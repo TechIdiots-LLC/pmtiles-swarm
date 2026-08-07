@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>pmtiles-swarm</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fff;
+        --fg: #111;
+        --muted: #666;
+        --line: #ddd;
+        --accent: #2d6cdf;
+        --ok: #1a7f37;
+        --warn: #9a6700;
+        --bad: #cf222e;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14161a;
+          --fg: #e8e8e8;
+          --muted: #9aa0a6;
+          --line: #2c3038;
+          --accent: #6ea8ff;
+          --ok: #3fb950;
+          --warn: #d29922;
+          --bad: #f85149;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 14px/1.5 system-ui, -apple-system, Segoe UI, sans-serif;
+      }
+      header {
+        display: flex;
+        align-items: baseline;
+        gap: 1rem;
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--line);
+        flex-wrap: wrap;
+      }
+      h1 { font-size: 1.05rem; margin: 0; font-weight: 600; }
+      .status { color: var(--muted); font-size: 0.85rem; }
+      .status b { color: var(--fg); font-weight: 600; }
+      main { padding: 1.25rem; }
+      .bar { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+      input, select, button {
+        font: inherit;
+        padding: 0.4rem 0.6rem;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--bg);
+        color: var(--fg);
+      }
+      input { min-width: 22rem; flex: 1; }
+      button { cursor: pointer; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      table { width: 100%; border-collapse: collapse; }
+      th, td {
+        text-align: left;
+        padding: 0.5rem 0.6rem;
+        border-bottom: 1px solid var(--line);
+        white-space: nowrap;
+      }
+      th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); font-weight: 600; }
+      td.name { white-space: normal; min-width: 18rem; }
+      .sub { color: var(--muted); font-size: 0.8rem; }
+      .num { text-align: right; font-variant-numeric: tabular-nums; }
+      .pill { display: inline-block; padding: 0.05rem 0.45rem; border-radius: 999px; font-size: 0.75rem; border: 1px solid var(--line); }
+      .seeding { color: var(--ok); border-color: currentColor; }
+      .downloading { color: var(--accent); border-color: currentColor; }
+      .stalled, .checking, .paused { color: var(--warn); border-color: currentColor; }
+      .error { color: var(--bad); border-color: currentColor; }
+      .track { width: 90px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+      .fill { height: 100%; background: var(--accent); }
+      a { color: var(--accent); }
+      .empty { color: var(--muted); padding: 2rem 0; }
+      .wrap { overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>pmtiles-swarm</h1>
+      <div class="status" id="status">connecting…</div>
+    </header>
+    <main>
+      <div class="bar">
+        <input
+          id="source"
+          placeholder="local .pmtiles path, https:// URL, magnet:… or .torrent URL"
+        />
+        <input id="category" placeholder="category (optional)" style="min-width: 10rem" />
+        <button class="primary" id="add">Add</button>
+        <button id="adopt" title="Import torrents the engine already holds">Adopt existing</button>
+        <button id="refresh-feeds" title="Poll subscribed feeds now">Poll feeds</button>
+        <a id="feed-link" href="/feed.xml" target="_blank" rel="noopener">feed.xml</a>
+      </div>
+      <div class="wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th><th>Size</th><th>Map</th><th>State</th>
+              <th>Progress</th><th class="num">Seeds</th><th class="num">Peers</th>
+              <th class="num">Down</th><th class="num">Up</th><th class="num">Ratio</th><th>Export</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="empty" hidden>
+        Nothing yet. Add an archive above, or click <b>Adopt existing</b> to pull
+        in what your torrent client already seeds.
+      </div>
+    </main>
+
+    <script type="module">
+      const bytes = (n) => {
+        if (!n) return '—';
+        const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+        let v = n, i = 0;
+        while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+        return `${v.toFixed(i ? 1 : 0)} ${u[i]}`;
+      };
+      const rate = (n) => (n ? `${bytes(n)}/s` : '—');
+
+      async function api(path, options) {
+        const response = await fetch(path, options);
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          throw new Error(body.error ?? `${response.status} ${response.statusText}`);
+        }
+        return response.status === 204 ? null : response.json();
+      }
+
+      function mapCell(entry) {
+        const m = entry.pmtiles;
+        if (!m) return '<span class="sub">—</span>';
+        return `${m.format} <span class="sub">z${m.minZoom}–${m.maxZoom}</span>`;
+      }
+
+      function row(entry) {
+        const s = entry.status;
+        const pct = Math.round((s?.progress ?? 0) * 100);
+        const state = s?.state ?? 'unknown';
+        return `<tr>
+          <td class="name">${entry.name}
+            <div class="sub">${entry.category ? entry.category + ' · ' : ''}${entry.infoHash.slice(0, 12)}…</div>
+          </td>
+          <td>${bytes(entry.size)}</td>
+          <td>${mapCell(entry)}</td>
+          <td><span class="pill ${state}">${state}</span></td>
+          <td><div class="track"><div class="fill" style="width:${pct}%"></div></div>
+            <span class="sub">${pct}%</span></td>
+          <td class="num">${s?.seeds ?? '—'}</td>
+          <td class="num">${s?.peers ?? '—'}</td>
+          <td class="num">${rate(s?.downloadSpeed)}</td>
+          <td class="num">${rate(s?.uploadSpeed)}</td>
+          <td class="num">${s ? (s.ratio ?? 0).toFixed(2) : '—'}</td>
+          <td>
+            <a href="/api/torrents/${entry.infoHash}/file">.torrent</a> ·
+            <a href="#" data-magnet="${entry.infoHash}">magnet</a> ·
+            <a href="#" data-remove="${entry.infoHash}">remove</a>
+          </td>
+        </tr>`;
+      }
+
+      async function refresh() {
+        try {
+          const [status, torrents] = await Promise.all([
+            api('/api/status'),
+            api('/api/torrents'),
+          ]);
+          document.getElementById('status').innerHTML =
+            `engine <b>${status.engine.name}</b> ${status.engine.ok ? 'ok' : '<span style="color:var(--bad)">unavailable</span>'} · ` +
+            `<b>${status.archives}</b> archives · ` +
+            `${status.categories.length} categories · ${status.subscriptions.length} feeds`;
+          document.getElementById('rows').innerHTML = torrents.map(row).join('');
+          document.getElementById('empty').hidden = torrents.length > 0;
+        } catch (error) {
+          document.getElementById('status').textContent = `error: ${error.message}`;
+        }
+      }
+
+      document.getElementById('add').onclick = async () => {
+        const value = document.getElementById('source').value.trim();
+        if (!value) return;
+        const category = document.getElementById('category').value.trim() || undefined;
+        // Route by shape: the server accepts each of these on its own key.
+        const body = value.startsWith('magnet:')
+          ? { magnet: value, category }
+          : /\.torrent(\?|$)/i.test(value)
+            ? { torrentUrl: value, category }
+            : /^https?:\/\//i.test(value)
+              ? { url: value, category }
+              : { path: value, category };
+        try {
+          await api('/api/torrents', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          document.getElementById('source').value = '';
+          refresh();
+        } catch (error) {
+          alert(`Could not add: ${error.message}`);
+        }
+      };
+
+      document.getElementById('adopt').onclick = async () => {
+        try {
+          const result = await api('/api/adopt', { method: 'POST' });
+          alert(`Adopted ${result.added} archive(s).`);
+          refresh();
+        } catch (error) {
+          alert(`Adopt failed: ${error.message}`);
+        }
+      };
+
+      document.getElementById('refresh-feeds').onclick = async () => {
+        try {
+          const result = await api('/api/subscriptions/refresh', { method: 'POST' });
+          alert(`Added ${result.added} archive(s) from feeds.`);
+          refresh();
+        } catch (error) {
+          alert(`Feed poll failed: ${error.message}`);
+        }
+      };
+
+      document.getElementById('rows').onclick = async (event) => {
+        const magnet = event.target.dataset?.magnet;
+        const remove = event.target.dataset?.remove;
+        if (magnet) {
+          event.preventDefault();
+          const uri = await fetch(`/api/torrents/${magnet}/magnet`).then((r) => r.text());
+          await navigator.clipboard.writeText(uri).catch(() => {});
+          prompt('Magnet link (copied to clipboard):', uri);
+        }
+        if (remove) {
+          event.preventDefault();
+          if (!confirm('Remove this archive from the catalog?')) return;
+          await api(`/api/torrents/${remove}`, { method: 'DELETE' });
+          refresh();
+        }
+      };
+
+      refresh();
+      setInterval(refresh, 3000);
+    </script>
+  </body>
+</html>

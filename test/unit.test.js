@@ -1,0 +1,281 @@
+import assert from 'node:assert';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { after, describe, it } from 'node:test';
+import { Catalog } from '../src/catalog.js';
+import { formatBytes, parseFeed, renderFeed } from '../src/feed.js';
+import {
+  generatePublisherKey,
+  mutableMagnet,
+  publicKeyFromMagnet,
+  publisherKeyFromPem,
+  publisherKeyToPem,
+} from '../src/mutable.js';
+import { checkOrigin, fingerprintOrigin } from '../src/origin.js';
+import { candidateDates, expandTemplate } from '../src/sources.js';
+
+const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-swarm-'));
+after(() => fs.rm(workspace, { recursive: true, force: true }));
+
+/**
+ * Builds a catalog entry for feed tests.
+ * @param {number} index - Distinguishes entries.
+ * @param {object} [extra] - Fields to override.
+ * @returns {object} - The entry.
+ */
+function entry(index, extra = {}) {
+  return {
+    infoHash: String(index).repeat(40).slice(0, 40),
+    name: `build-${index}.pmtiles`,
+    size: 1024 * index,
+    magnet: `magnet:?xt=urn:btih:${String(index).repeat(40).slice(0, 40)}`,
+    createdAt: new Date(Date.now() - index * 86400000).toISOString(),
+    ...extra,
+  };
+}
+
+describe('feed rendering', () => {
+  const options = { title: 'Maps', baseUrl: 'https://maps.example.org' };
+
+  it('caps items to the newest, and 0 means no limit', () => {
+    const entries = [1, 2, 3, 4, 5].map((i) => entry(i));
+    const count = (xml) => (xml.match(/<item>/g) ?? []).length;
+
+    assert.strictEqual(count(renderFeed(entries, options)), 5);
+    assert.strictEqual(count(renderFeed(entries, { ...options, maxItems: 2 })), 2);
+    assert.strictEqual(count(renderFeed(entries, { ...options, maxItems: 0 })), 5);
+    // Entries arrive newest first, so a cap must keep the newest.
+    const capped = renderFeed(entries, { ...options, maxItems: 1 });
+    assert.match(capped, /build-1\.pmtiles/);
+    assert.doesNotMatch(capped, /build-5\.pmtiles/);
+  });
+
+  it('carries a torrent enclosure that generic readers understand', () => {
+    const xml = renderFeed([entry(1)], options);
+    assert.match(xml, /type="application\/x-bittorrent"/);
+    assert.match(xml, /<enclosure url="https:\/\/maps\.example\.org\/api\/torrents\/1{40}\/file"/);
+  });
+
+  it('describes the map when the archive has been probed', () => {
+    const xml = renderFeed(
+      [
+        entry(1, {
+          pmtiles: {
+            format: 'pbf',
+            minZoom: 0,
+            maxZoom: 14,
+            bounds: [-180, -85, 180, 85],
+          },
+        }),
+      ],
+      options,
+    );
+    assert.match(xml, /<pmtiles:format>pbf<\/pmtiles:format>/);
+    assert.match(xml, /<pmtiles:maxzoom>14<\/pmtiles:maxzoom>/);
+    assert.match(xml, /<pmtiles:bounds>-180,-85,180,85<\/pmtiles:bounds>/);
+  });
+
+  it('escapes text that would otherwise break the XML', () => {
+    const xml = renderFeed([entry(1, { name: 'a & b <c>.pmtiles' })], options);
+    assert.match(xml, /a &amp; b &lt;c&gt;\.pmtiles/);
+    assert.doesNotMatch(xml, /<title>a & b/);
+  });
+
+  it('includes a copyright statement only when given one', () => {
+    assert.doesNotMatch(renderFeed([], options), /<copyright>/);
+    assert.match(
+      renderFeed([], { ...options, copyright: 'ODbL 1.0' }),
+      /<copyright>ODbL 1\.0<\/copyright>/,
+    );
+  });
+
+  it('formats sizes for humans', () => {
+    assert.strictEqual(formatBytes(0), 'unknown size');
+    assert.strictEqual(formatBytes(512), '512 B');
+    assert.strictEqual(formatBytes(1024 ** 3), '1.00 GiB');
+  });
+});
+
+describe('feed parsing', () => {
+  it('round-trips a feed it produced', () => {
+    const xml = renderFeed([entry(1), entry(2)], {
+      title: 'Maps',
+      baseUrl: 'https://maps.example.org',
+    });
+    const items = parseFeed(xml);
+    assert.strictEqual(items.length, 2);
+    assert.strictEqual(items[0].title, 'build-1.pmtiles');
+    assert.strictEqual(items[0].infoHash, '1'.repeat(40));
+    assert.ok(items[0].torrentUrl.endsWith('/file'));
+  });
+
+  it('reads a magnet supplied as the link', () => {
+    const magnet = `magnet:?xt=urn:btih:${'a'.repeat(40)}`;
+    const items = parseFeed(
+      `<rss><channel><item><title>x</title><link>${magnet}</link></item></channel></rss>`,
+    );
+    assert.strictEqual(items[0].magnet, magnet);
+  });
+
+  it('ignores items with nothing torrent-shaped in them', () => {
+    const items = parseFeed(
+      '<rss><channel><item><title>news</title><link>https://x/article</link></item></channel></rss>',
+    );
+    assert.strictEqual(items.length, 0);
+  });
+
+  it('decodes CDATA and entities', () => {
+    const items = parseFeed(
+      `<rss><channel><item><title><![CDATA[a & b]]></title>
+       <enclosure url="https://x/y.torrent" type="application/x-bittorrent"/></item></channel></rss>`,
+    );
+    assert.strictEqual(items[0].title, 'a & b');
+  });
+});
+
+describe('scheduled sources', () => {
+  it('expands date placeholders', () => {
+    const date = new Date(Date.UTC(2026, 7, 6));
+    assert.strictEqual(
+      expandTemplate('https://build.protomaps.com/{YYYYMMDD}.pmtiles', date),
+      'https://build.protomaps.com/20260806.pmtiles',
+    );
+    assert.strictEqual(
+      expandTemplate('{YYYY}/{MM}/{DD} and {YYYY-MM-DD}', date),
+      '2026/08/06 and 2026-08-06',
+    );
+  });
+
+  it('offsets and looks back, newest first', () => {
+    const now = new Date(Date.UTC(2026, 7, 7));
+    const dates = candidateDates({ offsetDays: -1, lookbackDays: 2 }, now);
+    assert.deepStrictEqual(
+      dates.map((d) => expandTemplate('{YYYY-MM-DD}', d)),
+      ['2026-08-06', '2026-08-05', '2026-08-04'],
+    );
+  });
+
+  it('defaults to today with a few days of slack', () => {
+    const dates = candidateDates({}, new Date(Date.UTC(2026, 7, 7)));
+    assert.strictEqual(expandTemplate('{YYYY-MM-DD}', dates[0]), '2026-08-07');
+    assert.strictEqual(dates.length, 4);
+  });
+});
+
+describe('origin tracking', () => {
+  it('detects a rewritten file, and tolerates an unchanged one', async () => {
+    const file = path.join(workspace, 'archive.pmtiles');
+    await fs.writeFile(file, 'original');
+    const source = { type: 'file', location: file };
+    const origin = await fingerprintOrigin(source);
+
+    assert.strictEqual(
+      (await checkOrigin({ infoHash: 'a', source, origin })).status,
+      'unchanged',
+    );
+
+    await fs.writeFile(file, 'replaced with different content');
+    const changed = await checkOrigin({ infoHash: 'a', source, origin });
+    assert.strictEqual(changed.status, 'changed');
+    assert.match(changed.reason, /size/);
+  });
+
+  it('reports a source that has gone away', async () => {
+    const source = {
+      type: 'file',
+      location: path.join(workspace, 'never-existed.pmtiles'),
+    };
+    const result = await checkOrigin({
+      infoHash: 'a',
+      source,
+      origin: { type: 'file', location: source.location, size: 1 },
+    });
+    assert.strictEqual(result.status, 'missing');
+  });
+
+  it('has nothing to watch for a joined torrent', async () => {
+    assert.strictEqual(
+      await fingerprintOrigin({ type: 'magnet', location: 'magnet:?x' }),
+      null,
+    );
+  });
+});
+
+describe('catalog', () => {
+  it('stores, finds and removes entries', async () => {
+    const dir = path.join(workspace, 'catalog');
+    const catalog = new Catalog(dir);
+    await catalog.load();
+
+    await catalog.put({
+      ...entry(1),
+      category: 'planet',
+      source: { type: 'file', location: '/data/one.pmtiles' },
+    });
+    await catalog.put({ ...entry(2), category: 'terrain' });
+
+    assert.strictEqual(catalog.list().length, 2);
+    assert.deepStrictEqual(catalog.categories(), ['planet', 'terrain']);
+    assert.strictEqual(catalog.byCategory('planet').length, 1);
+    assert.ok(catalog.findBySource('/data/one.pmtiles'));
+    assert.strictEqual(catalog.findBySource('/data/nope.pmtiles'), undefined);
+
+    // Reloading from disk must see the same thing.
+    const reopened = new Catalog(dir);
+    await reopened.load();
+    assert.strictEqual(reopened.list().length, 2);
+
+    await catalog.remove(entry(1).infoHash);
+    assert.strictEqual(catalog.list().length, 1);
+  });
+
+  it('preserves createdAt across updates', async () => {
+    const catalog = new Catalog(path.join(workspace, 'catalog2'));
+    await catalog.load();
+    const first = await catalog.put(entry(3));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const second = await catalog.put({ infoHash: entry(3).infoHash, stale: true });
+
+    assert.strictEqual(second.createdAt, first.createdAt);
+    assert.notStrictEqual(second.updatedAt, first.updatedAt);
+    // A partial update must not drop fields it did not mention.
+    assert.strictEqual(second.name, 'build-3.pmtiles');
+  });
+});
+
+describe('mutable torrents (BEP 46)', () => {
+  it('generates a 32-byte key that survives a PEM round trip', () => {
+    const key = generatePublisherKey();
+    assert.strictEqual(key.publicKey.length, 32);
+
+    const restored = publisherKeyFromPem(publisherKeyToPem(key));
+    assert.deepStrictEqual(
+      Buffer.from(restored.publicKey),
+      Buffer.from(key.publicKey),
+    );
+  });
+
+  it('builds a magnet naming the key rather than an infohash', () => {
+    const key = generatePublisherKey();
+    const magnet = mutableMagnet(key.publicKey, {
+      name: 'planet.pmtiles',
+      trackers: ['udp://tracker.example:1337'],
+    });
+
+    assert.match(magnet, /^magnet:\?xs=urn:btpk:[a-f0-9]{64}/);
+    // The whole point: no infohash, because it changes on every rebuild.
+    assert.doesNotMatch(magnet, /btih/);
+    assert.strictEqual(
+      publicKeyFromMagnet(magnet),
+      Buffer.from(key.publicKey).toString('hex'),
+    );
+  });
+
+  it('returns null for a magnet that is not mutable', () => {
+    assert.strictEqual(
+      publicKeyFromMagnet(`magnet:?xt=urn:btih:${'a'.repeat(40)}`),
+      null,
+    );
+  });
+});
