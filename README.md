@@ -114,8 +114,14 @@ subscribers forward, and they fail differently, so publishing both is cheap insu
   "maxConnections": 100,
   "feedMaxItems": 50,
   "publicUrl": "https://maps.example.org",
+  "auth": { "username": "admin", "password": "…", "apiKey": "…" },
   "watch": [
-    { "path": "/mnt/maps/generated", "category": "basemaps", "webSeedBase": "https://maps.example.org/files" }
+    {
+      "path": "/mnt/maps/incoming",
+      "category": "basemaps",
+      "publishDir": "/var/www/pmtiles",
+      "webSeedBase": "https://maps.example.org/files"
+    }
   ],
   "subscriptions": [
     { "url": "https://other.example.org/feed.xml", "mode": "cache", "filter": "terrain" }
@@ -151,19 +157,33 @@ matters there is `maxConnections`, since every peer holds a NAT table entry. See
 | `DELETE` | `/api/torrents/:infoHash` | Remove (`?deleteData=true` to delete data too) |
 | `GET` | `/api/torrents/:infoHash/file` | Download the `.torrent` |
 | `GET` | `/api/torrents/:infoHash/magnet` | Magnet URI |
+| `GET` | `/api/torrents/:infoHash` | One archive, with disk usage and how it is being read |
 | `GET` | `/api/torrents/:infoHash/peers` | Per-peer detail |
+| `POST` | `/api/torrents/:infoHash/webseeds` | Add web seeds — does not change the infohash |
+| `POST` | `/api/torrents/:infoHash/warm` | Pre-fetch a region (`GET` for progress, `DELETE` to cancel) |
+| `DELETE` | `/api/torrents/:infoHash/cache` | Reclaim cached pieces, keep the archive |
 | `POST` | `/api/torrents/:infoHash/check` | Has the source changed since the torrent was made? |
 | `POST` | `/api/torrents/:infoHash/rebuild` | Rebuild from the current source (mints a new infohash) |
 | `POST` | `/api/check-origins` | Check every archive with a watchable source |
 | `POST` | `/api/adopt` | Import what the engine already holds |
 | `POST` | `/api/subscriptions/refresh` | Poll subscribed feeds now |
-| `GET` | `/feed.xml`, `/feed/:category.xml` | RSS |
+| `GET` `PATCH` | `/api/config` | Read and change settings |
+| `POST` | `/api/login`, `/api/logout` | Console sign-in |
+| `GET` | `/archives/:infoHash/tiles.json` | TileJSON — **public** |
+| `GET` | `/archives/:infoHash/:z/:x/:y.:ext` | One tile — **public** |
+| `GET` | `/feed.xml`, `/feed/:category.xml` | RSS — **public** |
+
+Everything under `/api/` is guarded once a credential is configured; tiles, TileJSON and the feeds
+never are. See [docs/security.md](docs/security.md).
 
 ## Status
 
 Working and verified end to end against a live 71.93 GiB OpenMapTiles archive: torrent creation,
 joining existing torrents, catalog persistence, map metadata extraction, category feeds, live
 swarm stats, and cache mode holding at zero bytes on disk.
+
+Tile serving, region warming, cache accounting, web seed retrofitting and access control are
+covered by tests and verified against a running server.
 
 Not yet exercised: the qBittorrent engine against a real instance, watch-folder imports, feed
 subscription round-trips between two nodes, and BEP 46 publish/resolve against a live DHT (the
