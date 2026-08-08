@@ -615,6 +615,88 @@ export function createApp({
     }),
   );
 
+  /**
+   * The newest archive in a category, or null.
+   * @param {string} category - The category.
+   * @param {import('express').Request} req - The request, for its credential.
+   * @returns {object | null} - The entry.
+   */
+  const newestIn = (category, req) => {
+    // list() is newest first, so the first match is the answer.
+    return (
+      catalog
+        .byCategory(category)
+        .find((entry) => publishesEntry(entry, req)) ?? null
+    );
+  };
+
+  // A stable handle for "the current one". Every archive is addressed by
+  // infohash, which is right — it is what makes a tile immutable — but it
+  // leaves nothing for a style to point at that survives a rebuild. A category
+  // is already the grouping, so it is the natural thing to ask "latest" of.
+  app.get(
+    '/latest/:category/tiles.json',
+    route(async (req, res) => {
+      const entry = newestIn(req.params.category, req);
+      if (!entry) return res.status(404).json({ error: 'no such category' });
+      if (!entry.pmtiles) {
+        return res.status(409).json({
+          error: 'the newest archive in this category has not been probed',
+        });
+      }
+
+      res.setHeader('access-control-allow-origin', '*');
+      // Deliberately short-lived, and the only mutable document in the system.
+      // Everything it points at is content-addressed and cached for a year;
+      // this is the one thing that has to be re-read to notice a new build.
+      res.setHeader('cache-control', 'public, max-age=300');
+      res.json({
+        ...buildTileJson(entry, baseUrl(req)),
+        // Names what it resolved to, so a consumer can tell one build from the
+        // next without diffing the tile URLs.
+        latest: {
+          category: req.params.category,
+          infohash: entry.infoHash,
+          name: entry.name,
+          createdAt: entry.createdAt,
+        },
+      });
+    }),
+  );
+
+  // Redirects rather than serving, so what arrives is the immutable URL and a
+  // client that keeps it keeps a specific build rather than a moving target.
+  app.get('/latest/:category/archive.torrent', (req, res) => {
+    const entry = newestIn(req.params.category, req);
+    if (!entry) return res.status(404).json({ error: 'no such category' });
+    res.redirect(302, `${baseUrl(req)}/archives/${entry.infoHash}/archive.torrent`);
+  });
+
+  app.get('/latest/:category/magnet', (req, res) => {
+    const entry = newestIn(req.params.category, req);
+    if (!entry) return res.status(404).json({ error: 'no such category' });
+    res.type('text/plain').send(entry.magnet ?? '');
+  });
+
+  // The newest item on its own, for a subscriber that only ever wants the
+  // current build and should not have to parse a backlog to find it.
+  app.get('/latest/:category.xml', (req, res) => {
+    const { category } = req.params;
+    if (!publishesCategory(category, req)) {
+      return res.status(404).json({ error: 'no such feed' });
+    }
+    const entry = newestIn(category, req);
+    res.type('application/rss+xml').send(
+      renderFeed(entry ? [entry] : [], {
+        title: `${config.feedTitle ?? 'PMTiles archives'} — ${category}, latest`,
+        baseUrl: baseUrl(req),
+        copyright: config.feedCopyright,
+        category,
+        maxItems: 1,
+      }),
+    );
+  });
+
   app.get('/feed.xml', (req, res) => {
     res.type('application/rss+xml').send(
       renderFeed(

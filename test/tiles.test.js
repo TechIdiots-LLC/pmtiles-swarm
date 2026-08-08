@@ -1974,3 +1974,136 @@ describe('seeding limits', () => {
     assert.equal(evaluate(old, { ratio: 0 }, limit).then, 'delete');
   });
 });
+
+describe('a stable handle for the current build', () => {
+  /**
+   * Serves two builds in one category, the second newer.
+   * @returns {Promise<object>} - Fetchers and the two infohashes.
+   */
+  async function serve(feedCategories) {
+    const dir = await fs.mkdtemp(path.join(workspace, 'latest-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+
+    const older = entry({
+      infoHash: 'a'.repeat(40),
+      name: 'planet-202405.pmtiles',
+      categories: ['basemaps'],
+    });
+    await catalog.put(older);
+    // put() stamps createdAt itself, so order is what matters, not the clock.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const newer = entry({
+      infoHash: 'b'.repeat(40),
+      name: 'planet-202406.pmtiles',
+      categories: ['basemaps'],
+    });
+    await catalog.put(newer);
+    await catalog.put(entry({
+      infoHash: 'c'.repeat(40),
+      name: 'terrain.pmtiles',
+      categories: ['terrain'],
+    }));
+
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog,
+      engine: { name: 'x', list: async () => [] },
+      subscriptions: {},
+      tiles: { status: () => null },
+      config: { watch: [], subscriptions: [], feedCategories },
+    });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const { port } = server.address();
+    const base = `http://127.0.0.1:${port}`;
+    return {
+      base,
+      get: (p, init) => fetch(base + p, { redirect: 'manual', ...init }),
+      close: () => new Promise((resolve) => server.close(resolve)),
+    };
+  }
+
+  it('resolves a category to its newest archive', async () => {
+    const s = await serve();
+    try {
+      const doc = await (await s.get('/latest/basemaps/tiles.json')).json();
+      assert.equal(doc.latest.infohash, 'b'.repeat(40));
+      assert.equal(doc.latest.name, 'planet-202406.pmtiles');
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('points its tiles at the immutable URLs, not back at itself', async () => {
+    // The layering that matters. This document is the only mutable thing; what
+    // it names is content-addressed and cacheable for a year. Pointing the
+    // tiles at /latest/ would make every tile a moving target and throw that
+    // away.
+    const s = await serve();
+    try {
+      const doc = await (await s.get('/latest/basemaps/tiles.json')).json();
+      assert.ok(doc.tiles[0].includes(`/archives/${'b'.repeat(40)}/`));
+      assert.ok(!doc.tiles[0].includes('/latest/'));
+      assert.equal(doc.torrent.infohash, 'b'.repeat(40));
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('is cached briefly, unlike the tiles it names', async () => {
+    const s = await serve();
+    try {
+      const response = await s.get('/latest/basemaps/tiles.json');
+      const cacheControl = response.headers.get('cache-control');
+      assert.match(cacheControl, /max-age=300/);
+      assert.ok(!/immutable/.test(cacheControl), 'this one does change');
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('redirects the torrent to a specific build', async () => {
+    // So a client that keeps the URL keeps that build, rather than silently
+    // following along to the next one.
+    const s = await serve();
+    try {
+      const response = await s.get('/latest/basemaps/archive.torrent');
+      assert.equal(response.status, 302);
+      assert.ok(response.headers.get('location').includes('b'.repeat(40)));
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('serves a feed holding only the current build', async () => {
+    const s = await serve();
+    try {
+      const xml = await (await s.get('/latest/basemaps.xml')).text();
+      assert.ok(xml.includes('planet-202406.pmtiles'));
+      assert.ok(!xml.includes('planet-202405.pmtiles'));
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('404s a category with nothing in it', async () => {
+    const s = await serve();
+    try {
+      assert.equal((await s.get('/latest/invented/tiles.json')).status, 404);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('does not leak a category that is not published', async () => {
+    const s = await serve(['basemaps']);
+    try {
+      assert.equal((await s.get('/latest/basemaps/tiles.json')).status, 200);
+      assert.equal((await s.get('/latest/terrain/tiles.json')).status, 404);
+      assert.equal((await s.get('/latest/terrain.xml')).status, 404);
+    } finally {
+      await s.close();
+    }
+  });
+});

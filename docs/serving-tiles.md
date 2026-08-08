@@ -55,6 +55,51 @@ map.addSource('basemap', {
 });
 ```
 
+## The current build, at a stable URL
+
+Every archive is addressed by infohash, which is what makes a tile immutable —
+and leaves nothing for a map style to point at that survives a rebuild. A
+category is already the grouping, so it is what "latest" is asked of:
+
+```
+GET /latest/{category}/tiles.json        TileJSON for the newest in that category
+GET /latest/{category}/archive.torrent   302 to that build's .torrent
+GET /latest/{category}/magnet            its magnet URI
+GET /latest/{category}.xml               a feed holding only the current build
+```
+
+Point a style at `/latest/basemaps/tiles.json` and it keeps working across every
+rebuild, with no edit.
+
+**The tiles it names are still infohash URLs.** That is the whole point of the
+layering: this document is the only mutable thing in the system, and everything
+it refers to stays content-addressed and cached for a year. Pointing the tile
+template at `/latest/` instead would make every tile a moving target and throw
+that away — a client would have no way to know whether two tiles came from the
+same build.
+
+So it is cached for five minutes rather than a year, and carries a `latest`
+block naming what it resolved to:
+
+```json
+{
+  "tiles": ["https://maps.example.org/archives/913d…/{z}/{x}/{y}.pbf"],
+  "latest": {
+    "category": "basemaps",
+    "infohash": "913d671f3a28c5b8d605e28cf6bf01e293d36e86",
+    "name": "planet-202406.pmtiles",
+    "createdAt": "2026-06-01T02:14:00.000Z"
+  }
+}
+```
+
+The torrent endpoint **redirects** rather than serving, for the same reason: a
+client that keeps the URL it was given keeps that build, instead of quietly
+following along to the next one.
+
+Categories that are not published are not resolvable here either — `/latest/`
+answers 404 for them exactly as the feeds do.
+
 ## Where the bytes come from
 
 This is the part that makes serving tiles from a torrent client worth doing at

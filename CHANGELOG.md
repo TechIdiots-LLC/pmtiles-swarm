@@ -12,6 +12,10 @@
 - **An archive can carry several categories.** A planet build can be both `basemaps` and `weekly`
   without choosing. Feeds match on *any* tag, so it appears in both. Catalogues holding the older
   single `category` string are read as a list of one and normalised on the next write.
+- **A stable URL for the current build.** `/latest/{category}/tiles.json`, plus `archive.torrent`,
+  `magnet` and an `.xml` feed of just the newest. A style can point at one and survive every
+  rebuild. The tiles it names stay infohash URLs, so they remain immutable and cacheable for a
+  year — this document is the only mutable thing, and is cached for five minutes.
 - **Seeding limits**, in the shape a torrent client uses: stop at a ratio, or after so long
   seeding a complete copy, then stop, remove, or remove and delete the files. Global by default
   with a per-archive override — including "seed forever", which a change to the global rule must
