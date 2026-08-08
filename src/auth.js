@@ -15,9 +15,6 @@ import crypto from 'node:crypto';
  * request.
  */
 
-/** Paths served to anyone. Everything else needs a credential. */
-const PUBLIC_PREFIXES = ['/archives/', '/feed.xml', '/feed/'];
-
 /** Endpoints needed to obtain a credential in the first place. */
 const AUTH_PATHS = new Set(['/api/login', '/api/session']);
 
@@ -70,8 +67,12 @@ export function verifyPassword(password, stored) {
  * @returns {boolean} - True when no credential is needed.
  */
 export function isPublicPath(path) {
-  if (AUTH_PATHS.has(path)) return true;
-  return PUBLIC_PREFIXES.some((prefix) => path.startsWith(prefix));
+  // Only the API is guarded. Tiles, TileJSON, the feeds and the console's own
+  // HTML are all public, and the console must be: a sign-in page nobody can
+  // load is a sign-in page nobody can use. It carries no secrets — everything
+  // it displays it fetches from the API, which is guarded.
+  if (!path.startsWith('/api/')) return true;
+  return AUTH_PATHS.has(path);
 }
 
 /**

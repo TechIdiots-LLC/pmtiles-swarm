@@ -1209,7 +1209,14 @@ describe('authentication', () => {
   it('guards everything that can change the node', () => {
     assert.ok(!isPublicPath('/api/torrents'));
     assert.ok(!isPublicPath('/api/config'));
-    assert.ok(!isPublicPath('/'));
+    assert.ok(!isPublicPath('/api/adopt'));
+  });
+
+  it('serves the console itself, so the sign-in page can load', () => {
+    // A sign-in page nobody can load is a sign-in page nobody can use. The
+    // page carries no secrets; everything it shows comes from the guarded API.
+    assert.ok(isPublicPath('/'));
+    assert.ok(isPublicPath('/index.html'));
   });
 
   it('leaves the endpoints needed to sign in reachable', () => {

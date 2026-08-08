@@ -2,12 +2,15 @@
 
 Two audiences, two treatments.
 
-**Public, always.** Tiles, TileJSON and the `.torrent` under `/archives/`, and
-the RSS feeds. Serving these to anyone is the point of the server.
+**Public, always.** Tiles, TileJSON and the `.torrent` under `/archives/`, the
+RSS feeds, and the console's own HTML. Serving the first three to anyone is the
+point of the server; the console has to load or its sign-in page could never be
+reached. The page carries no secrets — everything it displays it fetches from
+the API.
 
-**Guarded, whenever a credential is configured.** Everything under `/api/`, and
-the console. These can create torrents, move files, delete data and rewrite the
-configuration.
+**Guarded, whenever a credential is configured.** Everything under `/api/`,
+except `/api/login` and `/api/session`. These can create torrents, move files,
+delete data and rewrite the configuration.
 
 ## Turning it on
 

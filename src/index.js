@@ -117,8 +117,15 @@ PMTILES_SWARM_PUBLIC_URL
     config,
   });
   const server = app.listen(config.port, config.host, () => {
+    // 0.0.0.0 is a bind address, not a destination — browsers reject it with
+    // ERR_ADDRESS_INVALID. Print something that can actually be opened.
+    const reachable = config.host === '0.0.0.0' || config.host === '::'
+      ? 'localhost'
+      : config.host;
+    const bound = reachable === config.host ? '' : ` (bound to ${config.host})`;
     console.log(
-      `[http] listening on http://${config.host}:${config.port} (${catalog.list().length} archives)`,
+      `[http] listening on http://${reachable}:${config.port}${bound} ` +
+        `(${catalog.list().length} archives)`,
     );
   });
 

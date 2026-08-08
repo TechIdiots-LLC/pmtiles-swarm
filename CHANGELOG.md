@@ -14,6 +14,9 @@
   bearer token for scripts, a sign-in form and session cookie for people. Passwords set through
   the settings screen are stored as a scrypt hash, and credentials are redacted from every
   response. Configuring nothing keeps the previous behaviour.
+- The startup line prints an address a browser can open. It previously printed the bind address,
+  and `http://0.0.0.0:8090` is rejected outright with `ERR_ADDRESS_INVALID`.
+- The console's own page is public, so its sign-in form can load; only `/api/` is guarded.
 - A node configured with only `auth.apiKey` can still use the console: the token is accepted at
   sign-in and the form asks for a token rather than a password that does not exist. Previously
   the console showed a sign-in form that could never succeed.

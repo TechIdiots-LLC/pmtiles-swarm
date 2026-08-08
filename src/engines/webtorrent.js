@@ -273,8 +273,24 @@ async function loadWebTorrent() {
     return ctor;
   } catch (error) {
     throw new Error(
-      "The webtorrent engine needs the optional dependency 'webtorrent'. " +
-        `Install it, or use the qbittorrent engine instead. (${error.message})`,
+      [
+        "The webtorrent engine needs the optional dependency 'webtorrent'.",
+        '',
+        '    npm install webtorrent',
+        '',
+        'If that reports "up to date" and changes nothing, the lockfile has',
+        'lost the package while keeping the declaration — npm then believes',
+        'there is nothing to do. Rebuild it:',
+        '',
+        '    rm -rf node_modules package-lock.json && npm install',
+        '',
+        'Installing globally does not help: Node resolves from node_modules',
+        'beside the code, not from the global prefix.',
+        '',
+        'Or use the qbittorrent or libtorrent engine instead.',
+        '',
+        `(${error.message})`,
+      ].join('\n'),
       { cause: error },
     );
   }
