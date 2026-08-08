@@ -52,7 +52,7 @@ The distinction is the point of the project.
 | `cache` | only what is read | Serving tiles from a 700 GiB archive on a small disk |
 
 Cache mode joins the swarm without downloading anything up front. A tile server reads byte ranges
-on demand through [`pmtiles-torrent`](https://github.com/WifiDB/tileserver-gl), and the node still
+on demand through [`pmtiles-torrent`](https://github.com/TechIdiots-LLC/pmtiles-torrent), and the node still
 seeds whatever pieces it has picked up along the way. Disk use tracks what people actually look
 at rather than what exists.
 
@@ -125,7 +125,7 @@ seconds against a single peer.
 Overridable globally, per scheduled source, and per request — an archive nobody will read
 randomly can keep larger pieces. Note that piece size has little bearing on load imposed on
 network equipment: peers request 16 KiB blocks whatever the piece size. The setting that
-matters there is , since every peer holds a NAT table entry. See
+matters there is `maxConnections`, since every peer holds a NAT table entry. See
 [docs/publishing.md](docs/publishing.md).
 
 ## API

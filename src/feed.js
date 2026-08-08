@@ -12,7 +12,7 @@
  * 72 GiB download before starting one.
  */
 
-const PMTILES_NS = 'https://github.com/WifiDB/pmtiles-swarm/ns/1.0';
+const PMTILES_NS = 'https://github.com/TechIdiots-LLC/pmtiles-swarm/ns/1.0';
 
 /**
  * Escapes text for XML content.

@@ -47,12 +47,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/WifiDB/pmtiles-swarm.git"
+    "url": "git+https://github.com/TechIdiots-LLC/pmtiles-swarm.git"
   },
   "bugs": {
-    "url": "https://github.com/WifiDB/pmtiles-swarm/issues"
+    "url": "https://github.com/TechIdiots-LLC/pmtiles-swarm/issues"
   },
-  "homepage": "https://github.com/WifiDB/pmtiles-swarm#readme",
+  "homepage": "https://github.com/TechIdiots-LLC/pmtiles-swarm#readme",
   "publishConfig": {
     "access": "public"
   }
