@@ -192,7 +192,15 @@ export function createAuth(config) {
      */
     login(req, res) {
       const { username = '', password = '' } = req.body ?? {};
-      if (!checkPassword(username, password)) return false;
+
+      // The token is accepted here too, so a node configured with only an
+      // apiKey still has a usable console. This grants nothing new: whoever
+      // holds the token already has full access to every route, and trading it
+      // for a session means it is typed once rather than kept in the browser.
+      const byToken =
+        Boolean(auth.apiKey) && constantTimeEquals(password, auth.apiKey);
+
+      if (!byToken && !checkPassword(username, password)) return false;
 
       const id = crypto.randomBytes(32).toString('base64url');
       sessions.set(id, Date.now() + ttlMs);

@@ -233,14 +233,15 @@
     <div class="overlay" id="login" hidden>
       <form class="card" id="login-form">
         <h2>Sign in</h2>
-        <div class="field">
+        <div class="field" id="login-user-field">
           <label for="login-user">Username</label>
           <input id="login-user" autocomplete="username" value="admin" />
         </div>
         <div class="field">
-          <label for="login-pass">Password</label>
+          <label for="login-pass" id="login-pass-label">Password</label>
           <input id="login-pass" type="password" autocomplete="current-password" />
         </div>
+        <div class="sub" id="login-hint" style="color: var(--muted)"></div>
         <div class="sub" id="login-error"></div>
         <button type="submit">Sign in</button>
       </form>
@@ -639,7 +640,17 @@
       $('tab-settings').onclick = () => showTab('settings');
 
       // ── Sign in ───────────────────────────────────────────────────────────
-      const showLogin = () => {
+      const showLogin = (session = {}) => {
+        // A node configured with only an apiKey has no password to ask for.
+        // Showing a username and password form there would be asking for
+        // something that cannot work.
+        if (session.required && session.passwordLogin === false) {
+          $('login-user-field').hidden = true;
+          $('login-pass-label').textContent = 'API token';
+          $('login-hint').textContent =
+            'This node is guarded by an API token. To sign in with a password ' +
+            'instead, set auth.password in the config.';
+        }
         $('login').hidden = false;
         $('login-pass').focus();
       };
@@ -680,7 +691,7 @@
           const session = await (await fetch('/api/session')).json();
           $('logout').hidden = !session.required;
           if (session.required && !session.authenticated) {
-            showLogin();
+            showLogin(session);
             return;
           }
         } catch {

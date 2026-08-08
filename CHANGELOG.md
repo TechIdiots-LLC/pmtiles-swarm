@@ -14,6 +14,9 @@
   bearer token for scripts, a sign-in form and session cookie for people. Passwords set through
   the settings screen are stored as a scrypt hash, and credentials are redacted from every
   response. Configuring nothing keeps the previous behaviour.
+- A node configured with only `auth.apiKey` can still use the console: the token is accepted at
+  sign-in and the form asks for a token rather than a password that does not exist. Previously
+  the console showed a sign-in form that could never succeed.
 - **A node with no credential now refuses to start on a reachable address**, rather than warning.
   The refusal prints the JSON to paste, into the config file it names — or how to create one when
   there is none — along with a generated key and the `curl` that uses it. It prints without a

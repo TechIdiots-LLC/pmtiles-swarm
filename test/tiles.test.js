@@ -1429,3 +1429,53 @@ describe('when the source URL may be published as a web seed', () => {
     assert.equal(carriesCredentials('not a url'), false);
   });
 });
+
+describe('signing in to a token-only node', () => {
+  const KEY = 'a-long-random-api-token-value-goes-here';
+  const request = (body) => ({ path: '/api/login', headers: {}, body, secure: false });
+  const response = () => ({
+    headers: {},
+    status() { return this; },
+    json() { return this; },
+    setHeader(name, value) { this.headers[name.toLowerCase()] = value; },
+  });
+
+  it('reports that password sign-in is unavailable', () => {
+    // The console needs to know, or it shows a username and password form
+    // asking for something that cannot work.
+    const auth = createAuth({ auth: { apiKey: KEY } });
+    assert.equal(auth.enabled, true);
+    assert.equal(auth.passwordLoginEnabled, false);
+  });
+
+  it('accepts the token at sign-in, so the console stays usable', () => {
+    // Grants nothing new: whoever holds the token already has every route.
+    const auth = createAuth({ auth: { apiKey: KEY } });
+    const res = response();
+    assert.ok(auth.login(request({ password: KEY }), res));
+    assert.match(res.headers['set-cookie'], /^pmtiles_swarm_session=/);
+  });
+
+  it('refuses a wrong token', () => {
+    const auth = createAuth({ auth: { apiKey: KEY } });
+    assert.ok(!auth.login(request({ password: 'not-the-token' }), response()));
+    assert.ok(!auth.login(request({ password: '' }), response()));
+  });
+
+  it('still accepts a password where one is configured', () => {
+    const auth = createAuth({
+      auth: { apiKey: KEY, username: 'andrew', password: 'hunter2' },
+    });
+    assert.equal(auth.passwordLoginEnabled, true);
+    assert.ok(auth.login(request({ username: 'andrew', password: 'hunter2' }), response()));
+    assert.ok(auth.login(request({ password: KEY }), response()));
+    assert.ok(!auth.login(request({ username: 'andrew', password: 'wrong' }), response()));
+  });
+
+  it('does not accept an empty password on a node with no credentials at all', () => {
+    // Guarding is off entirely here, so login is moot — but it must not hand
+    // out a session to anyone who asks.
+    const auth = createAuth({});
+    assert.ok(!auth.login(request({ password: '' }), response()));
+  });
+});

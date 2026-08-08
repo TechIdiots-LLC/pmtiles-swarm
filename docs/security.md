@@ -32,10 +32,15 @@ curl -H 'authorization: Bearer a-long-random-string' \
   http://maps.internal:8090/api/torrents
 ```
 
-**People** use the console, which posts to `/api/login` and gets a session
-cookie — `HttpOnly`, `SameSite=Lax`, and `Secure` when the request arrived over
+**People** use the console. Where a password is configured, sign in with it;
+where only `apiKey` is set, paste the token into the same box — the console says
+so rather than asking for a password that does not exist. Either way the console
+posts to `/api/login` and gets a session cookie — `HttpOnly`, `SameSite=Lax`, and `Secure` when the request arrived over
 TLS. Sessions live in memory, so a restart signs everyone out and there is no
 signing secret to keep safe.
+
+Trading the token for a session grants nothing new — whoever holds it already
+has every route — and means it is typed once rather than kept in the browser.
 
 ### Passwords
 
