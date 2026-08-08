@@ -51,6 +51,47 @@ Poll immediately rather than waiting for the interval:
 curl -X POST localhost:8090/api/subscriptions/refresh
 ```
 
+## Removing what a peer no longer offers
+
+A feed can only ever say "here is something new". Following one, a node
+accumulates and never sheds — remove an archive at the source and every
+subscriber keeps seeding it indefinitely.
+
+The catalogue API can say "here is everything", which is the only way a
+consumer can notice an absence. `prune` acts on that, and it is deliberately
+cautious:
+
+| `prune` | What happens |
+| --- | --- |
+| *omitted* | **Nothing is ever removed.** The default. |
+| `"report"` | Logs what it would remove. Removes nothing. |
+| `true` | Forgets the archive and stops seeding. Leaves the data. |
+| `"delete"` | Also removes the files. |
+
+**Start at `"report"` and leave it there for a while.** It prints exactly what
+it would have done, so you find out whether you agree with it before it can act:
+
+```
+[sync] would remove planet-202405.pmtiles: no longer listed by
+       https://maps.example.org/api/catalog (prune is set to report, so nothing was done)
+```
+
+### What it will never remove
+
+Four things, and each is a way you could otherwise lose something that was not
+the peer's to retract:
+
+- **Anything built here** — from a watch folder, a URL, a local file.
+- **Anything added by hand.** An operator's decision, not a feed's.
+- **Anything another subscription still lists.** One peer dropping an archive
+  says nothing about the other.
+- **Everything, if the view was partial.** A filtered subscription, or a
+  catalogue the peer only partly published, is not evidence of absence — so
+  pruning is skipped entirely and says so.
+
+Provenance is what makes this possible: an archive records which subscription
+sent it, and only that subscription can ever propose removing it.
+
 ## Sharing only what you tag
 
 Category feeds let a *subscriber* narrow what it takes. They do not narrow what

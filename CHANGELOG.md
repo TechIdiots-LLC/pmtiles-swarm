@@ -12,6 +12,9 @@
 - **An archive can carry several categories.** A planet build can be both `basemaps` and `weekly`
   without choosing. Feeds match on *any* tag, so it appears in both. Catalogues holding the older
   single `category` string are read as a list of one and normalised on the next write.
+- `prune` gained a `"report"` mode that logs what it would remove and removes nothing, so a new
+  peer can be watched before it is trusted. Pruning stays off unless asked for, only ever
+  considers archives that peer sent, and never acts on a filtered or partial view.
 - **Optional MD5**, `md5: true` globally or per add, published as `<pmtiles:md5>` in the feed and
   exposed in the API. Not for integrity — the torrent already verifies per piece, which is
   stronger — but for the quick manual check and for tooling that expects a checksum. Off by

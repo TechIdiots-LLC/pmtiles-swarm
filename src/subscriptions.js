@@ -216,8 +216,14 @@ export class SubscriptionManager {
    *   - everything, if the peer's document was partial — a filtered view is
    *     not evidence of absence.
    *
-   * `prune: true` stops seeding and forgets the archive but leaves the data.
-   * `prune: "delete"` also removes the files.
+   * Four settings, and the first two are the ones to start with:
+   *
+   *   omitted     nothing is ever removed. The default, and where a new peer
+   *               should stay until you have watched it for a while.
+   *   'report'    logs what it would remove and removes nothing. The way to
+   *               find out whether you agree with it before it can act.
+   *   true        forgets the archive and stops seeding, leaving the data.
+   *   'delete'    also removes the files.
    * @param {object} subscription - The subscription.
    * @param {object} document - The catalogue document received.
    * @param {object[]} listed - The archives it listed, after filtering.
@@ -225,6 +231,10 @@ export class SubscriptionManager {
    */
   async #prune(subscription, document, listed) {
     if (!subscription.prune) return;
+    // Watching mode. Deleting things a peer stopped mentioning is a lot of
+    // trust to extend on the strength of a config flag, so there is a setting
+    // that shows the consequences without any.
+    const dryRun = subscription.prune === 'report';
 
     // A filtered view is not evidence of absence. Pruning against one would
     // delete everything the filter excluded.
@@ -255,6 +265,14 @@ export class SubscriptionManager {
         (other) => other.url === entry.source?.subscription,
       );
       if (claimedElsewhere) continue;
+
+      if (dryRun) {
+        console.log(
+          `[sync] would remove ${entry.name}: no longer listed by ` +
+            `${subscription.url} (prune is set to report, so nothing was done)`,
+        );
+        continue;
+      }
 
       console.log(
         `[sync] ${entry.name} is no longer listed by ${subscription.url}; removing`,

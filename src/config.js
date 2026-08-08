@@ -257,10 +257,16 @@ const DEFAULTS = {
    *   token     presented to the peer, which may then publish more than it
    *             does to the world — see feedCategories
    *   filter    regex on the archive name
-   *   prune     drop archives this peer no longer lists. Off by default;
-   *             true forgets them and stops seeding, 'delete' also removes
-   *             the data. Only ever applies to archives this peer sent, and
-   *             never against a filtered or partial view.
+   *   prune     drop archives this peer no longer lists. Off by default, and
+   *             a new peer should stay that way until you have watched it:
+   *               omitted    nothing is removed, ever
+   *               'report'   logs what it would remove, removes nothing
+   *               true       forgets them, leaves the data
+   *               'delete'   also removes the data
+   *             It only ever considers archives this peer sent — never one
+   *             built here, added by hand, or still listed by another peer —
+   *             and never acts on a filtered or partial view, since absence
+   *             from those means nothing.
    *
    * RSS says "here is what is new" and is bounded by the publisher's
    * feedMaxItems, so a node offline long enough misses things permanently. The
