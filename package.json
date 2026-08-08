@@ -43,7 +43,7 @@
     "uint8-util": "2.2.5"
   },
   "engines": {
-    "node": "^20.19.0 || ^22.13.0 || 24"
+    "node": ">=20"
   },
   "repository": {
     "type": "git",
