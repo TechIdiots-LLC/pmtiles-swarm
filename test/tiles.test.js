@@ -2245,3 +2245,107 @@ describe('optional MD5', () => {
     assert.equal(item.md5, 'd7d470adeaf9954e5a8e3ce2ce749795');
   });
 });
+
+describe('torrent detail', () => {
+  /**
+   * Serves one archive built with tiered trackers and a comment.
+   * @returns {Promise<object>} - Fetchers and the infohash.
+   */
+  async function serve() {
+    const dir = await fs.mkdtemp(path.join(workspace, 'detail-'));
+    const file = path.join(dir, 'planet.pmtiles');
+    await writeArchive(file, { tiles: [{ z: 0, x: 0, y: 0, data: Buffer.alloc(2048, 3) }] });
+
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    const library = new Library({
+      catalog,
+      engine: { name: 'x', add: async () => {} },
+      config: {
+        dataDir: dir,
+        webtorrent: { savePath: dir },
+        trackers: [
+          'udp://one.example.org:1337',
+          ['udp://two.example.org:6969/announce', 'http://two.example.org:6969/announce'],
+          'udp://three.example.org:451',
+        ],
+      },
+    });
+    const created = await library.addLocalArchive(file, {
+      comment: 'Planetiler openmaptiles data export',
+      webSeeds: ['https://maps.example.org/planet.pmtiles'],
+    });
+
+    const app = createApp({
+      library,
+      catalog,
+      engine: { name: 'x', list: async () => [], get: async () => null },
+      subscriptions: {},
+      tiles: { status: () => null },
+      config: { watch: [], subscriptions: [] },
+    });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const { port } = server.address();
+    return {
+      hash: created.infoHash,
+      get: (p) => fetch(`http://127.0.0.1:${port}${p}`),
+      close: () => new Promise((resolve) => server.close(resolve)),
+    };
+  }
+
+  it('reports trackers in their tiers, not flattened', async () => {
+    // Which tier a tracker sits in decides whether it is tried alongside
+    // another or only after it fails. parse-torrent flattens announce-list, so
+    // this reads the bencode — showing them flat would hide real structure.
+    const s = await serve();
+    try {
+      const { tiers } = await (await s.get(`/api/torrents/${s.hash}/trackers`)).json();
+      assert.equal(tiers.length, 3);
+      assert.deepEqual(tiers[0].urls, ['udp://one.example.org:1337']);
+      assert.deepEqual(tiers[1].urls, [
+        'udp://two.example.org:6969/announce',
+        'http://two.example.org:6969/announce',
+      ]);
+      assert.equal(tiers[2].tier, 2);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('reports the files, piece geometry and comment', async () => {
+    const s = await serve();
+    try {
+      const content = await (await s.get(`/api/torrents/${s.hash}/content`)).json();
+      assert.equal(content.files.length, 1);
+      assert.equal(content.files[0].name ?? content.files[0].path, 'planet.pmtiles');
+      assert.ok(content.pieceLength > 0);
+      assert.equal(content.createdBy, 'pmtiles-swarm');
+      assert.equal(content.comment, 'Planetiler openmaptiles data export');
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('answers with an empty list when an engine cannot report peers', async () => {
+    // Not knowing is a fact about the archive, not a server fault, and a 500
+    // in a detail tab reads as something being broken.
+    const s = await serve();
+    try {
+      const response = await s.get(`/api/torrents/${s.hash}/peers`);
+      assert.equal(response.status, 501);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('404s an archive it does not hold', async () => {
+    const s = await serve();
+    try {
+      assert.equal((await s.get(`/api/torrents/${'f'.repeat(40)}/trackers`)).status, 404);
+      assert.equal((await s.get(`/api/torrents/${'f'.repeat(40)}/content`)).status, 404);
+    } finally {
+      await s.close();
+    }
+  });
+});

@@ -12,6 +12,9 @@
 - **An archive can carry several categories.** A planet build can be both `basemaps` and `weekly`
   without choosing. Feeds match on *any* tag, so it appears in both. Catalogues holding the older
   single `category` string are read as a list of one and normalised on the next write.
+- **Tabbed detail per archive**, as a torrent client has: General, Trackers, Peers, HTTP sources
+  and Content. Trackers are shown in their tiers, files with piece geometry, comment and creator.
+  Panes load when first opened. New `trackers` and `content` endpoints back them.
 - **The console shows where each archive came from** — built here, adopted, added by hand, or the
   host of the peer that sent it. Worth showing rather than inferring: an archive taken from a peer
   is one this node seeds and serves under its own name.
@@ -85,6 +88,11 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- `webtorrent` is a plain dependency rather than an optional one. It is the *default* engine, so
+  calling it optional was wrong, and npm repeatedly dropped it from the lockfile while leaving the
+  declaration — after which `npm install webtorrent` reported "up to date" and changed nothing,
+  and the default engine failed to start.
+- A torrent's comment and piece length were accepted by the API but never passed on.
 - A custom `webSeeds` list was discarded when `webSeed: false` — exactly the case where the source
   must not be published and a public URL was supplied in its place.
 - **A pre-signed source URL was published as a web seed, credentials and all.** Adding an archive

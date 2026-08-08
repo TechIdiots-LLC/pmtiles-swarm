@@ -197,6 +197,32 @@
       }
       .tag.on { background: var(--accent); color: #fff; border-color: var(--accent); }
       #add-error { color: var(--bad); min-height: 1.2rem; }
+      .tabs {
+        display: flex;
+        gap: 0.25rem;
+        border-bottom: 1px solid var(--line);
+        margin: -0.25rem 0 1rem;
+        flex-wrap: wrap;
+      }
+      .tabs button {
+        border: none;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        background: none;
+        color: var(--muted);
+        padding: 0.4rem 0.7rem;
+      }
+      .tabs button.on { color: var(--fg); border-bottom-color: var(--accent); }
+      .rows { width: 100%; border-collapse: collapse; }
+      .rows th, .rows td {
+        text-align: left;
+        padding: 0.35rem 0.6rem;
+        border-bottom: 1px solid var(--line);
+        font-size: 0.85rem;
+        white-space: normal;
+        word-break: break-all;
+      }
+      .rows th { color: var(--muted); font-size: 0.75rem; white-space: nowrap; }
       [hidden] { display: none !important; }
     </style>
   </head>
@@ -553,6 +579,99 @@
           ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
         );
 
+      /**
+       * Fills one detail tab, the first time it is opened.
+       * @param {string} name - Which pane.
+       * @param {string} infoHash - The archive.
+       * @param {object} entry - What the detail endpoint already returned.
+       * @returns {Promise<void>} - Resolves once rendered.
+       */
+      async function fillPane(name, infoHash, entry) {
+        const pane = document.querySelector(`[data-pane="${name}"]`);
+        if (!pane) return;
+
+        const table = (headers, rows) =>
+          rows.length === 0
+            ? '<div class="sub">Nothing to show.</div>'
+            : `<table class="rows"><thead><tr>${headers
+                .map((h) => `<th>${escapeHtml(h)}</th>`)
+                .join('')}</tr></thead><tbody>${rows
+                .map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`)
+                .join('')}</tbody></table>`;
+
+        try {
+          if (name === 'trackers') {
+            const { tiers, note } = await api(`/api/torrents/${infoHash}/trackers`);
+            pane.innerHTML = note
+              ? `<div class="sub">${escapeHtml(note)}</div>`
+              : table(
+                  ['Tier', 'URL'],
+                  tiers.flatMap((tier) =>
+                    tier.urls.map((url) => [
+                      String(tier.tier),
+                      escapeHtml(url),
+                    ]),
+                  ),
+                ) +
+                `<div class="sub" style="margin-top:0.5rem">
+                   Trackers in the same tier are tried together; the next tier is
+                   only reached if that one fails.
+                 </div>`;
+            return;
+          }
+
+          if (name === 'peers') {
+            const peers = await api(`/api/torrents/${infoHash}/peers`);
+            pane.innerHTML = table(
+              ['Address', 'Client', 'Progress', 'Down', 'Up'],
+              (Array.isArray(peers) ? peers : []).map((peer) => [
+                escapeHtml(peer.address ?? peer.ip ?? '—'),
+                escapeHtml(peer.client ?? '—'),
+                peer.progress != null ? pct(peer.progress) : '—',
+                rate(peer.downloadSpeed ?? peer.dlSpeed),
+                rate(peer.uploadSpeed ?? peer.upSpeed),
+              ]),
+            );
+            return;
+          }
+
+          if (name === 'sources') {
+            const seeds = entry.webSeeds ?? [];
+            pane.innerHTML =
+              table(['URL'], seeds.map((url) => [escapeHtml(url)])) +
+              `<div class="sub" style="margin-top:0.5rem">
+                 A web seed serves the archive over plain HTTP, which is what
+                 makes it usable before it has peers — and the difference
+                 between a cold tile taking tens of seconds and under one.
+               </div>`;
+            return;
+          }
+
+          if (name === 'content') {
+            const info = await api(`/api/torrents/${infoHash}/content`);
+            pane.innerHTML =
+              table(
+                ['File', 'Size'],
+                info.files.map((file) => [
+                  escapeHtml(file.path ?? file.name),
+                  bytes(file.length),
+                ]),
+              ) +
+              `<div class="grid" style="margin-top:1rem">
+                <div><span>pieces</span><b>${info.pieceCount ?? '—'} × ${bytes(info.pieceLength)}</b></div>
+                <div><span>created by</span><b>${escapeHtml(info.createdBy ?? '—')}</b></div>
+                <div><span>created</span><b>${info.created ? new Date(info.created).toLocaleString() : '—'}</b></div>
+                <div><span>infohash v2</span><b>${escapeHtml(info.infoHashV2 ?? 'N/A')}</b></div>
+                ${info.comment ? `<div><span>comment</span><b>${escapeHtml(info.comment)}</b></div>` : ''}
+                ${entry.md5 ? `<div><span>md5</span><b>${escapeHtml(entry.md5)}</b></div>` : ''}
+              </div>`;
+            return;
+          }
+        } catch (error) {
+          pane.innerHTML = `<div class="sub">${escapeHtml(error.message)}</div>`;
+        }
+      }
+
       async function renderDetail(infoHash) {
         const panel = $('detail');
         panel.hidden = false;
@@ -573,6 +692,15 @@
 
         panel.innerHTML = `
           <h2>${escapeHtml(entry.name)}</h2>
+          <div class="tabs">
+            <button data-tab="general" class="on">General</button>
+            <button data-tab="trackers">Trackers</button>
+            <button data-tab="peers">Peers</button>
+            <button data-tab="sources">HTTP sources</button>
+            <button data-tab="content">Content</button>
+          </div>
+
+          <div data-pane="general">
           <div class="grid">
             <div><span>infohash</span><b>${escapeHtml(entry.infoHash)}</b></div>
             <div><span>size</span><b>${bytes(entry.size)}</b></div>
@@ -636,7 +764,33 @@
           ${(entry.webSeeds ?? []).length ? `<h2>Web seeds</h2><div class="sub" style="margin-bottom:1rem">${entry.webSeeds.map((u) => `<div><code>${escapeHtml(u)}</code></div>`).join('')}</div>` : ''}
 
           <h2>Preview</h2>
-          <div id="preview"></div>`;
+          <div id="preview"></div>
+          </div>
+
+          <div data-pane="trackers" hidden><div class="sub">loading…</div></div>
+          <div data-pane="peers" hidden><div class="sub">loading…</div></div>
+          <div data-pane="sources" hidden><div class="sub">loading…</div></div>
+          <div data-pane="content" hidden><div class="sub">loading…</div></div>`;
+
+        // Panes load when first opened. A screenful of archives should not
+        // each cost four extra requests nobody looked at.
+        const loaded = new Set(['general']);
+        const paneFor = (name) => panel.querySelector(`[data-pane="${name}"]`);
+
+        for (const tab of panel.querySelectorAll('.tabs button')) {
+          tab.onclick = () => {
+            for (const other of panel.querySelectorAll('.tabs button')) {
+              other.classList.toggle('on', other === tab);
+            }
+            for (const pane of panel.querySelectorAll('[data-pane]')) {
+              pane.hidden = pane.dataset.pane !== tab.dataset.tab;
+            }
+            if (!loaded.has(tab.dataset.tab)) {
+              loaded.add(tab.dataset.tab);
+              fillPane(tab.dataset.tab, infoHash, entry);
+            }
+          };
+        }
 
         // Seeding limit: the same three-way choice a torrent client offers,
         // because "this one stays" has to survive a change to the global rule.

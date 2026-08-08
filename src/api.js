@@ -338,6 +338,89 @@ export function createApp({
     }),
   );
 
+  /**
+   * Reads the stored .torrent for details the catalog does not keep.
+   *
+   * Trackers and the file list live in the torrent itself, and reading them
+   * back is both authoritative and engine-independent — a qBittorrent-backed
+   * node and a WebTorrent-backed one give the same answer, which they would
+   * not if this asked the engine.
+   * @param {object} entry - Catalog entry.
+   * @returns {Promise<object|null>} - The parsed torrent, or null.
+   */
+  const readTorrent = async (entry) => {
+    if (!entry?.torrentPath) return null;
+    const bytes = await fs.readFile(entry.torrentPath).catch(() => null);
+    if (!bytes) return null;
+    const { default: parseTorrent } = await import('parse-torrent');
+    return parseTorrent(new Uint8Array(bytes)).catch(() => null);
+  };
+
+  app.get(
+    '/api/torrents/:infoHash/trackers',
+    route(async (req, res) => {
+      const entry = catalog.get(req.params.infoHash);
+      if (!entry) return res.status(404).json({ error: 'not found' });
+
+      const parsed = await readTorrent(entry);
+      if (!parsed) {
+        return res.json({ tiers: [], note: 'no .torrent is stored for this archive' });
+      }
+
+      // Read the tiers from the bencode rather than from parse-torrent, which
+      // flattens announce-list into one array. Which tier a tracker sits in
+      // decides whether it is tried alongside another or only after it fails,
+      // and showing them flat would hide the structure the torrent carries.
+      const bytes = await fs.readFile(entry.torrentPath).catch(() => null);
+      const { default: bencode } = await import('bencode');
+      const decoded = bytes ? bencode.decode(bytes) : {};
+      const raw = decoded['announce-list'] ?? [];
+
+      const asText = (value) =>
+        Buffer.isBuffer(value) || value instanceof Uint8Array
+          ? Buffer.from(value).toString()
+          : String(value);
+
+      const tiers = (raw.length > 0 ? raw : [[decoded.announce].filter(Boolean)])
+        .map((tier, index) => ({
+          tier: index,
+          urls: (Array.isArray(tier) ? tier : [tier]).map(asText),
+        }))
+        .filter((tier) => tier.urls.length > 0);
+
+      res.json({ tiers, total: tiers.reduce((n, t) => n + t.urls.length, 0) });
+    }),
+  );
+
+  app.get(
+    '/api/torrents/:infoHash/content',
+    route(async (req, res) => {
+      const entry = catalog.get(req.params.infoHash);
+      if (!entry) return res.status(404).json({ error: 'not found' });
+
+      const parsed = await readTorrent(entry);
+      const files = (parsed?.files ?? []).map((file) => ({
+        name: file.name,
+        path: file.path,
+        length: file.length,
+        offset: file.offset,
+      }));
+
+      res.json({
+        files:
+          files.length > 0
+            ? files
+            : [{ name: entry.name, path: entry.name, length: entry.size, offset: 0 }],
+        pieceLength: parsed?.pieceLength ?? entry.pieceLength,
+        pieceCount: parsed?.pieces?.length ?? entry.pieceCount,
+        comment: parsed?.comment,
+        createdBy: parsed?.createdBy,
+        created: parsed?.created,
+        infoHashV2: parsed?.infoHashV2,
+      });
+    }),
+  );
+
   app.get(
     '/api/torrents/:infoHash/peers',
     route(async (req, res) => {
@@ -346,7 +429,14 @@ export function createApp({
           .status(501)
           .json({ error: `${engine.name} does not report peer detail` });
       }
-      res.json(await engine.peers(req.params.infoHash));
+      try {
+        res.json(await engine.peers(req.params.infoHash));
+      } catch (error) {
+        // The engine has the method but could not answer — the torrent may not
+        // be loaded there. That is a fact about this archive, not a fault.
+        res.status(200).json([]);
+        console.warn(`[api] peers for ${req.params.infoHash}: ${error.message}`);
+      }
     }),
   );
 
@@ -409,6 +499,8 @@ export function createApp({
         categories: body.categories ?? body.category,
         trackers: body.trackers,
         addTrackers: body.addTrackers,
+        comment: body.comment,
+        pieceLength: body.pieceLength,
         webSeeds: body.webSeeds,
         pieceLength: body.pieceLength,
         savePath: body.savePath,

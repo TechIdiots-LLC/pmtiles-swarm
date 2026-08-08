@@ -29,14 +29,13 @@
   ],
   "license": "BSD-3-Clause",
   "dependencies": {
+    "bencode": "^4.0.1",
     "chokidar": "^5.0.0",
     "create-torrent": "^6.1.0",
     "express": "^5.2.1",
     "parse-torrent": "^11.0.24",
     "pmtiles": "^4.4.1",
-    "pmtiles-torrent": "^0.1.1"
-  },
-  "optionalDependencies": {
+    "pmtiles-torrent": "^0.1.1",
     "webtorrent": "^3.0.21"
   },
   "engines": {
