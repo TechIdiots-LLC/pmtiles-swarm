@@ -12,6 +12,10 @@
 - **An archive can carry several categories.** A planet build can be both `basemaps` and `weekly`
   without choosing. Feeds match on *any* tag, so it appears in both. Catalogues holding the older
   single `category` string are read as a list of one and normalised on the next write.
+- **Trackers are settable wherever a torrent is created** — per watch folder, per scheduled
+  source, per request — with `trackers` replacing the global list and `addTrackers` appending to
+  it. Watch folders could not set them at all before. The add dialog shows the defaults and
+  offers a field to announce to more.
 - **Adding is a dialog now**, with everything the API could already do: multiple categories picked
   from those in use or typed fresh, keep-or-discard for URL fetches, and whether the source URL is
   published as a web seed — plus a list of your own to publish instead of it.

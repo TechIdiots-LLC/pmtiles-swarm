@@ -162,6 +162,7 @@ export class ScheduledSourceManager {
           category: source.category,
           savePath: source.savePath,
           trackers: source.trackers,
+          addTrackers: source.addTrackers,
           pieceLength: source.pieceLength,
           retain: source.retain !== false,
           comment: source.comment

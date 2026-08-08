@@ -25,7 +25,7 @@ export class WatchManager {
 
   /**
    * Starts watching the configured folders.
-   * @param {object[]} folders - Entries of {path, category, webSeedBase, publishDir, sparse, stabilitySeconds}.
+   * @param {object[]} folders - Entries of {path, categories, webSeedBase, publishDir, sparse, trackers, addTrackers, stabilitySeconds}.
    * @returns {void}
    */
   start(folders = []) {
@@ -70,13 +70,17 @@ export class WatchManager {
       // base plus filename, so it is known before the archive has moved
       // anywhere — or is even being served yet.
       const entry = await this.#library.addLocalArchive(file, {
-        category: folder.category,
+        categories: folder.categories ?? folder.category,
         webSeedBase: folder.webSeedBase,
         // Moves the archive into the directory that is served, so the web seed
         // it advertises actually resolves. Without this, the base has to
         // already describe the watched folder itself.
         publishDir: folder.publishDir,
         sparse: folder.sparse,
+        // A folder's builds may belong on a different tracker from the rest —
+        // `trackers` replaces the global list, `addTrackers` adds to it.
+        trackers: folder.trackers,
+        addTrackers: folder.addTrackers,
       });
       console.log(`[watch] imported ${entry.name} (${entry.infoHash})`);
     } catch (error) {

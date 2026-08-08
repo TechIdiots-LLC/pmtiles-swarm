@@ -279,6 +279,20 @@
           </div>
         </div>
 
+        <fieldset id="tracker-options">
+          <legend>Trackers</legend>
+          <div class="sub" id="default-trackers"></div>
+          <div class="field" style="margin-top: 0.5rem">
+            <label for="extra-trackers">Also announce to</label>
+            <input id="extra-trackers" placeholder="udp://tracker.example.org:1337/announce" />
+            <div class="sub">
+              Comma separated, added to the defaults above. Only applies when a
+              torrent is created here — joining one takes the trackers it
+              already carries.
+            </div>
+          </div>
+        </fieldset>
+
         <fieldset id="url-options">
           <legend>Fetching from a URL</legend>
 
@@ -651,6 +665,9 @@
         // Retaining and web seeds only mean anything when we fetch the bytes
         // ourselves. Joining an existing torrent takes what it already says.
         $('url-options').hidden = kind !== 'url';
+        // Joining an existing torrent uses the trackers it already carries, so
+        // offering to add more would be offering something that does nothing.
+        $('tracker-options').hidden = kind !== 'url' && kind !== 'path';
       }
 
       /** Draws the category chips, existing ones plus whatever was typed. */
@@ -682,6 +699,18 @@
         $('extra-seeds').value = '';
         $('add-error').textContent = '';
         $('use-source-seed').checked = true;
+        $('extra-trackers').value = '';
+
+        try {
+          const { config } = await api('/api/config');
+          const defaults = config.trackers ?? [];
+          $('default-trackers').textContent = defaults.length
+            ? `Every torrent created here announces to: ${defaults.join(', ')}`
+            : 'No default trackers are configured.';
+        } catch {
+          $('default-trackers').textContent =
+            'Defaults come from the trackers setting.';
+        }
         document.querySelector('input[name="retain"][value="keep"]').checked = true;
 
         let known = [];
@@ -722,6 +751,12 @@
         const kind = sourceKind(value);
         const body = { categories: [...chosenCategories] };
         body[kind] = value;
+
+        const trackers = $('extra-trackers').value
+          .split(',')
+          .map((url) => url.trim())
+          .filter(Boolean);
+        if (trackers.length > 0) body.addTrackers = trackers;
 
         if (kind === 'url') {
           body.retain =

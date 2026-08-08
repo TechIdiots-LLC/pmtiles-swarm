@@ -1757,3 +1757,63 @@ describe('tagging archives', () => {
     assert.equal(stored.category, undefined, 'the old field is folded in, not kept alongside');
   });
 });
+
+describe('choosing trackers', () => {
+  /**
+   * Creates a library and reports the trackers a new torrent would announce to.
+   * @param {string[]} globals - The configured default list.
+   * @param {object} options - Per-add overrides.
+   * @returns {Promise<string[]>} - The resolved announce list.
+   */
+  async function resolve(globals, options) {
+    const dir = await fs.mkdtemp(path.join(workspace, 'trk-'));
+    const file = path.join(dir, 'a.pmtiles');
+    await writeArchive(file, { tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('t') }] });
+
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    const library = new Library({
+      catalog,
+      engine: { name: 'x', add: async () => {} },
+      config: { dataDir: dir, webtorrent: { savePath: dir }, trackers: globals },
+    });
+
+    const created = await library.addLocalArchive(file, options);
+    const { default: parseTorrent } = await import('parse-torrent');
+    const parsed = await parseTorrent(
+      new Uint8Array(await fs.readFile(created.torrentPath)),
+    );
+    return (parsed.announce ?? []).sort();
+  }
+
+  const PUBLIC = ['udp://a.example.org:1337/announce', 'udp://b.example.org:451/announce'];
+
+  it('uses the configured defaults when nothing is asked for', async () => {
+    assert.deepEqual(await resolve(PUBLIC, {}), [...PUBLIC].sort());
+  });
+
+  it('adds to the defaults rather than replacing them', async () => {
+    // The common case: a private tracker as well as the public ones, not
+    // instead of them.
+    const got = await resolve(PUBLIC, {
+      addTrackers: ['udp://private.example.org:6969/announce'],
+    });
+    assert.deepEqual(got, [...PUBLIC, 'udp://private.example.org:6969/announce'].sort());
+  });
+
+  it('replaces them when replacement is what was meant', async () => {
+    const got = await resolve(PUBLIC, {
+      trackers: ['udp://only.example.org:6969/announce'],
+    });
+    assert.deepEqual(got, ['udp://only.example.org:6969/announce']);
+  });
+
+  it('does not duplicate a tracker named twice', async () => {
+    const got = await resolve(PUBLIC, { addTrackers: [PUBLIC[0]] });
+    assert.deepEqual(got, [...PUBLIC].sort());
+  });
+
+  it('can publish with no trackers at all, for a DHT-only swarm', async () => {
+    assert.deepEqual(await resolve(PUBLIC, { trackers: [] }), []);
+  });
+});

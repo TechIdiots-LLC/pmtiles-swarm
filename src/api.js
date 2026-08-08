@@ -377,6 +377,7 @@ export function createApp({
       const options = {
         categories: body.categories ?? body.category,
         trackers: body.trackers,
+        addTrackers: body.addTrackers,
         webSeeds: body.webSeeds,
         pieceLength: body.pieceLength,
         savePath: body.savePath,

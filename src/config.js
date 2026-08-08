@@ -60,7 +60,25 @@ const DEFAULTS = {
    * the network misbehaves while seeding.
    */
   maxConnections: 100,
-  /** Trackers baked into every torrent we create. */
+  /**
+   * Trackers baked into every torrent this node creates.
+   *
+   * These two are the ones the OpenStreetMap community's map torrents use, so
+   * archives published here land in the same swarms people already follow.
+   *
+   * Overridable wherever a torrent is created — per watch folder, per
+   * scheduled source, per request — with two knobs that differ:
+   *
+   *   `trackers`     replaces this list
+   *   `addTrackers`  appends to it
+   *
+   * Append unless you mean to replace. Dropping the public trackers is a
+   * silent change: the torrent still works, it is simply announced to fewer
+   * places than intended, and nothing about it says so.
+   *
+   * Only applies to torrents created here. Joining an existing one uses the
+   * trackers that torrent already carries.
+   */
   trackers: [
     'udp://tracker.opentrackr.org:1337/announce',
     'udp://tracker.torrent.eu.org:451/announce',

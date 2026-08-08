@@ -62,6 +62,27 @@ export class Library {
   }
 
   /**
+   * Works out which trackers a new torrent announces to.
+   *
+   * Two knobs, because both are wanted and they are not the same thing:
+   *
+   *   `trackers`     replaces the global list outright
+   *   `addTrackers`  appends to it
+   *
+   * Appending is usually what is meant. A watch folder wanting its builds on a
+   * private tracker rarely wants them off the public ones as well, and having
+   * only a replacing option makes that mistake silent — the torrent still
+   * works, it is just announced to fewer places than intended, which nothing
+   * about it reveals.
+   * @param {object} options - May carry `trackers` and `addTrackers`.
+   * @returns {string[]} - Announce URLs, de-duplicated.
+   */
+  #trackersFor(options = {}) {
+    const base = options.trackers ?? this.#config.trackers ?? [];
+    return [...new Set([...base, ...(options.addTrackers ?? [])])];
+  }
+
+  /**
    * Adds a local PMTiles archive, creating a torrent for it.
    *
    * The data is left where it is and the torrent points at it, so publishing a
@@ -107,7 +128,7 @@ export class Library {
 
     const created = await createTorrentFromFile(absolute, {
       pieceLength: options.pieceLength ?? this.#config.pieceLength,
-      trackers: options.trackers ?? this.#config.trackers,
+      trackers: this.#trackersFor(options),
       webSeeds: [...new Set(webSeeds)],
       comment: options.comment,
     });
@@ -230,7 +251,7 @@ export class Library {
       // to something self-describing locally.
       name: options.name,
       pieceLength: options.pieceLength ?? this.#config.pieceLength,
-      trackers: options.trackers ?? this.#config.trackers,
+      trackers: this.#trackersFor(options),
       webSeeds: options.webSeeds ?? [],
       comment: options.comment,
       retainPath: retain ? savePath : undefined,
