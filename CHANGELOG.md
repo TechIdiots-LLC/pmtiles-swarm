@@ -9,6 +9,10 @@
   root.
 - Cache-mode archives now live under `cacheSavePath`, separate from mirrors, so a glance at the
   disk says which files are whole archives and which never will be.
+- **`feedCategories` decides what leaves the node.** Category feeds let a subscriber narrow what
+  it takes; they never narrowed what was published, since `/feed.xml` carried the whole catalogue.
+  With an allow-list set, only those categories appear in any feed and other category feeds
+  answer 404. Untagged archives are excluded, because untagged means unmarked for sharing.
 - **Access control.** Tiles, TileJSON and the feed stay public; everything under `/api/` and the
   console are guarded whenever `auth.apiKey`, `auth.password` or `auth.passwordHash` is set. A
   bearer token for scripts, a sign-in form and session cookie for people. Passwords set through

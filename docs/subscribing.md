@@ -51,6 +51,50 @@ Poll immediately rather than waiting for the interval:
 curl -X POST localhost:8090/api/subscriptions/refresh
 ```
 
+## Sharing only what you tag
+
+Category feeds let a *subscriber* narrow what it takes. They do not narrow what
+you publish: `/feed.xml` carries the whole catalogue, so a peer who could follow
+`/feed/basemaps.xml` could equally read the main feed, or guess a category name.
+
+To decide what leaves the node at all, list the categories that may be published:
+
+```json
+{
+  "feedCategories": ["basemaps", "terrain"]
+}
+```
+
+Then `/feed.xml` carries only those categories, and `/feed/<anything-else>.xml`
+answers 404 — rather than 403, which would confirm the category exists.
+
+**Archives with no category are excluded whenever this is set.** An untagged
+archive has not been marked for sharing, and defaulting to publish would make
+the setting fail open.
+
+Unset, everything is published, which is the right default for a node whose
+whole catalogue is meant to be shared.
+
+### Why this matters when peering
+
+Between your own nodes, sharing everything is usually what you want. Between
+organisations it is a decision: **anything you publish is something a peer may
+mirror, seed and serve under their own domain.** An allow-list makes that
+deliberate — build internally under one category, share under another, and only
+the second ever reaches the wire.
+
+```json
+// Publisher: only basemaps leave this node.
+{ "feedCategories": ["basemaps"] }
+
+// Peer: take them, cache rather than mirror, file them under their own name.
+{
+  "subscriptions": [
+    { "url": "https://maps.example.org/feed/basemaps.xml", "mode": "cache", "category": "upstream" }
+  ]
+}
+```
+
 ## mirror or cache
 
 The choice that decides what a subscriber costs.

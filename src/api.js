@@ -473,9 +473,21 @@ export function createApp({
     return config.feedMaxItems ?? 0;
   };
 
+  /**
+   * Whether a category may leave this node.
+   * @param {string} [category] - The category to check.
+   * @returns {boolean} - True when it is published.
+   */
+  const publishes = (category) => {
+    const allowed = config.feedCategories;
+    if (!Array.isArray(allowed)) return true;
+    // Untagged means unmarked for sharing, so it stays put.
+    return Boolean(category) && allowed.includes(category);
+  };
+
   app.get('/feed.xml', (req, res) => {
     res.type('application/rss+xml').send(
-      renderFeed(catalog.list(), {
+      renderFeed(catalog.list().filter((entry) => publishes(entry.category)), {
         title: config.feedTitle ?? 'PMTiles archives',
         baseUrl: baseUrl(req),
         copyright: config.feedCopyright,
@@ -486,6 +498,11 @@ export function createApp({
 
   app.get('/feed/:category.xml', (req, res) => {
     const { category } = req.params;
+    // 404 rather than 403: refusing by name would confirm the category exists,
+    // which is exactly what an allow-list is meant to avoid disclosing.
+    if (!publishes(category)) {
+      return res.status(404).json({ error: 'no such feed' });
+    }
     res.type('application/rss+xml').send(
       renderFeed(catalog.byCategory(category), {
         title: `${config.feedTitle ?? 'PMTiles archives'} — ${category}`,

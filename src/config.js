@@ -85,6 +85,26 @@ const DEFAULTS = {
    * build entirely, with nothing to indicate it had.
    */
   feedMaxItems: 50,
+  /**
+   * Which categories are published in the feeds at all.
+   *
+   * Unset means everything, which is the right default for a node whose whole
+   * catalogue is meant to be shared. Set it to an allow-list and only archives
+   * in those categories appear in any feed — `/feed.xml` is filtered to them,
+   * and `/feed/<other>.xml` reports 404 rather than confirming the category
+   * exists.
+   *
+   * This is the difference between selective *subscription* and selective
+   * *publication*. A peer choosing to follow `/feed/basemaps.xml` withholds
+   * nothing: they could read `/feed.xml` instead, or guess. Deciding here is
+   * what actually keeps an archive off the wire — which matters when peering
+   * with someone else's node, since everything you publish is something they
+   * may mirror and serve under their own name.
+   *
+   * Archives with no category are excluded whenever this is set: an untagged
+   * archive has not been marked for sharing.
+   */
+  feedCategories: undefined,
   /** Scheduled upstreams that publish a new archive per date. See sources.js. */
   sources: [],
   /** How often to poll scheduled sources, in hours. */

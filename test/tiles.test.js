@@ -1486,3 +1486,111 @@ describe('signing in to a token-only node', () => {
     assert.ok(!auth.login(request({ password: '' }), response()));
   });
 });
+
+describe('publishing only what is tagged for sharing', () => {
+  /**
+   * Serves a node holding three archives across two categories, plus one
+   * untagged, and reports what each feed exposes.
+   * @param {string[]} [feedCategories] - The allow-list, or undefined for all.
+   * @returns {Promise<object>} - Fetchers for the feeds.
+   */
+  async function serve(feedCategories) {
+    const dir = await fs.mkdtemp(path.join(workspace, 'feeds-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put(entry({ infoHash: 'a'.repeat(40), name: 'world.pmtiles', category: 'public' }));
+    await catalog.put(entry({ infoHash: 'b'.repeat(40), name: 'staff.pmtiles', category: 'internal' }));
+    await catalog.put(entry({ infoHash: 'c'.repeat(40), name: 'loose.pmtiles', category: undefined }));
+
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog,
+      engine: { name: 'x', list: async () => [] },
+      subscriptions: {},
+      tiles: { status: () => null },
+      config: { watch: [], subscriptions: [], feedCategories },
+    });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const { port } = server.address();
+    const base = `http://127.0.0.1:${port}`;
+    return {
+      main: async () => (await fetch(`${base}/feed.xml`)).text(),
+      category: async (name) => fetch(`${base}/feed/${name}.xml`),
+      close: () => new Promise((resolve) => server.close(resolve)),
+    };
+  }
+
+  it('publishes everything when no allow-list is set', async () => {
+    const feeds = await serve(undefined);
+    try {
+      const xml = await feeds.main();
+      assert.ok(xml.includes('world.pmtiles'));
+      assert.ok(xml.includes('staff.pmtiles'));
+      assert.ok(xml.includes('loose.pmtiles'));
+      assert.equal((await feeds.category('internal')).status, 200);
+    } finally {
+      await feeds.close();
+    }
+  });
+
+  it('withholds anything outside the allow-list from the main feed', async () => {
+    // The point: tagging alone withholds nothing, because a peer can read
+    // /feed.xml instead of the category feed.
+    const feeds = await serve(['public']);
+    try {
+      const xml = await feeds.main();
+      assert.ok(xml.includes('world.pmtiles'));
+      assert.ok(!xml.includes('staff.pmtiles'));
+    } finally {
+      await feeds.close();
+    }
+  });
+
+  it('excludes untagged archives, which were never marked for sharing', async () => {
+    const feeds = await serve(['public']);
+    try {
+      assert.ok(!(await feeds.main()).includes('loose.pmtiles'));
+    } finally {
+      await feeds.close();
+    }
+  });
+
+  it('404s a category feed that is not published', async () => {
+    // 404 rather than 403: refusing by name would confirm it exists, which is
+    // what an allow-list is meant not to disclose.
+    const feeds = await serve(['public']);
+    try {
+      assert.equal((await feeds.category('public')).status, 200);
+      assert.equal((await feeds.category('internal')).status, 404);
+      assert.equal((await feeds.category('invented')).status, 404);
+    } finally {
+      await feeds.close();
+    }
+  });
+
+  it('publishes several categories when several are listed', async () => {
+    const feeds = await serve(['public', 'internal']);
+    try {
+      const xml = await feeds.main();
+      assert.ok(xml.includes('world.pmtiles'));
+      assert.ok(xml.includes('staff.pmtiles'));
+      assert.ok(!xml.includes('loose.pmtiles'));
+      assert.equal((await feeds.category('internal')).status, 200);
+    } finally {
+      await feeds.close();
+    }
+  });
+
+  it('publishes nothing at all for an empty allow-list', async () => {
+    const feeds = await serve([]);
+    try {
+      const xml = await feeds.main();
+      assert.ok(!xml.includes('world.pmtiles'));
+      assert.ok(!xml.includes('staff.pmtiles'));
+      assert.equal((await feeds.category('public')).status, 404);
+    } finally {
+      await feeds.close();
+    }
+  });
+});
