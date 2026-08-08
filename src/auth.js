@@ -246,11 +246,76 @@ export function assertSafeToListen(config, auth) {
   if (auth.enabled || config.allowUnauthenticated) return;
   if (LOOPBACK.has(config.host)) return;
 
-  throw new Error(
-    `refusing to listen on ${config.host} with no authentication configured.\n\n` +
-      'Every /api/ route can create torrents, move files, delete data and\n' +
-      'rewrite this configuration, and none of them would ask who is calling.\n\n' +
-      'Set auth.apiKey or auth.password, bind to 127.0.0.1, or — if this really\n' +
-      'is on a trusted network — set allowUnauthenticated: true.',
+  // A ready-to-paste key, because the alternative is the reader going away to
+  // find out how to generate one and coming back less inclined to bother.
+  const suggested = crypto.randomBytes(32).toString('base64url');
+  const file = config.configPath;
+
+  const where = file
+    ? `Add this to ${file}:`
+    : [
+        'You are running without --config, so there is no file to edit yet.',
+        'Create one — swarm.config.json, say — containing:',
+      ].join('\n');
+
+  const tail = file
+    ? ''
+    : `\nthen start with:\n\n    node src/index.js --config swarm.config.json\n`;
+
+  throw new ConfigurationError(
+    [
+      `Refusing to listen on ${config.host} with no authentication configured.`,
+      '',
+      'Every /api/ route can create torrents, move files, delete data and',
+      'rewrite this configuration, and none of them would ask who is calling.',
+      '',
+      '─── To fix it ' + '─'.repeat(56),
+      '',
+      where,
+      '',
+      '    {',
+      '      "auth": {',
+      `        "apiKey": "${suggested}"`,
+      '      }',
+      '    }',
+      tail,
+      'Then send that key with every API call:',
+      '',
+      `    curl -H 'authorization: Bearer ${suggested}' \\`,
+      `      http://${config.host === '0.0.0.0' ? 'localhost' : config.host}:${config.port}/api/status`,
+      '',
+      'To sign in from a browser instead, use a password (it is stored as a',
+      'scrypt hash the first time you change it from the settings screen):',
+      '',
+      '    { "auth": { "username": "admin", "password": "something-long" } }',
+      '',
+      '─── Or, if you would rather not ' + '─'.repeat(38),
+      '',
+      '  • Bind to loopback and put a reverse proxy in front of it:',
+      '        { "host": "127.0.0.1" }',
+      '',
+      '  • Declare the network trusted and accept the risk:',
+      '        { "allowUnauthenticated": true }',
+      '',
+      'Full detail: docs/security.md',
+    ].join('\n'),
   );
+}
+
+/**
+ * A refusal to start, as opposed to a crash.
+ *
+ * Marked so the entry point can print the explanation on its own. A stack trace
+ * on a configuration problem buries the part the reader needs under frames that
+ * cannot help them.
+ */
+export class ConfigurationError extends Error {
+  /**
+   * @param {string} message - The explanation, already formatted for a terminal.
+   */
+  constructor(message) {
+    super(message);
+    this.name = 'ConfigurationError';
+    this.isConfigurationError = true;
+  }
 }

@@ -178,6 +178,12 @@ PMTILES_SWARM_PUBLIC_URL
 }
 
 main().catch((error) => {
-  console.error(error.stack ?? error.message);
+  // A refusal to start is not a crash. Printing a stack trace for one buries
+  // the explanation under frames that cannot help the reader.
+  console.error(
+    error.isConfigurationError ? `
+${error.message}
+` : (error.stack ?? error.message),
+  );
   process.exit(1);
 });

@@ -15,8 +15,10 @@
   the settings screen are stored as a scrypt hash, and credentials are redacted from every
   response. Configuring nothing keeps the previous behaviour.
 - **A node with no credential now refuses to start on a reachable address**, rather than warning.
-  Bind to loopback, configure `auth`, or set `allowUnauthenticated: true`. See
-  [docs/security.md](docs/security.md).
+  The refusal prints the JSON to paste, into the config file it names — or how to create one when
+  there is none — along with a generated key and the `curl` that uses it. It prints without a
+  stack trace, since a configuration refusal is not a crash. Bind to loopback, configure `auth`,
+  or set `allowUnauthenticated: true`. See [docs/security.md](docs/security.md).
 - **The web UI is now a real console.** Live-refreshing archive table with progress, peers and
   speeds; a detail panel per archive with disk usage, web seeds and a tile preview; per-archive
   actions for warming, clearing a cache, adding a web seed and removing; export by downloading

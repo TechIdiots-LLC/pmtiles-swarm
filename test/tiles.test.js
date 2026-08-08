@@ -1323,8 +1323,60 @@ describe('authentication', () => {
     // The failure this prevents is silent: the node works perfectly until
     // somebody who is not you finds the port.
     assert.throws(
-      () => assertSafeToListen({ host: '0.0.0.0' }, createAuth({})),
-      /refusing to listen/,
+      () => assertSafeToListen({ host: '0.0.0.0', port: 8090 }, createAuth({})),
+      (error) => {
+        assert.match(error.message, /Refusing to listen on 0\.0\.0\.0/);
+        // Marked so the entry point prints the explanation without a stack
+        // trace, which would bury it.
+        assert.equal(error.isConfigurationError, true);
+        // The message has to say how to fix it, not only that something is
+        // wrong — it is the only documentation most readers will see.
+        assert.match(error.message, /"auth"/);
+        assert.match(error.message, /apiKey/);
+        assert.match(error.message, /authorization: Bearer /);
+        assert.match(error.message, /allowUnauthenticated/);
+        assert.match(error.message, /127\.0\.0\.1/);
+        return true;
+      },
+    );
+  });
+
+  it('names the config file when there is one, and how to make one when not', () => {
+    const withFile = { host: '0.0.0.0', port: 8090 };
+    Object.defineProperty(withFile, 'configPath', {
+      value: '/etc/swarm.json',
+      enumerable: false,
+    });
+    assert.throws(
+      () => assertSafeToListen(withFile, createAuth({})),
+      /Add this to \/etc\/swarm\.json/,
+    );
+
+    assert.throws(
+      () => assertSafeToListen({ host: '0.0.0.0', port: 8090 }, createAuth({})),
+      /running without --config/,
+    );
+  });
+
+  it('suggests a key that would actually work', () => {
+    // A suggestion the reader has to go and research is a suggestion they will
+    // put off, so the message carries a usable one.
+    let message = '';
+    try {
+      assertSafeToListen({ host: '0.0.0.0', port: 8090 }, createAuth({}));
+    } catch (error) {
+      message = error.message;
+    }
+    const key = message.match(/"apiKey": "([^"]+)"/)?.[1];
+    assert.ok(key && key.length >= 32, `expected a long key, got ${key}`);
+
+    // And it must be a credential this node would actually accept.
+    const auth = createAuth({ auth: { apiKey: key } });
+    assert.ok(
+      auth.isAuthenticated({
+        path: '/api/torrents',
+        headers: { authorization: `Bearer ${key}` },
+      }),
     );
   });
 
