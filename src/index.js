@@ -11,6 +11,7 @@ import { Library } from './library.js';
 import { ScheduledSourceManager } from './sources.js';
 import { SubscriptionManager } from './subscriptions.js';
 import { TileStore } from './tiles.js';
+import { WarmRunner } from './warm.js';
 import { WatchManager } from './watch.js';
 
 /**
@@ -98,6 +99,7 @@ PMTILES_SWARM_PUBLIC_URL
   const sources = new ScheduledSourceManager(library, catalog, config);
 
   const tiles = new TileStore({ catalog, engine, config });
+  const warm = new WarmRunner(tiles);
 
   const app = createApp({
     library,
@@ -105,6 +107,7 @@ PMTILES_SWARM_PUBLIC_URL
     engine,
     subscriptions,
     tiles,
+    warm,
     config,
   });
   const server = app.listen(config.port, config.host, () => {
@@ -156,6 +159,7 @@ PMTILES_SWARM_PUBLIC_URL
     subscriptions.stop();
     await watch.stop().catch(() => {});
     await new Promise((resolve) => server.close(resolve));
+    warm.stop();
     // Before the engine, so readers let go of their torrents while the client
     // that owns them is still alive.
     await tiles.close().catch(() => {});

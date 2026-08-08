@@ -133,6 +133,49 @@ at the current infohash.
 }
 ```
 
+## Warming a region
+
+A cache-mode node is slow exactly once per region: the first request pulls the
+pieces those tiles live in, and everything after is served from what it now
+holds. Warming moves that cost off the request path, which matters most just
+before adding a node to a load-balanced pool.
+
+```sh
+curl -X POST http://node:8090/api/torrents/$INFOHASH/warm \
+  -H 'content-type: application/json' \
+  -d '{"bounds": [5.9, 45.8, 10.5, 47.8], "minZoom": 0, "maxZoom": 12}'
+```
+
+Everything is optional. Without `bounds` it uses the archive's own; without a
+zoom range it warms from the archive's minimum up a handful of levels, because
+tile counts quadruple per level and warming to z14 globally is never what was
+meant. The zoom range is clamped to what the archive actually holds, so asking
+for more than exists costs nothing.
+
+```
+GET    /api/torrents/{infohash}/warm    progress
+DELETE /api/torrents/{infohash}/warm    cancel
+```
+
+Progress reports `total`, `done`, `hits`, `misses` and `errors`. Misses are
+normal — a bounding box over a sparse archive covers tiles that were never
+generated. A job that fails every tile without a single success gives up early
+rather than grinding through the region to prove the archive is unreadable.
+
+`maxTiles` caps a job (5000 by default) and `concurrency` sets how many tiles are
+in flight (4 by default). Raising concurrency helps when the bottleneck is swarm
+latency rather than bandwidth.
+
+**Warming a mirror node does nothing useful** — it already holds everything and
+reads its local file. The endpoint still works; it just finishes almost
+immediately.
+
+**Warming is cheaper on the second node.** Every node in the serving tier is a
+peer in the same swarm, so a node warming a region a sibling already holds
+fetches it from that sibling rather than from the original seed. Local service
+discovery is on by default, so nodes on the same subnet find each other with no
+configuration.
+
 ### Absolute URLs behind a proxy
 
 TileJSON contains absolute tile URLs, so the server has to know how it is reached:

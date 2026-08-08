@@ -3,15 +3,28 @@
 How a map library is ingested once, distributed over BitTorrent, and served to
 both ordinary and torrent-aware clients from the same URLs.
 
-Three views: **the whole topology**, **how a tile request resolves**, and **what
-happens when an archive is updated**.
+Four views: **the whole topology**, **how a tile request resolves**, **what a
+torrent-aware client does differently**, and **what happens when an archive is
+updated**.
 (Renders in VS Code's Markdown preview and on GitHub.)
 
 ---
 
 ## 1. Topology
 
-One node publishes, several serve, everything meets in the swarm.
+One node publishes, any number serve, everything meets in the swarm.
+
+**"Primary" and "secondary" are roles, not node types.** The only thing that makes
+a node primary is that it creates torrents and owns the catalog others subscribe
+to. It can sit in the load-balanced pool alongside everything else — it holds
+complete copies, so it is the *best* tile server in the fleet, not an exception
+to it. The diagram separates them only to keep the arrows legible.
+
+Likewise **mirror and cache are per-archive choices, not node identities.** A
+serving node can mirror the archives it cares about and cache the rest. Mirroring
+everything is a perfectly good deployment: every node seeds fully, every node
+reads locally, and cache mode is there for the nodes and archives where a full
+copy is not worth the disk.
 
 ```mermaid
 %%{init: {"flowchart": {"rankSpacing": 80, "nodeSpacing": 50}}}%%
@@ -25,21 +38,23 @@ graph LR
 
     F1 & F2 & F3 & F4 --> PRI
 
-    PRI["<b>pmtiles-swarm · primary</b><br/>creates torrents · owns the catalog<br/>publishes /feed.xml<br/><small>mirror mode — holds full copies</small>"]
+    PRI["<b>pmtiles-swarm · publisher</b><br/>creates torrents · owns the catalog<br/>publishes /feed.xml<br/><small>mirrors — and can serve tiles too</small>"]
 
     PRI -->|"RSS<br/>torrents + magnets"| S1 & S2 & S3
 
-    subgraph SEC["Serving tier — subscribed to the primary's feed"]
-        S1["pmtiles-swarm · secondary<br/><small>cache mode</small>"]
-        S2["pmtiles-swarm · secondary<br/><small>cache mode</small>"]
-        S3["pmtiles-swarm · secondary<br/><small>cache mode</small>"]
+    subgraph SEC["Serving tier — subscribed to the publisher's feed"]
+        S1["pmtiles-swarm<br/><small>mirror — reads locally, seeds fully</small>"]
+        S2["pmtiles-swarm<br/><small>mirror — reads locally, seeds fully</small>"]
+        S3["pmtiles-swarm<br/><small>cache — reads pieces on demand</small>"]
     end
 
     BT{{"BitTorrent swarm<br/><small>DHT · trackers · web seeds</small>"}}
 
     PRI <==>|"seeds"| BT
-    S1 & S2 & S3 <==>|"read pieces on demand<br/>seed back what they hold"| BT
+    S1 & S2 <==>|"seed complete copies"| BT
+    S3 <==>|"pull pieces on demand<br/>seed back what it holds"| BT
 
+    PRI --> LB
     S1 & S2 & S3 --> LB["Load balancer / CDN<br/>HAProxy · Cloudflare<br/><small>caches tiles — they are immutable</small>"]
 
     LB --> C1 & C2
@@ -51,20 +66,24 @@ graph LR
 
     C1 <==>|"tiles from pieces"| BT
 
-    %% 4-6 = RSS distribution, 7-10 and 16 = BitTorrent, rest = HTTP
+    %% 4-6 = RSS distribution, 7-10 and 17 = BitTorrent, rest = HTTP
     linkStyle 4,5,6 stroke:#3F8F4F,stroke-width:2.5px;
-    linkStyle 7,8,9,10,16 stroke:#F5A623,stroke-width:3.5px;
+    linkStyle 7,8,9,10,17 stroke:#F5A623,stroke-width:3.5px;
 ```
 
 **Key points:** **orange = BitTorrent, green = RSS distribution, plain = HTTP.**
-The primary is the only node that *creates* torrents; secondaries learn about
-archives from its feed and join the swarm in cache mode, holding almost nothing.
-Every node is both a reader and a seeder — a secondary that pulls pieces to
-answer a tile request then serves those pieces to everyone else, so serving load
-turns into swarm capacity rather than consuming it.
+The publisher is the only node that *creates* torrents; the rest learn about
+archives from its feed and join the swarm, each choosing per archive whether to
+mirror it or cache it.
 
-The primary is a single point of failure for **publishing new archives only**.
-Once a torrent exists, the swarm and the serving tier keep working without it.
+Every node is both a reader and a seeder. A mirror seeds the whole archive; a
+cache-mode node seeds whatever pieces it has pulled to answer requests. Either
+way serving load turns into swarm capacity rather than consuming it, which is the
+inversion that makes this worth building.
+
+The publisher is a single point of failure for **publishing new archives only**.
+Once a torrent exists, the swarm and the serving tier keep working without it —
+including the feed's existing items, which subscribers have already acted on.
 
 ---
 
@@ -95,12 +114,8 @@ graph TD
 
     LOCAL --> DONE
 
-    TA["Torrent-aware client"] -.->|"reads tiles.json,<br/>then bypasses HTTP entirely"| SWARM2{{"joins the swarm itself"}}
-    TA -->|"first paint, while<br/>the swarm warms up"| REQ
-
-    %% 10-12 = the piece fetch and seed-back path, 14 = the client's own swarm
+    %% 10-12 = the piece fetch and seed-back path
     linkStyle 10,11,12 stroke:#F5A623,stroke-width:3px;
-    linkStyle 14 stroke:#4A7EBB,stroke-width:2.5px,stroke-dasharray:4 3;
 ```
 
 **Key points:** a cold tile on a cache-mode node costs one piece fetch — and a
@@ -108,14 +123,82 @@ graph TD
 swarm-only fetch. If your archives are also on plain HTTP storage, put that URL
 in the torrent's `url-list`; it is the single biggest lever on this whole design.
 
-The torrent-aware client is the interesting case: it fetches over HTTP
-immediately so the map paints, *and* joins the swarm in the background. Once the
-swarm is warm it stops needing the HTTP path. It never has a blank screen waiting
-for metadata.
+A node holding a complete copy skips all of this and reads its local file.
 
 ---
 
-## 3. Updating an archive
+## 3. What a torrent-aware client does
+
+The server-side path above is what an *ordinary* client triggers. A torrent-aware
+client does something different: it takes over the archive reading itself, and
+stops needing the tile endpoint at all.
+
+The important part is that it does both at once — HTTP for the first paint, swarm
+in the background — so there is never a blank map waiting for metadata.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant App as Map (maplibre)
+    participant P as Plugin
+    participant HTTP as pmtiles-swarm<br/>(via CDN)
+    participant BT as BitTorrent swarm
+
+    App->>P: load style → tiles.json
+    P->>HTTP: GET /archives/{hash}/tiles.json
+    HTTP-->>P: TileJSON + torrent block
+
+    Note over P: claims the /archives/{hash}/ prefix,<br/>so only these URLs come to it
+
+    par Map is usable immediately
+        App->>P: tile 12/2145/1436
+        P->>HTTP: GET …/12/2145/1436.pbf
+        HTTP-->>App: tile bytes
+    and Swarm warms up in the background
+        P->>BT: join (.torrent — metadata already in hand)
+        BT-->>P: connected
+        P->>BT: fetch PMTiles header + root directory
+        BT-->>P: those pieces
+        Note over P: now able to resolve any tile<br/>to a byte range locally
+    end
+
+    App->>P: tile 12/2146/1436
+    Note over P: tile → byte range (PMTiles directory)<br/>→ piece index
+    P->>BT: fetch that piece
+    BT-->>P: piece
+    P-->>App: tile bytes, no HTTP involved
+
+    Note over P,BT: the client is now a peer —<br/>it seeds those pieces back
+
+    App->>P: tile in an unfetched region
+    P->>BT: fetch piece
+    BT--)P: too slow / unavailable
+    P->>HTTP: fall back for this tile
+    HTTP-->>App: tile bytes
+```
+
+**Key points:** the plugin resolves tiles the same way the server does — PMTiles
+directory lookup, byte range, piece index — it just does it on the device. That
+is why the `torrent` block carries the archive's `.torrent` rather than per-tile
+URLs: **there is nothing tile-specific in the swarm.** The swarm holds one file,
+and both ends know how to read tiles out of it.
+
+Three consequences worth being clear about:
+
+- **HTTP is never fully abandoned.** It is the fallback for anything the swarm
+  cannot answer quickly, and the only path until the swarm is connected.
+- **The client becomes a seeder.** Every piece it pulls, it serves — so a popular
+  region gets *faster* as more clients view it, which is the opposite of how a
+  tile server behaves under load.
+- **Prefer the `.torrent` over the magnet.** A magnet carries only an infohash, so
+  the client must find peers and complete a metadata exchange before it knows
+  anything about the archive — measured at 90 to 240 seconds against a 72 GiB
+  archive. The `.torrent` served alongside the TileJSON already contains the
+  metadata and is ready immediately.
+
+---
+
+## 4. Updating an archive
 
 New data means a new infohash, which is what makes cache invalidation free.
 
@@ -173,13 +256,32 @@ as mixed content — which looks like an empty map rather than a misconfiguratio
 
 **Load balancing needs no session affinity.** Any node serving a given infohash
 returns byte-identical tiles, because the infohash pins the content. Round-robin
-is fine.
+is fine, and a node can be added or removed mid-request-stream without a client
+noticing.
 
-**But affinity still helps.** Each secondary warms its piece cache independently,
-so scattering requests for one region across N nodes costs N cold fetches instead
-of one. Hashing on the request path rather than the client address keeps a given
-tile landing on the same node. The CDN in front absorbs most of this either way.
+**Cold start only applies to cache-mode nodes.** A node holding a complete copy
+reads its local file and is fast from the first request. If every serving node
+mirrors, this section does not apply to you at all.
 
-**Give secondaries enough disk for what gets viewed, not for the archive.** Cache
-mode grows with what people actually look at. Watch it and cap it; it is not
-bounded on its own.
+Where nodes *do* run in cache mode, each warms its own piece cache, so scattering
+requests for one region across N nodes costs N first-fetches rather than one.
+Three things reduce that, in order of effect:
+
+1. **The CDN absorbs repeats.** Tiles are immutable, so the second request for a
+   tile never reaches any node.
+2. **The nodes are peers in the same swarm.** A node fetching a piece a sibling
+   already holds gets it *from that sibling*, usually over the LAN. Local service
+   discovery is on by default, so same-subnet nodes find each other without
+   configuration. The cost is one external fetch plus N−1 local ones, not N
+   external ones.
+3. **Warm before rotating in.** `POST /api/torrents/{infohash}/warm` pre-fetches
+   a region so the first real request is never the slow one. See
+   [serving tiles](serving-tiles.md#warming-a-region).
+
+Path-based affinity (HAProxy's `balance uri`) helps too, but it is the smallest
+of the four levers and it costs you even load distribution.
+
+**Size cache-mode disks for what gets viewed, not for the archive.** Cache usage
+grows with what people actually look at and is not bounded on its own. Watch it,
+and mirror instead where a full copy is affordable — a mirror is predictable,
+faster, and a better peer.

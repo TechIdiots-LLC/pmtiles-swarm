@@ -9,6 +9,7 @@ import { Catalog } from '../src/catalog.js';
 import { LibtorrentReadEngine } from '../src/read-engine.js';
 import { buildTileJson, extensionMatches } from '../src/tilejson.js';
 import { TileStore } from '../src/tiles.js';
+import { WarmRunner, countTiles, tilesInBounds } from '../src/warm.js';
 import { TILE_TYPE, writeArchive } from './pmtiles-fixture.js';
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-swarm-tiles-'));
@@ -604,5 +605,131 @@ describe('tile http endpoints', () => {
     } finally {
       await close();
     }
+  });
+});
+
+describe('region warming', () => {
+  /**
+   * A tile store that records what was asked for.
+   * @param {object} [options] - Failure injection.
+   * @returns {object} - The fake store.
+   */
+  function fakeStore(options = {}) {
+    const asked = [];
+    return {
+      asked,
+      getTile: async (hash, z, x, y, opts = {}) => {
+        if (opts.signal?.aborted) {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          throw error;
+        }
+        asked.push(`${z}/${x}/${y}`);
+        if (options.alwaysThrow) throw new Error('unreadable');
+        // Pretend odd rows are absent, so hits and misses are distinguishable.
+        return y % 2 === 0 ? { data: Buffer.alloc(4) } : null;
+      },
+    };
+  }
+
+  /**
+   * Waits for a job to leave the running state.
+   * @param {WarmRunner} runner - The runner.
+   * @param {string} hash - Archive.
+   * @returns {Promise<object>} - The finished job.
+   */
+  async function settle(runner, hash) {
+    for (let i = 0; i < 200; i++) {
+      const job = runner.get(hash);
+      if (job && job.state !== 'running') return job;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    throw new Error('warm job never settled');
+  }
+
+  /** The fixture archive only reaches z1; warming deeper needs a deeper one. */
+  const deep = (extra = {}) =>
+    entry({ pmtiles: { ...entry().pmtiles, maxZoom: 14 }, ...extra });
+
+  it('enumerates the tiles covering a bounding box', () => {
+    // The whole world at z0 is one tile; at z1 it is four.
+    assert.equal(countTiles([-180, -85, 180, 85], 0, 0, 100), 1);
+    assert.equal(countTiles([-180, -85, 180, 85], 1, 1, 100), 4);
+    assert.equal(countTiles([-180, -85, 180, 85], 0, 1, 100), 5);
+  });
+
+  it('covers a small area with few tiles even at high zoom', () => {
+    // Around Zurich, a tenth of a degree.
+    const tiles = [...tilesInBounds([8.5, 47.35, 8.6, 47.4], 12, 12, 1000)];
+    assert.ok(tiles.length > 0 && tiles.length < 30, `got ${tiles.length}`);
+    assert.ok(tiles.every((t) => t.z === 12));
+  });
+
+  it('respects the tile ceiling', () => {
+    assert.equal(countTiles([-180, -85, 180, 85], 0, 10, 7), 7);
+  });
+
+  it('fetches every tile in the region and reports progress', async () => {
+    const store = fakeStore();
+    const runner = new WarmRunner(store);
+    runner.start(entry(), { bounds: [-180, -85, 180, 85], minZoom: 0, maxZoom: 1 });
+
+    const job = await settle(runner, INFOHASH);
+    assert.equal(job.state, 'complete');
+    assert.equal(job.total, 5);
+    assert.equal(job.done, 5);
+    assert.equal(job.hits + job.misses, 5);
+    assert.equal(store.asked.length, 5);
+    assert.ok(job.finishedAt);
+  });
+
+  it('refuses a second warm while one is running', () => {
+    const runner = new WarmRunner(fakeStore());
+    runner.start(deep(), { bounds: [-180, -85, 180, 85], minZoom: 0, maxZoom: 6 });
+    assert.throws(() => runner.start(deep()), { status: 409 });
+  });
+
+  it('can be cancelled', async () => {
+    const runner = new WarmRunner(fakeStore());
+    runner.start(deep(), { bounds: [-180, -85, 180, 85], minZoom: 0, maxZoom: 8 });
+    assert.equal(runner.cancel(INFOHASH), true);
+    const job = await settle(runner, INFOHASH);
+    assert.equal(job.state, 'cancelled');
+    assert.ok(job.done < job.total, 'should not have finished everything');
+  });
+
+  it('gives up on an archive where nothing succeeds', async () => {
+    const runner = new WarmRunner(fakeStore({ alwaysThrow: true }));
+    runner.start(deep(), { bounds: [-180, -85, 180, 85], minZoom: 0, maxZoom: 8 });
+    const job = await settle(runner, INFOHASH);
+    assert.equal(job.state, 'failed');
+    assert.match(job.error, /unreadable/);
+    // Bailed out early rather than grinding through the whole region.
+    assert.ok(job.done < job.total, `done ${job.done} of ${job.total}`);
+  });
+
+  it('never warms deeper than the archive actually goes', async () => {
+    const store = fakeStore();
+    const runner = new WarmRunner(store);
+    // The fixture stops at z1, so asking for z8 must not enumerate z2 upwards
+    // — those tiles do not exist and fetching them is wasted swarm traffic.
+    runner.start(entry(), { bounds: [-180, -85, 180, 85], minZoom: 0, maxZoom: 8 });
+    const job = await settle(runner, INFOHASH);
+    assert.equal(job.maxZoom, 1);
+    assert.equal(job.total, 5);
+    assert.ok(store.asked.every((t) => Number(t.split('/')[0]) <= 1));
+  });
+
+  it('does not expose the internal cancel handle', () => {
+    const runner = new WarmRunner(fakeStore());
+    runner.start(entry(), { minZoom: 0, maxZoom: 0 });
+    const job = runner.get(INFOHASH);
+    assert.equal(job.cancel, undefined);
+    assert.equal(JSON.parse(JSON.stringify(job)).infoHash, INFOHASH);
+    runner.cancel(INFOHASH);
+  });
+
+  it('reports nothing for an archive never warmed', () => {
+    assert.equal(new WarmRunner(fakeStore()).get(INFOHASH), null);
   });
 });

@@ -11,6 +11,11 @@
   torrent-aware clients use it to join the swarm directly. One URL serves both.
 - Tiles are served `immutable` with a year-long max-age. An infohash pins content, so a tile
   under one can never change, and an updated archive gets new URLs rather than needing a purge.
+- **Warm a region before serving it.** `POST /api/torrents/{infohash}/warm` pre-fetches the
+  tiles covering a bounding box, so a cache-mode node is useful the moment it enters a
+  load-balanced pool rather than paying for the first request to every area. Progress and
+  cancellation via `GET` and `DELETE` on the same path. The zoom range is clamped to what the
+  archive actually holds.
 - New `trustProxy` config option. With it set, absolute URLs in TileJSON and the RSS feed are
   derived per request from `X-Forwarded-Proto` and `X-Forwarded-Host`, so one node can answer
   correctly on both `https://public` and `http://internal`.

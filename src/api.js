@@ -26,6 +26,7 @@ function route(handler) {
  * @param {import('./engines/types.js').SeedEngine} deps.engine - The seeding engine.
  * @param {import('./subscriptions.js').SubscriptionManager} deps.subscriptions - Feed follower.
  * @param {import('./tiles.js').TileStore} deps.tiles - The tile reader.
+ * @param {import('./warm.js').WarmRunner} [deps.warm] - Region pre-fetcher.
  * @param {object} deps.config - Resolved configuration.
  * @returns {import('express').Express} - The configured app.
  */
@@ -35,6 +36,7 @@ export function createApp({
   engine,
   subscriptions,
   tiles,
+  warm,
   config,
 }) {
   const app = express();
@@ -111,6 +113,56 @@ export function createApp({
       // see when a node is slower than expected.
       const reading = tiles?.status(entry.infoHash) ?? null;
       res.json({ ...entry, status, reading });
+    }),
+  );
+
+  // Pre-fetching a region, so a cache-mode node is useful the moment it enters
+  // rotation rather than paying for the first request to every area. A node
+  // holding a complete copy has nothing to warm; this reads its local file and
+  // finishes almost immediately.
+  app.post(
+    '/api/torrents/:infoHash/warm',
+    route(async (req, res) => {
+      const entry = catalog.get(req.params.infoHash);
+      if (!entry) return res.status(404).json({ error: 'not found' });
+      if (!warm) return res.status(501).json({ error: 'warming is disabled' });
+
+      const body = req.body ?? {};
+      try {
+        const job = warm.start(entry, {
+          bounds: body.bounds,
+          minZoom: body.minZoom,
+          maxZoom: body.maxZoom,
+          maxTiles: body.maxTiles,
+          concurrency: body.concurrency,
+        });
+        res.status(202).json(warm.get(job.infoHash));
+      } catch (error) {
+        if (error.status) {
+          return res.status(error.status).json({ error: error.message });
+        }
+        throw error;
+      }
+    }),
+  );
+
+  app.get(
+    '/api/torrents/:infoHash/warm',
+    route(async (req, res) => {
+      const job = warm?.get(req.params.infoHash);
+      if (!job) return res.status(404).json({ error: 'no warm for this archive' });
+      res.json(job);
+    }),
+  );
+
+  app.delete(
+    '/api/torrents/:infoHash/warm',
+    route(async (req, res) => {
+      const cancelled = warm?.cancel(req.params.infoHash);
+      if (!cancelled) {
+        return res.status(404).json({ error: 'no warm running' });
+      }
+      res.status(202).json(warm.get(req.params.infoHash));
     }),
   );
 
