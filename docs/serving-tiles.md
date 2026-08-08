@@ -13,6 +13,37 @@ GET /archives/{infohash}/archive.torrent     the .torrent
 `jpg`, `webp`, `avif` for raster. Asking for the wrong one is a 400 rather than
 a silently wrong content type.
 
+## Missing tiles
+
+A tile the archive does not hold answers **404 for raster and 204 for vector**,
+and the difference is not cosmetic:
+
+| Status | What MapLibre does |
+| --- | --- |
+| `404` | Treats the tile as absent and **overzooms the parent** |
+| `204` | Treats it as empty but present, and draws nothing |
+
+A sparse raster-dem — Mapterhorn, or any terrain built only where there is land
+— renders as holes if answered 204, because that stops the fallback the dataset
+depends on. Vector wants the opposite: an empty tile legitimately means no
+features here, and 404 would make a map log errors while panning past coverage.
+
+Override it globally or per archive, the same arrangement (and the same name)
+tileserver-gl uses:
+
+```json
+{
+  "tiles": { "sparse": true }
+}
+```
+
+```sh
+curl -X POST http://localhost:8090/api/torrents   -H 'content-type: application/json'   -d '{"path": "/data/hillshade.pmtiles", "sparse": false}'
+```
+
+Precedence is archive, then global, then the format default. PMTiles cannot say
+whether raster data is a DEM, so raster defaults to the answer a DEM needs.
+
 Drop the TileJSON URL into any client that speaks TileJSON:
 
 ```js

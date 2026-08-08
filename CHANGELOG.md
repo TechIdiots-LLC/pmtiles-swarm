@@ -2,10 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- New `sparse` setting, global with a per-archive override, matching tileserver-gl.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A missing tile answered 204 for every archive, which breaks sparse raster.** MapLibre only
+  overzooms a parent tile when the child 404s, so a sparse raster-dem — Mapterhorn, or any
+  terrain built only where there is land — rendered as holes wherever data was never built.
+  Raster now answers 404 and vector keeps 204.
 
 ## 0.2.0
 ### ✨ Features and improvements

@@ -74,6 +74,7 @@ export class Library {
       // The torrent names the file, so the save path is its parent directory.
       savePath: path.dirname(absolute),
       pmtiles: summary,
+      sparse: options.sparse,
       seedOnly: true,
     });
   }
@@ -120,6 +121,7 @@ export class Library {
       source: { type: 'http', location: url },
       savePath,
       pmtiles: summary,
+      sparse: options.sparse,
       webSeeds: created.webSeeds ?? [url],
       // With no local copy there is nothing to seed; peers rely on the web
       // seed until one of them completes a download.
@@ -543,6 +545,9 @@ export class Library {
       pieceLength: created.pieceLength,
       pieceCount: created.pieceCount,
       pmtiles: details.pmtiles,
+      // Left undefined unless asked for, so the format-based default applies
+      // and a later change to that default reaches existing archives.
+      sparse: details.sparse,
       mode: details.mode ?? 'mirror',
       retainedAt: created.retainedAt,
       origin,

@@ -733,3 +733,100 @@ describe('region warming', () => {
     assert.equal(new WarmRunner(fakeStore()).get(INFOHASH), null);
   });
 });
+
+describe('missing tile status', () => {
+  /**
+   * Serves one archive and reports what a missing tile answers with.
+   * @param {object} [options] - Entry and config overrides.
+   * @returns {Promise<{status: number, close: Function}>} - The result.
+   */
+  async function missingTileStatus(options = {}) {
+    const dir = await fs.mkdtemp(path.join(workspace, 'sparse-'));
+    const archive = entry({
+      ...options.entry,
+      savePath: dir,
+      pmtiles: { ...entry().pmtiles, ...options.pmtiles },
+    });
+    await writeArchive(path.join(dir, archive.name), {
+      tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('present') }],
+      minZoom: 0,
+      maxZoom: 1,
+    });
+
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put(archive);
+
+    const tiles = new TileStore({ catalog, engine: completeEngine, config: { tiles: {} } });
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog,
+      engine: { ...completeEngine, list: async () => [] },
+      subscriptions: {},
+      tiles,
+      config: { watch: [], subscriptions: [], tiles: options.config ?? {} },
+    });
+
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const { port } = server.address();
+    const extension = options.pmtiles?.format === 'pbf' ? 'pbf' : 'webp';
+    const response = await fetch(
+      `http://127.0.0.1:${port}/archives/${archive.infoHash}/1/0/1.${extension}`,
+    );
+    await tiles.close();
+    await new Promise((resolve) => server.close(resolve));
+    return response.status;
+  }
+
+  it('404s a missing raster tile so MapLibre overzooms the parent', async () => {
+    // A sparse raster-dem renders as holes on 204: it means "empty but
+    // present", which stops the fallback that makes terrain work at all.
+    assert.equal(
+      await missingTileStatus({
+        pmtiles: { format: 'webp', contentType: 'image/webp' },
+      }),
+      404,
+    );
+  });
+
+  it('204s a missing vector tile, which legitimately has no features', async () => {
+    assert.equal(await missingTileStatus({ pmtiles: { format: 'pbf' } }), 204);
+  });
+
+  it('lets a single archive override the default', async () => {
+    assert.equal(
+      await missingTileStatus({
+        entry: { sparse: false },
+        pmtiles: { format: 'webp', contentType: 'image/webp' },
+      }),
+      204,
+    );
+    assert.equal(
+      await missingTileStatus({ entry: { sparse: true }, pmtiles: { format: 'pbf' } }),
+      404,
+    );
+  });
+
+  it('lets the global setting override the format default', async () => {
+    assert.equal(
+      await missingTileStatus({
+        config: { sparse: false },
+        pmtiles: { format: 'webp', contentType: 'image/webp' },
+      }),
+      204,
+    );
+  });
+
+  it('lets an archive override the global setting', async () => {
+    // Precedence: archive, then global, then format.
+    assert.equal(
+      await missingTileStatus({
+        entry: { sparse: true },
+        config: { sparse: false },
+        pmtiles: { format: 'webp', contentType: 'image/webp' },
+      }),
+      404,
+    );
+  });
+});

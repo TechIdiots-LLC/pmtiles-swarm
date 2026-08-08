@@ -115,6 +115,22 @@ const DEFAULTS = {
     pieceTimeoutMs: 120000,
     /** How long to wait for torrent metadata when opening an archive. */
     readyTimeoutMs: 60000,
+    /**
+     * What a missing tile answers with: true for 404, false for 204.
+     *
+     * This is not cosmetic. MapLibre only overzooms a parent tile when the
+     * child 404s, so a sparse raster-dem answered with 204 renders as holes
+     * where the data simply was not built — which is most of a terrain
+     * dataset covering only land.
+     *
+     * Vector wants the opposite: an empty tile means no features here, and
+     * 404 makes a map log errors while panning past coverage.
+     *
+     * Left unset it defaults per archive by format — 404 for raster, 204 for
+     * vector — and an individual archive can override it with its own
+     * `sparse` field. Same rule and same name as tileserver-gl.
+     */
+    sparse: undefined,
   },
   /** Folders scanned for new archives: [{ path, category, webSeedBase }]. */
   watch: [],

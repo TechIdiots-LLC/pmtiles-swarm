@@ -73,6 +73,25 @@ export function createApp({
   const baseUrl = (req) =>
     (config.publicUrl ?? `${req.protocol}://${req.host}`).replace(/\/$/, '');
 
+  /**
+   * Whether an archive should answer a missing tile with 404 rather than 204.
+   *
+   * MapLibre only overzooms a parent tile when the child 404s. A sparse
+   * raster-dem — Mapterhorn, or any terrain built only where there is land —
+   * therefore renders as holes if told 204, because that means "empty but
+   * present" and stops the fallback.
+   *
+   * Vector is the other way round: an empty tile legitimately means no features
+   * here, and 404 would make a map log errors while panning past coverage.
+   *
+   * Overridable per archive and globally, defaulting by format, which is the
+   * same arrangement tileserver-gl uses.
+   * @param {object} entry - Catalog entry.
+   * @returns {boolean} - True to answer 404.
+   */
+  const isSparse = (entry) =>
+    entry.sparse ?? config.tiles?.sparse ?? entry.pmtiles?.format !== 'pbf';
+
   app.get(
     '/api/status',
     route(async (_req, res) => {
@@ -241,6 +260,7 @@ export function createApp({
         savePath: body.savePath,
         mode: body.mode,
         retain: body.retain,
+        sparse: body.sparse,
       };
 
       let entry;
@@ -449,10 +469,16 @@ export function createApp({
       res.setHeader('cache-control', 'public, max-age=31536000, immutable');
       res.setHeader('etag', `"${infoHash}-${z}-${x}-${y}"`);
 
-      // A missing tile is normal in a sparse archive. 204 rather than 404 is
-      // what vector clients expect, and it stops a map logging errors while
-      // panning past the edge of coverage.
-      if (!tile) return res.status(204).end();
+      // A missing tile is normal, and which status says so matters.
+      //
+      //   404 tells MapLibre the tile is absent, so it overzooms the parent —
+      //       which is the only way a sparse raster-dem renders terrain at all.
+      //   204 tells it the tile is empty but present, so it draws nothing and
+      //       does not fall back.
+      //
+      // Vector wants 204 (an empty tile means no features here); raster wants
+      // 404. Same rule and same name as tileserver-gl's `sparse`.
+      if (!tile) return res.status(isSparse(entry) ? 404 : 204).end();
 
       res.type(entry.pmtiles?.contentType ?? 'application/octet-stream');
       if (tile.encoding) res.setHeader('content-encoding', tile.encoding);
