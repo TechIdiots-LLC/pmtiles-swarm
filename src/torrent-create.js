@@ -26,6 +26,7 @@ import { Readable } from 'node:stream';
  * @property {number} [pieceLength] - Piece size in bytes; must be a power of two.
  * @property {string[]} [trackers] - Announce URLs.
  * @property {string[]} [webSeeds] - BEP 19 url-list entries.
+ * @property {boolean} [includeSourceAsWebSeed] - Publish the source URL as a web seed. Default true.
  * @property {string} [comment] - Free-text comment.
  * @property {boolean} [private] - Mark the torrent private (no DHT/PEX).
  */
@@ -81,8 +82,13 @@ export async function createTorrentFromFile(filePath, options = {}) {
  */
 export async function createTorrentFromUrl(url, options = {}) {
   const name = options.name ?? path.basename(new URL(url).pathname);
-  // The origin is, by construction, a valid web seed for these exact bytes.
-  const webSeeds = [...new Set([...(options.webSeeds ?? []), url])];
+  // The origin is, by construction, a valid web seed for these exact bytes —
+  // but the caller decides whether it may be published, since a pre-signed URL
+  // is a credential and a torrent cannot be recalled.
+  const webSeeds =
+    options.includeSourceAsWebSeed === false
+      ? [...new Set(options.webSeeds ?? [])]
+      : [...new Set([...(options.webSeeds ?? []), url])];
 
   if (options.retainPath) {
     // Download first, then hash from disk. Two passes over local storage, but

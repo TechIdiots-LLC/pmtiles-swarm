@@ -18,7 +18,12 @@ import {
   identifyBytes,
   identifyFile,
 } from '../src/identify.js';
-import { Library, publish, webSeedFor } from '../src/library.js';
+import {
+  Library,
+  carriesCredentials,
+  publish,
+  webSeedFor,
+} from '../src/library.js';
 import { LibtorrentReadEngine } from '../src/read-engine.js';
 import { buildTileJson, extensionMatches } from '../src/tilejson.js';
 import { TileStore } from '../src/tiles.js';
@@ -1331,5 +1336,44 @@ describe('authentication', () => {
       { host: '0.0.0.0', allowUnauthenticated: true },
       createAuth({}),
     );
+  });
+});
+
+describe('when the source URL may be published as a web seed', () => {
+  it('publishes an ordinary public URL', () => {
+    assert.equal(
+      carriesCredentials('https://download.example.org/planet.pmtiles'),
+      false,
+    );
+    assert.equal(
+      carriesCredentials('https://x.org/a.pmtiles?version=2024&cache=1'),
+      false,
+    );
+  });
+
+  it('recognises a pre-signed S3 URL', () => {
+    // Anyone holding this can fetch the object until it expires. Publishing it
+    // in a torrent broadcasts it to the swarm, and a torrent cannot be recalled.
+    assert.ok(
+      carriesCredentials(
+        'https://bucket.s3.amazonaws.com/planet.pmtiles' +
+          '?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIA%2F20240101' +
+          '&X-Amz-Signature=abc123',
+      ),
+    );
+  });
+
+  it('recognises the other major object stores', () => {
+    assert.ok(carriesCredentials('https://x.blob.core.windows.net/a.pmtiles?sig=abc&se=2024'));
+    assert.ok(carriesCredentials('https://storage.googleapis.com/a.pmtiles?X-Goog-Signature=abc'));
+    assert.ok(carriesCredentials('https://x.org/a.pmtiles?token=abc'));
+  });
+
+  it('recognises credentials in the userinfo', () => {
+    assert.ok(carriesCredentials('https://andrew:hunter2@maps.internal/planet.pmtiles'));
+  });
+
+  it('treats something unparseable as ordinary rather than throwing', () => {
+    assert.equal(carriesCredentials('not a url'), false);
   });
 });

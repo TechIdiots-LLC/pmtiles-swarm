@@ -33,6 +33,11 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **A pre-signed source URL was published as a web seed, credentials and all.** Adding an archive
+  from an S3 or Azure signed link baked that link — a bearer credential — into the `.torrent` and
+  broadcast it to the swarm, where it cannot be recalled. Such URLs are now detected and not
+  published; `webSeed: false` suppresses any source URL, and `webSeeds` supplies a public one
+  instead.
 - **Creating a torrent from a local path published any readable file to a public swarm.** The
   PMTiles probe failure was caught and discarded, so `{"path": "/etc/shadow"}` produced a
   seeded torrent and returned its infohash. Archives are now identified by content — PMTiles

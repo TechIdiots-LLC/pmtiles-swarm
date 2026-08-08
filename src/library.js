@@ -159,7 +159,27 @@ export class Library {
       options.savePath,
     );
 
+    // The origin is a valid web seed for exactly these bytes, so it is used as
+    // one by default — that is what makes a new archive usable before it has
+    // peers. But not when the URL is a credential: a pre-signed link published
+    // in a torrent is broadcast to the swarm, and a torrent cannot be recalled.
+    const secret = carriesCredentials(url);
+    const useSourceAsWebSeed = options.webSeed ?? !secret;
+    if (secret && useSourceAsWebSeed) {
+      console.warn(
+        `[web seed] ${new URL(url).origin} appears to carry credentials and is ` +
+          'being published as a web seed because webSeed was set explicitly',
+      );
+    } else if (secret) {
+      console.warn(
+        `[web seed] not publishing ${new URL(url).origin} as a web seed: the ` +
+          'URL appears to carry credentials. Pass webSeed: true to override, ' +
+          'or webSeeds: ["…"] to publish a different, public URL.',
+      );
+    }
+
     const created = await createTorrentFromUrl(url, {
+      includeSourceAsWebSeed: useSourceAsWebSeed,
       // Upstreams often publish under a bare dated name; a source can rename it
       // to something self-describing locally.
       name: options.name,
@@ -183,7 +203,7 @@ export class Library {
       pmtiles: summary,
       kind: identified.kind,
       sparse: options.sparse,
-      webSeeds: created.webSeeds ?? [url],
+      webSeeds: created.webSeeds ?? (useSourceAsWebSeed ? [url] : []),
       // With no local copy there is nothing to seed; peers rely on the web
       // seed until one of them completes a download.
       seedOnly: retain,
@@ -787,6 +807,44 @@ export class Library {
       stale: false,
     });
   }
+}
+
+/** Query parameters that carry a signature, across the major object stores. */
+const SIGNATURE_PARAMS = [
+  'x-amz-signature',
+  'x-amz-credential',
+  'x-goog-signature',
+  'signature',
+  'sig',
+  'se',
+  'token',
+  'access_token',
+];
+
+/**
+ * Whether publishing this URL would publish a credential with it.
+ *
+ * A pre-signed URL is a bearer credential in link form: anyone holding it can
+ * fetch the object until it expires. Baking one into a torrent broadcasts it to
+ * the swarm, and a torrent cannot be recalled.
+ * @param {string} url - The URL to inspect.
+ * @returns {boolean} - True when it appears to carry a credential.
+ */
+export function carriesCredentials(url) {
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+
+  // https://user:password@host/...
+  if (parsed.username || parsed.password) return true;
+
+  for (const key of parsed.searchParams.keys()) {
+    if (SIGNATURE_PARAMS.includes(key.toLowerCase())) return true;
+  }
+  return false;
 }
 
 /**

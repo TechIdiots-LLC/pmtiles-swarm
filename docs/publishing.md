@@ -31,6 +31,40 @@ curl -X POST localhost:8090/api/torrents \
 curl -X POST localhost:8090/api/adopt
 ```
 
+### When the source URL is not published
+
+Adding from a URL registers that URL as a web seed by default, because it is by
+construction a valid source for exactly those bytes and it makes the archive
+usable before it has peers.
+
+Two cases where that is wrong:
+
+**The URL carries a credential.** A pre-signed S3 or Azure link, a Google signed
+URL, or anything with `user:pass@`, is a bearer credential in link form —
+whoever holds it can fetch the object until it expires. Publishing one inside a
+torrent broadcasts it to the swarm, and a torrent cannot be recalled. These are
+detected and **not** published, with a warning saying so.
+
+**You would simply rather not.** Pass `webSeed: false`.
+
+```jsonc
+// Fetch from a signed URL, publish a public one as the seed instead.
+{
+  "url": "https://bucket.s3.amazonaws.com/planet.pmtiles?X-Amz-Signature=…",
+  "webSeeds": ["https://maps.example.org/planet.pmtiles"]
+}
+
+// Fetch and publish nothing as a seed.
+{ "url": "https://internal.example.org/planet.pmtiles", "webSeed": false }
+```
+
+`webSeed: true` forces a credential-bearing URL to be published anyway, which is
+almost never what you want.
+
+Adding from a **local path** never publishes a seed unless you ask: a web seed
+appears only when `webSeedBase` is set, and `publishDir` moves the file without
+implying one.
+
 ## Adding web seeds to a torrent already published
 
 A web seed can be added to a torrent that is already in circulation, and doing

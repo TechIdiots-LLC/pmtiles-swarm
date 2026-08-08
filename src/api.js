@@ -366,6 +366,7 @@ export function createApp({
         publishDir: body.publishDir,
         webSeedBase: body.webSeedBase,
         allowUnknown: body.allowUnknown,
+        webSeed: body.webSeed,
       };
 
       let entry;
