@@ -1817,3 +1817,73 @@ describe('choosing trackers', () => {
     assert.deepEqual(await resolve(PUBLIC, { trackers: [] }), []);
   });
 });
+
+describe('matching an existing mktorrent workflow', () => {
+  it('writes announce tiers, not one flat list', async () => {
+    // mktorrent's comma-separated -a groups are BEP 12 tiers: a client tries
+    // each tier in order and only falls through when one fails. Flattening
+    // them would announce to everything at once, which is a different and
+    // noisier thing than what the script asked for.
+    const dir = await fs.mkdtemp(path.join(workspace, 'tiers-'));
+    const file = path.join(dir, 'planet.pmtiles');
+    await writeArchive(file, { tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('t') }] });
+
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    const library = new Library({
+      catalog,
+      engine: { name: 'x', add: async () => {} },
+      config: {
+        dataDir: dir,
+        webtorrent: { savePath: dir },
+        trackers: [
+          'udp://tracker.opentrackr.org:1337',
+          ['udp://a.example.org:6969/announce', 'http://a.example.org:6969/announce'],
+          'http://retracker.local/announce',
+        ],
+      },
+    });
+
+    const created = await library.addLocalArchive(file, { pieceLength: 1 << 24 });
+    const bencode = (await import('bencode')).default;
+    const decoded = bencode.decode(await fs.readFile(created.torrentPath));
+    const tiers = decoded['announce-list'].map((tier) =>
+      tier.map((url) => Buffer.from(url).toString()),
+    );
+
+    assert.equal(tiers.length, 3, 'one tier per entry');
+    assert.deepEqual(tiers[1], [
+      'udp://a.example.org:6969/announce',
+      'http://a.example.org:6969/announce',
+    ], 'a grouped entry stays one tier');
+  });
+
+  it('honours a 16 MiB piece length, as mktorrent -l 24 produces', async () => {
+    // The default here is 4 MiB, chosen for a tile server reading at random.
+    // A whole-file download of a planet wants the larger piece, and a folder
+    // producing those should be able to say so.
+    const dir = await fs.mkdtemp(path.join(workspace, 'piece-'));
+    const file = path.join(dir, 'planet.pmtiles');
+    await writeArchive(file, { tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('t') }] });
+
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    const library = new Library({
+      catalog,
+      engine: { name: 'x', add: async () => {} },
+      config: { dataDir: dir, webtorrent: { savePath: dir }, trackers: [] },
+    });
+
+    const created = await library.addLocalArchive(file, {
+      pieceLength: 1 << 24,
+      comment: 'Planetiler openmaptiles data export',
+    });
+    const { default: parseTorrent } = await import('parse-torrent');
+    const parsed = await parseTorrent(
+      new Uint8Array(await fs.readFile(created.torrentPath)),
+    );
+
+    assert.equal(parsed.pieceLength, 1 << 24);
+    assert.equal(parsed.comment, 'Planetiler openmaptiles data export');
+  });
+});

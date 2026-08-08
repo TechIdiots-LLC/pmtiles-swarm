@@ -81,6 +81,12 @@ export class WatchManager {
         // `trackers` replaces the global list, `addTrackers` adds to it.
         trackers: folder.trackers,
         addTrackers: folder.addTrackers,
+        // A folder producing one kind of build wants one piece size. 16 MiB
+        // suits a whole-file download of a planet; the 4 MiB default suits
+        // random reads by a tile server. Which is right depends on the folder,
+        // not on the node.
+        pieceLength: folder.pieceLength,
+        comment: folder.comment,
       });
       console.log(`[watch] imported ${entry.name} (${entry.infoHash})`);
     } catch (error) {
