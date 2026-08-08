@@ -12,7 +12,7 @@ import {
   isPublicPath,
   verifyPassword,
 } from '../src/auth.js';
-import { Catalog } from '../src/catalog.js';
+import { Catalog, normalizeCategories } from '../src/catalog.js';
 import {
   assertPublishable,
   identifyBytes,
@@ -1708,5 +1708,52 @@ describe('one feed, two audiences', () => {
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
+  });
+});
+
+describe('tagging archives', () => {
+  it('reads however categories were supplied into one shape', () => {
+    assert.deepEqual(normalizeCategories({ categories: ['b', 'a'] }), ['a', 'b']);
+    // The older single-string field, so catalogues written before tagging keep
+    // working rather than losing their grouping.
+    assert.deepEqual(normalizeCategories({ category: 'basemaps' }), ['basemaps']);
+    assert.deepEqual(
+      normalizeCategories({ category: 'a', categories: ['b'] }),
+      ['a', 'b'],
+    );
+  });
+
+  it('drops blanks and duplicates', () => {
+    assert.deepEqual(
+      normalizeCategories({ categories: ['a', ' a ', '', '  ', 'b', null, 7] }),
+      ['a', 'b'],
+    );
+    assert.deepEqual(normalizeCategories({}), []);
+    assert.deepEqual(normalizeCategories(undefined), []);
+  });
+
+  it('finds an archive under any of its tags, not all of them', async () => {
+    // A tag names one thing an archive is, not the whole of what it is.
+    const dir = await fs.mkdtemp(path.join(workspace, 'tags-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put(entry({ infoHash: 'a'.repeat(40), categories: ['basemaps', 'weekly'] }));
+    await catalog.put(entry({ infoHash: 'b'.repeat(40), categories: ['terrain'] }));
+
+    assert.equal(catalog.byCategory('basemaps').length, 1);
+    assert.equal(catalog.byCategory('weekly').length, 1);
+    assert.equal(catalog.byCategory('terrain').length, 1);
+    assert.equal(catalog.byCategory('nothing').length, 0);
+    assert.deepEqual(catalog.categories(), ['basemaps', 'terrain', 'weekly']);
+  });
+
+  it('normalises on write, so a stored entry is always a list', async () => {
+    const dir = await fs.mkdtemp(path.join(workspace, 'tags2-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    const stored = await catalog.put(entry({ category: 'basemaps' }));
+
+    assert.deepEqual(stored.categories, ['basemaps']);
+    assert.equal(stored.category, undefined, 'the old field is folded in, not kept alongside');
   });
 });

@@ -13,7 +13,9 @@ import path from 'node:path';
  * @property {string} infoHash - Hex v1 infohash. The catalog's primary key.
  * @property {string} name - Archive filename.
  * @property {number} size - Bytes.
- * @property {string} [category] - Grouping, also used to split RSS feeds.
+ * @property {string[]} [categories] - Tags, also used to split RSS feeds. An
+ *   archive may carry several; older catalogues holding a single `category`
+ *   string are read as a list of one.
  * @property {object} source - Where the archive came from: {type, location}.
  * @property {string} savePath - Directory holding the data.
  * @property {string} torrentPath - Generated .torrent on disk.
@@ -24,6 +26,30 @@ import path from 'node:path';
  * @property {string} createdAt - ISO timestamp.
  * @property {string} updatedAt - ISO timestamp.
  */
+/**
+ * Normalises however categories were supplied into a clean list.
+ *
+ * An archive can carry several: a planet build might be both "basemaps" and
+ * "weekly", and which feeds it belongs in should not force a choice between
+ * them. Accepts the older single `category` string so catalogues written before
+ * tagging keep working — they are read as a list of one.
+ * @param {object} source - Anything with `categories` and/or `category`.
+ * @returns {string[]} - Sorted, de-duplicated, non-empty tags.
+ */
+export function normalizeCategories(source) {
+  const raw = [
+    ...(Array.isArray(source?.categories) ? source.categories : []),
+    ...(Array.isArray(source?.category)
+      ? source.category
+      : [source?.category]),
+  ];
+  const clean = raw
+    .filter((value) => typeof value === 'string')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return [...new Set(clean)].sort();
+}
+
 export class Catalog {
   #file;
   #entries = new Map();
@@ -68,7 +94,11 @@ export class Catalog {
    * @returns {CatalogEntry[]} - Matching entries.
    */
   byCategory(category) {
-    return this.list().filter((entry) => entry.category === category);
+    // Any match, not all: a tag names one thing an archive is, and asking for
+    // "terrain" should find everything tagged terrain whatever else it is.
+    return this.list().filter((entry) =>
+      normalizeCategories(entry).includes(category),
+    );
   }
 
   /**
@@ -78,7 +108,7 @@ export class Catalog {
   categories() {
     const seen = new Set();
     for (const entry of this.#entries.values()) {
-      if (entry.category) seen.add(entry.category);
+      for (const category of normalizeCategories(entry)) seen.add(category);
     }
     return [...seen].sort();
   }
@@ -116,9 +146,17 @@ export class Catalog {
     const stored = {
       ...existing,
       ...entry,
+      // Normalised on the way in, so nothing downstream has to cope with a
+      // string here and a list there. The old single-string field is dropped
+      // once it has been folded into the list.
+      categories: normalizeCategories({
+        categories: entry.categories ?? existing?.categories,
+        category: entry.category ?? existing?.category,
+      }),
       createdAt: existing?.createdAt ?? now,
       updatedAt: now,
     };
+    delete stored.category;
     this.#entries.set(stored.infoHash, stored);
     await this.#flush();
     return stored;

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { createAuth } from './auth.js';
+import { normalizeCategories } from './catalog.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
 import { renderFeed } from './feed.js';
 import { buildTileJson, extensionMatches } from './tilejson.js';
@@ -364,7 +365,7 @@ export function createApp({
         const entry = await library.addExistingTorrent(
           { torrentFile: req.body },
           {
-            category: req.query.category,
+            categories: req.query.categories?.split(',') ?? req.query.category,
             savePath: req.query.savePath,
             mode: req.query.mode,
           },
@@ -374,7 +375,7 @@ export function createApp({
 
       const body = req.body ?? {};
       const options = {
-        category: body.category,
+        categories: body.categories ?? body.category,
         trackers: body.trackers,
         webSeeds: body.webSeeds,
         pieceLength: body.pieceLength,
@@ -504,7 +505,7 @@ export function createApp({
    * @param {import('express').Request} req - The request, for its credential.
    * @returns {boolean} - True when it is published to this caller.
    */
-  const publishes = (category, req) => {
+  const publishesCategory = (category, req) => {
     const allowed = config.feedCategories;
     if (!Array.isArray(allowed)) return true;
     // Both halves matter. isAuthenticated answers true for everyone when no
@@ -512,8 +513,25 @@ export function createApp({
     // would treat every caller as privileged and the allow-list would quietly
     // do nothing — on precisely the node least able to afford that.
     if (auth.enabled && auth.isAuthenticated(req)) return true;
-    // Untagged means unmarked for sharing, so it stays put.
     return Boolean(category) && allowed.includes(category);
+  };
+
+  /**
+   * Whether an archive may leave this node, for this caller.
+   *
+   * Any tag matching is enough. A tag names one thing an archive is, not the
+   * whole of what it is, so a planet build tagged both "basemaps" and "weekly"
+   * belongs in a basemaps feed whether or not weekly is also published.
+   * @param {object} entry - Catalog entry.
+   * @param {import('express').Request} req - The request, for its credential.
+   * @returns {boolean} - True when it is published to this caller.
+   */
+  const publishesEntry = (entry, req) => {
+    const allowed = config.feedCategories;
+    if (!Array.isArray(allowed)) return true;
+    if (auth.enabled && auth.isAuthenticated(req)) return true;
+    // Untagged means unmarked for sharing, so it stays put.
+    return normalizeCategories(entry).some((name) => allowed.includes(name));
   };
 
   /**
@@ -534,12 +552,12 @@ export function createApp({
     route(async (req, res) => {
       const entries = catalog
         .list()
-        .filter((entry) => publishes(entry.category, req))
+        .filter((entry) => publishesEntry(entry, req))
         .map((entry) => ({
           infoHash: entry.infoHash,
           name: entry.name,
           size: entry.size,
-          category: entry.category,
+          categories: normalizeCategories(entry),
           magnet: entry.magnet,
           torrent: `${baseUrl(req)}/archives/${entry.infoHash}/archive.torrent`,
           webSeeds: entry.webSeeds ?? [],
@@ -568,7 +586,7 @@ export function createApp({
   app.get('/feed.xml', (req, res) => {
     res.type('application/rss+xml').send(
       renderFeed(
-        catalog.list().filter((entry) => publishes(entry.category, req)),
+        catalog.list().filter((entry) => publishesEntry(entry, req)),
         {
         title: config.feedTitle ?? 'PMTiles archives',
         baseUrl: baseUrl(req),
@@ -583,7 +601,7 @@ export function createApp({
     const { category } = req.params;
     // 404 rather than 403: refusing by name would confirm the category exists,
     // which is exactly what an allow-list is meant to avoid disclosing.
-    if (!publishes(category, req)) {
+    if (!publishesCategory(category, req)) {
       return res.status(404).json({ error: 'no such feed' });
     }
     res.type('application/rss+xml').send(

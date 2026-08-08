@@ -183,7 +183,7 @@ export class SubscriptionManager {
             magnet: archive.magnet,
             torrentUrl: archive.torrent,
             infoHash: archive.infoHash,
-            category: archive.category,
+            categories: archive.categories,
           },
           subscription,
         );
@@ -275,7 +275,13 @@ export class SubscriptionManager {
    */
   async #add(item, subscription) {
     const options = {
-      category: subscription.category ?? item.category,
+      // A subscriber may file a peer's archives under its own tags; failing
+      // that, whatever the peer tagged them with comes across.
+      categories:
+        subscription.categories ??
+        subscription.category ??
+        item.categories ??
+        item.category,
       savePath: subscription.savePath,
       // Provenance. Without it, prune cannot tell an archive this peer sent
       // from one built here or added by hand, and would happily delete both.

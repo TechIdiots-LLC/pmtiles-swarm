@@ -113,7 +113,7 @@ export class Library {
     });
 
     return this.#register(created, {
-      category: options.category,
+      categories: options.categories ?? options.category,
       source: { type: 'file', location: absolute },
       // The torrent names the file, so the save path is its parent directory.
       savePath: path.dirname(absolute),
@@ -246,13 +246,22 @@ export class Library {
     this.#running.delete(url);
 
     return this.#register(created, {
-      category: options.category,
+      categories: options.categories ?? options.category,
       source: { type: 'http', location: url },
       savePath,
       pmtiles: summary,
       kind: identified.kind,
       sparse: options.sparse,
-      webSeeds: created.webSeeds ?? (useSourceAsWebSeed ? [url] : []),
+      // Whatever was asked for, plus the source when it may be published.
+      // Falling back to the source alone dropped a caller's own list — which
+      // is precisely the case where the source must not be published and a
+      // public URL was supplied instead of it.
+      webSeeds: created.webSeeds ?? [
+        ...new Set([
+          ...(options.webSeeds ?? []),
+          ...(useSourceAsWebSeed ? [url] : []),
+        ]),
+      ],
       // With no local copy there is nothing to seed; peers rely on the web
       // seed until one of them completes a download.
       seedOnly: retain,
@@ -298,7 +307,7 @@ export class Library {
       torrentFile,
       magnet: torrentFile ? undefined : input.magnet,
       savePath,
-      category: options.category,
+      categories: options.categories ?? options.category,
       mode,
     });
 
@@ -313,7 +322,7 @@ export class Library {
       infoHash: parsed.infoHash,
       name: parsed.name ?? parsed.infoHash,
       size: parsed.length ?? 0,
-      category: options.category,
+      categories: options.categories ?? options.category,
       source: {
         type: input.magnet ? 'magnet' : 'torrent',
         location: input.magnet ?? input.torrentPath ?? 'uploaded',
@@ -363,7 +372,7 @@ export class Library {
           infoHash: torrent.infoHash,
           name: torrent.name,
           size: torrent.size,
-          category: torrent.category,
+          categories: torrent.category ? [torrent.category] : [],
           source: { type: 'adopted', location: torrent.savePath ?? 'engine' },
           savePath: torrent.savePath,
           magnet: `magnet:?xt=urn:btih:${torrent.infoHash}&dn=${encodeURIComponent(torrent.name)}`,
@@ -554,7 +563,7 @@ export class Library {
     }
 
     const shared = {
-      category: options.category ?? entry.category,
+      categories: options.categories ?? options.category ?? entry.categories,
       trackers: options.trackers,
       webSeeds: options.webSeeds ?? entry.webSeeds,
       pieceLength: options.pieceLength ?? entry.pieceLength,
@@ -666,7 +675,7 @@ export class Library {
       torrentFile: torrentFile ?? undefined,
       magnet: torrentFile ? undefined : entry.magnet,
       savePath: entry.savePath,
-      category: entry.category,
+      categories: entry.categories,
       mode: 'cache',
     });
 
@@ -833,7 +842,7 @@ export class Library {
     await this.#engine.add({
       torrentFile: created.torrentFile,
       savePath: details.savePath,
-      category: details.category,
+      categories: details.categories,
       seedOnly: details.seedOnly,
       mode: details.mode ?? 'mirror',
     });
@@ -842,7 +851,7 @@ export class Library {
       infoHash: created.infoHash,
       name: created.name,
       size: created.size,
-      category: details.category,
+      categories: details.categories,
       source: details.source,
       savePath: details.savePath,
       torrentPath,

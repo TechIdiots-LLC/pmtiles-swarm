@@ -107,7 +107,9 @@ function renderItem(entry, baseUrl) {
       <guid isPermaLink="false">${xml(entry.infoHash)}</guid>
       <pubDate>${new Date(entry.createdAt).toUTCString()}</pubDate>
       <description>${xml(map?.description ?? summary)}</description>
-${entry.category ? `      <category>${xml(entry.category)}</category>` : ''}
+${(entry.categories ?? (entry.category ? [entry.category] : []))
+        .map((name) => `      <category>${xml(name)}</category>`)
+        .join('\n')}
       <enclosure url="${xml(torrentUrl)}" length="${xml(entry.size)}" type="application/x-bittorrent"/>
       <pmtiles:infohash>${xml(entry.infoHash)}</pmtiles:infohash>
       <pmtiles:magnet>${xml(entry.magnet)}</pmtiles:magnet>
@@ -188,7 +190,11 @@ export function parseFeed(body) {
       infoHash: tag(block, 'pmtiles:infohash')?.toLowerCase(),
       magnet,
       torrentUrl,
-      category: tag(block, 'category'),
+      // RSS allows several <category> elements, and an archive may be tagged
+      // more than once, so take all of them.
+      categories: [...block.matchAll(/<category>([\s\S]*?)<\/category>/g)]
+        .map((match) => decode(match[1]).trim())
+        .filter(Boolean),
     });
   }
   return items;

@@ -9,6 +9,12 @@
   root.
 - Cache-mode archives now live under `cacheSavePath`, separate from mirrors, so a glance at the
   disk says which files are whole archives and which never will be.
+- **An archive can carry several categories.** A planet build can be both `basemaps` and `weekly`
+  without choosing. Feeds match on *any* tag, so it appears in both. Catalogues holding the older
+  single `category` string are read as a list of one and normalised on the next write.
+- **Adding is a dialog now**, with everything the API could already do: multiple categories picked
+  from those in use or typed fresh, keep-or-discard for URL fetches, and whether the source URL is
+  published as a web seed — plus a list of your own to publish instead of it.
 - **`feedCategories` decides what leaves the node.** Category feeds let a subscriber narrow what
   it takes; they never narrowed what was published, since `/feed.xml` carried the whole catalogue.
   With an allow-list set, only those categories appear in any feed and other category feeds
@@ -48,6 +54,8 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- A custom `webSeeds` list was discarded when `webSeed: false` — exactly the case where the source
+  must not be published and a public URL was supplied in its place.
 - **A pre-signed source URL was published as a web seed, credentials and all.** Adding an archive
   from an S3 or Azure signed link baked that link — a bearer credential — into the `.torrent` and
   broadcast it to the swarm, where it cannot be recalled. Such URLs are now detected and not
