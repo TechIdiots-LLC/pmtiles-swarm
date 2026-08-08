@@ -8,6 +8,7 @@
       :root {
         color-scheme: light dark;
         --bg: #fff;
+        --panel: #fafafa;
         --fg: #111;
         --muted: #666;
         --line: #ddd;
@@ -19,6 +20,7 @@
       @media (prefers-color-scheme: dark) {
         :root {
           --bg: #14161a;
+          --panel: #1b1e24;
           --fg: #e8e8e8;
           --muted: #9aa0a6;
           --line: #2c3038;
@@ -44,11 +46,14 @@
         flex-wrap: wrap;
       }
       h1 { font-size: 1.05rem; margin: 0; font-weight: 600; }
+      h2 { font-size: 0.95rem; margin: 0 0 0.6rem; font-weight: 600; }
       .status { color: var(--muted); font-size: 0.85rem; }
       .status b { color: var(--fg); font-weight: 600; }
+      nav { margin-left: auto; display: flex; gap: 0.35rem; }
+      nav button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
       main { padding: 1.25rem; }
       .bar { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
-      input, select, button {
+      input, select, button, textarea {
         font: inherit;
         padding: 0.4rem 0.6rem;
         border: 1px solid var(--line);
@@ -56,9 +61,10 @@
         background: var(--bg);
         color: var(--fg);
       }
-      input { min-width: 22rem; flex: 1; }
+      input.grow { min-width: 20rem; flex: 1; }
       button { cursor: pointer; }
-      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      button:hover { border-color: var(--accent); }
+      button.danger:hover { border-color: var(--bad); color: var(--bad); }
       table { width: 100%; border-collapse: collapse; }
       th, td {
         text-align: left;
@@ -66,189 +72,539 @@
         border-bottom: 1px solid var(--line);
         white-space: nowrap;
       }
-      th { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); font-weight: 600; }
-      td.name { white-space: normal; min-width: 18rem; }
+      th { color: var(--muted); font-weight: 600; font-size: 0.8rem; }
+      tbody tr { cursor: pointer; }
+      tbody tr:hover { background: var(--panel); }
+      tbody tr.on { background: var(--panel); box-shadow: inset 3px 0 0 var(--accent); }
+      td.name { white-space: normal; word-break: break-word; min-width: 16rem; }
       .sub { color: var(--muted); font-size: 0.8rem; }
-      .num { text-align: right; font-variant-numeric: tabular-nums; }
-      .pill { display: inline-block; padding: 0.05rem 0.45rem; border-radius: 999px; font-size: 0.75rem; border: 1px solid var(--line); }
-      .seeding { color: var(--ok); border-color: currentColor; }
-      .downloading { color: var(--accent); border-color: currentColor; }
-      .stalled, .checking, .paused { color: var(--warn); border-color: currentColor; }
-      .error { color: var(--bad); border-color: currentColor; }
-      .track { width: 90px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
-      .fill { height: 100%; background: var(--accent); }
-      a { color: var(--accent); }
-      .empty { color: var(--muted); padding: 2rem 0; }
-      .wrap { overflow-x: auto; }
+      .track {
+        width: 7rem;
+        height: 6px;
+        border-radius: 3px;
+        background: var(--line);
+        overflow: hidden;
+      }
+      .track > i { display: block; height: 100%; background: var(--accent); }
+      .track > i.done { background: var(--ok); }
+      .pill {
+        display: inline-block;
+        padding: 0.05rem 0.45rem;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        font-size: 0.75rem;
+        color: var(--muted);
+      }
+      .pill.mirror { color: var(--ok); border-color: var(--ok); }
+      .pill.cache { color: var(--warn); border-color: var(--warn); }
+      .panel {
+        margin-top: 1.25rem;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 1rem;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+        gap: 0.75rem 1.25rem;
+        margin-bottom: 1rem;
+      }
+      .grid div span { display: block; color: var(--muted); font-size: 0.75rem; }
+      .grid div b { font-weight: 600; word-break: break-all; }
+      .actions { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+      .empty { color: var(--muted); padding: 2rem 0; text-align: center; }
+      .preview { display: flex; gap: 2px; flex-wrap: wrap; max-width: 20rem; }
+      .preview img {
+        width: 64px; height: 64px; background: var(--line); image-rendering: pixelated;
+      }
+      code {
+        font: 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        padding: 0.1rem 0.3rem;
+        word-break: break-all;
+      }
+      .field { margin-bottom: 0.75rem; }
+      .field label { display: block; font-size: 0.8rem; color: var(--muted); }
+      .field input, .field textarea { width: 100%; min-width: 0; }
+      .badge {
+        font-size: 0.7rem;
+        color: var(--warn);
+        border: 1px solid var(--warn);
+        border-radius: 999px;
+        padding: 0 0.4rem;
+        margin-left: 0.4rem;
+      }
+      .toast {
+        position: fixed;
+        bottom: 1rem;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--fg);
+        color: var(--bg);
+        padding: 0.5rem 0.9rem;
+        border-radius: 6px;
+        opacity: 0;
+        transition: opacity 0.2s;
+        pointer-events: none;
+      }
+      .toast.show { opacity: 1; }
+      [hidden] { display: none !important; }
     </style>
   </head>
   <body>
     <header>
       <h1>pmtiles-swarm</h1>
       <div class="status" id="status">connecting…</div>
+      <nav>
+        <button id="tab-archives" class="on">Archives</button>
+        <button id="tab-settings">Settings</button>
+      </nav>
     </header>
+
     <main>
-      <div class="bar">
-        <input
-          id="source"
-          placeholder="local .pmtiles path, https:// URL, magnet:… or .torrent URL"
-        />
-        <input id="category" placeholder="category (optional)" style="min-width: 10rem" />
-        <button class="primary" id="add">Add</button>
-        <button id="adopt" title="Import torrents the engine already holds">Adopt existing</button>
-        <button id="refresh-feeds" title="Poll subscribed feeds now">Poll feeds</button>
-        <a id="feed-link" href="/feed.xml" target="_blank" rel="noopener">feed.xml</a>
-      </div>
-      <div class="wrap">
+      <section id="view-archives">
+        <div class="bar">
+          <input
+            id="source"
+            class="grow"
+            placeholder="/path/to.pmtiles · https://…/archive.pmtiles · magnet:?xt=… · https://…/x.torrent"
+          />
+          <input id="category" placeholder="category" style="min-width: 8rem" />
+          <button id="add">Add</button>
+          <button id="adopt">Adopt existing</button>
+          <a id="feed-link" href="/feed.xml" target="_blank" rel="noreferrer">
+            <button type="button">Feed</button>
+          </a>
+        </div>
+
         <table>
           <thead>
             <tr>
-              <th>Name</th><th>Size</th><th>Map</th><th>State</th>
-              <th>Progress</th><th class="num">Seeds</th><th class="num">Peers</th>
-              <th class="num">Down</th><th class="num">Up</th><th class="num">Ratio</th><th>Export</th>
+              <th>Archive</th>
+              <th>Size</th>
+              <th>Mode</th>
+              <th>Progress</th>
+              <th>Peers</th>
+              <th>Down</th>
+              <th>Up</th>
+              <th>State</th>
             </tr>
           </thead>
           <tbody id="rows"></tbody>
         </table>
-      </div>
-      <div class="empty" id="empty" hidden>
-        Nothing yet. Add an archive above, or click <b>Adopt existing</b> to pull
-        in what your torrent client already seeds.
-      </div>
+        <div class="empty" id="empty" hidden>
+          Nothing yet. Add an archive above, or click <b>Adopt existing</b> to
+          pull in what your torrent client already seeds.
+        </div>
+
+        <div class="panel" id="detail" hidden></div>
+      </section>
+
+      <section id="view-settings" hidden>
+        <div class="bar">
+          <button id="settings-save">Save changes</button>
+          <span class="status" id="settings-note"></span>
+        </div>
+        <div id="settings-body"></div>
+      </section>
     </main>
 
+    <div class="toast" id="toast"></div>
+
     <script type="module">
+      const $ = (id) => document.getElementById(id);
+
+      /** Formats a byte count for people rather than machines. */
       const bytes = (n) => {
-        if (!n) return '—';
-        const u = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-        let v = n, i = 0;
-        while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
-        return `${v.toFixed(i ? 1 : 0)} ${u[i]}`;
-      };
-      const rate = (n) => (n ? `${bytes(n)}/s` : '—');
-
-      async function api(path, options) {
-        const response = await fetch(path, options);
-        if (!response.ok) {
-          const body = await response.json().catch(() => ({}));
-          throw new Error(body.error ?? `${response.status} ${response.statusText}`);
+        if (!Number.isFinite(n) || n <= 0) return '—';
+        const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+        let value = n;
+        let unit = 0;
+        while (value >= 1024 && unit < units.length - 1) {
+          value /= 1024;
+          unit++;
         }
-        return response.status === 204 ? null : response.json();
+        return `${value.toFixed(value < 10 && unit > 0 ? 1 : 0)} ${units[unit]}`;
+      };
+
+      const rate = (n) => (n > 0 ? `${bytes(n)}/s` : '—');
+      const pct = (n) => `${Math.round((n ?? 0) * 100)}%`;
+
+      let toastTimer;
+      const toast = (message) => {
+        $('toast').textContent = message;
+        $('toast').classList.add('show');
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => $('toast').classList.remove('show'), 2200);
+      };
+
+      /** Calls the API, turning an error response into a thrown Error. */
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          headers: options.body ? { 'content-type': 'application/json' } : {},
+          ...options,
+          body: options.body ? JSON.stringify(options.body) : undefined,
+        });
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : null;
+        if (!response.ok) throw new Error(data?.error ?? response.statusText);
+        return data;
       }
 
-      function mapCell(entry) {
-        const m = entry.pmtiles;
-        if (!m) return '<span class="sub">—</span>';
-        return `${m.format} <span class="sub">z${m.minZoom}–${m.maxZoom}</span>`;
-      }
+      const copy = async (text, what) => {
+        try {
+          await navigator.clipboard.writeText(text);
+          toast(`${what} copied`);
+        } catch {
+          // Clipboard access needs a secure context, which a plain-http LAN
+          // deployment is not. Fall back to showing it to select by hand.
+          window.prompt(`Copy ${what}:`, text);
+        }
+      };
 
-      function row(entry) {
-        const s = entry.status;
-        const pct = Math.round((s?.progress ?? 0) * 100);
-        const state = s?.state ?? 'unknown';
-        return `<tr>
-          <td class="name">${entry.name}
-            <div class="sub">${entry.category ? entry.category + ' · ' : ''}${entry.infoHash.slice(0, 12)}…</div>
-          </td>
-          <td>${bytes(entry.size)}</td>
-          <td>${mapCell(entry)}</td>
-          <td><span class="pill ${state}">${state}</span></td>
-          <td><div class="track"><div class="fill" style="width:${pct}%"></div></div>
-            <span class="sub">${pct}%</span></td>
-          <td class="num">${s?.seeds ?? '—'}</td>
-          <td class="num">${s?.peers ?? '—'}</td>
-          <td class="num">${rate(s?.downloadSpeed)}</td>
-          <td class="num">${rate(s?.uploadSpeed)}</td>
-          <td class="num">${s ? (s.ratio ?? 0).toFixed(2) : '—'}</td>
-          <td>
-            <a href="/api/torrents/${entry.infoHash}/file">.torrent</a> ·
-            <a href="#" data-magnet="${entry.infoHash}">magnet</a> ·
-            <a href="#" data-remove="${entry.infoHash}">remove</a>
-          </td>
-        </tr>`;
-      }
+      // ── Archives ──────────────────────────────────────────────────────────
+      let archives = [];
+      let selected = null;
 
       async function refresh() {
         try {
-          const [status, torrents] = await Promise.all([
+          const [status, list] = await Promise.all([
             api('/api/status'),
             api('/api/torrents'),
           ]);
-          document.getElementById('status').innerHTML =
-            `engine <b>${status.engine.name}</b> ${status.engine.ok ? 'ok' : '<span style="color:var(--bad)">unavailable</span>'} · ` +
-            `<b>${status.archives}</b> archives · ` +
-            `${status.categories.length} categories · ${status.subscriptions.length} feeds`;
-          document.getElementById('rows').innerHTML = torrents.map(row).join('');
-          document.getElementById('empty').hidden = torrents.length > 0;
+          const engine = status.engine;
+          $('status').innerHTML =
+            `engine <b>${engine.name}</b> ${engine.ok ? 'ready' : 'unavailable'}` +
+            ` · <b>${status.archives}</b> archives`;
+          archives = list;
+          renderRows();
+          if (selected) renderDetail(selected);
         } catch (error) {
-          document.getElementById('status').textContent = `error: ${error.message}`;
+          $('status').textContent = `disconnected: ${error.message}`;
         }
       }
 
-      document.getElementById('add').onclick = async () => {
-        const value = document.getElementById('source').value.trim();
+      function renderRows() {
+        const rows = $('rows');
+        rows.innerHTML = '';
+        $('empty').hidden = archives.length > 0;
+
+        for (const entry of archives) {
+          const s = entry.status ?? {};
+          const progress = s.progress ?? 0;
+          const mode = entry.mode ?? 'mirror';
+          const tr = document.createElement('tr');
+          if (entry.infoHash === selected) tr.className = 'on';
+          tr.innerHTML = `
+            <td class="name">
+              ${escapeHtml(entry.name)}
+              <div class="sub">${escapeHtml(entry.category ?? '')}</div>
+            </td>
+            <td>${bytes(entry.size)}</td>
+            <td><span class="pill ${mode}">${mode}</span></td>
+            <td>
+              <div class="track">
+                <i class="${progress >= 1 ? 'done' : ''}" style="width:${Math.min(100, progress * 100)}%"></i>
+              </div>
+              <div class="sub">${pct(progress)}</div>
+            </td>
+            <td>${s.peers ?? 0} / ${s.seeds ?? 0}</td>
+            <td>${rate(s.downloadSpeed)}</td>
+            <td>${rate(s.uploadSpeed)}</td>
+            <td class="sub">${escapeHtml(s.state ?? '—')}</td>`;
+          tr.onclick = () => {
+            selected = selected === entry.infoHash ? null : entry.infoHash;
+            renderRows();
+            if (selected) renderDetail(selected);
+            else $('detail').hidden = true;
+          };
+          rows.append(tr);
+        }
+      }
+
+      const escapeHtml = (value) =>
+        String(value ?? '').replace(/[&<>"']/g, (c) =>
+          ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
+        );
+
+      async function renderDetail(infoHash) {
+        const panel = $('detail');
+        panel.hidden = false;
+
+        let entry;
+        try {
+          entry = await api(`/api/torrents/${infoHash}`);
+        } catch (error) {
+          panel.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+          return;
+        }
+
+        const base = location.origin;
+        const tileJson = `${base}/archives/${entry.infoHash}/tiles.json`;
+        const torrentUrl = `${base}/archives/${entry.infoHash}/archive.torrent`;
+        const summary = entry.pmtiles ?? {};
+        const mode = entry.mode ?? 'mirror';
+
+        panel.innerHTML = `
+          <h2>${escapeHtml(entry.name)}</h2>
+          <div class="grid">
+            <div><span>infohash</span><b>${escapeHtml(entry.infoHash)}</b></div>
+            <div><span>size</span><b>${bytes(entry.size)}</b></div>
+            <div><span>on disk</span><b>${bytes(entry.diskBytes)}</b></div>
+            <div><span>mode</span><b>${mode}</b></div>
+            <div><span>reading via</span><b>${escapeHtml(entry.reading?.mode ?? 'not open')}</b></div>
+            <div><span>format</span><b>${escapeHtml(summary.format ?? '—')}</b></div>
+            <div><span>zoom</span><b>${summary.minZoom ?? '—'}–${summary.maxZoom ?? '—'}</b></div>
+            <div><span>web seeds</span><b>${(entry.webSeeds ?? []).length}</b></div>
+          </div>
+
+          <h2>Export</h2>
+          <div class="actions">
+            <a href="${torrentUrl}" download><button type="button">Download .torrent</button></a>
+            <button id="copy-magnet">Copy magnet</button>
+            <button id="copy-tilejson">Copy TileJSON URL</button>
+            <button id="copy-hash">Copy infohash</button>
+            <a href="${tileJson}" target="_blank" rel="noreferrer"><button type="button">Open TileJSON</button></a>
+          </div>
+          <div class="sub" style="margin-bottom:1rem"><code>${escapeHtml(tileJson)}</code></div>
+
+          <h2>Actions</h2>
+          <div class="actions">
+            <button id="warm">Warm region</button>
+            <button id="add-seed">Add web seed</button>
+            <button id="clear-cache" ${mode === 'cache' ? '' : 'disabled title="only cache-mode archives have a cache to clear"'}>Clear cache</button>
+            <button id="remove" class="danger">Remove</button>
+          </div>
+
+          ${(entry.webSeeds ?? []).length ? `<h2>Web seeds</h2><div class="sub" style="margin-bottom:1rem">${entry.webSeeds.map((u) => `<div><code>${escapeHtml(u)}</code></div>`).join('')}</div>` : ''}
+
+          <h2>Preview</h2>
+          <div id="preview"></div>`;
+
+        $('copy-magnet').onclick = () => copy(entry.magnet ?? '', 'Magnet link');
+        $('copy-tilejson').onclick = () => copy(tileJson, 'TileJSON URL');
+        $('copy-hash').onclick = () => copy(entry.infoHash, 'Infohash');
+
+        $('warm').onclick = async () => {
+          try {
+            await api(`/api/torrents/${infoHash}/warm`, { method: 'POST', body: {} });
+            toast('warming started');
+          } catch (error) {
+            toast(error.message);
+          }
+        };
+
+        $('add-seed').onclick = async () => {
+          const url = window.prompt(
+            'Web seed URL (adding one does not change the infohash):',
+            `https://example.org/${entry.name}`,
+          );
+          if (!url) return;
+          try {
+            const result = await api(`/api/torrents/${infoHash}/webseeds`, {
+              method: 'POST',
+              body: { webSeeds: [url] },
+            });
+            toast(result.live ? 'web seed added and live' : 'web seed added');
+            renderDetail(infoHash);
+          } catch (error) {
+            toast(error.message);
+          }
+        };
+
+        $('clear-cache').onclick = async () => {
+          if (!window.confirm('Discard this archive’s cached pieces?')) return;
+          try {
+            const result = await api(`/api/torrents/${infoHash}/cache`, {
+              method: 'DELETE',
+            });
+            toast(`reclaimed ${bytes(result.cleared)}`);
+            refresh();
+          } catch (error) {
+            toast(error.message);
+          }
+        };
+
+        $('remove').onclick = async () => {
+          const deleteData = window.confirm(
+            'Remove this archive.\n\nOK also deletes its data; Cancel keeps the files.',
+          );
+          try {
+            await api(
+              `/api/torrents/${infoHash}?deleteData=${deleteData}`,
+              { method: 'DELETE' },
+            );
+            selected = null;
+            $('detail').hidden = true;
+            refresh();
+          } catch (error) {
+            toast(error.message);
+          }
+        };
+
+        renderPreview(entry);
+      }
+
+      /**
+       * Shows what the archive actually contains.
+       *
+       * Raster archives get real tiles, which is the check that matters — it
+       * proves the swarm read path works end to end. Vector tiles cannot be
+       * drawn without a renderer, so those get their layer list instead of a
+       * megabyte of mapping library.
+       */
+      function renderPreview(entry) {
+        const target = $('preview');
+        const format = entry.pmtiles?.format;
+        if (!format) {
+          target.innerHTML = '<div class="sub">Not probed yet.</div>';
+          return;
+        }
+
+        if (format === 'pbf') {
+          const layers = entry.pmtiles.vectorLayers ?? [];
+          target.innerHTML = layers.length
+            ? `<div class="sub">${layers.length} vector layers: ${layers
+                .map((l) => escapeHtml(l.id))
+                .join(', ')}</div>`
+            : '<div class="sub">Vector tiles.</div>';
+          return;
+        }
+
+        const ext = { jpeg: 'jpg' }[format] ?? format;
+        const z = Math.max(entry.pmtiles.minZoom ?? 0, 1);
+        const span = 2 ** z;
+        const cells = [];
+        for (let y = 0; y < Math.min(span, 4); y++) {
+          for (let x = 0; x < Math.min(span, 4); x++) {
+            cells.push(
+              `<img loading="lazy" alt="${z}/${x}/${y}" src="/archives/${entry.infoHash}/${z}/${x}/${y}.${ext}" />`,
+            );
+          }
+        }
+        target.innerHTML =
+          `<div class="preview">${cells.join('')}</div>` +
+          `<div class="sub">zoom ${z} · served through this node</div>`;
+      }
+
+      $('add').onclick = async () => {
+        const value = $('source').value.trim();
         if (!value) return;
-        const category = document.getElementById('category').value.trim() || undefined;
-        // Route by shape: the server accepts each of these on its own key.
-        const body = value.startsWith('magnet:')
+        const category = $('category').value.trim() || undefined;
+        const body = /^magnet:/i.test(value)
           ? { magnet: value, category }
-          : /\.torrent(\?|$)/i.test(value)
+          : /^https?:\/\/.+\.torrent$/i.test(value)
             ? { torrentUrl: value, category }
             : /^https?:\/\//i.test(value)
               ? { url: value, category }
               : { path: value, category };
         try {
-          await api('/api/torrents', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-          document.getElementById('source').value = '';
+          await api('/api/torrents', { method: 'POST', body });
+          $('source').value = '';
+          toast('added');
           refresh();
         } catch (error) {
-          alert(`Could not add: ${error.message}`);
+          toast(error.message);
         }
       };
 
-      document.getElementById('adopt').onclick = async () => {
+      $('adopt').onclick = async () => {
         try {
           const result = await api('/api/adopt', { method: 'POST' });
-          alert(`Adopted ${result.added} archive(s).`);
+          toast(`adopted ${result?.length ?? 0}`);
           refresh();
         } catch (error) {
-          alert(`Adopt failed: ${error.message}`);
+          toast(error.message);
         }
       };
 
-      document.getElementById('refresh-feeds').onclick = async () => {
+      // ── Settings ──────────────────────────────────────────────────────────
+      let restartKeys = new Set();
+
+      async function loadSettings() {
+        const { config, restartRequired, configPath } = await api('/api/config');
+        restartKeys = new Set(restartRequired);
+        $('settings-note').textContent = configPath
+          ? `saved to ${configPath}`
+          : 'no config file — changes apply to this run only';
+
+        const body = $('settings-body');
+        body.innerHTML = '';
+        for (const [key, value] of Object.entries(config)) {
+          const needsRestart = restartKeys.has(key);
+          const field = document.createElement('div');
+          field.className = 'field';
+          const isScalar =
+            value === null || value === undefined || typeof value !== 'object';
+          field.innerHTML = `
+            <label for="cfg-${key}">
+              ${escapeHtml(key)}
+              ${needsRestart ? '<span class="badge">restart</span>' : ''}
+            </label>
+            ${
+              isScalar
+                ? `<input id="cfg-${key}" data-key="${key}" data-scalar="1" value="${escapeHtml(value ?? '')}" />`
+                : `<textarea id="cfg-${key}" data-key="${key}" rows="${Math.min(12, JSON.stringify(value, null, 2).split('\n').length)}">${escapeHtml(JSON.stringify(value, null, 2))}</textarea>`
+            }`;
+          body.append(field);
+        }
+      }
+
+      $('settings-save').onclick = async () => {
+        const updates = {};
+        for (const element of $('settings-body').querySelectorAll('[data-key]')) {
+          const key = element.dataset.key;
+          const raw = element.value.trim();
+          if (element.dataset.scalar) {
+            // Keep types: an empty box means unset, and numbers and booleans
+            // must not arrive as strings or the merge would corrupt them.
+            if (raw === '') updates[key] = undefined;
+            else if (raw === 'true') updates[key] = true;
+            else if (raw === 'false') updates[key] = false;
+            else if (raw !== '' && !Number.isNaN(Number(raw))) updates[key] = Number(raw);
+            else updates[key] = raw;
+          } else {
+            try {
+              updates[key] = JSON.parse(raw);
+            } catch {
+              toast(`${key} is not valid JSON`);
+              return;
+            }
+          }
+        }
+
         try {
-          const result = await api('/api/subscriptions/refresh', { method: 'POST' });
-          alert(`Added ${result.added} archive(s) from feeds.`);
-          refresh();
+          const result = await api('/api/config', { method: 'PATCH', body: updates });
+          toast(
+            result.restartRequired.length
+              ? `saved — restart needed for: ${result.restartRequired.join(', ')}`
+              : 'saved and applied',
+          );
         } catch (error) {
-          alert(`Feed poll failed: ${error.message}`);
+          toast(error.message);
         }
       };
 
-      document.getElementById('rows').onclick = async (event) => {
-        const magnet = event.target.dataset?.magnet;
-        const remove = event.target.dataset?.remove;
-        if (magnet) {
-          event.preventDefault();
-          const uri = await fetch(`/api/torrents/${magnet}/magnet`).then((r) => r.text());
-          await navigator.clipboard.writeText(uri).catch(() => {});
-          prompt('Magnet link (copied to clipboard):', uri);
-        }
-        if (remove) {
-          event.preventDefault();
-          if (!confirm('Remove this archive from the catalog?')) return;
-          await api(`/api/torrents/${remove}`, { method: 'DELETE' });
-          refresh();
-        }
+      // ── Tabs ──────────────────────────────────────────────────────────────
+      const showTab = (name) => {
+        const archives = name === 'archives';
+        $('view-archives').hidden = !archives;
+        $('view-settings').hidden = archives;
+        $('tab-archives').classList.toggle('on', archives);
+        $('tab-settings').classList.toggle('on', !archives);
+        if (!archives) loadSettings().catch((e) => toast(e.message));
       };
+      $('tab-archives').onclick = () => showTab('archives');
+      $('tab-settings').onclick = () => showTab('settings');
 
       refresh();
-      setInterval(refresh, 3000);
+      // Live enough to watch a download without hammering the engine.
+      setInterval(() => {
+        if (!$('view-archives').hidden) refresh();
+      }, 3000);
     </script>
   </body>
 </html>

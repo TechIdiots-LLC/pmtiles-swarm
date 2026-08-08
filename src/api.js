@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
 import { renderFeed } from './feed.js';
 import { buildTileJson, extensionMatches } from './tilejson.js';
 import { TileReadError } from './tiles.js';
@@ -113,6 +114,37 @@ export function createApp({
           mode: s.mode ?? 'cache',
         })),
       });
+    }),
+  );
+
+  // Settings. Everything read per request takes effect immediately because the
+  // running config object is the one being mutated; everything bound at startup
+  // is written to the file and reported back as needing a restart, rather than
+  // being silently accepted and ignored.
+  app.get(
+    '/api/config',
+    route(async (_req, res) => {
+      res.json({
+        config: redactConfig(config),
+        restartRequired: [...RESTART_REQUIRED],
+        configPath: config.configPath ?? null,
+      });
+    }),
+  );
+
+  app.patch(
+    '/api/config',
+    route(async (req, res) => {
+      try {
+        const result = await saveConfig(
+          config,
+          req.body ?? {},
+          config.configPath,
+        );
+        res.json({ ...result, config: redactConfig(config) });
+      } catch (error) {
+        res.status(400).json({ error: error.message });
+      }
     }),
   );
 

@@ -237,6 +237,12 @@ export async function loadConfig(configPath) {
   }
 
   const config = merge(DEFAULTS, fileConfig);
+  // Non-enumerable so it never lands in the persisted file or an API response.
+  Object.defineProperty(config, 'configPath', {
+    value: configPath,
+    enumerable: false,
+    writable: true,
+  });
 
   // Environment overrides, for containerised deployments.
   if (process.env.PMTILES_SWARM_PORT) {
@@ -272,4 +278,101 @@ export async function loadConfig(configPath) {
   }));
 
   return config;
+}
+
+/**
+ * Settings that only take effect on restart.
+ *
+ * Each of these is bound into something long-lived when the process starts — a
+ * listening socket, a libtorrent session, a WebTorrent client, a chokidar
+ * watcher. Changing the file changes what the next start does; it cannot change
+ * what the current one already built.
+ *
+ * The distinction is worth surfacing rather than hiding. A settings screen that
+ * silently accepted a port change and kept serving on the old one would be
+ * worse than one that says plainly it needs a restart.
+ */
+export const RESTART_REQUIRED = new Set([
+  'port',
+  'host',
+  'dataDir',
+  'engine',
+  'qbittorrent',
+  'webtorrent',
+  'libtorrent',
+  'cacheSavePath',
+  'watch',
+  'maxConnections',
+]);
+
+/** Settings never sent to a client, because they are credentials. */
+const SECRET_PATHS = [['qbittorrent', 'password']];
+
+/**
+ * Copies a config with credentials blanked out.
+ * @param {object} config - The resolved configuration.
+ * @returns {object} - A safe copy, with secrets replaced by a placeholder.
+ */
+export function redactConfig(config) {
+  const copy = structuredClone(config);
+  for (const pathParts of SECRET_PATHS) {
+    let cursor = copy;
+    for (const key of pathParts.slice(0, -1)) {
+      cursor = cursor?.[key];
+    }
+    const last = pathParts[pathParts.length - 1];
+    if (cursor && cursor[last]) cursor[last] = '********';
+  }
+  return copy;
+}
+
+/**
+ * Applies updates to the config file and to the running config.
+ *
+ * The running object is mutated in place because everything holding it holds
+ * the same reference — so a change to a per-request setting such as
+ * `tiles.sparse` takes effect on the very next request, with no plumbing.
+ * Startup-bound settings are written to the file and reported back as needing a
+ * restart.
+ * @param {object} config - The live configuration object.
+ * @param {object} updates - Partial configuration to apply.
+ * @param {string} [configPath] - Where to persist. Omitted means memory only.
+ * @returns {Promise<{applied: string[], restartRequired: string[]}>} - What changed.
+ */
+export async function saveConfig(config, updates, configPath) {
+  const applied = [];
+  const restartRequired = [];
+
+  for (const [key, value] of Object.entries(updates ?? {})) {
+    if (!(key in DEFAULTS)) {
+      throw new Error(`unknown setting: ${key}`);
+    }
+
+    // Never let a redaction placeholder be written back as a real password.
+    if (key === 'qbittorrent' && value?.password === '********') {
+      delete value.password;
+    }
+
+    const isObject =
+      value && typeof value === 'object' && !Array.isArray(value);
+    config[key] = isObject ? { ...config[key], ...value } : value;
+
+    applied.push(key);
+    if (RESTART_REQUIRED.has(key)) restartRequired.push(key);
+  }
+
+  if (configPath && applied.length > 0) {
+    // Persist the whole resolved config rather than a diff: the file is meant
+    // to be readable and hand-editable, and a file of overrides accumulated
+    // over time is neither.
+    const { configPath: _omit, ...persistable } = config;
+    await fs.writeFile(
+      configPath,
+      `${JSON.stringify(persistable, null, 2)}
+`,
+      'utf8',
+    );
+  }
+
+  return { applied, restartRequired };
 }

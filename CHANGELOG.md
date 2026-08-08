@@ -9,6 +9,14 @@
   root.
 - Cache-mode archives now live under `cacheSavePath`, separate from mirrors, so a glance at the
   disk says which files are whole archives and which never will be.
+- **The web UI is now a real console.** Live-refreshing archive table with progress, peers and
+  speeds; a detail panel per archive with disk usage, web seeds and a tile preview; per-archive
+  actions for warming, clearing a cache, adding a web seed and removing; export by downloading
+  the `.torrent` or copying the magnet, TileJSON URL or infohash; and a settings screen.
+- `GET`/`PATCH /api/config` read and write settings. Anything read per request applies
+  immediately; anything bound at startup is written to the file and reported back as needing a
+  restart, rather than being accepted and quietly ignored. Credentials are redacted on the way
+  out and never overwritten by their own placeholder.
 - `POST /api/torrents/{infohash}/webseeds` adds web seeds to a torrent already in circulation.
   This does not change the infohash — `url-list` sits outside the `info` dictionary — so magnets
   and peers stay valid, and anything published without a web seed can be given one.
