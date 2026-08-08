@@ -75,12 +75,20 @@ export class SubscriptionManager {
 
   /**
    * Polls one feed.
-   * @param {object} subscription - Entry of {url, mode, category, filter}.
+   * @param {object} subscription - Entry of {url, mode, category, filter, token}.
    * @returns {Promise<object[]>} - Entries added from this feed.
    */
   async #poll(subscription) {
     const response = await fetch(subscription.url, {
-      headers: { accept: 'application/rss+xml, application/xml, text/xml' },
+      headers: {
+        accept: 'application/rss+xml, application/xml, text/xml',
+        // A token identifies this node to the peer, which may then publish
+        // more than it does to the world — how two internal nodes stay fully
+        // in sync while the same feed shows outsiders only what is shared.
+        ...(subscription.token
+          ? { authorization: `Bearer ${subscription.token}` }
+          : {}),
+      },
     });
     if (!response.ok) {
       throw new Error(`${response.status} ${response.statusText}`);

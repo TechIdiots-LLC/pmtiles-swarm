@@ -75,6 +75,36 @@ the setting fail open.
 Unset, everything is published, which is the right default for a node whose
 whole catalogue is meant to be shared.
 
+### Sharing everything with your own nodes, and less with everyone else
+
+An allow-list on its own is all-or-nothing for every caller, which makes the
+common case awkward: two internal servers that should stay fully in sync, and an
+external peer that should see only part of the catalogue.
+
+A credential lifts the allow-list. Give the internal node the token and it sees
+everything through the same feed a stranger sees filtered:
+
+```json
+// Publisher: strangers get basemaps; a caller with the token gets the lot.
+{
+  "feedCategories": ["basemaps"],
+  "auth": { "apiKey": "a-long-random-string" }
+}
+
+// Internal sibling: same URL, full catalogue, because it identifies itself.
+{
+  "subscriptions": [
+    { "url": "https://maps.internal/feed.xml", "mode": "mirror", "token": "a-long-random-string" }
+  ]
+}
+```
+
+Untagged archives sync this way too, which is what makes it work for a node
+that never uses categories at all.
+
+Note the allow-list still applies to everyone on a node with **no** credential
+configured. There is no privileged caller there to lift it for.
+
 ### Why this matters when peering
 
 Between your own nodes, sharing everything is usually what you want. Between

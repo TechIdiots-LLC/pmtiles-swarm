@@ -1594,3 +1594,119 @@ describe('publishing only what is tagged for sharing', () => {
     }
   });
 });
+
+describe('one feed, two audiences', () => {
+  const TOKEN = 'peer-token-for-the-internal-sibling';
+
+  /**
+   * A node publishing one category, holding three archives.
+   * @returns {Promise<object>} - Fetchers and a close function.
+   */
+  async function serve() {
+    const dir = await fs.mkdtemp(path.join(workspace, 'audiences-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put(entry({ infoHash: 'a'.repeat(40), name: 'world.pmtiles', category: 'public' }));
+    await catalog.put(entry({ infoHash: 'b'.repeat(40), name: 'staff.pmtiles', category: 'internal' }));
+    await catalog.put(entry({ infoHash: 'c'.repeat(40), name: 'loose.pmtiles', category: undefined }));
+
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog,
+      engine: { name: 'x', list: async () => [] },
+      subscriptions: {},
+      tiles: { status: () => null },
+      config: {
+        watch: [],
+        subscriptions: [],
+        feedCategories: ['public'],
+        auth: { apiKey: TOKEN },
+      },
+    });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const { port } = server.address();
+    const base = `http://127.0.0.1:${port}`;
+    return {
+      feed: async (headers = {}) => (await fetch(`${base}/feed.xml`, { headers })).text(),
+      category: (name, headers = {}) => fetch(`${base}/feed/${name}.xml`, { headers }),
+      close: () => new Promise((resolve) => server.close(resolve)),
+    };
+  }
+
+  const bearer = { authorization: `Bearer ${TOKEN}` };
+
+  it('shows a stranger only what is marked for sharing', async () => {
+    const feeds = await serve();
+    try {
+      const xml = await feeds.feed();
+      assert.ok(xml.includes('world.pmtiles'));
+      assert.ok(!xml.includes('staff.pmtiles'));
+      assert.ok(!xml.includes('loose.pmtiles'));
+    } finally {
+      await feeds.close();
+    }
+  });
+
+  it('shows a node holding the token the whole catalogue', async () => {
+    // This is what keeps two internal servers in sync without publishing to
+    // strangers: same URL, more content, because the caller is known.
+    const feeds = await serve();
+    try {
+      const xml = await feeds.feed(bearer);
+      assert.ok(xml.includes('world.pmtiles'));
+      assert.ok(xml.includes('staff.pmtiles'));
+      assert.ok(xml.includes('loose.pmtiles'), 'untagged archives sync too');
+    } finally {
+      await feeds.close();
+    }
+  });
+
+  it('opens unpublished category feeds to the token as well', async () => {
+    const feeds = await serve();
+    try {
+      assert.equal((await feeds.category('internal')).status, 404);
+      assert.equal((await feeds.category('internal', bearer)).status, 200);
+    } finally {
+      await feeds.close();
+    }
+  });
+
+  it('ignores a wrong token', async () => {
+    const feeds = await serve();
+    try {
+      const xml = await feeds.feed({ authorization: 'Bearer wrong' });
+      assert.ok(!xml.includes('staff.pmtiles'));
+    } finally {
+      await feeds.close();
+    }
+  });
+
+  it('still applies the allow-list on a node with no credentials at all', async () => {
+    // isAuthenticated answers true for everyone when nothing is configured, so
+    // without an explicit check the allow-list would quietly do nothing here —
+    // on precisely the node least able to afford that.
+    const dir = await fs.mkdtemp(path.join(workspace, 'noauth-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put(entry({ infoHash: 'd'.repeat(40), name: 'staff.pmtiles', category: 'internal' }));
+
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog,
+      engine: { name: 'x', list: async () => [] },
+      subscriptions: {},
+      tiles: { status: () => null },
+      config: { watch: [], subscriptions: [], feedCategories: ['public'] },
+    });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const { port } = server.address();
+    try {
+      const xml = await (await fetch(`http://127.0.0.1:${port}/feed.xml`)).text();
+      assert.ok(!xml.includes('staff.pmtiles'));
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});

@@ -474,25 +474,40 @@ export function createApp({
   };
 
   /**
-   * Whether a category may leave this node.
+   * Whether a category may leave this node, for this caller.
+   *
+   * A credential lifts the allow-list, which is what lets one node serve two
+   * audiences: an internal sibling holding the token syncs the whole
+   * catalogue, while the outside world sees only the categories marked for
+   * sharing. Without this, `feedCategories` is all or nothing for everyone,
+   * and keeping internal servers in sync means publishing to strangers too.
    * @param {string} [category] - The category to check.
-   * @returns {boolean} - True when it is published.
+   * @param {import('express').Request} req - The request, for its credential.
+   * @returns {boolean} - True when it is published to this caller.
    */
-  const publishes = (category) => {
+  const publishes = (category, req) => {
     const allowed = config.feedCategories;
     if (!Array.isArray(allowed)) return true;
+    // Both halves matter. isAuthenticated answers true for everyone when no
+    // credential is configured, so without the first check a node with no auth
+    // would treat every caller as privileged and the allow-list would quietly
+    // do nothing — on precisely the node least able to afford that.
+    if (auth.enabled && auth.isAuthenticated(req)) return true;
     // Untagged means unmarked for sharing, so it stays put.
     return Boolean(category) && allowed.includes(category);
   };
 
   app.get('/feed.xml', (req, res) => {
     res.type('application/rss+xml').send(
-      renderFeed(catalog.list().filter((entry) => publishes(entry.category)), {
+      renderFeed(
+        catalog.list().filter((entry) => publishes(entry.category, req)),
+        {
         title: config.feedTitle ?? 'PMTiles archives',
         baseUrl: baseUrl(req),
-        copyright: config.feedCopyright,
-        maxItems: feedLimit(req),
-      }),
+          copyright: config.feedCopyright,
+          maxItems: feedLimit(req),
+        },
+      ),
     );
   });
 
@@ -500,7 +515,7 @@ export function createApp({
     const { category } = req.params;
     // 404 rather than 403: refusing by name would confirm the category exists,
     // which is exactly what an allow-list is meant to avoid disclosing.
-    if (!publishes(category)) {
+    if (!publishes(category, req)) {
       return res.status(404).json({ error: 'no such feed' });
     }
     res.type('application/rss+xml').send(

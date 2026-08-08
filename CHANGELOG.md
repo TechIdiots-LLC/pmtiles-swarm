@@ -13,6 +13,9 @@
   it takes; they never narrowed what was published, since `/feed.xml` carried the whole catalogue.
   With an allow-list set, only those categories appear in any feed and other category feeds
   answer 404. Untagged archives are excluded, because untagged means unmarked for sharing.
+- A subscription can carry a `token`, and a credential lifts `feedCategories`. One feed then
+  serves two audiences: an internal node holding the token syncs the whole catalogue, untagged
+  archives included, while the outside world sees only the categories marked for sharing.
 - **Access control.** Tiles, TileJSON and the feed stay public; everything under `/api/` and the
   console are guarded whenever `auth.apiKey`, `auth.password` or `auth.passwordHash` is set. A
   bearer token for scripts, a sign-in form and session cookie for people. Passwords set through
