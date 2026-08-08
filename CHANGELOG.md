@@ -25,6 +25,12 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **Creating a torrent from a local path published any readable file to a public swarm.** The
+  PMTiles probe failure was caught and discarded, so `{"path": "/etc/shadow"}` produced a
+  seeded torrent and returned its infohash. Archives are now identified by content — PMTiles
+  and MBTiles are recognised, anything else is a 400 unless `allowUnknown` is passed. Only
+  PMTiles can have its tiles served; MBTiles is SQLite, whose pages are scattered rather than
+  spatially clustered, so it is distributable but not servable.
 - **A missing tile answered 204 for every archive, which breaks sparse raster.** MapLibre only
   overzooms a parent tile when the child 404s, so a sparse raster-dem — Mapterhorn, or any
   terrain built only where there is land — rendered as holes wherever data was never built.

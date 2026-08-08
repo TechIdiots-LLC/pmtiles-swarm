@@ -6,6 +6,11 @@ import { after, describe, it } from 'node:test';
 import zlib from 'node:zlib';
 import { createApp } from '../src/api.js';
 import { Catalog } from '../src/catalog.js';
+import {
+  assertPublishable,
+  identifyBytes,
+  identifyFile,
+} from '../src/identify.js';
 import { Library, publish, webSeedFor } from '../src/library.js';
 import { LibtorrentReadEngine } from '../src/read-engine.js';
 import { buildTileJson, extensionMatches } from '../src/tilejson.js';
@@ -1098,5 +1103,61 @@ describe('retrofitting web seeds', () => {
       () => library.addWebSeeds('f'.repeat(40), ['https://a.example.org/p']),
       /unknown archive/,
     );
+  });
+});
+
+describe('what may be published', () => {
+  const PMTILES_HEAD = Buffer.from('PM\0\0\0\0\0\x03', 'latin1');
+  const SQLITE_HEAD = Buffer.from('SQLite format 3\0', 'latin1');
+
+  it('recognises a PMTiles archive, and will serve its tiles', () => {
+    const identified = identifyBytes(PMTILES_HEAD);
+    assert.equal(identified.kind, 'pmtiles');
+    assert.equal(identified.servable, true);
+  });
+
+  it('recognises an MBTiles archive, but will not serve its tiles', () => {
+    // Distributable, not servable: SQLite pages are scattered rather than
+    // spatially clustered, so on-demand reading over a swarm does not work
+    // the way it does for a flat Hilbert-ordered file.
+    const identified = identifyBytes(SQLITE_HEAD);
+    assert.equal(identified.kind, 'mbtiles');
+    assert.equal(identified.servable, false);
+  });
+
+  it('does not recognise something that is neither', () => {
+    assert.equal(identifyBytes(Buffer.from('root:x:0:0:root')).kind, 'unknown');
+    assert.equal(identifyBytes(Buffer.alloc(16)).kind, 'unknown');
+    assert.equal(identifyBytes(Buffer.alloc(0)).kind, 'unknown');
+  });
+
+  it('identifies a real archive on disk', async () => {
+    const dir = await fs.mkdtemp(path.join(workspace, 'identify-'));
+    const file = path.join(dir, 'real.pmtiles');
+    await writeArchive(file, { tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('t') }] });
+    assert.equal((await identifyFile(file)).kind, 'pmtiles');
+  });
+
+  it('treats an unreadable path as unknown rather than throwing', async () => {
+    assert.equal((await identifyFile('/no/such/file')).kind, 'unknown');
+  });
+
+  it('refuses to publish an unrecognised file', () => {
+    // The sharp edge this closes: without it, "make a torrent of this path"
+    // publishes any readable file to a public swarm.
+    assert.throws(() => assertPublishable(identifyBytes(Buffer.from('root:x:0:0'))), {
+      status: 400,
+    });
+  });
+
+  it('allows both map formats through', () => {
+    assertPublishable(identifyBytes(PMTILES_HEAD));
+    assertPublishable(identifyBytes(SQLITE_HEAD));
+  });
+
+  it('can be overridden deliberately', () => {
+    assertPublishable(identifyBytes(Buffer.from('anything')), {
+      allowUnknown: true,
+    });
   });
 });

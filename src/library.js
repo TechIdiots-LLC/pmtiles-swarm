@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { assertPublishable, identifyFile, identifyUrl } from './identify.js';
 import { checkOrigin, fingerprintOrigin } from './origin.js';
 import { probePMTiles } from './pmtiles-probe.js';
 import {
@@ -77,7 +78,19 @@ export class Library {
       webSeeds.push(webSeedFor(options.webSeedBase, path.basename(absolute)));
     }
 
-    const summary = await probePMTiles(absolute).catch(() => undefined);
+    // Check what this actually is before making a torrent of it. Without
+    // this, "publish the file at this path" will publish any readable file to
+    // a public swarm, whatever it is.
+    const identified = await identifyFile(absolute);
+    assertPublishable(identified, {
+      allowUnknown: options.allowUnknown ?? this.#config.allowUnknownArchives,
+    });
+
+    // Only PMTiles can have its tiles served, so only PMTiles gets probed.
+    const summary = identified.kind === 'pmtiles'
+      ? await probePMTiles(absolute).catch(() => undefined)
+      : undefined;
+
     const created = await createTorrentFromFile(absolute, {
       pieceLength: options.pieceLength ?? this.#config.pieceLength,
       trackers: options.trackers ?? this.#config.trackers,
@@ -91,6 +104,7 @@ export class Library {
       // The torrent names the file, so the save path is its parent directory.
       savePath: path.dirname(absolute),
       pmtiles: summary,
+      kind: identified.kind,
       sparse: options.sparse,
       webSeeds: [...new Set(webSeeds)],
       seedOnly: true,
@@ -128,7 +142,14 @@ export class Library {
     // Probing reads only the header and directory, so this is cheap even
     // against a multi-gigabyte archive — worth doing before committing to a
     // download that may take hours.
-    const summary = await probePMTiles(url).catch(() => undefined);
+    const identified = await identifyUrl(url);
+    assertPublishable(identified, {
+      allowUnknown: options.allowUnknown ?? this.#config.allowUnknownArchives,
+    });
+
+    const summary = identified.kind === 'pmtiles'
+      ? await probePMTiles(url).catch(() => undefined)
+      : undefined;
 
     // Retaining leaves a seedable copy behind. Discarding is explicit, because
     // the result is a torrent this node cannot serve.
@@ -160,6 +181,7 @@ export class Library {
       source: { type: 'http', location: url },
       savePath,
       pmtiles: summary,
+      kind: identified.kind,
       sparse: options.sparse,
       webSeeds: created.webSeeds ?? [url],
       // With no local copy there is nothing to seed; peers rely on the web
@@ -755,6 +777,7 @@ export class Library {
       pieceLength: created.pieceLength,
       pieceCount: created.pieceCount,
       pmtiles: details.pmtiles,
+      kind: details.kind,
       // Left undefined unless asked for, so the format-based default applies
       // and a later change to that default reaches existing archives.
       sparse: details.sparse,

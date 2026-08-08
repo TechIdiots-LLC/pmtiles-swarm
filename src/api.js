@@ -335,6 +335,7 @@ export function createApp({
         sparse: body.sparse,
         publishDir: body.publishDir,
         webSeedBase: body.webSeedBase,
+        allowUnknown: body.allowUnknown,
       };
 
       let entry;
@@ -564,8 +565,12 @@ export function createApp({
 
   // eslint-disable-next-line no-unused-vars -- express identifies error handlers by arity
   app.use((error, _req, res, _next) => {
-    console.error(`[api] ${error.stack ?? error.message}`);
-    res.status(500).json({ error: error.message });
+    // A validation failure is the caller's, not ours, and saying so is more
+    // useful than a 500 — refusing to publish an unrecognised file is an
+    // expected outcome, not a fault.
+    const status = Number.isInteger(error.status) ? error.status : 500;
+    if (status >= 500) console.error(`[api] ${error.stack ?? error.message}`);
+    res.status(status).json({ error: error.message });
   });
 
   return app;
