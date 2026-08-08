@@ -131,7 +131,10 @@ export function createApp({
       // whether one reads its local file or the swarm is worth being able to
       // see when a node is slower than expected.
       const reading = tiles?.status(entry.infoHash) ?? null;
-      res.json({ ...entry, status, reading });
+      // Optional call: a missing method throws before any .catch could see it.
+      const diskBytes =
+        (await library.diskUsage?.(entry.infoHash).catch(() => null)) ?? null;
+      res.json({ ...entry, status, reading, diskBytes });
     }),
   );
 
@@ -182,6 +185,21 @@ export function createApp({
         return res.status(404).json({ error: 'no warm running' });
       }
       res.status(202).json(warm.get(req.params.infoHash));
+    }),
+  );
+
+  // Reclaims what on-demand reading has accumulated for one archive, without
+  // forgetting the archive. Nothing else bounds that disk usage.
+  app.delete(
+    '/api/torrents/:infoHash/cache',
+    route(async (req, res) => {
+      try {
+        const result = await library.clearCache(req.params.infoHash);
+        res.json(result);
+      } catch (error) {
+        const status = /unknown archive/.test(error.message) ? 404 : 409;
+        res.status(status).json({ error: error.message });
+      }
     }),
   );
 

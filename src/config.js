@@ -21,6 +21,20 @@ const DEFAULTS = {
     savePath: './data/torrents-data',
   },
   /**
+   * Where cache-mode archives keep their pieces.
+   *
+   * Separate from the mirror path on purpose. A mirror is a whole archive and
+   * can be trusted as a file; a cache-mode archive is a scatter of pieces that
+   * will never be complete, and telling them apart matters when you are
+   * looking at a disk rather than at the API. Keeping them in different
+   * directories says so permanently, where an "incomplete" suffix would have
+   * to be maintained and can drift out of step with the truth.
+   *
+   * It also makes the cache measurable and clearable as a unit: this directory
+   * is exactly the disk that on-demand reading has cost.
+   */
+  cacheSavePath: './data/cache',
+  /**
    * Piece length for torrents we create. 4 MiB is a deliberate compromise:
    * tools default much higher for large files, which is fine for whole-file
    * downloads but terrible for the random access a tile server does, since

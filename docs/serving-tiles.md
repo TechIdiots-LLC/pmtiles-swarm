@@ -170,6 +170,49 @@ at the current infohash.
 `sparse` is the missing-tile status described above; `null` means decide by
 format.
 
+## Caches, and what bounds them
+
+Four different things get called a cache here, and only three of them are
+bounded:
+
+| Cache | Bounded by | Eviction |
+| --- | --- | --- |
+| Pieces held in memory | `tiles.pieceCacheBytes` | Least recently used |
+| Headers and directories | `tiles.directoryCacheEntries` | Least recently used |
+| Open archives | `tiles.maxOpenArchives` | Least recently used |
+| **Pieces written to disk** | **nothing** | **none** |
+
+The first three do what you would expect: hit the limit, the oldest goes. The
+fourth is the one that actually grows. Every piece fetched to answer a tile is
+written to the engine's store and kept — which is deliberate, since that is what
+makes the node a seeder and what makes the second visit to a region fast. But
+nothing reclaims it.
+
+Cache-mode archives live under `cacheSavePath` (`./data/cache` by default),
+separate from mirrors. That is partly so you can tell at a glance which files on
+disk are whole archives and which are a scatter of pieces that never will be,
+and partly so the cache is measurable and clearable as a unit.
+
+```
+GET    /api/torrents/{infohash}          reports diskBytes
+DELETE /api/torrents/{infohash}/cache    reclaims it, keeps the archive
+```
+
+Clearing removes the archive's data and rejoins the swarm, so it starts again
+from nothing. Re-joining is the part that matters: deleting files underneath a
+running torrent leaves the engine convinced it still holds them.
+
+**The unit of eviction is the whole archive, and cannot honestly be smaller.**
+Neither libtorrent nor WebTorrent can be told to forget an individual piece —
+both track what they hold in a bitfield the stored data has to agree with — so a
+byte-capped on-disk cache with per-piece eviction is not something this can
+offer. Watch `diskBytes`, and clear an archive when it has grown past what you
+want to give it.
+
+Clearing a mirror is refused: its data is a complete copy that other peers may
+be depending on, and dropping it is a different decision from reclaiming a
+cache.
+
 ## Warming a region
 
 A cache-mode node is slow exactly once per region: the first request pulls the

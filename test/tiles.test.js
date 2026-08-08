@@ -6,7 +6,7 @@ import { after, describe, it } from 'node:test';
 import zlib from 'node:zlib';
 import { createApp } from '../src/api.js';
 import { Catalog } from '../src/catalog.js';
-import { publish, webSeedFor } from '../src/library.js';
+import { Library, publish, webSeedFor } from '../src/library.js';
 import { LibtorrentReadEngine } from '../src/read-engine.js';
 import { buildTileJson, extensionMatches } from '../src/tilejson.js';
 import { TileStore } from '../src/tiles.js';
@@ -884,5 +884,83 @@ describe('publishing archives for web seeding', () => {
 
     assert.equal(await publish(source, dir), source);
     assert.equal(await fs.readFile(source, 'utf8'), 'bytes');
+  });
+});
+
+describe('cache accounting', () => {
+  /**
+   * A library over one archive, with a recording engine.
+   * @param {object} [entryExtra] - Fields to override on the entry.
+   * @returns {Promise<object>} - The library, catalog, engine and directory.
+   */
+  async function makeLibrary(entryExtra = {}) {
+    const dir = await fs.mkdtemp(path.join(workspace, 'cache-'));
+    const archive = entry({ savePath: dir, mode: 'cache', ...entryExtra });
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put(archive);
+
+    const calls = [];
+    const engine = {
+      name: 'webtorrent',
+      add: async (request) => calls.push({ op: 'add', ...request }),
+      remove: async (hash, options) =>
+        calls.push({ op: 'remove', hash, ...options }),
+      get: async () => ({ progress: 0.5 }),
+    };
+    const library = new Library({
+      catalog,
+      engine,
+      config: { dataDir: dir, webtorrent: { savePath: dir } },
+    });
+    return { library, catalog, engine, calls, dir, entry: archive };
+  }
+
+  it('measures what an archive occupies on disk', async () => {
+    const { library, dir, entry: archive } = await makeLibrary();
+    await fs.writeFile(path.join(dir, archive.name), 'x'.repeat(500));
+    // Engines leave part files beside the archive; they are cache too.
+    await fs.writeFile(path.join(dir, `${archive.name}.parts`), 'y'.repeat(250));
+    // Something unrelated in the same directory must not be counted.
+    await fs.writeFile(path.join(dir, 'unrelated.txt'), 'z'.repeat(999));
+
+    assert.equal(await library.diskUsage(archive.infoHash), 750);
+  });
+
+  it('reports zero when nothing has been downloaded yet', async () => {
+    const { library, entry: archive } = await makeLibrary();
+    assert.equal(await library.diskUsage(archive.infoHash), 0);
+  });
+
+  it('clears a cache-mode archive and rejoins it', async () => {
+    const { library, calls, dir, entry: archive } = await makeLibrary();
+    await fs.writeFile(path.join(dir, archive.name), 'x'.repeat(400));
+
+    const result = await library.clearCache(archive.infoHash);
+    assert.equal(result.cleared, 400);
+
+    // Removed with its data, then re-added — re-adding is what resets the
+    // engine's bitfield, which deleting files underneath it would not.
+    assert.equal(calls[0].op, 'remove');
+    assert.equal(calls[0].deleteData, true);
+    assert.equal(calls[1].op, 'add');
+    assert.equal(calls[1].mode, 'cache');
+    assert.equal(calls[1].savePath, dir);
+  });
+
+  it('refuses to clear a mirror, which others may be relying on', async () => {
+    const { library, entry: archive } = await makeLibrary({ mode: 'mirror' });
+    await assert.rejects(
+      () => library.clearCache(archive.infoHash),
+      /is a mirror/,
+    );
+  });
+
+  it('reports an unknown archive rather than clearing nothing quietly', async () => {
+    const { library } = await makeLibrary();
+    await assert.rejects(
+      () => library.clearCache('f'.repeat(40)),
+      /unknown archive/,
+    );
   });
 });

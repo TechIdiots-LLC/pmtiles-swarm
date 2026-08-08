@@ -98,6 +98,24 @@ export class Library {
   }
 
   /**
+   * Where an archive's data belongs, given how it is being held.
+   *
+   * Cache-mode archives go somewhere separate: they are a scatter of pieces
+   * that will never be a complete file, and keeping them apart from mirrors
+   * makes both legible on disk and makes the cache measurable and clearable as
+   * a unit.
+   * @param {string} mode - 'mirror' or 'cache'.
+   * @param {string} [explicit] - An explicit override.
+   * @returns {string} - The save path.
+   */
+  #savePathFor(mode, explicit) {
+    if (explicit) return explicit;
+    return mode === 'cache'
+      ? (this.#config.cacheSavePath ?? path.join(this.#config.dataDir, 'cache'))
+      : this.#config.webtorrent.savePath;
+  }
+
+  /**
    * Adds a remote PMTiles archive by streaming it past the hasher.
    * @param {string} url - HTTP(S) URL of the archive.
    * @param {object} [options] - Category, trackers, piece length, save path.
@@ -115,7 +133,10 @@ export class Library {
     // Retaining leaves a seedable copy behind. Discarding is explicit, because
     // the result is a torrent this node cannot serve.
     const retain = options.retain !== false;
-    const savePath = options.savePath ?? this.#config.webtorrent.savePath;
+    const savePath = this.#savePathFor(
+      retain ? 'mirror' : 'cache',
+      options.savePath,
+    );
 
     const created = await createTorrentFromUrl(url, {
       // Upstreams often publish under a bare dated name; a source can rename it
@@ -177,11 +198,11 @@ export class Library {
     const existing = this.#catalog.get(parsed.infoHash);
     if (existing) return existing;
 
-    const savePath = options.savePath ?? this.#config.webtorrent.savePath;
     // Default to cache: joining a torrent should not silently commit the disk
     // to a full copy of something that may be hundreds of gigabytes. Mirroring
     // is opt-in.
     const mode = options.mode ?? 'cache';
+    const savePath = this.#savePathFor(mode, options.savePath);
     await this.#engine.add({
       torrentFile,
       magnet: torrentFile ? undefined : input.magnet,
@@ -471,6 +492,89 @@ export class Library {
       supersededBy: rebuilt.infoHash,
     });
     return rebuilt;
+  }
+
+  /**
+   * Reports how much disk an archive's data is occupying.
+   *
+   * For a mirror this is the archive; for a cache-mode archive it is the pieces
+   * on-demand reading has accumulated, which is the number worth watching
+   * because nothing bounds it.
+   * @param {string} infoHash - The archive.
+   * @returns {Promise<number>} - Bytes on disk, zero if nothing is there.
+   */
+  async diskUsage(infoHash) {
+    const entry = this.#catalog.get(infoHash);
+    if (!entry?.savePath) return 0;
+
+    // Engines lay data out differently — one file, a part file beside it, or a
+    // directory — so measure everything belonging to this archive rather than
+    // assuming a shape.
+    const prefix = entry.name;
+    let total = 0;
+    let names;
+    try {
+      names = await fs.readdir(entry.savePath);
+    } catch {
+      return 0;
+    }
+
+    for (const name of names) {
+      if (name !== prefix && !name.startsWith(prefix) &&
+          !name.includes(infoHash)) {
+        continue;
+      }
+      const stat = await fs
+        .stat(path.join(entry.savePath, name))
+        .catch(() => null);
+      if (stat?.isFile()) total += stat.size;
+    }
+    return total;
+  }
+
+  /**
+   * Drops an archive's cached pieces without forgetting the archive.
+   *
+   * The unit of eviction is the whole archive, deliberately. Neither engine can
+   * be told to forget one piece — libtorrent and WebTorrent both track what
+   * they hold in a bitfield that the stored data has to agree with — so a
+   * per-piece cache limit is not something that can be honestly offered. What
+   * can be offered is this: reclaim everything one archive has accumulated, and
+   * rejoin it so it starts again from nothing.
+   * @param {string} infoHash - The archive to clear.
+   * @returns {Promise<{cleared: number}>} - Bytes reclaimed.
+   */
+  async clearCache(infoHash) {
+    const entry = this.#catalog.get(infoHash);
+    if (!entry) throw new Error('unknown archive');
+    if (entry.mode !== 'cache') {
+      throw new Error(
+        `${entry.name} is a mirror, not a cache; removing its data would stop ` +
+          'it seeding a copy others may depend on',
+      );
+    }
+
+    const before = await this.diskUsage(infoHash);
+
+    // Remove with its data, then rejoin from the stored .torrent. Re-adding is
+    // what resets the engine's bitfield: deleting the files underneath a
+    // running torrent leaves it convinced it still holds them.
+    await this.#engine.remove(infoHash, { deleteData: true }).catch(() => {});
+
+    const torrentFile = await fs
+      .readFile(entry.torrentPath)
+      .then((buffer) => new Uint8Array(buffer))
+      .catch(() => null);
+
+    await this.#engine.add({
+      torrentFile: torrentFile ?? undefined,
+      magnet: torrentFile ? undefined : entry.magnet,
+      savePath: entry.savePath,
+      category: entry.category,
+      mode: 'cache',
+    });
+
+    return { cleared: before };
   }
 
   /**

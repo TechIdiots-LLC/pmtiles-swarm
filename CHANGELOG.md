@@ -4,6 +4,15 @@
 ### ✨ Features and improvements
 - New `sparse` setting, global with a per-archive override, matching tileserver-gl.
 
+- Watch folders can move each archive into the directory a web server serves (`publishDir`) and
+  advertise that URL as a web seed, rather than assuming the watched folder is already the web
+  root.
+- Cache-mode archives now live under `cacheSavePath`, separate from mirrors, so a glance at the
+  disk says which files are whole archives and which never will be.
+- `DELETE /api/torrents/{infohash}/cache` reclaims what on-demand reading has accumulated for one
+  archive without forgetting the archive, and `GET /api/torrents/{infohash}` reports `diskBytes`.
+  Nothing else bounded that disk usage.
+
 ### 🐞 Bug fixes
 - **A missing tile answered 204 for every archive, which breaks sparse raster.** MapLibre only
   overzooms a parent tile when the child 404s, so a sparse raster-dem — Mapterhorn, or any
