@@ -12,6 +12,11 @@
 - **An archive can carry several categories.** A planet build can be both `basemaps` and `weekly`
   without choosing. Feeds match on *any* tag, so it appears in both. Catalogues holding the older
   single `category` string are read as a list of one and normalised on the next write.
+- **Optional MD5**, `md5: true` globally or per add, published as `<pmtiles:md5>` in the feed and
+  exposed in the API. Not for integrity — the torrent already verifies per piece, which is
+  stronger — but for the quick manual check and for tooling that expects a checksum. Off by
+  default because on a local file it costs a second read of the whole archive; where the bytes
+  are already streaming past it is free.
 - **Run a command when a download finishes.** `onComplete` closes the loop for a build pipeline:
   subscribe to a feed of source data, let the swarm fetch it, start the job that turns it into
   something worth publishing. Placeholders match a torrent client's, so an existing

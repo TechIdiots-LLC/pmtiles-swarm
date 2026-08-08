@@ -13,6 +13,8 @@ import {
   verifyPassword,
 } from '../src/auth.js';
 import { Catalog, normalizeCategories } from '../src/catalog.js';
+import crypto from 'node:crypto';
+import { parseFeed, renderFeed } from '../src/feed.js';
 import { substitute } from '../src/hooks.js';
 import { loadConfig, saveConfig } from '../src/config.js';
 import { evaluate, limitFor } from '../src/seeding.js';
@@ -31,7 +33,7 @@ import { LibtorrentReadEngine } from '../src/read-engine.js';
 import { buildTileJson, extensionMatches } from '../src/tilejson.js';
 import { TileStore } from '../src/tiles.js';
 import { WarmRunner, countTiles, tilesInBounds } from '../src/warm.js';
-import { TILE_TYPE, writeArchive } from './pmtiles-fixture.js';
+import { TILE_TYPE, buildArchive, writeArchive } from './pmtiles-fixture.js';
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-swarm-tiles-'));
 after(() => fs.rm(workspace, { recursive: true, force: true }));
@@ -2165,5 +2167,81 @@ describe('running a script when a download finishes', () => {
     const config = await loadConfig();
     const result = await saveConfig(config, { feedMaxItems: 10 });
     assert.deepEqual(result.applied, ['feedMaxItems']);
+  });
+});
+
+describe('optional MD5', () => {
+  /**
+   * Builds an archive large enough to arrive in several chunks, which is where
+   * a digest taken beside a stream rather than in it loses data.
+   * @returns {Buffer} - The archive bytes.
+   */
+  function bigArchive() {
+    const tiles = [];
+    for (let x = 0; x < 4; x++) {
+      for (let y = 0; y < 4; y++) {
+        tiles.push({ z: 2, x, y, data: Buffer.alloc(65536, x * 4 + y) });
+      }
+    }
+    return buildArchive({ tiles });
+  }
+
+  /**
+   * Adds a local archive and reports the digest recorded.
+   * @param {object} options - Add options.
+   * @returns {Promise<{md5: string|undefined, truth: string}>} - Both digests.
+   */
+  async function add(options) {
+    const dir = await fs.mkdtemp(path.join(workspace, 'md5-'));
+    const bytes = bigArchive();
+    const file = path.join(dir, 'a.pmtiles');
+    await fs.writeFile(file, bytes);
+
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    const library = new Library({
+      catalog,
+      engine: { name: 'x', add: async () => {} },
+      config: { dataDir: dir, webtorrent: { savePath: dir }, trackers: [] },
+    });
+    const entry = await library.addLocalArchive(file, options);
+    return {
+      md5: entry.md5,
+      truth: crypto.createHash('md5').update(bytes).digest('hex'),
+    };
+  }
+
+  it('records a digest that matches md5sum', async () => {
+    // A checksum that is wrong is worse than none, because it looks like one.
+    const { md5, truth } = await add({ md5: true });
+    assert.equal(md5, truth);
+  });
+
+  it('records nothing when it was not asked for', async () => {
+    // It costs a second read of the whole archive on this path, so it is not
+    // something to do by default.
+    const { md5 } = await add({});
+    assert.equal(md5, undefined);
+  });
+
+  it('publishes the digest in the feed only when there is one', () => {
+    const withDigest = renderFeed(
+      [entry({ md5: 'd7d470adeaf9954e5a8e3ce2ce749795' })],
+      { title: 'x', baseUrl: 'https://x.org' },
+    );
+    assert.match(withDigest, /<pmtiles:md5>d7d470adeaf9954e5a8e3ce2ce749795<\/pmtiles:md5>/);
+
+    const without = renderFeed([entry()], { title: 'x', baseUrl: 'https://x.org' });
+    assert.ok(!without.includes('pmtiles:md5'));
+  });
+
+  it('reads a digest back out of a feed', () => {
+    // So a subscriber can carry it forward rather than losing it on the hop.
+    const xml = renderFeed(
+      [entry({ md5: 'd7d470adeaf9954e5a8e3ce2ce749795', torrentPath: '/x.torrent' })],
+      { title: 'x', baseUrl: 'https://x.org' },
+    );
+    const [item] = parseFeed(xml);
+    assert.equal(item.md5, 'd7d470adeaf9954e5a8e3ce2ce749795');
   });
 });

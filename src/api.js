@@ -418,6 +418,7 @@ export function createApp({
         publishDir: body.publishDir,
         webSeedBase: body.webSeedBase,
         allowUnknown: body.allowUnknown,
+        md5: body.md5,
         webSeed: body.webSeed,
       };
 
@@ -595,6 +596,7 @@ export function createApp({
           webSeeds: entry.webSeeds ?? [],
           pmtiles: entry.pmtiles,
           kind: entry.kind,
+          md5: entry.md5,
           sparse: entry.sparse,
           mutable: entry.mutable,
           createdAt: entry.createdAt,

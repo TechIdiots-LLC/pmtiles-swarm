@@ -131,6 +131,7 @@ export class Library {
       trackers: this.#trackersFor(options),
       webSeeds: [...new Set(webSeeds)],
       comment: options.comment,
+      md5: options.md5 ?? this.#config.md5,
     });
 
     return this.#register(created, {
@@ -141,6 +142,7 @@ export class Library {
       pmtiles: summary,
       kind: identified.kind,
       sparse: options.sparse,
+      md5: created.md5,
       webSeeds: [...new Set(webSeeds)],
       seedOnly: true,
     });
@@ -254,6 +256,7 @@ export class Library {
       trackers: this.#trackersFor(options),
       webSeeds: options.webSeeds ?? [],
       comment: options.comment,
+      md5: options.md5 ?? this.#config.md5,
       retainPath: retain ? savePath : undefined,
       signal: controller.signal,
       onProgress: ({ received, total, done }) => {
@@ -273,6 +276,7 @@ export class Library {
       pmtiles: summary,
       kind: identified.kind,
       sparse: options.sparse,
+      md5: created.md5,
       // Whatever was asked for, plus the source when it may be published.
       // Falling back to the source alone dropped a caller's own list — which
       // is precisely the case where the source must not be published and a
@@ -882,6 +886,7 @@ export class Library {
       pieceCount: created.pieceCount,
       pmtiles: details.pmtiles,
       kind: details.kind,
+      md5: details.md5,
       // Left undefined unless asked for, so the format-based default applies
       // and a later change to that default reaches existing archives.
       sparse: details.sparse,

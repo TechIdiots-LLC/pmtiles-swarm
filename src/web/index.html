@@ -325,6 +325,25 @@
             </div>
           </div>
 
+        </fieldset>
+
+        <fieldset id="md5-options">
+          <legend>Checksum</legend>
+          <div class="field">
+            <label>
+              <input type="checkbox" id="want-md5" />
+              Also compute an MD5
+            </label>
+            <div class="sub">
+              For a quick manual check. The torrent already verifies the
+              archive, and per piece rather than as a whole — this is the
+              familiar convenience, not the integrity guarantee.
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset id="url-seeds">
+          <legend>Web seeds</legend>
           <div class="field">
             <label for="extra-seeds">Additional web seeds</label>
             <input id="extra-seeds" placeholder="https://cdn.example.org/planet.pmtiles" />
@@ -749,6 +768,9 @@
         // Joining an existing torrent uses the trackers it already carries, so
         // offering to add more would be offering something that does nothing.
         $('tracker-options').hidden = kind !== 'url' && kind !== 'path';
+        // Only a torrent created here can carry a digest; joining one takes
+        // whatever that torrent already says.
+        $('md5-options').hidden = kind !== 'url' && kind !== 'path';
       }
 
       /** Draws the category chips, existing ones plus whatever was typed. */
@@ -780,6 +802,7 @@
         $('extra-seeds').value = '';
         $('add-error').textContent = '';
         $('use-source-seed').checked = true;
+        $('want-md5').checked = false;
         $('extra-trackers').value = '';
 
         try {
@@ -838,6 +861,8 @@
           .map((url) => url.trim())
           .filter(Boolean);
         if (trackers.length > 0) body.addTrackers = trackers;
+
+        if ($('want-md5').checked) body.md5 = true;
 
         if (kind === 'url') {
           body.retain =

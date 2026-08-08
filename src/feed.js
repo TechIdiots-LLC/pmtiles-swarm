@@ -113,6 +113,7 @@ ${(entry.categories ?? (entry.category ? [entry.category] : []))
       <enclosure url="${xml(torrentUrl)}" length="${xml(entry.size)}" type="application/x-bittorrent"/>
       <pmtiles:infohash>${xml(entry.infoHash)}</pmtiles:infohash>
       <pmtiles:magnet>${xml(entry.magnet)}</pmtiles:magnet>
+${entry.md5 ? `      <pmtiles:md5>${xml(entry.md5)}</pmtiles:md5>` : ''}
 ${mapFields}
     </item>`;
 }
@@ -192,6 +193,7 @@ export function parseFeed(body) {
       torrentUrl,
       // RSS allows several <category> elements, and an archive may be tagged
       // more than once, so take all of them.
+      md5: tag(block, 'pmtiles:md5'),
       categories: [...block.matchAll(/<category>([\s\S]*?)<\/category>/g)]
         .map((match) => decode(match[1]).trim())
         .filter(Boolean),

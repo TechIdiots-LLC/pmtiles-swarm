@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import { pipeline as pipelineAsync } from 'node:stream/promises';
 
 /**
  * Turning a PMTiles archive into a torrent.
@@ -27,6 +28,7 @@ import { Readable } from 'node:stream';
  * @property {string[]} [trackers] - Announce URLs.
  * @property {string[]} [webSeeds] - BEP 19 url-list entries.
  * @property {AbortSignal} [signal] - Cancels a download in progress.
+ * @property {boolean} [md5] - Also compute an MD5 of the archive.
  * @property {boolean} [includeSourceAsWebSeed] - Publish the source URL as a web seed. Default true.
  * @property {string} [comment] - Free-text comment.
  * @property {boolean} [private] - Mark the torrent private (no DHT/PEX).
@@ -55,7 +57,13 @@ export async function createTorrentFromFile(filePath, options = {}) {
   if (!stat.isFile() || stat.size === 0) {
     throw new Error(`not a usable file: ${filePath}`);
   }
-  return buildTorrent(filePath, path.basename(filePath), stat.size, options);
+  // A second read of the archive, which is why it is opt-in. Nothing else here
+  // touches these bytes again once the piece hashes are done.
+  const md5Digest = options.md5 ? await md5File(filePath) : undefined;
+  return buildTorrent(filePath, path.basename(filePath), stat.size, {
+    ...options,
+    md5Digest,
+  });
 }
 
 /**
@@ -112,8 +120,39 @@ export async function createTorrentFromUrl(url, options = {}) {
     );
   }
   const size = Number(response.headers.get('content-length') ?? 0);
-  const stream = Readable.fromWeb(response.body);
-  return buildTorrent(stream, name, size, { ...options, webSeeds });
+  let stream = Readable.fromWeb(response.body);
+
+  // Nothing is kept here, so there is no file to hash afterwards. The bytes
+  // are already going past, so the digest costs nothing to take on the way.
+  let digest;
+  if (options.md5) {
+    const { createHash } = await import('node:crypto');
+    const { Transform } = await import('node:stream');
+    const hash = createHash('md5');
+    // A Transform in the path, not a 'data' listener beside it. Attaching
+    // 'data' puts the stream in flowing mode there and then, so chunks can go
+    // by before whatever consumes it is attached — the digest would be of
+    // however much happened to arrive late, which is worse than no digest at
+    // all because it looks like one.
+    stream = stream.pipe(
+      new Transform({
+        transform(chunk, _encoding, next) {
+          hash.update(chunk);
+          next(null, chunk);
+        },
+        flush(next) {
+          digest = hash.digest('hex');
+          next();
+        },
+      }),
+    );
+  }
+
+  const created = await buildTorrent(stream, name, size, {
+    ...options,
+    webSeeds,
+  });
+  return { ...created, md5: digest };
 }
 
 /**
@@ -169,6 +208,29 @@ async function downloadTo(url, target, onProgress, signal) {
  * @param {CreateTorrentOptions} options - Creation options.
  * @returns {Promise<CreatedTorrent>} - The created torrent.
  */
+/**
+ * Computes an MD5 of a file.
+ *
+ * Not for integrity — the torrent already covers that, and better: it verifies
+ * per piece, so it says *where* something went wrong rather than only that it
+ * did. This is for the quick manual check people actually do, and for tooling
+ * downstream that expects a checksum file next to a download.
+ *
+ * Note what it costs. Everywhere the bytes already stream past — a URL being
+ * fetched — the digest rides along for nothing. Against a file already on disk
+ * there is no such pass to join, so this is a second read of the whole archive.
+ * Opt-in for that reason.
+ * @param {string} filePath - The file to hash.
+ * @returns {Promise<string>} - Lowercase hex digest.
+ */
+async function md5File(filePath) {
+  const { createReadStream } = await import('node:fs');
+  const { createHash } = await import('node:crypto');
+  const hash = createHash('md5');
+  await pipelineAsync(createReadStream(filePath), hash);
+  return hash.digest('hex');
+}
+
 async function buildTorrent(input, name, size, options) {
   const [{ default: createTorrent }, { default: parseTorrent }] =
     await Promise.all([import('create-torrent'), import('parse-torrent')]);
@@ -209,6 +271,7 @@ async function buildTorrent(input, name, size, options) {
     size: parsed.length ?? size,
     pieceLength: parsed.pieceLength,
     pieceCount: parsed.pieces?.length ?? 0,
+    md5: options.md5Digest,
   };
 }
 
