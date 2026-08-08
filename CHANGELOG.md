@@ -12,6 +12,13 @@
 - **An archive can carry several categories.** A planet build can be both `basemaps` and `weekly`
   without choosing. Feeds match on *any* tag, so it appears in both. Catalogues holding the older
   single `category` string are read as a list of one and normalised on the next write.
+- **Run a command when a download finishes.** `onComplete` closes the loop for a build pipeline:
+  subscribe to a feed of source data, let the swarm fetch it, start the job that turns it into
+  something worth publishing. Placeholders match a torrent client's, so an existing
+  `torrent_finished.sh` keeps working. Command and arguments are separate rather than one shell
+  string, so a name with spaces stays one argument. Configurable from the config file only —
+  never through the API, since a token that manages archives should not also choose what code
+  runs as the service user.
 - **A stable URL for the current build.** `/latest/{category}/tiles.json`, plus `archive.torrent`,
   `magnet` and an `.xml` feed of just the newest. A style can point at one and survive every
   rebuild. The tiles it names stay infohash URLs, so they remain immutable and cacheable for a

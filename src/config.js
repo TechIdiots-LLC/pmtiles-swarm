@@ -323,6 +323,35 @@ const DEFAULTS = {
   },
   /** How often to check seeding limits, in seconds. Zero disables it. */
   seedingCheckIntervalSeconds: 3600,
+  /**
+   * Run something when a download finishes.
+   *
+   * This is what closes the loop for a build pipeline: subscribe to a feed of
+   * source data — planet.openstreetmap.org publishes one for the PBF — let the
+   * swarm fetch it, and start the job that turns it into something worth
+   * publishing back.
+   *
+   *   {
+   *     "command": "/work/scripts/torrent_finished.sh",
+   *     "args": ["%N", "%F", "%I"]
+   *   }
+   *
+   * Placeholders match a torrent client's, so an existing script keeps working:
+   * %N name, %L first category, %G all tags, %F content path, %D save path,
+   * %Z size, %C file count, %I infohash.
+   *
+   * Command and arguments are separate rather than one string a shell pulls
+   * apart. Archive names contain spaces and brackets, and every shell-string
+   * hook eventually meets one and does something surprising; an argument vector
+   * means a filename is a filename however it is spelled.
+   *
+   * **Config file only.** This cannot be set through the API, because a token
+   * that manages torrents turning into a token that runs arbitrary commands as
+   * the service user is a large step to take by accident.
+   */
+  onComplete: undefined,
+  /** How often to look for finished downloads, in seconds. */
+  onCompleteCheckIntervalSeconds: 60,
   /** How often to poll subscribed feeds, in seconds. */
   subscriptionIntervalSeconds: 900,
   /** Republish interval for BEP 46 records, in seconds. DHT items expire. */
@@ -429,6 +458,7 @@ export async function loadConfig(configPath) {
  */
 export const RESTART_REQUIRED = new Set([
   'port',
+  'onComplete',
   'allowUnauthenticated',
   'host',
   'dataDir',
@@ -440,6 +470,15 @@ export const RESTART_REQUIRED = new Set([
   'watch',
   'maxConnections',
 ]);
+
+/**
+ * Settings the API refuses to change.
+ *
+ * Not secrets — these decide what code the service runs. An operator token is
+ * meant to manage archives; letting it also choose a command to execute is a
+ * different power, and one worth having to reach the filesystem for.
+ */
+const FILE_ONLY = new Set(['onComplete']);
 
 /** Settings never sent to a client, because they are credentials. */
 const SECRET_PATHS = [
@@ -487,6 +526,14 @@ export async function saveConfig(config, updates, configPath) {
   for (const [key, value] of Object.entries(updates ?? {})) {
     if (!(key in DEFAULTS)) {
       throw new Error(`unknown setting: ${key}`);
+    }
+
+    if (FILE_ONLY.has(key)) {
+      throw new Error(
+        `${key} can only be set in the config file, not through the API. It ` +
+          'runs a command as the service user, and an API token should not be ' +
+          'a way to choose which one.',
+      );
     }
 
     // Never let a redaction placeholder be written back as a real secret.

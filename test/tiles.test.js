@@ -13,6 +13,8 @@ import {
   verifyPassword,
 } from '../src/auth.js';
 import { Catalog, normalizeCategories } from '../src/catalog.js';
+import { substitute } from '../src/hooks.js';
+import { loadConfig, saveConfig } from '../src/config.js';
 import { evaluate, limitFor } from '../src/seeding.js';
 import {
   assertPublishable,
@@ -2105,5 +2107,63 @@ describe('a stable handle for the current build', () => {
     } finally {
       await s.close();
     }
+  });
+});
+
+describe('running a script when a download finishes', () => {
+  const finished = {
+    infoHash: '5e1c143c400d15aaacfb1c748d4ab6d1b46c5df5',
+    name: 'planet-260601.osm.pbf',
+    savePath: '/mnt/store/incoming',
+    size: 82123456789,
+    categories: ['source', 'planet'],
+  };
+
+  it('fills the placeholders a torrent client uses', () => {
+    // So an existing torrent_finished.sh keeps working unchanged.
+    assert.equal(substitute('%N', finished), 'planet-260601.osm.pbf');
+    assert.equal(substitute('%I', finished), finished.infoHash);
+    assert.equal(substitute('%D', finished), '/mnt/store/incoming');
+    assert.equal(substitute('%Z', finished), '82123456789');
+    assert.equal(substitute('%L', finished), 'source');
+    assert.equal(substitute('%G', finished), 'source,planet');
+    assert.equal(
+      substitute('%F', finished),
+      path.join('/mnt/store/incoming', 'planet-260601.osm.pbf'),
+    );
+  });
+
+  it('leaves a name with spaces intact', () => {
+    // The reason arguments are a vector rather than a shell string: this is
+    // one argument, and nothing downstream gets to re-split it.
+    const spaced = { ...finished, name: 'planet 2026 (final).osm.pbf' };
+    assert.equal(substitute('%N', spaced), 'planet 2026 (final).osm.pbf');
+  });
+
+  it('does not re-substitute a value that contains a percent sign', () => {
+    const odd = { ...finished, name: '100%N-complete.pbf' };
+    assert.equal(substitute('%N', odd), '100%N-complete.pbf');
+  });
+
+  it('leaves an unknown placeholder alone rather than blanking it', () => {
+    assert.equal(substitute('%Q', finished), '%Q');
+  });
+
+  it('refuses to be configured through the API', async () => {
+    // A token that manages archives should not also choose what code runs as
+    // the service user. That is a different power, and worth having to reach
+    // the filesystem for.
+    const config = await loadConfig();
+    await assert.rejects(
+      () => saveConfig(config, { onComplete: { command: '/bin/sh' } }),
+      /only be set in the config file/,
+    );
+    assert.equal(config.onComplete, undefined, 'and nothing was applied');
+  });
+
+  it('still allows ordinary settings through', async () => {
+    const config = await loadConfig();
+    const result = await saveConfig(config, { feedMaxItems: 10 });
+    assert.deepEqual(result.applied, ['feedMaxItems']);
   });
 });

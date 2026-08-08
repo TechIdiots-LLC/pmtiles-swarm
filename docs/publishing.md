@@ -65,6 +65,62 @@ Adding from a **local path** never publishes a seed unless you ask: a web seed
 appears only when `webSeedBase` is set, and `publishDir` moves the file without
 implying one.
 
+## Building from a feed of source data
+
+Subscribing is not only for finished archives. The OpenStreetMap project
+publishes an RSS feed of planet PBF torrents, and joining it makes the swarm
+your download manager:
+
+```json
+{
+  "subscriptions": [
+    {
+      "url": "https://planet.openstreetmap.org/pbf/planet-pbf-rss.xml",
+      "mode": "mirror",
+      "categories": ["source"]
+    }
+  ],
+  "onComplete": {
+    "command": "/work/scripts/planetiler_dump.sh",
+    "args": ["%N", "%F", "%I"]
+  }
+}
+```
+
+The feed's items are `.osm.pbf`, not map archives — that is fine. Joining an
+existing torrent does not require it to be anything in particular; only
+*creating* one does. The archive simply is not servable, and nothing tries.
+
+When the download finishes, the command runs. Placeholders match a torrent
+client's, so an existing `torrent_finished.sh` keeps working:
+
+| | |
+| --- | --- |
+| `%N` | Archive name |
+| `%F` | Content path |
+| `%D` | Save path |
+| `%I` | Infohash |
+| `%L` | First category |
+| `%G` | All categories, comma separated |
+| `%Z` | Size in bytes |
+| `%C` | File count |
+
+Point the script's output at a watch folder and the loop closes: source arrives,
+the build runs, the result is published as a torrent with its own feed, and
+another node picks it up.
+
+### Two things done differently
+
+**Command and arguments are separate**, rather than one string a shell pulls
+apart. Archive names contain spaces and brackets — `planet 2026 (final).pmtiles`
+is one argument here, and nothing downstream re-splits it. Every shell-string
+hook eventually meets a name like that.
+
+**This is settable only in the config file, never through the API.** A token
+that manages archives becoming a token that runs arbitrary commands as the
+service user is a large step, and not one to take by accident. `PATCH
+/api/config` refuses it.
+
 ## Adding web seeds to a torrent already published
 
 A web seed can be added to a torrent that is already in circulation, and doing

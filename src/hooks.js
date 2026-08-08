@@ -1,0 +1,182 @@
+import { execFile } from 'node:child_process';
+import path from 'node:path';
+
+/**
+ * Running something when a download finishes.
+ *
+ * The point is to close the loop that a build pipeline needs: subscribe to a
+ * feed of source data, let the swarm fetch it, and start the job that turns it
+ * into something worth publishing. That is what a torrent client's "run on
+ * completion" hook is for, and it is the piece that lets this replace one.
+ *
+ * Two deliberate differences from how a client usually does it.
+ *
+ * The command and its arguments are separate, rather than one string pulled
+ * apart by a shell. Archive names contain spaces, brackets and occasionally
+ * quotes; every shell-string hook eventually meets one and does something
+ * surprising. Passing an argument vector means a filename is a filename however
+ * it is spelled, and nothing is ever re-parsed.
+ *
+ * And this is configurable only from the config file, never over the API. A
+ * token that manages torrents becoming a token that runs arbitrary commands as
+ * the service user is a large step, and not one to take by accident.
+ */
+
+/**
+ * Fills the placeholders in one argument.
+ *
+ * The set mirrors a torrent client's, so an existing script keeps working:
+ *
+ *   %N name          %I infohash      %F content path
+ *   %L category      %G tags          %D save path
+ *   %Z size          %C file count
+ *
+ * @param {string} argument - An argument possibly containing placeholders.
+ * @param {object} entry - The catalog entry that finished.
+ * @returns {string} - The argument with placeholders replaced.
+ */
+export function substitute(argument, entry) {
+  const categories = entry.categories ?? [];
+  const contentPath = entry.savePath
+    ? path.join(entry.savePath, entry.name ?? '')
+    : (entry.name ?? '');
+
+  const values = {
+    '%N': entry.name ?? '',
+    '%L': categories[0] ?? '',
+    '%G': categories.join(','),
+    '%F': contentPath,
+    '%R': entry.savePath ?? '',
+    '%D': entry.savePath ?? '',
+    '%C': String(entry.fileCount ?? 1),
+    '%Z': String(entry.size ?? 0),
+    '%I': entry.infoHash ?? '',
+    '%J': entry.infoHashV2 ?? '',
+    '%K': entry.infoHash ?? '',
+    '%T': (entry.trackers ?? [])[0] ?? '',
+  };
+
+  // One pass, so a value containing a percent sign is not re-substituted.
+  return argument.replace(/%[A-Z]/g, (token) =>
+    token in values ? values[token] : token,
+  );
+}
+
+/**
+ * Watches for downloads finishing and runs the configured command.
+ */
+export class CompletionHooks {
+  #library;
+  #config;
+  #timer;
+  #running = new Set();
+
+  /**
+   * @param {import('./library.js').Library} library - The library.
+   * @param {object} config - Resolved configuration.
+   */
+  constructor(library, config) {
+    this.#library = library;
+    this.#config = config;
+  }
+
+  /** Whether a command is configured. @returns {boolean} - True when armed. */
+  get enabled() {
+    return Boolean(this.#config.onComplete?.command);
+  }
+
+  /**
+   * Starts watching.
+   * @returns {void}
+   */
+  start() {
+    if (!this.enabled) return;
+    const seconds = this.#config.onCompleteCheckIntervalSeconds ?? 60;
+
+    const run = () =>
+      this.sweep().catch((error) =>
+        console.error(`[hook] sweep failed: ${error.message}`),
+      );
+    run();
+    this.#timer = setInterval(run, seconds * 1000);
+    this.#timer.unref?.();
+    console.log(`[hook] will run ${this.#config.onComplete.command} on completion`);
+  }
+
+  /** Stops watching. @returns {void} */
+  stop() {
+    if (this.#timer) clearInterval(this.#timer);
+    this.#timer = undefined;
+  }
+
+  /**
+   * Fires the hook for anything that has finished since the last look.
+   * @returns {Promise<object[]>} - The entries the hook ran for.
+   */
+  async sweep() {
+    const live = await this.#library.listWithStatus().catch(() => []);
+    const fired = [];
+
+    for (const entry of live) {
+      if (entry.completedAt) continue;
+      if (!(entry.status?.progress >= 1)) continue;
+      // A slow hook must not be started twice by the next sweep.
+      if (this.#running.has(entry.infoHash)) continue;
+
+      // Recorded before running, not after. A hook that fails should not run
+      // again every minute forever — a build that takes six hours would be
+      // started six times over.
+      await this.#library.catalog.put({
+        infoHash: entry.infoHash,
+        completedAt: new Date().toISOString(),
+      });
+
+      this.#running.add(entry.infoHash);
+      fired.push(entry);
+      this.#run(entry).finally(() => this.#running.delete(entry.infoHash));
+    }
+
+    return fired;
+  }
+
+  /**
+   * Runs the command for one archive.
+   * @param {object} entry - The archive that finished.
+   * @returns {Promise<void>} - Resolves when the command exits.
+   */
+  #run(entry) {
+    const { command, args = [], timeoutSeconds } = this.#config.onComplete;
+    const filled = args.map((argument) => substitute(argument, entry));
+
+    console.log(`[hook] ${entry.name}: ${command} ${filled.join(' ')}`);
+
+    return new Promise((resolve) => {
+      execFile(
+        command,
+        filled,
+        {
+          // A tile build runs for hours. Nothing here should assume otherwise,
+          // so the default is no timeout at all.
+          timeout: (timeoutSeconds ?? 0) * 1000,
+          maxBuffer: 4 * 1024 * 1024,
+          cwd: this.#config.onComplete.cwd,
+          env: { ...process.env, ...(this.#config.onComplete.env ?? {}) },
+        },
+        (error, stdout, stderr) => {
+          if (error) {
+            console.error(`[hook] ${entry.name}: ${error.message}`);
+          } else {
+            console.log(`[hook] ${entry.name}: finished`);
+          }
+          const output = `${stdout ?? ''}${stderr ?? ''}`.trim();
+          if (output) {
+            for (const line of output.split('\n').slice(-20)) {
+              console.log(`[hook]   ${line}`);
+            }
+          }
+          resolve();
+        },
+      );
+    });
+  }
+}
