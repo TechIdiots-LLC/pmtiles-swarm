@@ -178,6 +178,25 @@ export function createApp({
     }),
   );
 
+  // Stops a remote add that is still streaming. Hashing a remote archive can
+  // run for hours and move hundreds of gigabytes; realising it was a mistake
+  // should not mean killing the process.
+  app.get(
+    '/api/adds',
+    route(async (_req, res) => res.json({ running: library.runningAdds?.() ?? [] })),
+  );
+
+  app.delete(
+    '/api/adds',
+    route(async (req, res) => {
+      const cancelled = library.cancelAdd?.(req.query.url) ?? [];
+      if (cancelled.length === 0) {
+        return res.status(404).json({ error: 'nothing to cancel' });
+      }
+      res.json({ cancelled });
+    }),
+  );
+
   app.get(
     '/api/torrents',
     route(async (_req, res) => res.json(await library.listWithStatus())),
@@ -497,6 +516,55 @@ export function createApp({
     return Boolean(category) && allowed.includes(category);
   };
 
+  /**
+   * The whole catalogue, for a peer keeping itself in step.
+   *
+   * Deliberately separate from /api/torrents, which is the console's endpoint
+   * and will change shape as the console does. A sync contract should not be
+   * coupled to a user interface's convenience.
+   *
+   * The difference from the RSS feed is not the encoding, it is the meaning.
+   * A feed says "here is what is new" and is bounded by feedMaxItems, so a
+   * peer offline long enough misses things permanently and never learns it.
+   * This says "here is everything", which is what lets a consumer reconcile
+   * rather than accumulate.
+   */
+  app.get(
+    '/api/catalog',
+    route(async (req, res) => {
+      const entries = catalog
+        .list()
+        .filter((entry) => publishes(entry.category, req))
+        .map((entry) => ({
+          infoHash: entry.infoHash,
+          name: entry.name,
+          size: entry.size,
+          category: entry.category,
+          magnet: entry.magnet,
+          torrent: `${baseUrl(req)}/archives/${entry.infoHash}/archive.torrent`,
+          webSeeds: entry.webSeeds ?? [],
+          pmtiles: entry.pmtiles,
+          kind: entry.kind,
+          sparse: entry.sparse,
+          mutable: entry.mutable,
+          createdAt: entry.createdAt,
+        }));
+
+      res.json({
+        // Named so a consumer can refuse a document it does not understand
+        // rather than silently syncing half of it.
+        format: 'pmtiles-swarm-catalog/1',
+        generatedAt: new Date().toISOString(),
+        // Whether this is everything, or only what is shared publicly. A
+        // consumer must not prune against a partial view.
+        complete: !Array.isArray(config.feedCategories) ||
+          (auth.enabled && auth.isAuthenticated(req)),
+        count: entries.length,
+        archives: entries,
+      });
+    }),
+  );
+
   app.get('/feed.xml', (req, res) => {
     res.type('application/rss+xml').send(
       renderFeed(
@@ -552,10 +620,32 @@ export function createApp({
 
   // The .torrent under the archive root, so everything a TileJSON consumer
   // needs hangs off one prefix rather than being split across /api.
-  app.get('/archives/:infoHash/archive.torrent', (req, res, next) => {
-    req.url = `/api/torrents/${req.params.infoHash}/file`;
-    app.handle(req, res, next);
-  });
+  //
+  // Served directly rather than by re-dispatching to the /api/ route. Doing
+  // that put the request back through the guard on an /api/ path, so on a node
+  // with authentication configured this answered 401 — to the very callers it
+  // exists for, since this is the URL the TileJSON torrent block advertises and
+  // the one a syncing peer follows.
+  app.get(
+    '/archives/:infoHash/archive.torrent',
+    route(async (req, res) => {
+      const entry = catalog.get(req.params.infoHash);
+      if (!entry?.torrentPath) {
+        return res
+          .status(404)
+          .json({ error: 'no .torrent stored for this archive' });
+      }
+      const body = await fs.readFile(entry.torrentPath).catch(() => null);
+      if (!body) return res.status(404).json({ error: 'torrent file missing' });
+      res.setHeader('access-control-allow-origin', '*');
+      res.type('application/x-bittorrent');
+      res.setHeader(
+        'content-disposition',
+        `attachment; filename="${entry.name}.torrent"`,
+      );
+      res.send(body);
+    }),
+  );
 
   app.get(
     '/archives/:infoHash/:z/:x/:y.:ext',

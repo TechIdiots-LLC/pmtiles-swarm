@@ -228,7 +228,27 @@ const DEFAULTS = {
    * root, since nothing is moved.
    */
   watch: [],
-  /** Feeds to follow: [{ url, mode, category }] where mode is 'mirror' or 'cache'. */
+  /**
+   * Peers to follow.
+   *
+   * `[{ url, mode, category, filter, token, protocol, prune }]`
+   *
+   *   url       an RSS feed, or a peer's /api/catalog
+   *   protocol  'rss' or 'api'; inferred from the URL when omitted
+   *   mode      'mirror' (whole archive) or 'cache' (only what is read)
+   *   token     presented to the peer, which may then publish more than it
+   *             does to the world — see feedCategories
+   *   filter    regex on the archive name
+   *   prune     drop archives this peer no longer lists. Off by default;
+   *             true forgets them and stops seeding, 'delete' also removes
+   *             the data. Only ever applies to archives this peer sent, and
+   *             never against a filtered or partial view.
+   *
+   * RSS says "here is what is new" and is bounded by the publisher's
+   * feedMaxItems, so a node offline long enough misses things permanently. The
+   * API says "here is everything", which is what makes reconciling possible —
+   * and pruning, which needs to be able to notice an absence.
+   */
   subscriptions: [],
   /**
    * How often to re-check whether the sources archives were built from have

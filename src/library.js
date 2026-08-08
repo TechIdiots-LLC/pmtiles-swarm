@@ -28,6 +28,8 @@ export class Library {
   #config;
   /** Serialises rebuilds so a sweep cannot start several multi-hour hashes at once. */
   #rebuildQueue = Promise.resolve();
+  /** In-flight remote adds, by URL, so they can be cancelled. */
+  #running = new Map();
 
   /**
    * Creates the service.
@@ -40,6 +42,18 @@ export class Library {
     this.#catalog = catalog;
     this.#engine = engine;
     this.#config = config;
+  }
+
+  /**
+   * The catalog this library writes to.
+   *
+   * Exposed for the subscription manager, which has to reconcile against what
+   * is already held — it cannot ask "what did this peer send me that it no
+   * longer lists" without seeing the whole catalogue.
+   * @returns {import('./catalog.js').Catalog} - The catalog.
+   */
+  get catalog() {
+    return this.#catalog;
   }
 
   /** @returns {string} - Where generated .torrent files are written. */
@@ -130,6 +144,32 @@ export class Library {
   }
 
   /**
+   * Stops an in-flight remote add.
+   * @param {string} [url] - The source URL, or all of them when omitted.
+   * @returns {string[]} - The URLs cancelled.
+   */
+  cancelAdd(url) {
+    const targets = url ? [url] : [...this.#running.keys()];
+    const cancelled = [];
+    for (const target of targets) {
+      const controller = this.#running.get(target);
+      if (!controller) continue;
+      controller.abort();
+      this.#running.delete(target);
+      cancelled.push(target);
+    }
+    return cancelled;
+  }
+
+  /**
+   * Remote adds currently running.
+   * @returns {string[]} - Their source URLs.
+   */
+  runningAdds() {
+    return [...this.#running.keys()];
+  }
+
+  /**
    * Adds a remote PMTiles archive by streaming it past the hasher.
    * @param {string} url - HTTP(S) URL of the archive.
    * @param {object} [options] - Category, trackers, piece length, save path.
@@ -139,10 +179,16 @@ export class Library {
     const existing = this.#catalog.findBySource(url);
     if (existing) return existing;
 
+    // Tracked so it can be stopped. Hashing a remote archive can run for hours
+    // and move hundreds of gigabytes; discovering it was a mistake should not
+    // mean killing the process.
+    const controller = new AbortController();
+    this.#running.set(url, controller);
+
     // Probing reads only the header and directory, so this is cheap even
     // against a multi-gigabyte archive — worth doing before committing to a
     // download that may take hours.
-    const identified = await identifyUrl(url);
+    const identified = await identifyUrl(url, { signal: controller.signal });
     assertPublishable(identified, {
       allowUnknown: options.allowUnknown ?? this.#config.allowUnknownArchives,
     });
@@ -188,6 +234,7 @@ export class Library {
       webSeeds: options.webSeeds ?? [],
       comment: options.comment,
       retainPath: retain ? savePath : undefined,
+      signal: controller.signal,
       onProgress: ({ received, total, done }) => {
         const pct = total ? ((received / total) * 100).toFixed(1) : '?';
         console.log(
@@ -195,6 +242,8 @@ export class Library {
         );
       },
     });
+
+    this.#running.delete(url);
 
     return this.#register(created, {
       category: options.category,
@@ -268,6 +317,11 @@ export class Library {
       source: {
         type: input.magnet ? 'magnet' : 'torrent',
         location: input.magnet ?? input.torrentPath ?? 'uploaded',
+        // Which peer sent it, when one did. This is what lets pruning tell an
+        // archive a peer offered from one built here or added by hand, and so
+        // what keeps it from deleting things that were never the peer's to
+        // retract.
+        subscription: options.subscriptionUrl,
       },
       savePath,
       torrentPath: storedTorrentPath,

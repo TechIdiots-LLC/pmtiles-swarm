@@ -79,6 +79,8 @@ export class SubscriptionManager {
    * @returns {Promise<object[]>} - Entries added from this feed.
    */
   async #poll(subscription) {
+    if (this.#isApi(subscription)) return this.#syncFromApi(subscription);
+
     const response = await fetch(subscription.url, {
       headers: {
         accept: 'application/rss+xml, application/xml, text/xml',
@@ -122,6 +124,149 @@ export class SubscriptionManager {
     return added;
   }
 
+/**
+   * Whether this subscription speaks the catalogue API rather than RSS.
+   * @param {object} subscription - The subscription.
+   * @returns {boolean} - True for the API.
+   */
+  #isApi(subscription) {
+    if (subscription.protocol) return subscription.protocol === 'api';
+    return /\/api\/catalog\/?$/.test(subscription.url);
+  }
+
+  /**
+   * Reconciles against a peer's whole catalogue.
+   *
+   * The difference from a feed is the meaning, not the encoding. A feed says
+   * "here is what is new" and is bounded, so a node offline long enough misses
+   * things permanently and never learns it did. This says "here is everything",
+   * which is the only way a consumer can notice an absence — and absence is the
+   * whole point of pruning.
+   * @param {object} subscription - The subscription.
+   * @returns {Promise<object[]>} - Entries added this pass.
+   */
+  async #syncFromApi(subscription) {
+    const response = await fetch(subscription.url, {
+      headers: {
+        accept: 'application/json',
+        ...(subscription.token
+          ? { authorization: `Bearer ${subscription.token}` }
+          : {}),
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`${response.status} ${response.statusText}`);
+    }
+
+    const document = await response.json();
+    if (!String(document.format ?? '').startsWith('pmtiles-swarm-catalog/')) {
+      throw new Error(
+        'not a pmtiles-swarm catalogue; refusing to sync against a document ' +
+          'whose shape is unknown',
+      );
+    }
+
+    const archives = (document.archives ?? []).filter(
+      (archive) =>
+        !subscription.filter ||
+        new RegExp(subscription.filter, 'i').test(archive.name ?? ''),
+    );
+
+    const added = [];
+    for (const archive of archives) {
+      if (this.#seen.has(archive.infoHash)) continue;
+      this.#seen.add(archive.infoHash);
+      try {
+        const entry = await this.#add(
+          {
+            title: archive.name,
+            magnet: archive.magnet,
+            torrentUrl: archive.torrent,
+            infoHash: archive.infoHash,
+            category: archive.category,
+          },
+          subscription,
+        );
+        if (entry) {
+          added.push(entry);
+          console.log(
+            `[sync] ${subscription.mode ?? 'cache'} ${entry.name} from ${subscription.url}`,
+          );
+        }
+      } catch (error) {
+        console.error(`[sync] could not add "${archive.name}": ${error.message}`);
+      }
+    }
+
+    await this.#prune(subscription, document, archives);
+    return added;
+  }
+
+  /**
+   * Drops archives this subscription no longer lists.
+   *
+   * Off unless asked for, and narrow when on. Four things are never pruned,
+   * and each would otherwise be a way to lose something that was not the
+   * peer's to retract:
+   *
+   *   - anything created here, from a watch folder, a URL or a local file;
+   *   - anything added by hand, which is an operator's decision, not a feed's;
+   *   - anything another subscription still lists, since one peer dropping it
+   *     says nothing about the other;
+   *   - everything, if the peer's document was partial — a filtered view is
+   *     not evidence of absence.
+   *
+   * `prune: true` stops seeding and forgets the archive but leaves the data.
+   * `prune: "delete"` also removes the files.
+   * @param {object} subscription - The subscription.
+   * @param {object} document - The catalogue document received.
+   * @param {object[]} listed - The archives it listed, after filtering.
+   * @returns {Promise<void>} - Resolves once pruning is done.
+   */
+  async #prune(subscription, document, listed) {
+    if (!subscription.prune) return;
+
+    // A filtered view is not evidence of absence. Pruning against one would
+    // delete everything the filter excluded.
+    if (document.complete === false) {
+      console.warn(
+        `[sync] ${subscription.url} returned a partial catalogue; not pruning`,
+      );
+      return;
+    }
+    if (subscription.filter) {
+      console.warn(
+        `[sync] ${subscription.url} has a filter, so absence is expected; not pruning`,
+      );
+      return;
+    }
+
+    const present = new Set(listed.map((archive) => archive.infoHash));
+    const others = (this.#config.subscriptions ?? []).filter(
+      (other) => other !== subscription,
+    );
+
+    for (const entry of this.#library.catalog.list()) {
+      if (entry.source?.subscription !== subscription.url) continue;
+      if (present.has(entry.infoHash)) continue;
+
+      // Another peer still offering it means it has not gone away.
+      const claimedElsewhere = others.some(
+        (other) => other.url === entry.source?.subscription,
+      );
+      if (claimedElsewhere) continue;
+
+      console.log(
+        `[sync] ${entry.name} is no longer listed by ${subscription.url}; removing`,
+      );
+      await this.#library
+        .remove(entry.infoHash, { deleteData: subscription.prune === 'delete' })
+        .catch((error) =>
+          console.error(`[sync] could not remove ${entry.name}: ${error.message}`),
+        );
+    }
+  }
+
   /**
    * Adds one feed item to the library.
    * @param {import('./feed.js').FeedItem} item - The item.
@@ -132,6 +277,9 @@ export class SubscriptionManager {
     const options = {
       category: subscription.category ?? item.category,
       savePath: subscription.savePath,
+      // Provenance. Without it, prune cannot tell an archive this peer sent
+      // from one built here or added by hand, and would happily delete both.
+      subscriptionUrl: subscription.url,
       // Cache mode joins the swarm without pulling the whole archive; the
       // pieces it does hold are still served to other peers.
       paused: (subscription.mode ?? 'cache') === 'cache',

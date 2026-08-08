@@ -26,6 +26,7 @@ import { Readable } from 'node:stream';
  * @property {number} [pieceLength] - Piece size in bytes; must be a power of two.
  * @property {string[]} [trackers] - Announce URLs.
  * @property {string[]} [webSeeds] - BEP 19 url-list entries.
+ * @property {AbortSignal} [signal] - Cancels a download in progress.
  * @property {boolean} [includeSourceAsWebSeed] - Publish the source URL as a web seed. Default true.
  * @property {string} [comment] - Free-text comment.
  * @property {boolean} [private] - Mark the torrent private (no DHT/PEX).
@@ -95,7 +96,7 @@ export async function createTorrentFromUrl(url, options = {}) {
     // only one trip over the network — which is the expensive part — and it
     // leaves a seedable copy behind.
     const target = path.join(options.retainPath, name);
-    await downloadTo(url, target, options.onProgress);
+    await downloadTo(url, target, options.onProgress, options.signal);
     const created = await createTorrentFromFile(target, {
       ...options,
       name,
@@ -104,7 +105,7 @@ export async function createTorrentFromUrl(url, options = {}) {
     return { ...created, retainedAt: target };
   }
 
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: options.signal });
   if (!response.ok || !response.body) {
     throw new Error(
       `could not read ${url}: ${response.status} ${response.statusText}`,
@@ -120,13 +121,16 @@ export async function createTorrentFromUrl(url, options = {}) {
  * @param {string} url - Source URL.
  * @param {string} target - Destination path.
  * @param {Function} [onProgress] - Called with {received, total}.
+ * @param {AbortSignal} [signal] - Cancels the download.
  * @returns {Promise<number>} - Bytes written.
  */
-async function downloadTo(url, target, onProgress) {
+async function downloadTo(url, target, onProgress, signal) {
   const { createWriteStream } = await import('node:fs');
   const { pipeline } = await import('node:stream/promises');
 
-  const response = await fetch(url);
+  // Without a signal here, a 700 GiB download cannot be stopped short of
+  // killing the process — which is exactly what it took before this existed.
+  const response = await fetch(url, { signal });
   if (!response.ok || !response.body) {
     throw new Error(
       `could not read ${url}: ${response.status} ${response.statusText}`,
@@ -150,7 +154,9 @@ async function downloadTo(url, target, onProgress) {
     }
   });
 
-  await pipeline(source, createWriteStream(target));
+  // Passing the signal to pipeline as well is what tears the write down
+  // mid-stream rather than only stopping the next read.
+  await pipeline(source, createWriteStream(target), { signal });
   onProgress?.({ received, total, done: true });
   return received;
 }

@@ -88,13 +88,39 @@ export async function identifyFile(filePath) {
 /**
  * Identifies a remote archive with a small range request.
  * @param {string} url - The archive URL.
+ * @param {object} [options] - An abort signal.
  * @returns {Promise<ArchiveKind>} - What it is.
  */
-export async function identifyUrl(url) {
+export async function identifyUrl(url, options = {}) {
   try {
-    const response = await fetch(url, { headers: { range: 'bytes=0-15' } });
+    const response = await fetch(url, {
+      headers: { range: 'bytes=0-15' },
+      signal: options.signal,
+    });
     if (!response.ok && response.status !== 206) return UNKNOWN;
-    return identifyBytes(new Uint8Array(await response.arrayBuffer()));
+    if (!response.body) return UNKNOWN;
+
+    // Read the first bytes off the stream and then stop, rather than
+    // buffering the response. A server that ignores Range answers 200 with the
+    // whole file, and `arrayBuffer()` would obediently download all of it —
+    // hundreds of gigabytes to look at sixteen bytes, before the caller has
+    // agreed to download anything.
+    const reader = response.body.getReader();
+    const head = new Uint8Array(16);
+    let filled = 0;
+    try {
+      while (filled < head.length) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const take = Math.min(value.length, head.length - filled);
+        head.set(value.subarray(0, take), filled);
+        filled += take;
+      }
+    } finally {
+      await reader.cancel().catch(() => {});
+    }
+
+    return identifyBytes(head.subarray(0, filled));
   } catch {
     return UNKNOWN;
   }
