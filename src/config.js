@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { hashPassword } from './auth.js';
 import path from 'node:path';
 
 /**
@@ -103,6 +104,36 @@ const DEFAULTS = {
    * things to distribute.
    */
   allowUnknownArchives: false,
+  /**
+   * Who may administer this node.
+   *
+   * Tiles, TileJSON and the feed are always public — serving them is the point.
+   * Everything under /api/ can create torrents, move files, delete data and
+   * rewrite this configuration, so it is gated whenever anything here is set.
+   *
+   *   apiKey        a bearer token, for scripts and sibling nodes
+   *   username      defaults to "admin"
+   *   password      plaintext; keep the config file readable only by its owner
+   *   passwordHash  a scrypt$salt$hash string, preferred over password
+   *
+   * Setting a password through PATCH /api/config stores the hash rather than
+   * the plaintext.
+   */
+  auth: {
+    apiKey: undefined,
+    username: 'admin',
+    password: undefined,
+    passwordHash: undefined,
+    sessionTtlSeconds: 12 * 60 * 60,
+  },
+  /**
+   * Permit listening on a reachable address with no authentication.
+   *
+   * The node refuses to start otherwise, because that failure is silent: it
+   * works perfectly and looks fine until somebody who is not you finds the
+   * port. Set this only for a genuinely trusted network.
+   */
+  allowUnauthenticated: false,
   /** Public base URL, used to build absolute links in the RSS feed and TileJSON. */
   publicUrl: undefined,
   /**
@@ -309,6 +340,7 @@ export async function loadConfig(configPath) {
  */
 export const RESTART_REQUIRED = new Set([
   'port',
+  'allowUnauthenticated',
   'host',
   'dataDir',
   'engine',
@@ -321,7 +353,12 @@ export const RESTART_REQUIRED = new Set([
 ]);
 
 /** Settings never sent to a client, because they are credentials. */
-const SECRET_PATHS = [['qbittorrent', 'password']];
+const SECRET_PATHS = [
+  ['qbittorrent', 'password'],
+  ['auth', 'password'],
+  ['auth', 'passwordHash'],
+  ['auth', 'apiKey'],
+];
 
 /**
  * Copies a config with credentials blanked out.
@@ -363,9 +400,18 @@ export async function saveConfig(config, updates, configPath) {
       throw new Error(`unknown setting: ${key}`);
     }
 
-    // Never let a redaction placeholder be written back as a real password.
-    if (key === 'qbittorrent' && value?.password === '********') {
+    // Never let a redaction placeholder be written back as a real secret.
+    if (value && typeof value === 'object') {
+      for (const field of ['password', 'passwordHash', 'apiKey']) {
+        if (value[field] === '********') delete value[field];
+      }
+    }
+
+    // Store a hash rather than the plaintext when a password is set here.
+    if (key === 'auth' && value?.password) {
+      value.passwordHash = hashPassword(value.password);
       delete value.password;
+      config.auth = { ...config.auth, password: undefined };
     }
 
     const isObject =

@@ -9,6 +9,14 @@
   root.
 - Cache-mode archives now live under `cacheSavePath`, separate from mirrors, so a glance at the
   disk says which files are whole archives and which never will be.
+- **Access control.** Tiles, TileJSON and the feed stay public; everything under `/api/` and the
+  console are guarded whenever `auth.apiKey`, `auth.password` or `auth.passwordHash` is set. A
+  bearer token for scripts, a sign-in form and session cookie for people. Passwords set through
+  the settings screen are stored as a scrypt hash, and credentials are redacted from every
+  response. Configuring nothing keeps the previous behaviour.
+- **A node with no credential now refuses to start on a reachable address**, rather than warning.
+  Bind to loopback, configure `auth`, or set `allowUnauthenticated: true`. See
+  [docs/security.md](docs/security.md).
 - **The web UI is now a real console.** Live-refreshing archive table with progress, peers and
   speeds; a detail panel per archive with disk usage, web seeds and a tile preview; per-archive
   actions for warming, clearing a cache, adding a web seed and removing; export by downloading

@@ -2,6 +2,7 @@
 import fs from 'node:fs/promises';
 import { parseArgs } from 'node:util';
 import { createApp } from './api.js';
+import { assertSafeToListen, createAuth } from './auth.js';
 import { Catalog } from './catalog.js';
 import { loadConfig } from './config.js';
 import { LibtorrentEngine } from './engines/libtorrent.js';
@@ -74,6 +75,11 @@ PMTILES_SWARM_PUBLIC_URL
 
   const config = await loadConfig(values.config);
   if (values.port) config.port = Number(values.port);
+
+  // Before anything is created or any port is bound: an unauthenticated node
+  // on a reachable address fails silently, working perfectly right up until
+  // somebody else finds it.
+  assertSafeToListen(config, createAuth(config));
 
   await fs.mkdir(config.dataDir, { recursive: true });
   if (config.engine === 'webtorrent') {

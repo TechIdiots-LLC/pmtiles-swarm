@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { createAuth } from './auth.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
 import { renderFeed } from './feed.js';
 import { buildTileJson, extensionMatches } from './tilejson.js';
@@ -47,6 +48,35 @@ export function createApp({
   // like an empty map rather than like a configuration mistake.
   if (config.trustProxy) app.set('trust proxy', config.trustProxy);
   app.use(express.json({ limit: '1mb' }));
+
+  // Tiles, TileJSON and the feed stay public — serving them is the point.
+  // Everything else is gated, because it can create torrents, move files,
+  // delete data and rewrite this configuration.
+  const auth = createAuth(config);
+  app.use((req, res, next) => auth.middleware(req, res, next));
+
+  // Lets the console decide between showing a login form and showing the app,
+  // without guessing from a 401 it has not provoked yet.
+  app.get('/api/session', (req, res) => {
+    res.json({
+      required: auth.enabled,
+      authenticated: auth.isAuthenticated(req),
+      passwordLogin: auth.passwordLoginEnabled,
+    });
+  });
+
+  app.post('/api/login', (req, res) => {
+    if (!auth.enabled) return res.json({ ok: true });
+    if (!auth.login(req, res)) {
+      return res.status(401).json({ error: 'wrong username or password' });
+    }
+    res.json({ ok: true });
+  });
+
+  app.post('/api/logout', (req, res) => {
+    auth.logout(req, res);
+    res.json({ ok: true });
+  });
   // .torrent uploads arrive as raw bytes.
   app.use(
     express.raw({ type: 'application/x-bittorrent', limit: '64mb' }),

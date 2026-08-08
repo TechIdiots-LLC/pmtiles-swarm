@@ -5,6 +5,13 @@ import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import zlib from 'node:zlib';
 import { createApp } from '../src/api.js';
+import {
+  assertSafeToListen,
+  createAuth,
+  hashPassword,
+  isPublicPath,
+  verifyPassword,
+} from '../src/auth.js';
 import { Catalog } from '../src/catalog.js';
 import {
   assertPublishable,
@@ -1159,5 +1166,170 @@ describe('what may be published', () => {
     assertPublishable(identifyBytes(Buffer.from('anything')), {
       allowUnknown: true,
     });
+  });
+});
+
+describe('authentication', () => {
+  /** A request shaped enough for the middleware to judge it. */
+  const request = (extra = {}) => ({
+    path: '/api/torrents',
+    headers: {},
+    body: {},
+    secure: false,
+    ...extra,
+  });
+
+  /** A response that records what the middleware did to it. */
+  const response = () => {
+    const res = {
+      statusCode: null,
+      payload: null,
+      headers: {},
+      status(code) { res.statusCode = code; return res; },
+      json(body) { res.payload = body; return res; },
+      setHeader(name, value) { res.headers[name.toLowerCase()] = value; },
+    };
+    return res;
+  };
+
+  it('leaves tiles, TileJSON and the feed public', () => {
+    // Serving these is the entire point; gating them would defeat the project.
+    assert.ok(isPublicPath('/archives/abc/tiles.json'));
+    assert.ok(isPublicPath('/archives/abc/5/16/11.pbf'));
+    assert.ok(isPublicPath('/archives/abc/archive.torrent'));
+    assert.ok(isPublicPath('/feed.xml'));
+    assert.ok(isPublicPath('/feed/planet.xml'));
+  });
+
+  it('guards everything that can change the node', () => {
+    assert.ok(!isPublicPath('/api/torrents'));
+    assert.ok(!isPublicPath('/api/config'));
+    assert.ok(!isPublicPath('/'));
+  });
+
+  it('leaves the endpoints needed to sign in reachable', () => {
+    // Otherwise the console could not tell a locked node from a broken one.
+    assert.ok(isPublicPath('/api/session'));
+    assert.ok(isPublicPath('/api/login'));
+  });
+
+  it('does nothing at all when no credential is configured', () => {
+    const auth = createAuth({});
+    assert.equal(auth.enabled, false);
+
+    let passed = false;
+    auth.middleware(request(), response(), () => { passed = true; });
+    assert.ok(passed, 'an unconfigured node must keep working as before');
+  });
+
+  it('rejects an unauthenticated request once a credential exists', () => {
+    const auth = createAuth({ auth: { apiKey: 'secret' } });
+    const res = response();
+    let passed = false;
+    auth.middleware(request(), res, () => { passed = true; });
+
+    assert.ok(!passed);
+    assert.equal(res.statusCode, 401);
+  });
+
+  it('accepts a correct bearer token and refuses a wrong one', () => {
+    const auth = createAuth({ auth: { apiKey: 'secret' } });
+    assert.ok(
+      auth.isAuthenticated(request({ headers: { authorization: 'Bearer secret' } })),
+    );
+    assert.ok(
+      !auth.isAuthenticated(request({ headers: { authorization: 'Bearer wrong' } })),
+    );
+    // A prefix of the real token must not be enough.
+    assert.ok(
+      !auth.isAuthenticated(request({ headers: { authorization: 'Bearer sec' } })),
+    );
+  });
+
+  it('issues a session cookie for a correct password', () => {
+    const auth = createAuth({ auth: { username: 'andrew', password: 'hunter2' } });
+    const res = response();
+    const ok = auth.login(request({ body: { username: 'andrew', password: 'hunter2' } }), res);
+
+    assert.ok(ok);
+    const cookie = res.headers['set-cookie'];
+    assert.match(cookie, /^pmtiles_swarm_session=/);
+    // A session cookie reachable from script would undo the point of having one.
+    assert.match(cookie, /HttpOnly/);
+    assert.match(cookie, /SameSite=Lax/);
+  });
+
+  it('does not mark the cookie Secure on a plain http request', () => {
+    // Marking it Secure on a LAN deployment would stop it working entirely.
+    const auth = createAuth({ auth: { password: 'x' } });
+    const res = response();
+    auth.login(request({ body: { username: 'admin', password: 'x' }, secure: false }), res);
+    assert.ok(!/Secure/.test(res.headers['set-cookie']));
+
+    const secureRes = response();
+    auth.login(request({ body: { username: 'admin', password: 'x' }, secure: true }), secureRes);
+    assert.match(secureRes.headers['set-cookie'], /Secure/);
+  });
+
+  it('refuses a wrong password and a wrong username alike', () => {
+    const auth = createAuth({ auth: { username: 'andrew', password: 'hunter2' } });
+    assert.ok(!auth.login(request({ body: { username: 'andrew', password: 'no' } }), response()));
+    assert.ok(!auth.login(request({ body: { username: 'someone', password: 'hunter2' } }), response()));
+  });
+
+  it('accepts the session it issued, and stops after a logout', () => {
+    const auth = createAuth({ auth: { password: 'x' } });
+    const res = response();
+    auth.login(request({ body: { username: 'admin', password: 'x' } }), res);
+    const cookie = res.headers['set-cookie'].split(';')[0];
+
+    assert.ok(auth.isAuthenticated(request({ headers: { cookie } })));
+    auth.logout(request({ headers: { cookie } }), response());
+    assert.ok(!auth.isAuthenticated(request({ headers: { cookie } })));
+  });
+
+  it('rejects a session id that was never issued', () => {
+    const auth = createAuth({ auth: { password: 'x' } });
+    assert.ok(
+      !auth.isAuthenticated(
+        request({ headers: { cookie: 'pmtiles_swarm_session=invented' } }),
+      ),
+    );
+  });
+
+  it('verifies a password against a stored hash', () => {
+    const stored = hashPassword('hunter2');
+    assert.match(stored, /^scrypt\$/);
+    assert.ok(verifyPassword('hunter2', stored));
+    assert.ok(!verifyPassword('hunter3', stored));
+    // A salt means the same password hashes differently every time.
+    assert.notEqual(hashPassword('hunter2'), stored);
+  });
+
+  it('accepts a hash where a plaintext password would do', () => {
+    const auth = createAuth({
+      auth: { username: 'andrew', passwordHash: hashPassword('hunter2') },
+    });
+    assert.ok(auth.login(request({ body: { username: 'andrew', password: 'hunter2' } }), response()));
+    assert.ok(!auth.login(request({ body: { username: 'andrew', password: 'nope' } }), response()));
+  });
+
+  it('refuses to listen on a reachable address with no credential', () => {
+    // The failure this prevents is silent: the node works perfectly until
+    // somebody who is not you finds the port.
+    assert.throws(
+      () => assertSafeToListen({ host: '0.0.0.0' }, createAuth({})),
+      /refusing to listen/,
+    );
+  });
+
+  it('allows loopback, a credential, or an explicit opt-out', () => {
+    assertSafeToListen({ host: '127.0.0.1' }, createAuth({}));
+    assertSafeToListen({ host: '::1' }, createAuth({}));
+    assertSafeToListen({ host: '0.0.0.0' }, createAuth({ auth: { apiKey: 'k' } }));
+    assertSafeToListen(
+      { host: '0.0.0.0', allowUnauthenticated: true },
+      createAuth({}),
+    );
   });
 });
