@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.2.0
+### ✨ Features and improvements
 - **Serve tiles.** Every archive now has a TileJSON endpoint and a `{z}/{x}/{y}` tile endpoint
   under `/archives/{infohash}/`. A node holding a complete copy reads its local file; a node in
   cache mode reads through the swarm via `pmtiles-torrent`, fetching only the pieces a requested
