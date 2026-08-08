@@ -12,6 +12,9 @@
 - **An archive can carry several categories.** A planet build can be both `basemaps` and `weekly`
   without choosing. Feeds match on *any* tag, so it appears in both. Catalogues holding the older
   single `category` string are read as a list of one and normalised on the next write.
+- **The console shows where each archive came from** — built here, adopted, added by hand, or the
+  host of the peer that sent it. Worth showing rather than inferring: an archive taken from a peer
+  is one this node seeds and serves under its own name.
 - `prune` gained a `"report"` mode that logs what it would remove and removes nothing, so a new
   peer can be watched before it is trusted. Pruning stays off unless asked for, only ever
   considers archives that peer sent, and never acts on a filtered or partial view.

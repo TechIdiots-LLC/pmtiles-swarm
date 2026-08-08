@@ -227,6 +227,7 @@
               <th>Archive</th>
               <th>Size</th>
               <th>Mode</th>
+              <th>Origin</th>
               <th>Progress</th>
               <th>Peers</th>
               <th>Down</th>
@@ -473,6 +474,7 @@
             </td>
             <td>${bytes(entry.size)}</td>
             <td><span class="pill ${mode}">${mode}</span></td>
+            <td>${originCell(entry)}</td>
             <td>
               <div class="track">
                 <i class="${progress >= 1 ? 'done' : ''}" style="width:${Math.min(100, progress * 100)}%"></i>
@@ -492,6 +494,59 @@
           rows.append(tr);
         }
       }
+
+      /**
+       * Where an archive came from, in a few words.
+       *
+       * Worth showing rather than inferring, because the answer decides what
+       * you are responsible for: an archive taken from a peer is one this node
+       * seeds and serves under its own name, and nothing else on the page says
+       * so.
+       * @param {object} entry - Catalog entry.
+       * @returns {{label: string, detail: string, own: boolean}} - Its origin.
+       */
+      function originOf(entry) {
+        const source = entry.source ?? {};
+        if (source.subscription) {
+          let host = source.subscription;
+          try {
+            host = new URL(source.subscription).host;
+          } catch {
+            // Keep the raw string if it will not parse.
+          }
+          return {
+            label: host,
+            detail: `received from ${source.subscription}`,
+            own: false,
+          };
+        }
+        if (source.type === 'file' || source.type === 'http') {
+          return {
+            label: 'built here',
+            detail: `created from ${source.location ?? 'a local source'}`,
+            own: true,
+          };
+        }
+        if (source.type === 'adopted') {
+          return {
+            label: 'adopted',
+            detail: 'imported from what the engine was already seeding',
+            own: true,
+          };
+        }
+        return {
+          label: 'added by hand',
+          detail: source.location ?? 'added directly',
+          own: true,
+        };
+      }
+
+      const originCell = (entry) => {
+        const origin = originOf(entry);
+        return `<span class="pill ${origin.own ? 'mirror' : ''}" title="${escapeHtml(
+          origin.detail,
+        )}">${escapeHtml(origin.label)}</span>`;
+      };
 
       const escapeHtml = (value) =>
         String(value ?? '').replace(/[&<>"']/g, (c) =>
@@ -523,6 +578,8 @@
             <div><span>size</span><b>${bytes(entry.size)}</b></div>
             <div><span>on disk</span><b>${bytes(entry.diskBytes)}</b></div>
             <div><span>mode</span><b>${mode}</b></div>
+            <div><span>origin</span><b>${escapeHtml(originOf(entry).label)}</b>
+              <span class="sub">${escapeHtml(originOf(entry).detail)}</span></div>
             <div><span>reading via</span><b>${escapeHtml(entry.reading?.mode ?? 'not open')}</b></div>
             <div><span>format</span><b>${escapeHtml(summary.format ?? '—')}</b></div>
             <div><span>zoom</span><b>${summary.minZoom ?? '—'}–${summary.maxZoom ?? '—'}</b></div>
