@@ -578,6 +578,94 @@ export class Library {
   }
 
   /**
+   * Adds web seeds to an archive that already exists.
+   *
+   * This is safe on a torrent already in circulation. BEP 19's `url-list` is a
+   * top-level key in the metainfo and the infohash covers only the `info`
+   * dictionary, so adding one leaves the infohash untouched — every magnet,
+   * peer and published reference stays valid. The check below asserts that
+   * rather than trusting it: if a rewrite ever did change the infohash, the
+   * result would be a different torrent wearing the old one's name, which is
+   * worth refusing loudly.
+   *
+   * Retrofitting matters because a web seed is the difference between a cold
+   * tile taking tens of seconds and taking well under one — and an archive
+   * published without one can be given one at any time.
+   * @param {string} infoHash - The archive.
+   * @param {string[]} urls - Web seed URLs to add.
+   * @param {object} [options] - Set `replace` to discard the existing list.
+   * @returns {Promise<{webSeeds: string[], live: boolean}>} - The new list, and
+   *   whether the running torrent took them without a restart.
+   */
+  async addWebSeeds(infoHash, urls, options = {}) {
+    const entry = this.#catalog.get(infoHash);
+    if (!entry) throw new Error('unknown archive');
+    if (!entry.torrentPath) {
+      throw new Error('no .torrent is stored for this archive');
+    }
+
+    const wanted = (Array.isArray(urls) ? urls : [urls]).filter(Boolean);
+    if (wanted.length === 0) throw new Error('no web seeds given');
+
+    for (const url of wanted) {
+      if (!/^https?:\/\//i.test(url)) {
+        throw new Error(`web seed must be an http(s) URL: ${url}`);
+      }
+    }
+
+    const parseTorrentModule = await import('parse-torrent');
+    const parse = parseTorrentModule.default;
+    const { toTorrentFile } = parseTorrentModule;
+
+    const original = await fs.readFile(entry.torrentPath);
+    const parsed = await parse(new Uint8Array(original));
+
+    const merged = options.replace
+      ? [...new Set(wanted)]
+      : [...new Set([...(parsed.urlList ?? []), ...wanted])];
+    parsed.urlList = merged;
+
+    const rebuilt = toTorrentFile(parsed);
+    const check = await parse(new Uint8Array(rebuilt));
+    if (check.infoHash !== parsed.infoHash) {
+      throw new Error(
+        `rewriting the torrent changed its infohash (${parsed.infoHash} -> ` +
+          `${check.infoHash}); refusing to replace it`,
+      );
+    }
+
+    await fs.writeFile(entry.torrentPath, Buffer.from(rebuilt));
+    if (this.#config.torrentDropDir) {
+      await fs
+        .writeFile(
+          path.join(
+            this.#config.torrentDropDir,
+            path.basename(entry.torrentPath),
+          ),
+          Buffer.from(rebuilt),
+        )
+        .catch(() => {});
+    }
+
+    await this.#catalog.put({ ...entry, webSeeds: merged });
+
+    // Where the engine can take a seed at runtime, the node benefits now;
+    // where it cannot, peers still get it from the rewritten .torrent and this
+    // node picks it up when the torrent is next added.
+    let live = false;
+    if (this.#engine.addWebSeed) {
+      const results = await Promise.all(
+        wanted.map((url) =>
+          this.#engine.addWebSeed(infoHash, url).catch(() => false),
+        ),
+      );
+      live = results.every(Boolean);
+    }
+
+    return { webSeeds: merged, live };
+  }
+
+  /**
    * Removes an archive from the catalog and the engine.
    * @param {string} infoHash - The archive to remove.
    * @param {object} [options] - Removal options.

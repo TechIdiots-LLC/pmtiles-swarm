@@ -9,6 +9,9 @@
   root.
 - Cache-mode archives now live under `cacheSavePath`, separate from mirrors, so a glance at the
   disk says which files are whole archives and which never will be.
+- `POST /api/torrents/{infohash}/webseeds` adds web seeds to a torrent already in circulation.
+  This does not change the infohash — `url-list` sits outside the `info` dictionary — so magnets
+  and peers stay valid, and anything published without a web seed can be given one.
 - `DELETE /api/torrents/{infohash}/cache` reclaims what on-demand reading has accumulated for one
   archive without forgetting the archive, and `GET /api/torrents/{infohash}` reports `diskBytes`.
   Nothing else bounded that disk usage.

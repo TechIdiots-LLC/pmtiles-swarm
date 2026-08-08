@@ -127,6 +127,23 @@ export class WebTorrentSeedEngine {
   }
 
   /**
+   * Tells a running torrent about a web seed.
+   *
+   * Optional across engines. Where it is missing the seed still reaches peers
+   * through the rewritten .torrent, it just does not help this node until the
+   * torrent is next added.
+   * @param {string} infoHash - The torrent.
+   * @param {string} url - The web seed to add.
+   * @returns {Promise<boolean>} - Whether the running torrent took it.
+   */
+  async addWebSeed(infoHash, url) {
+    const torrent = this.#client?.get(infoHash);
+    if (!torrent?.addWebSeed) return false;
+    torrent.addWebSeed(url);
+    return true;
+  }
+
+  /**
    * Removes a torrent.
    * @param {string} infoHash - The torrent to remove.
    * @param {{deleteData?: boolean}} [options] - Whether to delete the data too.

@@ -964,3 +964,139 @@ describe('cache accounting', () => {
     );
   });
 });
+
+describe('retrofitting web seeds', () => {
+  /**
+   * A library holding one archive with a real .torrent on disk.
+   * @returns {Promise<object>} - Library, entry and the recording engine.
+   */
+  async function makeLibrary() {
+    const dir = await fs.mkdtemp(path.join(workspace, 'seeds-'));
+    const data = path.join(dir, 'planet.pmtiles');
+    await writeArchive(data, {
+      tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('tile') }],
+    });
+
+    const { default: createTorrent } = await import('create-torrent');
+    const torrentFile = await new Promise((resolve, reject) =>
+      createTorrent(data, { announce: [] }, (error, result) =>
+        error ? reject(error) : resolve(result),
+      ),
+    );
+    const torrentPath = path.join(dir, 'planet.torrent');
+    await fs.writeFile(torrentPath, torrentFile);
+
+    const { default: parseTorrent } = await import('parse-torrent');
+    const parsed = await parseTorrent(new Uint8Array(torrentFile));
+
+    const archive = entry({
+      infoHash: parsed.infoHash,
+      name: 'planet.pmtiles',
+      savePath: dir,
+      torrentPath,
+      webSeeds: [],
+    });
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put(archive);
+
+    const added = [];
+    const library = new Library({
+      catalog,
+      engine: {
+        name: 'webtorrent',
+        addWebSeed: async (hash, url) => {
+          added.push({ hash, url });
+          return true;
+        },
+      },
+      config: { dataDir: dir, webtorrent: { savePath: dir } },
+    });
+    return { library, catalog, entry: archive, added, torrentPath };
+  }
+
+  it('adds a web seed without changing the infohash', async () => {
+    // The property the whole feature rests on: url-list lives outside the info
+    // dictionary, so a torrent already in circulation keeps its identity and
+    // every magnet and peer stays valid.
+    const { library, entry: archive, torrentPath } = await makeLibrary();
+
+    const result = await library.addWebSeeds(archive.infoHash, [
+      'https://maps.example.org/planet.pmtiles',
+    ]);
+
+    assert.deepEqual(result.webSeeds, [
+      'https://maps.example.org/planet.pmtiles',
+    ]);
+
+    const { default: parseTorrent } = await import('parse-torrent');
+    const rewritten = await parseTorrent(
+      new Uint8Array(await fs.readFile(torrentPath)),
+    );
+    assert.equal(rewritten.infoHash, archive.infoHash);
+    assert.deepEqual(rewritten.urlList, [
+      'https://maps.example.org/planet.pmtiles',
+    ]);
+  });
+
+  it('records the seeds on the catalog entry, so TileJSON advertises them', async () => {
+    const { library, catalog, entry: archive } = await makeLibrary();
+    await library.addWebSeeds(archive.infoHash, ['https://a.example.org/p.pmtiles']);
+    assert.deepEqual(catalog.get(archive.infoHash).webSeeds, [
+      'https://a.example.org/p.pmtiles',
+    ]);
+  });
+
+  it('tells a running torrent, so the seed helps immediately', async () => {
+    const { library, entry: archive, added } = await makeLibrary();
+    const result = await library.addWebSeeds(archive.infoHash, [
+      'https://a.example.org/p.pmtiles',
+    ]);
+    assert.equal(result.live, true);
+    assert.equal(added[0].url, 'https://a.example.org/p.pmtiles');
+  });
+
+  it('merges with existing seeds, and does not duplicate them', async () => {
+    const { library, entry: archive } = await makeLibrary();
+    await library.addWebSeeds(archive.infoHash, ['https://a.example.org/p.pmtiles']);
+    const result = await library.addWebSeeds(archive.infoHash, [
+      'https://a.example.org/p.pmtiles',
+      'https://b.example.org/p.pmtiles',
+    ]);
+    assert.deepEqual(result.webSeeds, [
+      'https://a.example.org/p.pmtiles',
+      'https://b.example.org/p.pmtiles',
+    ]);
+  });
+
+  it('replaces the list when asked', async () => {
+    const { library, entry: archive } = await makeLibrary();
+    await library.addWebSeeds(archive.infoHash, ['https://a.example.org/p.pmtiles']);
+    const result = await library.addWebSeeds(
+      archive.infoHash,
+      ['https://b.example.org/p.pmtiles'],
+      { replace: true },
+    );
+    assert.deepEqual(result.webSeeds, ['https://b.example.org/p.pmtiles']);
+  });
+
+  it('rejects anything that is not an http URL', async () => {
+    const { library, entry: archive } = await makeLibrary();
+    await assert.rejects(
+      () => library.addWebSeeds(archive.infoHash, ['/data/planet.pmtiles']),
+      /must be an http\(s\) URL/,
+    );
+    await assert.rejects(
+      () => library.addWebSeeds(archive.infoHash, []),
+      /no web seeds given/,
+    );
+  });
+
+  it('reports an unknown archive', async () => {
+    const { library } = await makeLibrary();
+    await assert.rejects(
+      () => library.addWebSeeds('f'.repeat(40), ['https://a.example.org/p']),
+      /unknown archive/,
+    );
+  });
+});

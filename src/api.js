@@ -203,6 +203,28 @@ export function createApp({
     }),
   );
 
+  // Adds web seeds to an archive already in circulation. Safe on a published
+  // torrent: url-list sits outside the info dictionary, so the infohash — and
+  // every magnet and peer that depends on it — is unaffected.
+  app.post(
+    '/api/torrents/:infoHash/webseeds',
+    route(async (req, res) => {
+      const body = req.body ?? {};
+      const urls = body.webSeeds ?? body.urls ?? body.url;
+      try {
+        const result = await library.addWebSeeds(
+          req.params.infoHash,
+          Array.isArray(urls) ? urls : [urls],
+          { replace: body.replace === true },
+        );
+        res.json(result);
+      } catch (error) {
+        const status = /unknown archive/.test(error.message) ? 404 : 400;
+        res.status(status).json({ error: error.message });
+      }
+    }),
+  );
+
   app.get(
     '/api/torrents/:infoHash/peers',
     route(async (req, res) => {

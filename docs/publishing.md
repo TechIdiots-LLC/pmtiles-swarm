@@ -31,6 +31,29 @@ curl -X POST localhost:8090/api/torrents \
 curl -X POST localhost:8090/api/adopt
 ```
 
+## Adding web seeds to a torrent already published
+
+A web seed can be added to a torrent that is already in circulation, and doing
+so **does not change its infohash**. `url-list` is a top-level key in the
+metainfo and the infohash covers only the `info` dictionary, so every magnet,
+peer and published reference stays valid.
+
+```sh
+curl -X POST http://localhost:8090/api/torrents/$INFOHASH/webseeds   -H 'content-type: application/json'   -d '{"webSeeds": ["https://maps.example.org/pmtiles/planet.pmtiles"]}'
+```
+
+This rewrites the stored `.torrent`, records the seeds on the catalog entry so
+the TileJSON advertises them, and tells the running torrent where the engine
+supports it. `replace: true` discards the existing list instead of merging.
+
+The rewrite asserts the infohash is unchanged and refuses to replace the file if
+it ever were — a torrent that quietly changed identity would be far worse than a
+failed request.
+
+**Worth doing to anything published without one.** A web seed is the difference
+between a cold tile taking tens of seconds and taking well under one, and it
+makes a brand-new archive usable before any peer holds a copy.
+
 ## Web seeds
 
 **A web seed is an HTTP URL baked into the torrent that serves the same bytes** (BEP 19,
