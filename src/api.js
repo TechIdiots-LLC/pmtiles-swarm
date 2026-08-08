@@ -3,6 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { renderFeed } from './feed.js';
+import { buildTileJson, extensionMatches } from './tilejson.js';
+import { TileReadError } from './tiles.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -23,6 +25,7 @@ function route(handler) {
  * @param {import('./catalog.js').Catalog} deps.catalog - The catalog.
  * @param {import('./engines/types.js').SeedEngine} deps.engine - The seeding engine.
  * @param {import('./subscriptions.js').SubscriptionManager} deps.subscriptions - Feed follower.
+ * @param {import('./tiles.js').TileStore} deps.tiles - The tile reader.
  * @param {object} deps.config - Resolved configuration.
  * @returns {import('express').Express} - The configured app.
  */
@@ -31,9 +34,15 @@ export function createApp({
   catalog,
   engine,
   subscriptions,
+  tiles,
   config,
 }) {
   const app = express();
+  // Without this, a TLS-terminating proxy leaves req.protocol as "http", and
+  // the TileJSON advertises http:// tile URLs. A browser that loaded the map
+  // over https then blocks every one of them as mixed content, which looks
+  // like an empty map rather than like a configuration mistake.
+  if (config.trustProxy) app.set('trust proxy', config.trustProxy);
   app.use(express.json({ limit: '1mb' }));
   // .torrent uploads arrive as raw bytes.
   app.use(
@@ -41,15 +50,26 @@ export function createApp({
   );
 
   /**
-   * The externally visible base URL, needed for absolute links in the feed.
+   * The externally visible base URL, for absolute links in the feed and in
+   * TileJSON.
+   *
+   * Three behaviours, in order:
+   *
+   *   `publicUrl` set          one canonical URL, whatever the request said.
+   *   `trustProxy` set         derived per request from X-Forwarded-Proto and
+   *                            X-Forwarded-Host, so the same node can answer
+   *                            correctly on http and https at once.
+   *   neither                  derived from the connection itself.
+   *
+   * Note `req.host` rather than `req.get('host')`: only the former follows
+   * X-Forwarded-Host, and the raw Host header behind a proxy is whatever the
+   * proxy dialled — usually an internal address, which would end up baked into
+   * every published tile URL.
    * @param {import('express').Request} req - The request.
    * @returns {string} - Base URL without a trailing slash.
    */
   const baseUrl = (req) =>
-    (config.publicUrl ?? `${req.protocol}://${req.get('host')}`).replace(
-      /\/$/,
-      '',
-    );
+    (config.publicUrl ?? `${req.protocol}://${req.host}`).replace(/\/$/, '');
 
   app.get(
     '/api/status',
@@ -86,7 +106,11 @@ export function createApp({
       const entry = catalog.get(req.params.infoHash);
       if (!entry) return res.status(404).json({ error: 'not found' });
       const status = await engine.get(entry.infoHash).catch(() => null);
-      res.json({ ...entry, status });
+      // Null unless a tile has been requested: archives are opened lazily, and
+      // whether one reads its local file or the swarm is worth being able to
+      // see when a node is slower than expected.
+      const reading = tiles?.status(entry.infoHash) ?? null;
+      res.json({ ...entry, status, reading });
     }),
   );
 
@@ -294,6 +318,95 @@ export function createApp({
       }),
     );
   });
+
+  // Tile serving. These sit outside /api on purpose: they are the URLs that go
+  // into a map style, so they should look like a tile server, not like an
+  // administrative API.
+
+  app.get(
+    '/archives/:infoHash/tiles.json',
+    route(async (req, res) => {
+      const entry = catalog.get(req.params.infoHash);
+      if (!entry) return res.status(404).json({ error: 'unknown archive' });
+      if (!entry.pmtiles) {
+        return res.status(409).json({
+          error:
+            'this archive has not been probed, so its tile metadata is unknown',
+        });
+      }
+      // Anyone embedding a map is doing so from another origin.
+      res.setHeader('access-control-allow-origin', '*');
+      res.json(buildTileJson(entry, baseUrl(req)));
+    }),
+  );
+
+  // The .torrent under the archive root, so everything a TileJSON consumer
+  // needs hangs off one prefix rather than being split across /api.
+  app.get('/archives/:infoHash/archive.torrent', (req, res, next) => {
+    req.url = `/api/torrents/${req.params.infoHash}/file`;
+    app.handle(req, res, next);
+  });
+
+  app.get(
+    '/archives/:infoHash/:z/:x/:y.:ext',
+    route(async (req, res) => {
+      const { infoHash, ext } = req.params;
+      const entry = catalog.get(infoHash);
+      if (!entry) return res.status(404).json({ error: 'unknown archive' });
+
+      const z = Number(req.params.z);
+      const x = Number(req.params.x);
+      const y = Number(req.params.y);
+      if (![z, x, y].every(Number.isInteger)) {
+        return res.status(400).json({ error: 'z, x and y must be integers' });
+      }
+      const limit = 2 ** z;
+      if (z < 0 || z > 26 || x < 0 || y < 0 || x >= limit || y >= limit) {
+        return res.status(400).json({ error: 'tile coordinates out of range' });
+      }
+      if (!extensionMatches(entry, ext)) {
+        return res.status(400).json({
+          error: `this archive holds ${entry.pmtiles?.format ?? 'unknown'} tiles`,
+        });
+      }
+
+      const controller = new AbortController();
+      // A panning map abandons requests constantly. Without this the swarm
+      // keeps fetching pieces for tiles nobody is waiting for any more.
+      res.on('close', () => {
+        if (!res.writableEnded) controller.abort();
+      });
+
+      let tile;
+      try {
+        tile = await tiles.getTile(infoHash, z, x, y, {
+          signal: controller.signal,
+        });
+      } catch (error) {
+        if (error.name === 'AbortError') return;
+        if (error instanceof TileReadError) {
+          return res.status(error.status).json({ error: error.message });
+        }
+        throw error;
+      }
+
+      res.setHeader('access-control-allow-origin', '*');
+      // An infohash pins content, so a tile under one can never change. When a
+      // mutable archive is updated the infohash changes and so does this URL,
+      // which makes cache invalidation automatic.
+      res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+      res.setHeader('etag', `"${infoHash}-${z}-${x}-${y}"`);
+
+      // A missing tile is normal in a sparse archive. 204 rather than 404 is
+      // what vector clients expect, and it stops a map logging errors while
+      // panning past the edge of coverage.
+      if (!tile) return res.status(204).end();
+
+      res.type(entry.pmtiles?.contentType ?? 'application/octet-stream');
+      if (tile.encoding) res.setHeader('content-encoding', tile.encoding);
+      res.send(tile.data);
+    }),
+  );
 
   app.use(express.static(path.join(here, 'web')));
 

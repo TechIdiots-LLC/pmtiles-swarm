@@ -1,0 +1,284 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import zlib from 'node:zlib';
+import { PMTiles, SharedPromiseCache } from 'pmtiles';
+import { TorrentSource } from 'pmtiles-torrent';
+import { NodeFileSource } from './file-source.js';
+import { LibtorrentReadEngine } from './read-engine.js';
+
+/**
+ * Serves tiles out of the archives this node distributes.
+ *
+ * The point of doing this here rather than in a separate tile server is that
+ * the archive is already in the swarm. A node in cache mode holds almost none
+ * of a 72 GiB archive but can still answer for any tile in it, pulling the few
+ * pieces that tile lives in and keeping them for the next request. A node
+ * mirroring the archive reads its local copy directly and never involves the
+ * swarm at all. Same URL either way.
+ */
+
+/** Formats that are already compressed; gzipping them again wastes CPU. */
+const PRECOMPRESSED = new Set(['png', 'jpeg', 'webp', 'avif']);
+
+/** Request extensions accepted for each archive format. */
+const EXTENSIONS = {
+  pbf: ['pbf', 'mvt'],
+  png: ['png'],
+  jpeg: ['jpg', 'jpeg'],
+  webp: ['webp'],
+  avif: ['avif'],
+  mlt: ['mlt'],
+};
+
+/**
+ * An archive that could not be opened for reading, with the reason.
+ */
+export class TileReadError extends Error {
+  /**
+   * @param {string} message - What went wrong.
+   * @param {number} status - HTTP status this maps onto.
+   */
+  constructor(message, status = 500) {
+    super(message);
+    this.name = 'TileReadError';
+    this.status = status;
+  }
+}
+
+/**
+ * Opens archives on demand and reads tiles out of them.
+ */
+export class TileStore {
+  #catalog;
+  #engine;
+  #config;
+  #open = new Map();
+  // One header and directory cache across every archive. Entries are keyed by
+  // the source's key, so sharing it bounds total memory rather than letting
+  // each archive keep its own hundred entries.
+  #directoryCache;
+
+  /**
+   * @param {object} deps - Catalog, seeding engine and config.
+   */
+  constructor({ catalog, engine, config }) {
+    this.#catalog = catalog;
+    this.#engine = engine;
+    this.#config = config;
+    this.#directoryCache = new SharedPromiseCache(
+      config.tiles?.directoryCacheEntries ?? 200,
+    );
+  }
+
+  /**
+   * The extensions that map onto an archive's tile format.
+   * @param {string} format - Format name from the probe.
+   * @returns {string[]} - Accepted extensions.
+   */
+  static extensionsFor(format) {
+    return EXTENSIONS[format] ?? [];
+  }
+
+  /**
+   * Reads one tile.
+   * @param {string} infoHash - Which archive.
+   * @param {number} z - Zoom.
+   * @param {number} x - Column.
+   * @param {number} y - Row.
+   * @param {object} [options] - Abort signal.
+   * @returns {Promise<{data: Buffer, encoding?: string} | null>} - The tile, or null when absent.
+   */
+  async getTile(infoHash, z, x, y, options = {}) {
+    const entry = this.#catalog.get(infoHash);
+    if (!entry) throw new TileReadError('unknown archive', 404);
+
+    const handle = await this.#acquire(entry);
+    const tile = await handle.archive.getZxy(z, x, y, options.signal);
+    // A missing tile is not an error: sparse coverage is normal, and the
+    // caller turns this into a 204.
+    if (!tile?.data) return null;
+
+    const data = Buffer.from(tile.data);
+    const format = entry.pmtiles?.format;
+    if (!format || PRECOMPRESSED.has(format)) return { data };
+
+    // PMTiles decompresses tile data on the way out, so vector tiles arrive
+    // here as raw protobuf. Compressing them again is worth it — they are text
+    // heavy and typically a third of the size gzipped.
+    const gzipped = await new Promise((resolve, reject) =>
+      zlib.gzip(data, (error, out) => (error ? reject(error) : resolve(out))),
+    );
+    return { data: gzipped, encoding: 'gzip' };
+  }
+
+  /**
+   * Reports how an archive is currently being read, for diagnostics.
+   * @param {string} infoHash - Which archive.
+   * @returns {object | null} - Mode and stats, or null when not open.
+   */
+  status(infoHash) {
+    const handle = this.#open.get(infoHash);
+    if (!handle) return null;
+    return {
+      mode: handle.mode,
+      openedAt: handle.openedAt,
+      stats: handle.source?.stats,
+    };
+  }
+
+  /**
+   * Closes every open archive.
+   * @returns {Promise<void>} - Resolves once closed.
+   */
+  async close() {
+    const handles = [...this.#open.values()];
+    this.#open.clear();
+    for (const handle of handles) await this.#release(handle);
+  }
+
+  /**
+   * Gets an open archive, opening it if needed and evicting the least recently
+   * used one when over budget.
+   * @param {object} entry - Catalog entry.
+   * @returns {Promise<object>} - The open handle.
+   */
+  async #acquire(entry) {
+    const existing = this.#open.get(entry.infoHash);
+    if (existing) {
+      // Re-inserting moves it to the end, so the first key is always the least
+      // recently used.
+      this.#open.delete(entry.infoHash);
+      this.#open.set(entry.infoHash, existing);
+      return existing;
+    }
+
+    const handle = await this.#openArchive(entry);
+    this.#open.set(entry.infoHash, handle);
+
+    const limit = this.#config.tiles?.maxOpenArchives ?? 16;
+    while (this.#open.size > limit) {
+      const [oldest, victim] = this.#open.entries().next().value;
+      this.#open.delete(oldest);
+      await this.#release(victim);
+    }
+    return handle;
+  }
+
+  /**
+   * Opens an archive, choosing between the local file and the swarm.
+   * @param {object} entry - Catalog entry.
+   * @returns {Promise<object>} - The open handle.
+   */
+  async #openArchive(entry) {
+    const local = await this.#completeLocalPath(entry);
+    if (local) {
+      const source = new NodeFileSource(local);
+      return {
+        mode: 'local',
+        source,
+        archive: new PMTiles(source, this.#directoryCache),
+        openedAt: new Date().toISOString(),
+        close: () => source.close(),
+      };
+    }
+
+    const engine = await this.#readEngine(entry);
+    const source = new TorrentSource(engine, {
+      cacheBytes: this.#config.tiles?.pieceCacheBytes,
+      hydrateIdleMs: this.#config.tiles?.hydrateIdleMs,
+    });
+    return {
+      mode: 'swarm',
+      source,
+      archive: new PMTiles(source, this.#directoryCache),
+      openedAt: new Date().toISOString(),
+      // destroy() takes the engine down with it, which for both bridges means
+      // dropping this reader without disturbing what the node is seeding.
+      close: () => source.destroy(),
+    };
+  }
+
+  /**
+   * Returns the archive's path when this node holds a complete copy.
+   *
+   * Size alone cannot answer this: both engines preallocate the full file, so a
+   * torrent one piece in already looks the right size on disk. The engine's own
+   * progress is the only trustworthy signal.
+   * @param {object} entry - Catalog entry.
+   * @returns {Promise<string | null>} - Path, or null if incomplete.
+   */
+  async #completeLocalPath(entry) {
+    if (!entry.savePath) return null;
+    const status = await this.#engine.get(entry.infoHash).catch(() => null);
+    if (status && status.progress < 1) return null;
+
+    // No status at all means the engine does not know this torrent — the file
+    // may still be a plain local archive that was added and never seeded.
+    const file = path.join(entry.savePath, entry.name);
+    try {
+      const stat = await fs.stat(file);
+      if (!stat.isFile()) return null;
+      if (status === null && stat.size !== entry.size) return null;
+      return file;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Builds the read engine for an archive this node does not fully hold.
+   * @param {object} entry - Catalog entry.
+   * @returns {Promise<object>} - A pmtiles-torrent TorrentEngine.
+   */
+  async #readEngine(entry) {
+    switch (this.#engine.name) {
+      case 'libtorrent':
+        return new LibtorrentReadEngine(this.#engine, entry.infoHash, {
+          pieceTimeoutMs: this.#config.tiles?.pieceTimeoutMs,
+        });
+
+      case 'webtorrent': {
+        const { WebTorrentEngine } = await import('pmtiles-torrent/webtorrent');
+        const client = this.#engine.client;
+        if (!client) {
+          throw new TileReadError(
+            'the webtorrent engine is not connected yet',
+            503,
+          );
+        }
+        // Sharing the seeding client is the whole point: one peer pool, one
+        // port, one DHT node, and the pieces this fetches count towards what
+        // the node seeds back.
+        return new WebTorrentEngine(entry.torrentPath ?? entry.magnet, {
+          client,
+          path: entry.savePath,
+          readyTimeoutMs: this.#config.tiles?.readyTimeoutMs,
+        });
+      }
+
+      default:
+        // qBittorrent's WebUI has per-file priorities but nothing per piece and
+        // no way to read one back, so there is no honest way to serve a tile
+        // from an archive it holds only part of.
+        throw new TileReadError(
+          `the ${this.#engine.name} engine cannot read pieces on demand, and this ` +
+            'node does not hold a complete copy of the archive. Mirror it, or ' +
+            'run the libtorrent or webtorrent engine.',
+          501,
+        );
+    }
+  }
+
+  /**
+   * Closes one handle, swallowing errors so eviction cannot fail a request.
+   * @param {object} handle - The handle to close.
+   * @returns {Promise<void>} - Resolves once closed.
+   */
+  async #release(handle) {
+    try {
+      await handle.close();
+    } catch {
+      // Nothing useful to do: the handle is being dropped either way.
+    }
+  }
+}

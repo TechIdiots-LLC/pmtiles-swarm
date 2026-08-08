@@ -74,8 +74,48 @@ const DEFAULTS = {
   sources: [],
   /** How often to poll scheduled sources, in hours. */
   sourceCheckIntervalHours: 6,
-  /** Public base URL, used to build absolute links in the RSS feed. */
+  /** Public base URL, used to build absolute links in the RSS feed and TileJSON. */
   publicUrl: undefined,
+  /**
+   * Trust X-Forwarded-* headers, for running behind a reverse proxy or CDN.
+   *
+   * Takes anything Express accepts: `true`, a hop count, or a subnet list such
+   * as "loopback, 10.0.0.0/8". Off by default, because trusting these headers
+   * from an untrusted client lets it claim any protocol or address it likes.
+   *
+   * Set it when a proxy terminates TLS, or the TileJSON will advertise http://
+   * tile URLs that browsers block as mixed content. Setting `publicUrl`
+   * instead sidesteps the question entirely.
+   */
+  trustProxy: false,
+  /**
+   * Tile serving: a TileJSON endpoint and z/x/y tiles per archive.
+   *
+   * A node holding a complete copy reads its local file. A node in cache mode
+   * reads through the swarm, pulling only the pieces a requested tile lives in
+   * — which is what lets a machine with 10 GiB free serve a 700 GiB planet.
+   */
+  tiles: {
+    /**
+     * Open archives kept alive at once. Each holds a file descriptor or a
+     * torrent reader plus its piece cache, so this bounds both.
+     */
+    maxOpenArchives: 16,
+    /** Header and directory cache entries, shared across every archive. */
+    directoryCacheEntries: 200,
+    /**
+     * Byte budget for the piece cache of one swarm-read archive. Left unset it
+     * is sized from the torrent's piece length, which is the safer default: a
+     * fixed budget is a trap with 16 MiB pieces, since 64 MiB holds only four.
+     */
+    pieceCacheBytes: undefined,
+    /** How long no read must be in flight before background hydration resumes. */
+    hydrateIdleMs: undefined,
+    /** How long to wait for one piece before giving up on a tile. */
+    pieceTimeoutMs: 120000,
+    /** How long to wait for torrent metadata when opening an archive. */
+    readyTimeoutMs: 60000,
+  },
   /** Folders scanned for new archives: [{ path, category, webSeedBase }]. */
   watch: [],
   /** Feeds to follow: [{ url, mode, category }] where mode is 'mirror' or 'cache'. */

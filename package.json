@@ -9,7 +9,6 @@
   },
   "files": [
     "src",
-    "sidecar",
     "docs",
     "NOTICE.md",
     "CHANGELOG.md"
@@ -34,16 +33,14 @@
     "create-torrent": "^6.1.0",
     "express": "^5.2.1",
     "parse-torrent": "^11.0.24",
-    "pmtiles": "^4.4.1"
+    "pmtiles": "^4.4.1",
+    "pmtiles-torrent": "^0.1.1"
   },
   "optionalDependencies": {
-    "webtorrent": "^2.8.5"
-  },
-  "overrides": {
-    "uint8-util": "2.2.5"
+    "webtorrent": "^3.0.21"
   },
   "engines": {
-    "node": ">=20"
+    "node": "^22.13.0 || 24"
   },
   "repository": {
     "type": "git",

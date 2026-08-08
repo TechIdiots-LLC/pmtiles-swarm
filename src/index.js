@@ -10,6 +10,7 @@ import { WebTorrentSeedEngine } from './engines/webtorrent.js';
 import { Library } from './library.js';
 import { ScheduledSourceManager } from './sources.js';
 import { SubscriptionManager } from './subscriptions.js';
+import { TileStore } from './tiles.js';
 import { WatchManager } from './watch.js';
 
 /**
@@ -96,7 +97,16 @@ PMTILES_SWARM_PUBLIC_URL
   const watch = new WatchManager(library);
   const sources = new ScheduledSourceManager(library, catalog, config);
 
-  const app = createApp({ library, catalog, engine, subscriptions, config });
+  const tiles = new TileStore({ catalog, engine, config });
+
+  const app = createApp({
+    library,
+    catalog,
+    engine,
+    subscriptions,
+    tiles,
+    config,
+  });
   const server = app.listen(config.port, config.host, () => {
     console.log(
       `[http] listening on http://${config.host}:${config.port} (${catalog.list().length} archives)`,
@@ -146,6 +156,9 @@ PMTILES_SWARM_PUBLIC_URL
     subscriptions.stop();
     await watch.stop().catch(() => {});
     await new Promise((resolve) => server.close(resolve));
+    // Before the engine, so readers let go of their torrents while the client
+    // that owns them is still alive.
+    await tiles.close().catch(() => {});
     await engine.destroy().catch(() => {});
     process.exit(0);
   };

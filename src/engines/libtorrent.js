@@ -1,8 +1,32 @@
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
+/**
+ * Locates the libtorrent sidecar script.
+ *
+ * It lives in pmtiles-torrent rather than here. The two projects used to carry
+ * a copy each, which drifted — the read side grew `info` and `priority` ops
+ * that this copy never got. Since pmtiles-torrent is now a dependency and
+ * ships the script, there is one file again, and the read and seed sides
+ * cannot disagree about the protocol they speak over the same pipe.
+ * @returns {string} - Absolute path to the sidecar script.
+ */
+function resolveSidecar() {
+  const require = createRequire(import.meta.url);
+  try {
+    return path.join(
+      path.dirname(require.resolve('pmtiles-torrent/package.json')),
+      'sidecar',
+      'libtorrent_sidecar.py',
+    );
+  } catch (error) {
+    throw new Error(
+      'cannot locate the libtorrent sidecar: pmtiles-torrent is not resolvable. ' +
+        `Run npm install, or pass libtorrent.script to point at it. (${error.message})`,
+    );
+  }
+}
 
 /**
  * A SeedEngine backed by libtorrent, through a sidecar process.
@@ -61,9 +85,7 @@ export class LibtorrentEngine {
     if (this.#ready) return this.#ready;
 
     this.#ready = new Promise((resolve, reject) => {
-      const script =
-        this.#options.script ??
-        path.join(here, '..', '..', 'sidecar', 'libtorrent_sidecar.py');
+      const script = this.#options.script ?? resolveSidecar();
 
       const child = spawn(this.#options.python, [script], {
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -260,6 +282,36 @@ export class LibtorrentEngine {
       (options.timeoutMs ?? 60000) + 5000,
     );
     return new Uint8Array(Buffer.from(result.data, 'base64'));
+  }
+
+  /**
+   * Reports the piece geometry a reader needs to map byte ranges onto pieces.
+   *
+   * Note the two coordinate systems: `pieceLength` and `numPieces` describe the
+   * torrent's global byte space, while `fileOffset` locates the archive inside
+   * it. A single-file torrent has a zero offset; a multi-file one does not, and
+   * getting that wrong reads the neighbouring file.
+   * @param {string} infoHash - The torrent.
+   * @param {number} [fileIndex] - Which file in a multi-file torrent.
+   * @returns {Promise<object>} - {infoHash, pieceLength, numPieces, fileLength, fileOffset, name}.
+   */
+  async info(infoHash, fileIndex = 0) {
+    return this.#call('info', { infoHash, fileIndex });
+  }
+
+  /**
+   * Sets the download priority of a piece range.
+   *
+   * Zero means "do not fetch", which is how cache mode avoids pulling an entire
+   * archive while still seeding what it holds.
+   * @param {string} infoHash - The torrent.
+   * @param {number} first - First piece index, inclusive.
+   * @param {number} last - Last piece index, inclusive.
+   * @param {number} priority - libtorrent piece priority, 0 to 7.
+   * @returns {Promise<void>} - Resolves once applied.
+   */
+  async setPriority(infoHash, first, last, priority) {
+    await this.#call('set_priority', { infoHash, first, last, priority });
   }
 
   /**

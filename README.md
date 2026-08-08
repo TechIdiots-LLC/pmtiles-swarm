@@ -23,6 +23,10 @@ node src/index.js --config swarm.config.json
   hybrid v1+v2, watch folders, and the keep-or-discard choice when adding from a URL.
 - **[docs/subscribing.md](docs/subscribing.md)** — a worked two-node setup, mirror vs cache,
   feed contents, and updatable torrents.
+- **[docs/serving-tiles.md](docs/serving-tiles.md)** — the TileJSON and z/x/y endpoints, the
+  `torrent` block that torrent-aware clients use, caching, and running behind a proxy.
+- **[docs/architecture-diagram.md](docs/architecture-diagram.md)** — how a publishing node, a
+  serving tier, the swarm and both kinds of client fit together.
 
 ## What it does
 
@@ -41,6 +45,13 @@ new software. Items also carry a namespaced description of the map — format, z
 tile count — so a subscriber can decide whether it wants a 72 GiB download before starting one.
 
 **Follows feeds.** Subscribed feeds are polled and new archives added in one of two modes.
+
+**Serves tiles.** Every archive is also a TileJSON endpoint and a `{z}/{x}/{y}` tile endpoint, so
+a map can point straight at it. A node holding a complete copy reads its local file; a node in
+cache mode reads through the swarm, pulling only the pieces a requested tile lives in. The
+TileJSON carries a `torrent` block that ordinary clients ignore and torrent-aware ones use to
+join the swarm directly — one URL serves both. See
+[docs/serving-tiles.md](docs/serving-tiles.md).
 
 ## Mirror and cache
 

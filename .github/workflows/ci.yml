@@ -11,7 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: [20, 22, 24, latest]
+        # WebTorrent 3 requires Node 22, and Node 20 went end of life in
+        # April 2026.
+        node: [22, 24, latest]
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
@@ -26,13 +28,37 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          check-latest: true
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+      # The sidecar now lives in pmtiles-torrent and arrives as a dependency,
+      # so it has to be installed before it can be checked. Testing it here
+      # anyway is deliberate: this project spawns it, and a protocol change
+      # upstream should fail here rather than at run time.
+      - run: npm ci --prefer-offline --no-audit
       # The sidecar is the one part that cannot be exercised without
       # libtorrent present, so install it rather than leave it untested.
       - run: pip install libtorrent
-      - run: python -m py_compile sidecar/libtorrent_sidecar.py
+      - name: Locate the sidecar
+        id: sidecar
+        run: |
+          SCRIPT="node_modules/pmtiles-torrent/sidecar/libtorrent_sidecar.py"
+          test -f "$SCRIPT" || { echo "sidecar missing at $SCRIPT"; exit 1; }
+          echo "script=$SCRIPT" >> "$GITHUB_OUTPUT"
+      - run: python -m py_compile ${{ steps.sidecar.outputs.script }}
       - name: Smoke test the protocol
         run: |
-          echo '{"id":1,"op":"version","params":{}}' | python sidecar/libtorrent_sidecar.py | tail -1 | tee /dev/stderr | grep -q '"ok": *true'
+          echo '{"id":1,"op":"version","params":{}}' | python ${{ steps.sidecar.outputs.script }} | tail -1 | tee /dev/stderr | grep -q '"ok": *true'
+      - name: Check the ops this project calls still exist
+        run: |
+          # These are the ops src/engines/libtorrent.js sends. Losing one
+          # upstream would otherwise only show up when a tile was requested.
+          for op in add remove list get peers create read_piece set_priority info save_resume shutdown; do
+            grep -q "def op_${op}\b" ${{ steps.sidecar.outputs.script }} \
+              || { echo "sidecar has no op_${op}"; exit 1; }
+          done
+          echo "all ops present"
