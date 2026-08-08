@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import zlib from 'node:zlib';
 // The library's own Hilbert ordering, rather than a second implementation
 // here. A fixture that disagreed with the reader about tile ids would fail in
 // a way that looked like a reader bug.
@@ -18,7 +19,7 @@ import { zxyToTileId } from 'pmtiles';
 const HEADER_BYTES = 127;
 
 /** Compression identifiers from the spec. */
-const COMPRESSION_NONE = 1;
+export const COMPRESSION = { none: 1, gzip: 2 };
 
 /** Tile type identifiers from the spec. */
 export const TILE_TYPE = { mvt: 1, png: 2, jpeg: 3, webp: 4, avif: 5 };
@@ -85,6 +86,8 @@ function writeUint64(buffer, value, at) {
  * @param {object} [options.metadata] - JSON metadata.
  * @param {number} [options.minZoom] - Minimum zoom.
  * @param {number} [options.maxZoom] - Maximum zoom.
+ * @param {number} [options.internalCompression] - Applied to directories and metadata.
+ * @param {number} [options.tileCompression] - Applied to tile data.
  * @returns {Buffer} - The complete archive.
  */
 export function buildArchive({
@@ -93,7 +96,14 @@ export function buildArchive({
   metadata = {},
   minZoom = 0,
   maxZoom = 0,
+  internalCompression = COMPRESSION.none,
+  tileCompression = COMPRESSION.none,
 }) {
+  // Real vector archives gzip both, and the two fields are independent — an
+  // archive can gzip its tiles while leaving directories plain. A reader that
+  // conflates them still passes against an uncompressed fixture.
+  const pack = (buffer, compression) =>
+    compression === COMPRESSION.gzip ? zlib.gzipSync(buffer) : buffer;
   const sorted = [...tiles]
     .map((tile) => ({ ...tile, tileId: zxyToTileId(tile.z, tile.x, tile.y) }))
     .sort((a, b) => a.tileId - b.tileId);
@@ -102,18 +112,22 @@ export function buildArchive({
   const blobs = [];
   let dataOffset = 0;
   for (const tile of sorted) {
+    const packed = pack(tile.data, tileCompression);
     entries.push({
       tileId: tile.tileId,
       offset: dataOffset,
-      length: tile.data.length,
+      length: packed.length,
       runLength: 1,
     });
-    blobs.push(tile.data);
-    dataOffset += tile.data.length;
+    blobs.push(packed);
+    dataOffset += packed.length;
   }
 
-  const directory = serializeDirectory(entries);
-  const metadataJson = Buffer.from(JSON.stringify(metadata), 'utf8');
+  const directory = pack(serializeDirectory(entries), internalCompression);
+  const metadataJson = pack(
+    Buffer.from(JSON.stringify(metadata), 'utf8'),
+    internalCompression,
+  );
   const tileData = Buffer.concat(blobs);
 
   const rootOffset = HEADER_BYTES;
@@ -135,8 +149,8 @@ export function buildArchive({
   writeUint64(header, entries.length, 80);
   writeUint64(header, entries.length, 88);
   header.writeUInt8(1, 96); // clustered
-  header.writeUInt8(COMPRESSION_NONE, 97);
-  header.writeUInt8(COMPRESSION_NONE, 98);
+  header.writeUInt8(internalCompression, 97);
+  header.writeUInt8(tileCompression, 98);
   header.writeUInt8(tileType, 99);
   header.writeUInt8(minZoom, 100);
   header.writeUInt8(maxZoom, 101);
