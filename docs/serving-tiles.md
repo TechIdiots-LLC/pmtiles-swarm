@@ -38,7 +38,9 @@ tileserver-gl uses:
 ```
 
 ```sh
-curl -X POST http://localhost:8090/api/torrents   -H 'content-type: application/json'   -d '{"path": "/data/hillshade.pmtiles", "sparse": false}'
+curl -X POST http://localhost:8090/api/torrents \
+  -H 'content-type: application/json' \
+  -d '{"path": "/data/hillshade.pmtiles", "sparse": false}'
 ```
 
 Precedence is archive, then global, then the format default. PMTiles cannot say
@@ -159,10 +161,14 @@ at the current infohash.
     "pieceCacheBytes": null,
     "hydrateIdleMs": null,
     "pieceTimeoutMs": 120000,
-    "readyTimeoutMs": 60000
+    "readyTimeoutMs": 60000,
+    "sparse": null
   }
 }
 ```
+
+`sparse` is the missing-tile status described above; `null` means decide by
+format.
 
 ## Warming a region
 
