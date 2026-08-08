@@ -261,6 +261,8 @@ export function createApp({
         mode: body.mode,
         retain: body.retain,
         sparse: body.sparse,
+        publishDir: body.publishDir,
+        webSeedBase: body.webSeedBase,
       };
 
       let entry;

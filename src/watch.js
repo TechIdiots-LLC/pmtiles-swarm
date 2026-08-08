@@ -25,7 +25,7 @@ export class WatchManager {
 
   /**
    * Starts watching the configured folders.
-   * @param {object[]} folders - Entries of {path, category, webSeedBase, stabilitySeconds}.
+   * @param {object[]} folders - Entries of {path, category, webSeedBase, publishDir, sparse, stabilitySeconds}.
    * @returns {void}
    */
   start(folders = []) {
@@ -66,18 +66,17 @@ export class WatchManager {
     this.#importing.add(file);
     try {
       // A web seed makes a brand-new archive usable before anyone has it, so
-      // publish one whenever the folder is also served over HTTP.
-      const webSeeds = folder.webSeedBase
-        ? [
-            `${folder.webSeedBase.replace(/\/$/, '')}/${encodeURIComponent(
-              file.split(/[\\/]/).pop(),
-            )}`,
-          ]
-        : [];
-
+      // publish one whenever the folder is also served over HTTP. The URL is
+      // base plus filename, so it is known before the archive has moved
+      // anywhere — or is even being served yet.
       const entry = await this.#library.addLocalArchive(file, {
         category: folder.category,
-        webSeeds,
+        webSeedBase: folder.webSeedBase,
+        // Moves the archive into the directory that is served, so the web seed
+        // it advertises actually resolves. Without this, the base has to
+        // already describe the watched folder itself.
+        publishDir: folder.publishDir,
+        sparse: folder.sparse,
       });
       console.log(`[watch] imported ${entry.name} (${entry.infoHash})`);
     } catch (error) {

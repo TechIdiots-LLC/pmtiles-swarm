@@ -6,6 +6,7 @@ import { after, describe, it } from 'node:test';
 import zlib from 'node:zlib';
 import { createApp } from '../src/api.js';
 import { Catalog } from '../src/catalog.js';
+import { publish, webSeedFor } from '../src/library.js';
 import { LibtorrentReadEngine } from '../src/read-engine.js';
 import { buildTileJson, extensionMatches } from '../src/tilejson.js';
 import { TileStore } from '../src/tiles.js';
@@ -828,5 +829,60 @@ describe('missing tile status', () => {
       }),
       404,
     );
+  });
+});
+
+describe('publishing archives for web seeding', () => {
+  it('builds a web seed URL from a base and a filename', () => {
+    assert.equal(
+      webSeedFor('https://maps.example.org/pmtiles', 'planet.pmtiles'),
+      'https://maps.example.org/pmtiles/planet.pmtiles',
+    );
+    // A trailing slash on the base must not double up.
+    assert.equal(
+      webSeedFor('https://maps.example.org/pmtiles/', 'planet.pmtiles'),
+      'https://maps.example.org/pmtiles/planet.pmtiles',
+    );
+  });
+
+  it('escapes the filename but not the base path', () => {
+    // The base is configuration and may contain a path; escaping its slashes
+    // would break it. The filename is data and may contain anything.
+    assert.equal(
+      webSeedFor('https://x.org/a/b', 'planet 2024.pmtiles'),
+      'https://x.org/a/b/planet%202024.pmtiles',
+    );
+  });
+
+  it('moves an archive into the directory it will be served from', async () => {
+    const incoming = await fs.mkdtemp(path.join(workspace, 'incoming-'));
+    const served = path.join(workspace, `served-${Date.now()}`);
+    const source = path.join(incoming, 'planet.pmtiles');
+    await fs.writeFile(source, 'archive bytes');
+
+    const moved = await publish(source, served);
+
+    assert.equal(moved, path.join(served, 'planet.pmtiles'));
+    assert.equal(await fs.readFile(moved, 'utf8'), 'archive bytes');
+    // Moved, not copied: a 700 GiB archive must not exist twice.
+    await assert.rejects(() => fs.stat(source), { code: 'ENOENT' });
+  });
+
+  it('creates the publish directory when it does not exist', async () => {
+    const incoming = await fs.mkdtemp(path.join(workspace, 'incoming-'));
+    const source = path.join(incoming, 'planet.pmtiles');
+    await fs.writeFile(source, 'bytes');
+
+    const moved = await publish(source, path.join(workspace, 'new', 'nested'));
+    assert.equal(await fs.readFile(moved, 'utf8'), 'bytes');
+  });
+
+  it('does nothing when the archive is already in place', async () => {
+    const dir = await fs.mkdtemp(path.join(workspace, 'inplace-'));
+    const source = path.join(dir, 'planet.pmtiles');
+    await fs.writeFile(source, 'bytes');
+
+    assert.equal(await publish(source, dir), source);
+    assert.equal(await fs.readFile(source, 'utf8'), 'bytes');
   });
 });

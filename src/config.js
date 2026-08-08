@@ -132,7 +132,21 @@ const DEFAULTS = {
      */
     sparse: undefined,
   },
-  /** Folders scanned for new archives: [{ path, category, webSeedBase }]. */
+  /**
+   * Folders scanned for new archives.
+   *
+   * Each entry is `{ path, category, webSeedBase, publishDir, sparse }`.
+   *
+   * `publishDir` moves the archive into the directory a web server serves
+   * before the torrent is built, and `webSeedBase` is the URL that directory
+   * is reachable at. Together they give every imported archive a working web
+   * seed — which is what makes a brand-new archive usable before any peer has
+   * a copy of it, and what turns a cold tile read from tens of seconds into
+   * well under one.
+   *
+   * `webSeedBase` on its own assumes the watched folder is already the web
+   * root, since nothing is moved.
+   */
   watch: [],
   /** Feeds to follow: [{ url, mode, category }] where mode is 'mirror' or 'cache'. */
   subscriptions: [],

@@ -56,15 +56,32 @@ export class Library {
    * @returns {Promise<object>} - The catalog entry.
    */
   async addLocalArchive(filePath, options = {}) {
-    const absolute = path.resolve(filePath);
-    const existing = this.#catalog.findBySource(absolute);
+    const requested = path.resolve(filePath);
+    const existing = this.#catalog.findBySource(requested);
     if (existing) return existing;
+
+    // Move before hashing, not after. A rename on one filesystem is metadata
+    // and costs nothing, while hashing the archive is minutes — so the cheap
+    // irreversible step goes first, and the torrent is built from where the
+    // data will actually live. Doing it the other way round leaves the engine
+    // seeding from a path the file has left.
+    const absolute = options.publishDir
+      ? await publish(requested, options.publishDir)
+      : requested;
+
+    // The web seed URL is pure configuration — base plus filename — so it does
+    // not wait on the move, or even on the file being served yet. A seed that
+    // is not live is advisory: peers that try it fall back to the swarm.
+    const webSeeds = [...(options.webSeeds ?? [])];
+    if (options.webSeedBase) {
+      webSeeds.push(webSeedFor(options.webSeedBase, path.basename(absolute)));
+    }
 
     const summary = await probePMTiles(absolute).catch(() => undefined);
     const created = await createTorrentFromFile(absolute, {
       pieceLength: options.pieceLength ?? this.#config.pieceLength,
       trackers: options.trackers ?? this.#config.trackers,
-      webSeeds: options.webSeeds ?? [],
+      webSeeds: [...new Set(webSeeds)],
       comment: options.comment,
     });
 
@@ -75,6 +92,7 @@ export class Library {
       savePath: path.dirname(absolute),
       pmtiles: summary,
       sparse: options.sparse,
+      webSeeds: [...new Set(webSeeds)],
       seedOnly: true,
     });
   }
@@ -554,6 +572,54 @@ export class Library {
       stale: false,
     });
   }
+}
+
+/**
+ * Builds a web seed URL from a base and a filename.
+ *
+ * Only the filename is encoded: the base is configuration and may legitimately
+ * contain a path, so escaping its slashes would break it.
+ * @param {string} base - Base URL the directory is served at.
+ * @param {string} name - Archive filename.
+ * @returns {string} - The web seed URL.
+ */
+export function webSeedFor(base, name) {
+  return `${base.replace(/\/$/, '')}/${encodeURIComponent(name)}`;
+}
+
+/**
+ * Moves an archive into the directory it will be served from.
+ *
+ * A rename is instant within a filesystem and is what this expects. Across
+ * filesystems the platform falls back to copy-and-delete, which for a
+ * multi-terabyte archive is a very different proposition — so that case is
+ * reported rather than silently taking an hour.
+ * @param {string} from - Where the archive is now.
+ * @param {string} publishDir - Directory to move it into.
+ * @returns {Promise<string>} - The archive's new path.
+ */
+export async function publish(from, publishDir) {
+  const target = path.join(path.resolve(publishDir), path.basename(from));
+  if (target === from) return from;
+
+  await fs.mkdir(path.dirname(target), { recursive: true });
+
+  try {
+    await fs.rename(from, target);
+    return target;
+  } catch (error) {
+    if (error.code !== 'EXDEV') throw error;
+  }
+
+  // EXDEV: different filesystems, so this is a real copy.
+  const { size } = await fs.stat(from);
+  console.warn(
+    `[publish] ${from} and ${publishDir} are on different filesystems; ` +
+      `copying ${(size / 1024 ** 3).toFixed(1)} GiB instead of renaming`,
+  );
+  await fs.copyFile(from, target);
+  await fs.unlink(from);
+  return target;
 }
 
 /**
