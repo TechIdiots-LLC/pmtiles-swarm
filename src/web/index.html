@@ -520,6 +520,35 @@
           </div>
           <div class="sub" style="margin-bottom:1rem"><code>${escapeHtml(tileJson)}</code></div>
 
+          <h2>Seeding limit</h2>
+          <div class="field" id="seeding-box">
+            <label>
+              <input type="radio" name="seed-limit" value="global" />
+              Use the global limit <span class="sub" id="seed-global"></span>
+            </label>
+            <label>
+              <input type="radio" name="seed-limit" value="forever" />
+              Seed forever
+            </label>
+            <label>
+              <input type="radio" name="seed-limit" value="custom" />
+              Stop at
+              <input id="seed-ratio" style="width: 5rem" placeholder="ratio" />
+              or after
+              <input id="seed-minutes" style="width: 7rem" placeholder="minutes" />
+              then
+              <select id="seed-then">
+                <option value="stop">stop seeding</option>
+                <option value="remove">remove, keep the files</option>
+                <option value="delete">remove and delete the files</option>
+              </select>
+            </label>
+            <div class="actions" style="margin-top: 0.5rem">
+              <button id="seed-save">Save limit</button>
+              <span class="sub" id="seed-current"></span>
+            </div>
+          </div>
+
           <h2>Actions</h2>
           <div class="actions">
             <button id="warm">Warm region</button>
@@ -532,6 +561,58 @@
 
           <h2>Preview</h2>
           <div id="preview"></div>`;
+
+        // Seeding limit: the same three-way choice a torrent client offers,
+        // because "this one stays" has to survive a change to the global rule.
+        const describe = (limit) => {
+          if (!limit || limit.forever) return 'no limit';
+          const parts = [];
+          if (limit.ratio) parts.push(`ratio ${limit.ratio}`);
+          if (limit.minutes) parts.push(`${Math.round(limit.minutes / 1440)} days`);
+          return `${parts.join(' or ')} → ${limit.then}`;
+        };
+
+        try {
+          const { config } = await api('/api/config');
+          $('seed-global').textContent = `(${describe(config.seeding)})`;
+          const own = entry.seeding;
+          const mode = own === false ? 'forever' : own ? 'custom' : 'global';
+          document.querySelector(`input[name="seed-limit"][value="${mode}"]`).checked = true;
+          if (own && typeof own === 'object') {
+            $('seed-ratio').value = own.ratio ?? '';
+            $('seed-minutes').value = own.minutes ?? '';
+            $('seed-then').value = own.then ?? 'stop';
+          }
+          $('seed-current').textContent = `in effect: ${describe(
+            own === false ? { forever: true } : (own ?? config.seeding),
+          )}`;
+        } catch {
+          $('seeding-box').hidden = true;
+        }
+
+        $('seed-save').onclick = async () => {
+          const mode = document.querySelector('input[name="seed-limit"]:checked')?.value;
+          const body =
+            mode === 'forever'
+              ? { forever: true }
+              : mode === 'global'
+                ? { useGlobal: true }
+                : {
+                    ratio: Number($('seed-ratio').value) || undefined,
+                    minutes: Number($('seed-minutes').value) || undefined,
+                    then: $('seed-then').value,
+                  };
+          try {
+            const result = await api(`/api/torrents/${infoHash}/seeding`, {
+              method: 'PATCH',
+              body,
+            });
+            $('seed-current').textContent = `in effect: ${describe(result.effective)}`;
+            toast('seeding limit saved');
+          } catch (error) {
+            toast(error.message);
+          }
+        };
 
         $('copy-magnet').onclick = () => copy(entry.magnet ?? '', 'Magnet link');
         $('copy-tilejson').onclick = () => copy(tileJson, 'TileJSON URL');

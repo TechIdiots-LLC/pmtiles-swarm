@@ -12,6 +12,11 @@
 - **An archive can carry several categories.** A planet build can be both `basemaps` and `weekly`
   without choosing. Feeds match on *any* tag, so it appears in both. Catalogues holding the older
   single `category` string are read as a list of one and normalised on the next write.
+- **Seeding limits**, in the shape a torrent client uses: stop at a ratio, or after so long
+  seeding a complete copy, then stop, remove, or remove and delete the files. Global by default
+  with a per-archive override — including "seed forever", which a change to the global rule must
+  not undo. Never applies to a cache-mode archive, which holds a few pieces on purpose and has
+  not been seeding in the sense a ratio measures.
 - **Trackers are settable wherever a torrent is created** — per watch folder, per scheduled
   source, per request — with `trackers` replacing the global list and `addTrackers` appending to
   it. Watch folders could not set them at all before. The add dialog shows the defaults and

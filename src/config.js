@@ -292,6 +292,37 @@ const DEFAULTS = {
     /** The source must be unchanged for this long before rebuilding. */
     stabilitySeconds: 300,
   },
+  /**
+   * Seeding limits: how long an archive stays before it is let go.
+   *
+   * The same shape a torrent client uses, because it is the same decision.
+   * Either threshold is enough — "share it enough, or hold it long enough" is
+   * a sentence people mean, and requiring both would keep a well-shared
+   * archive for a month it did not need.
+   *
+   *   ratio    stop once uploaded/size reaches this
+   *   minutes  stop after this long seeding a complete copy
+   *   then     'stop' keeps everything and stops offering it
+   *            'remove' forgets the archive but leaves the data
+   *            'delete' removes the data too
+   *
+   * Unset, or `forever: true`, means never. An individual archive can override
+   * this with its own `seeding`, and `seeding: false` on an archive means it
+   * stays whatever the default says — which is the point of a per-archive
+   * override, so a global policy must not quietly undo it.
+   *
+   * Only ever applies to a complete copy. A cache-mode archive holds a few
+   * pieces on purpose and has not been "seeding" in the sense a ratio
+   * measures; expiring one on a timer would delete a working tile cache for
+   * having existed.
+   */
+  seeding: {
+    ratio: undefined,
+    minutes: undefined,
+    then: 'stop',
+  },
+  /** How often to check seeding limits, in seconds. Zero disables it. */
+  seedingCheckIntervalSeconds: 3600,
   /** How often to poll subscribed feeds, in seconds. */
   subscriptionIntervalSeconds: 900,
   /** Republish interval for BEP 46 records, in seconds. DHT items expire. */

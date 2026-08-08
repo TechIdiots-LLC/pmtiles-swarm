@@ -9,6 +9,7 @@ import { LibtorrentEngine } from './engines/libtorrent.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { WebTorrentSeedEngine } from './engines/webtorrent.js';
 import { Library } from './library.js';
+import { SeedingLimits } from './seeding.js';
 import { ScheduledSourceManager } from './sources.js';
 import { SubscriptionManager } from './subscriptions.js';
 import { TileStore } from './tiles.js';
@@ -103,6 +104,7 @@ PMTILES_SWARM_PUBLIC_URL
   const subscriptions = new SubscriptionManager(library, config);
   const watch = new WatchManager(library);
   const sources = new ScheduledSourceManager(library, catalog, config);
+  const seeding = new SeedingLimits(library, config);
 
   const tiles = new TileStore({ catalog, engine, config });
   const warm = new WarmRunner(tiles);
@@ -132,6 +134,7 @@ PMTILES_SWARM_PUBLIC_URL
   watch.start(config.watch);
   subscriptions.start();
   sources.start();
+  seeding.start();
 
   // Watch the sources archives were built from. A changed source does not
   // invalidate its torrent, but it does mean any web seed pointing there will
@@ -169,6 +172,7 @@ PMTILES_SWARM_PUBLIC_URL
     console.log(`\n[shutdown] ${signal}`);
     if (originTimer) clearInterval(originTimer);
     sources.stop();
+    seeding.stop();
     subscriptions.stop();
     await watch.stop().catch(() => {});
     await new Promise((resolve) => server.close(resolve));

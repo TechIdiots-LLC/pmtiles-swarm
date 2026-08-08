@@ -13,6 +13,7 @@ import {
   verifyPassword,
 } from '../src/auth.js';
 import { Catalog, normalizeCategories } from '../src/catalog.js';
+import { evaluate, limitFor } from '../src/seeding.js';
 import {
   assertPublishable,
   identifyBytes,
@@ -1885,5 +1886,91 @@ describe('matching an existing mktorrent workflow', () => {
 
     assert.equal(parsed.pieceLength, 1 << 24);
     assert.equal(parsed.comment, 'Planetiler openmaptiles data export');
+  });
+});
+
+describe('seeding limits', () => {
+  const GLOBAL = { ratio: 2, minutes: 64800, then: 'delete' };
+  const seeded = (extra = {}) => ({
+    infoHash: 'a'.repeat(40),
+    name: 'planet.pmtiles',
+    mode: 'mirror',
+    seedingSince: new Date(Date.now() - 60 * 86400000).toISOString(),
+    ...extra,
+  });
+
+  it('does nothing when no limit is configured', () => {
+    assert.equal(evaluate(seeded(), { ratio: 99 }, undefined).reached, false);
+    assert.equal(evaluate(seeded(), { ratio: 99 }, { forever: true }).reached, false);
+    // A limit naming no threshold is not a limit.
+    assert.equal(evaluate(seeded(), { ratio: 99 }, { then: 'delete' }).reached, false);
+  });
+
+  it('stops at the ratio', () => {
+    const verdict = evaluate(seeded({ seedingSince: new Date().toISOString() }), { ratio: 2.5 }, GLOBAL);
+    assert.equal(verdict.reached, true);
+    assert.match(verdict.reason, /ratio/);
+    assert.equal(verdict.then, 'delete');
+  });
+
+  it('stops at the time, even with a poor ratio', () => {
+    // Either threshold is enough — the same reading a torrent client uses.
+    const verdict = evaluate(seeded(), { ratio: 0 }, GLOBAL);
+    assert.equal(verdict.reached, true);
+    assert.match(verdict.reason, /seeding for/);
+  });
+
+  it('keeps seeding while both are short of the mark', () => {
+    const young = seeded({ seedingSince: new Date().toISOString() });
+    assert.equal(evaluate(young, { ratio: 0.5 }, GLOBAL).reached, false);
+  });
+
+  it('lets one archive stay forever, whatever the global policy says', () => {
+    // The point of a per-archive override: a global default must not undo it.
+    const kept = seeded({ seeding: false });
+    assert.equal(evaluate(kept, { ratio: 99 }, GLOBAL).reached, false);
+    assert.equal(limitFor(kept, GLOBAL).forever, true);
+  });
+
+  it('lets one archive have its own limit', () => {
+    const strict = seeded({ seeding: { ratio: 0.1, then: 'stop' } });
+    const verdict = evaluate(strict, { ratio: 0.5 }, GLOBAL);
+    assert.equal(verdict.reached, true);
+    assert.equal(verdict.then, 'stop', 'the archive its own action, not the global one');
+  });
+
+  it('never expires a cache-mode archive', () => {
+    // It holds a few pieces on purpose and has not been seeding in the sense a
+    // ratio measures. Expiring one on a timer would delete a working tile
+    // cache for having existed.
+    const cache = seeded({ mode: 'cache' });
+    assert.equal(evaluate(cache, { ratio: 99 }, GLOBAL).reached, false);
+  });
+
+  it('measures from when seeding began, not from when the archive was added', () => {
+    // A long download would otherwise count as time served.
+    const stillNew = {
+      infoHash: 'b'.repeat(40),
+      mode: 'mirror',
+      createdAt: new Date(Date.now() - 90 * 86400000).toISOString(),
+      seedingSince: new Date(Date.now() - 60000).toISOString(),
+    };
+    assert.equal(evaluate(stillNew, { ratio: 0 }, GLOBAL).reached, false);
+  });
+
+  it('rejects an action it does not understand rather than inventing one', () => {
+    const odd = seeded({ seeding: { minutes: 1, then: 'incinerate' } });
+    assert.equal(limitFor(odd, GLOBAL).then, 'stop', 'falls back to the safe action');
+  });
+
+  it('treats your qBittorrent settings the same way qBittorrent does', () => {
+    // 64800 minutes, no ratio limit, then remove with data — the screenshot.
+    const limit = { minutes: 64800, then: 'delete' };
+    const old = seeded({ seedingSince: new Date(Date.now() - 46 * 86400000).toISOString() });
+    const young = seeded({ seedingSince: new Date(Date.now() - 44 * 86400000).toISOString() });
+
+    assert.equal(evaluate(old, { ratio: 0 }, limit).reached, true);
+    assert.equal(evaluate(young, { ratio: 0 }, limit).reached, false);
+    assert.equal(evaluate(old, { ratio: 0 }, limit).then, 'delete');
   });
 });

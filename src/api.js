@@ -6,6 +6,7 @@ import { createAuth } from './auth.js';
 import { normalizeCategories } from './catalog.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
 import { renderFeed } from './feed.js';
+import { limitFor } from './seeding.js';
 import { buildTileJson, extensionMatches } from './tilejson.js';
 import { TileReadError } from './tiles.js';
 
@@ -304,6 +305,36 @@ export function createApp({
         const status = /unknown archive/.test(error.message) ? 404 : 400;
         res.status(status).json({ error: error.message });
       }
+    }),
+  );
+
+  // Seeding limits per archive. The per-torrent override a client offers, so
+  // one archive can be told to stay whatever the global policy says.
+  app.patch(
+    '/api/torrents/:infoHash/seeding',
+    route(async (req, res) => {
+      const entry = catalog.get(req.params.infoHash);
+      if (!entry) return res.status(404).json({ error: 'not found' });
+
+      const body = req.body ?? {};
+      let seeding;
+      if (body.forever === true || body.seeding === false) {
+        seeding = false;
+      } else if (body.useGlobal === true) {
+        seeding = undefined;
+      } else {
+        seeding = {
+          ratio: body.ratio,
+          minutes: body.minutes,
+          then: body.then,
+        };
+      }
+
+      const saved = await catalog.put({ infoHash: entry.infoHash, seeding });
+      res.json({
+        seeding: saved.seeding ?? null,
+        effective: limitFor(saved, config.seeding),
+      });
     }),
   );
 
