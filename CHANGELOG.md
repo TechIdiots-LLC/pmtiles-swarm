@@ -185,6 +185,12 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **Every radio and checkbox in the console sat centred on a line of its own**, with its label
+  above it. `.field label` makes a label `display: block` and `.field input` stretches a control to
+  the full width of its dialog, and both applied to these too. They share a `choice` class now,
+  defined last in the stylesheet because the rules it has to beat match just as tightly — position,
+  not specificity, is what settles it. A test asserts both halves, since moving the block up the
+  sheet would silently revert the layout.
 - **Shutting down could leave the port held, so the next run could not start.** Three faults in one
   loop. The signal handlers were installed at the *end* of startup, so a Ctrl-C while the catalogue
   was being handed back to the engine reached nothing at all and killed the process outright — port
