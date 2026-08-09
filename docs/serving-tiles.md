@@ -349,6 +349,33 @@ Leave `pieceCacheBytes` unset unless you have a reason. It is then sized from th
 torrent's piece length, which is the safer default — a fixed byte budget is a
 trap with 16 MiB pieces, since 64 MiB holds only four of them.
 
+## Looking at an archive
+
+`/archives/{infohash}/preview` renders the archive on a map, from the TileJSON
+beside it. Nothing there reconstructs a source description: the endpoint is
+already a complete, valid TileJSON, which is most of the reason it is worth
+having.
+
+**Vector archives get an inspector.** Every `vector_layer` the archive declares
+is drawn in a colour derived from its name — so a layer keeps its colour as
+others come and go, and two copies of the same data look alike — with fills,
+lines and circles by geometry type. Click anywhere to see the features under the
+cursor and their properties; click a layer in the list to hide it.
+
+**Raster archives get the raster.** There is nothing to inspect in an image, so
+the panel says so and the map is for checking coverage.
+
+No symbol layers are drawn and no glyphs are configured, deliberately: an
+archive carries tiles, not fonts, and a preview that needed a font server to
+render would not be a preview of the archive.
+
+MapLibre is served from this node, out of `node_modules/maplibre-gl/dist`, the
+same way tileserver-gl does it. A node on an internal network has to be able to
+render its own previews — a console that silently needs the internet is one that
+works on the machine it was written on. It is an ordinary dependency, so
+`npm install` is all there is to it; if it is missing, everything except the
+preview still works.
+
 ## Stopping a limit removing an archive underneath a map
 
 A seeding limit can `remove` or `delete` an archive that a style is pointed at.

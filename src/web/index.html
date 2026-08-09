@@ -1013,7 +1013,10 @@
             <button id="copy-magnet">Copy magnet</button>
             <button id="copy-hash">Copy infohash</button>
             ${servable ? `<button id="copy-tilejson">Copy TileJSON URL</button>
-            <a href="${tileJson}" target="_blank" rel="noreferrer"><button type="button">Open TileJSON</button></a>` : ''}
+            <a href="${tileJson}" target="_blank" rel="noreferrer"><button type="button">Open TileJSON</button></a>
+            <a href="${base}/archives/${entry.infoHash}/preview" target="_blank" rel="noreferrer"><button type="button">${
+              summary.format === 'pbf' ? 'Inspect' : 'Preview'
+            }</button></a>` : ''}
           </div>
           ${
             servable
@@ -1491,11 +1494,11 @@
 
         if (format === 'pbf') {
           const layers = entry.pmtiles.vectorLayers ?? [];
-          target.innerHTML = layers.length
-            ? `<div class="sub">${layers.length} vector layers: ${layers
-                .map((l) => escapeHtml(l.id))
-                .join(', ')}</div>`
-            : '<div class="sub">Vector tiles.</div>';
+          target.innerHTML = `<div class="sub">${
+            layers.length
+              ? `${layers.length} vector layers: ${layers.map((l) => escapeHtml(l.id)).join(', ')}`
+              : 'Vector tiles.'
+          } <a href="/archives/${entry.infoHash}/preview" target="_blank" rel="noreferrer">Inspect on a map →</a></div>`;
           return;
         }
 

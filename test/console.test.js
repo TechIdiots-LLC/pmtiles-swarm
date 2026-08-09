@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -57,5 +58,47 @@ describe('console layout', () => {
   it('stops .field input from stretching a radio across the dialog', () => {
     const rules = styles.slice(styles.indexOf('.choice input,'));
     assert.match(rules, /width:\s*auto/);
+  });
+});
+
+describe('the map preview', () => {
+  it('is offered for PMTiles and not for anything else', () => {
+    // Same rule as the TileJSON it renders: MBTiles is distributed here but
+    // never served, so a preview of it could only ever be an empty map.
+    assert.match(page, /servable \? `<button id="copy-tilejson"/);
+    assert.match(page, /\/preview" target="_blank"/);
+  });
+
+  it('loads maplibre from this node, not from a CDN', () => {
+    // A node on an internal network has to be able to render its own
+    // previews. A console that silently needs the internet is one that works
+    // on the machine it was written on.
+    const preview = fsSync.readFileSync(
+      path.join(here, '..', 'src', 'web', 'preview.html'),
+      'utf8',
+    );
+    assert.match(preview, /from '\/vendor\/maplibre-gl\/maplibre-gl\.mjs'/);
+    assert.doesNotMatch(preview, /unpkg|jsdelivr|cdn\./);
+  });
+
+  it('builds its source from the TileJSON rather than reconstructing one', () => {
+    // The endpoint is a complete, valid TileJSON already, which is the whole
+    // reason it is worth having.
+    const preview = fsSync.readFileSync(
+      path.join(here, '..', 'src', 'web', 'preview.html'),
+      'utf8',
+    );
+    assert.match(preview, /sources: \{ archive: \{ type: vector \? 'vector' : 'raster', url: tileJsonUrl \} \}/);
+  });
+
+  it('draws no symbol layers, since an archive carries no fonts', () => {
+    // A preview that needed a glyph server to render would not be a preview of
+    // the archive.
+    const preview = fsSync.readFileSync(
+      path.join(here, '..', 'src', 'web', 'preview.html'),
+      'utf8',
+    );
+    assert.doesNotMatch(preview, /type: 'symbol'/);
+    assert.doesNotMatch(preview, /glyphs:/);
   });
 });

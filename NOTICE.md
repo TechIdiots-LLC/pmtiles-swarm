@@ -31,6 +31,15 @@ that throws when handed the hex-string infohash that webtorrent's `Torrent._onTo
 breaking every magnet add. webtorrent declares `^2.2.5`, so the pin holds it at a working version.
 Remove it once webtorrent fixes the call site.
 
+## MapLibre GL JS — BSD-3-Clause
+
+> Copyright (c) 2020, MapLibre contributors
+> https://github.com/maplibre/maplibre-gl-js
+
+Served to the console from `node_modules/maplibre-gl/dist` — the same arrangement tileserver-gl
+uses — so a node on an internal network can render its own previews without reaching a CDN. The
+library is used unmodified through its public API; `src/web/preview.html` is our own code.
+
 ## qBittorrent — GPL-2.0-or-later
 
 > https://github.com/qbittorrent/qBittorrent

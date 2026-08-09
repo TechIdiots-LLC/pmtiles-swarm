@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -1451,6 +1452,16 @@ export function createApp({
   // into a map style, so they should look like a tile server, not like an
   // administrative API.
 
+  // A map, for looking at what an archive actually contains.
+  //
+  // Served under the archive rather than as a query on one page, so the URL is
+  // shareable and says what it shows. The page reads the TileJSON next to it —
+  // which is a complete, valid TileJSON already, so nothing here has to invent
+  // a source description.
+  app.get('/archives/:infoHash/preview', (_req, res) => {
+    res.sendFile(path.join(here, 'web', 'preview.html'));
+  });
+
   app.get(
     '/archives/:infoHash/tiles.json',
     route(async (req, res) => {
@@ -1606,6 +1617,23 @@ export function createApp({
       res.send(tile.data);
     }),
   );
+
+  // MapLibre, from node_modules rather than a CDN. A node on an internal
+  // network has to be able to render its own previews, and a console that
+  // silently needs the internet is a console that works on the machine it was
+  // written on. The whole dist directory is mounted because the bundle is ESM
+  // and imports a shared chunk and a worker from beside itself.
+  //
+  // BSD-3-Clause, © MapLibre contributors. See NOTICE.md.
+  try {
+    const maplibre = path.dirname(
+      createRequire(import.meta.url).resolve('maplibre-gl/package.json'),
+    );
+    app.use('/vendor/maplibre-gl', express.static(path.join(maplibre, 'dist')));
+  } catch {
+    // Optional at runtime: everything except the preview works without it.
+    console.warn('[web] maplibre-gl is not installed; map previews are unavailable');
+  }
 
   app.use(express.static(path.join(here, 'web')));
 
