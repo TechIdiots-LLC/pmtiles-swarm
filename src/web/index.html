@@ -388,6 +388,10 @@
         <div class="field">
           <button type="button" id="adopt-scan">Look for archives</button>
           <span class="status" id="adopt-status"></span>
+          <label class="choice" style="margin-top:0.5rem">
+            <input type="checkbox" id="adopt-all" />
+            <span>Show everything, not just map archives</span>
+          </label>
         </div>
 
         <div id="adopt-list" class="panel" hidden style="max-height:22rem; overflow:auto"></div>
@@ -422,11 +426,6 @@
             adopted where it lies and is unaffected by this.
           </div>
         </div>
-
-        <label class="choice">
-          <input type="checkbox" id="adopt-all" />
-          <span>Show everything, not just map archives</span>
-        </label>
 
         <div class="sub" id="adopt-error" style="color:var(--danger)"></div>
         <menu>
@@ -1584,7 +1583,10 @@
       }
 
       $('adopt-all').onchange = () => {
-        if (adoptCandidates.length > 0) renderAdoptList();
+        // Including when the result is empty: the empty state names this
+        // checkbox, so leaving it unrendered left that instruction on screen
+        // after it had been followed.
+        if (!$('adopt-list').hidden) renderAdoptList();
       };
 
       $('adopt-add-category').onclick = () => {
