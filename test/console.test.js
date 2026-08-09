@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
+import { declarationDepths } from './helpers/js-scope.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const page = await fs.readFile(
@@ -113,5 +114,61 @@ describe('the map preview', () => {
     );
     assert.doesNotMatch(preview, /type: 'symbol'/);
     assert.doesNotMatch(preview, /glyphs:/);
+  });
+});
+
+describe('console script structure', () => {
+  const script = page.split('<script type="module">')[1].split('</script>')[0];
+  const depths = declarationDepths(script);
+
+  it('declares shared helpers where everything can reach them', () => {
+    // `node --check` catches syntax and stops there. It will happily accept a
+    // helper declared inside one function and called from another, which is a
+    // ReferenceError the moment somebody clicks the button and not a moment
+    // before — which is exactly how these four shipped nested inside
+    // renderDetail while the add dialog called them.
+    const shared = [
+      'api',
+      'refresh',
+      'renderDetail',
+      'renderRows',
+      'renderPreview',
+      'locationPicker',
+      'fillLocations',
+      'chosenLocation',
+      'watchMove',
+      'renderRowEditor',
+      'readRow',
+      'readRowEditors',
+      'renderHookEditor',
+      'readHookEditor',
+      'renderTokenEditor',
+      'loadSettings',
+      'loadCategories',
+      'saveSettings',
+      'restartNode',
+      'duration',
+      'ratioCell',
+      'expiryCell',
+    ];
+
+    const nested = shared
+      .map((name) => [name, depths.get(name)])
+      .filter(([, depth]) => depth !== 0);
+
+    assert.deepEqual(
+      nested,
+      [],
+      'these are declared inside another function, so calling them from ' +
+        'anywhere else throws at click time',
+    );
+  });
+
+  it('knows about every helper it claims to check', () => {
+    // A typo in the list above would make the test above pass by checking
+    // nothing at all.
+    for (const name of ['api', 'locationPicker', 'renderDetail']) {
+      assert.ok(depths.has(name), `${name} should exist in the console script`);
+    }
   });
 });

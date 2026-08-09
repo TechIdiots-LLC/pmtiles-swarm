@@ -247,6 +247,13 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **"Add archive…" threw `locationPicker is not defined`.** The save-location helpers were declared
+  inside the detail panel's renderer, so the add and adopt dialogs — which are not — could not see
+  them. `node --check` accepts that happily: it is a syntax-clean script and a `ReferenceError` at
+  click time. The console script is now checked for it, by counting brace depth over a source with
+  strings, template literals, comments and regular expressions blanked out, and asserting that
+  every helper called from more than one place is declared at the top level. Verified against the
+  commit that broke it.
 - **Magnets dropped the web seeds their torrents advertised.** Torrents created here have always
   put them in the magnet; a torrent that was *joined* did not, and a web seed added after
   publication reached everyone holding the `.torrent` and nobody holding the magnet — which is the

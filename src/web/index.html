@@ -1196,121 +1196,6 @@
           }
         };
 
-        /**
-       * A save-location choice: the default, a named location, or a path.
-       *
-       * Rendered rather than written out by hand in each dialog, since there
-       * are three of them and the list has to be fetched.
-       * @param {string} id - Prefix for the control ids.
-       * @returns {string} - The markup.
-       */
-      function locationPicker(id) {
-        return `
-          <div class="field">
-            <label for="${id}-select">Save location</label>
-            <select id="${id}-select"></select>
-            <input id="${id}-path" hidden placeholder="M:\\archives" style="margin-top:0.4rem" />
-            <div class="sub" id="${id}-note"></div>
-          </div>`;
-      }
-
-      /**
-       * Fills a picker from the node's configured locations.
-       * @param {string} id - The prefix used above.
-       * @returns {Promise<void>} - Resolves once filled.
-       */
-      async function fillLocations(id) {
-        let status = {};
-        try {
-          status = await api('/api/status');
-        } catch {
-          // A picker offering only the default is still usable.
-        }
-
-        const select = $(`${id}-select`);
-        const custom = $(`${id}-path`);
-        const note = $(`${id}-note`);
-
-        // Free space beside each one, so choosing a destination does not mean
-        // going and looking it up somewhere else first.
-        const room = (free) => (free == null ? '' : ` · ${bytes(free)} free`);
-
-        select.innerHTML = [
-          `<option value="">Default${
-            status.defaultSavePath
-              ? ` — ${escapeHtml(status.defaultSavePath)}${room(status.defaultFree)}`
-              : ''
-          }</option>`,
-          ...(status.locations ?? []).map(
-            (entry) =>
-              `<option value="name:${escapeHtml(entry.name)}">${escapeHtml(entry.name)} — ${escapeHtml(entry.path)}${room(entry.free)}</option>`,
-          ),
-          '<option value="custom">Somewhere else…</option>',
-        ].join('');
-
-        note.textContent =
-          (status.locations ?? []).length > 0
-            ? ''
-            : 'Name the places you use often under Settings → Save locations.';
-
-        select.onchange = () => {
-          custom.hidden = select.value !== 'custom';
-          if (!custom.hidden) custom.focus();
-        };
-        custom.hidden = true;
-      }
-
-      /**
-       * What a picker chose, as the API expects it.
-       * @param {string} id - The prefix used above.
-       * @returns {object} - `{}`, `{location}` or `{savePath}`.
-       */
-      function chosenLocation(id) {
-        const value = $(`${id}-select`)?.value ?? '';
-        if (value === 'custom') {
-          const custom = $(`${id}-path`).value.trim();
-          return custom ? { savePath: custom } : {};
-        }
-        if (value.startsWith('name:')) return { location: value.slice(5) };
-        return {};
-      }
-
-      /**
-       * Follows a move until it finishes, so a long copy is visible.
-       * @param {string} infoHash - The archive being moved.
-       * @returns {Promise<void>} - Resolves when it is over.
-       */
-      async function watchMove(infoHash) {
-        for (;;) {
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-          let state;
-          try {
-            ({ move: state } = await api(`/api/torrents/${infoHash}/location`));
-          } catch {
-            return;
-          }
-          if (!state) return;
-
-          if (state.state === 'moving') {
-            // Only meaningful for the cross-filesystem copy; a rename is
-            // already done by the first poll.
-            const share = state.total ? Math.floor((state.bytes / state.total) * 100) : 0;
-            toast(`moving ${state.name} — ${share}%`);
-            continue;
-          }
-
-          toast(
-            state.state === 'done'
-              ? `${state.name} moved`
-              : `move failed: ${state.error}`,
-          );
-          refresh();
-          if (selected === infoHash) renderDetail(infoHash);
-          return;
-        }
-      }
-
-      // ── Categories ──
         const renderEntryTags = (tags) => {
           const box = $('entry-tags');
           box.innerHTML = '';
@@ -1484,6 +1369,120 @@
        * drawn without a renderer, so those get their layer list instead of a
        * megabyte of mapping library.
        */
+      /**
+       * A save-location choice: the default, a named location, or a path.
+       *
+       * Rendered rather than written out by hand in each dialog, since there
+       * are three of them and the list has to be fetched.
+       * @param {string} id - Prefix for the control ids.
+       * @returns {string} - The markup.
+       */
+      function locationPicker(id) {
+        return `
+          <div class="field">
+            <label for="${id}-select">Save location</label>
+            <select id="${id}-select"></select>
+            <input id="${id}-path" hidden placeholder="M:\\archives" style="margin-top:0.4rem" />
+            <div class="sub" id="${id}-note"></div>
+          </div>`;
+      }
+
+      /**
+       * Fills a picker from the node's configured locations.
+       * @param {string} id - The prefix used above.
+       * @returns {Promise<void>} - Resolves once filled.
+       */
+      async function fillLocations(id) {
+        let status = {};
+        try {
+          status = await api('/api/status');
+        } catch {
+          // A picker offering only the default is still usable.
+        }
+
+        const select = $(`${id}-select`);
+        const custom = $(`${id}-path`);
+        const note = $(`${id}-note`);
+
+        // Free space beside each one, so choosing a destination does not mean
+        // going and looking it up somewhere else first.
+        const room = (free) => (free == null ? '' : ` · ${bytes(free)} free`);
+
+        select.innerHTML = [
+          `<option value="">Default${
+            status.defaultSavePath
+              ? ` — ${escapeHtml(status.defaultSavePath)}${room(status.defaultFree)}`
+              : ''
+          }</option>`,
+          ...(status.locations ?? []).map(
+            (entry) =>
+              `<option value="name:${escapeHtml(entry.name)}">${escapeHtml(entry.name)} — ${escapeHtml(entry.path)}${room(entry.free)}</option>`,
+          ),
+          '<option value="custom">Somewhere else…</option>',
+        ].join('');
+
+        note.textContent =
+          (status.locations ?? []).length > 0
+            ? ''
+            : 'Name the places you use often under Settings → Save locations.';
+
+        select.onchange = () => {
+          custom.hidden = select.value !== 'custom';
+          if (!custom.hidden) custom.focus();
+        };
+        custom.hidden = true;
+      }
+
+      /**
+       * What a picker chose, as the API expects it.
+       * @param {string} id - The prefix used above.
+       * @returns {object} - `{}`, `{location}` or `{savePath}`.
+       */
+      function chosenLocation(id) {
+        const value = $(`${id}-select`)?.value ?? '';
+        if (value === 'custom') {
+          const custom = $(`${id}-path`).value.trim();
+          return custom ? { savePath: custom } : {};
+        }
+        if (value.startsWith('name:')) return { location: value.slice(5) };
+        return {};
+      }
+
+      /**
+       * Follows a move until it finishes, so a long copy is visible.
+       * @param {string} infoHash - The archive being moved.
+       * @returns {Promise<void>} - Resolves when it is over.
+       */
+      async function watchMove(infoHash) {
+        for (;;) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          let state;
+          try {
+            ({ move: state } = await api(`/api/torrents/${infoHash}/location`));
+          } catch {
+            return;
+          }
+          if (!state) return;
+
+          if (state.state === 'moving') {
+            // Only meaningful for the cross-filesystem copy; a rename is
+            // already done by the first poll.
+            const share = state.total ? Math.floor((state.bytes / state.total) * 100) : 0;
+            toast(`moving ${state.name} — ${share}%`);
+            continue;
+          }
+
+          toast(
+            state.state === 'done'
+              ? `${state.name} moved`
+              : `move failed: ${state.error}`,
+          );
+          refresh();
+          if (selected === infoHash) renderDetail(infoHash);
+          return;
+        }
+      }
+
       function renderPreview(entry) {
         const target = $('preview');
         const format = entry.pmtiles?.format;
