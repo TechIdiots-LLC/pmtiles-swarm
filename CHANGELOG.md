@@ -66,6 +66,12 @@
   header, since a header is something the caller controls. The refusal to start unauthenticated now
   reads the admin interface rather than the public one, because tiles on `0.0.0.0` is the point of
   the tiles.
+- **Torrents are created hybrid v1+v2 wherever libtorrent is present** — as the primary or
+  merely as a secondary, since what matters is that it is there at all. A hybrid is not a
+  trade-off: v2 clients gain per-file merkle trees over 16 KiB leaves, which is exactly the shape
+  of a tile read, and v1 clients see an ordinary torrent. `torrentFormat` takes `hybrid`, `v1` or
+  `v2`, and a node with no libtorrent falls back to v1 rather than failing. Previously every
+  torrent was v1 whatever the engine, and the docs said otherwise.
 - **Two engines can run at once.** `secondaryEngines: ["webtorrent"]` beside a libtorrent or
   qBittorrent primary — the arrangement the docs had been recommending without any code to do it,
   which until now meant two processes and two catalogues. libtorrent handles the bulk and speaks

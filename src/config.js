@@ -89,6 +89,23 @@ const DEFAULTS = {
   /** Interface for the admin listener. Defaults to `host`. */
   adminHost: undefined,
   /**
+   * What shape of torrent to create.
+   *
+   *   'hybrid'  v1 and v2 in one torrent. Every existing client sees an
+   *             ordinary torrent; a v2 client also gets per-file merkle trees
+   *             over 16 KiB leaves, so it can verify one small block without
+   *             holding the whole hash list — which is the shape of a tile
+   *             read. Needs libtorrent to be one of the engines, since nothing
+   *             else here can produce one.
+   *   'v1'      the older format only. Always available.
+   *   'v2'      v2 only. Smaller, but invisible to v1 clients.
+   *
+   * Hybrid where it can be, and v1 where it cannot: an engine without a
+   * libtorrent anywhere in it falls back rather than failing, because a
+   * torrent matters more than the format of a torrent.
+   */
+  torrentFormat: 'hybrid',
+  /**
    * Whether a joined archive gets a directory of its own.
    *
    *   'flat'      everything in one save path. The filename is the filename,

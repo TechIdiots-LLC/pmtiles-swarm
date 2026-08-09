@@ -298,33 +298,31 @@ that is also serving web seeds.
 
 ## BitTorrent v2
 
-**pmtiles-swarm currently creates v1 torrents only**, whichever engine is configured.
-Creation goes through `create-torrent`, not through the engine, so choosing libtorrent
-changes how archives are *seeded* and *read* but not how they are *made*:
+**If libtorrent is one of your engines, torrents are created hybrid v1+v2.** Primary or
+secondary — what matters is that it is there. A hybrid is not a trade-off: v2 clients get
+per-file merkle trees over 16 KiB leaves, so a peer can verify one small block without
+holding the whole hash list, which is exactly the shape of a tile read; v1 clients see an
+ordinary torrent and notice nothing. Neither `mktorrent` nor `create-torrent` can make one.
 
-```
-info keys      : length, name, piece length, pieces, private
-meta version   : (absent — v1 only)
-file tree (v2) : absent
-```
+Verified against libtorrent 2.0.13, the same archive through each arrangement:
 
-The capability exists one layer down and is not yet wired up here. The libtorrent sidecar
-that ships with `pmtiles-torrent` can produce **hybrid v1+v2** torrents, and does so by
-default when asked directly. v2 (BEP 52) adds per-file merkle trees with 16 KiB leaf
-blocks, so a peer can verify a small block without holding the entire hash list — which
-matters precisely for the random-access reads a tile server does — while the v1 half keeps
-every existing client working. Neither `mktorrent` nor `create-torrent` can produce these.
-
-Against libtorrent 2.0.13 the same archive yields three distinct torrents:
-
-| Format | `.torrent` size |
+| Engines | Torrent |
 | --- | --- |
-| `hybrid` (its default) | 415 B — carries both hash sets |
-| `v1` | 274 B |
-| `v2` | 371 B |
+| webtorrent alone | v1 only, 300 B |
+| libtorrent alone | **hybrid v1+v2**, 392 B |
+| libtorrent primary + webtorrent | **hybrid v1+v2**, 392 B |
+| webtorrent primary + libtorrent second | **hybrid v1+v2**, 392 B |
+| any, with `"torrentFormat": "v1"` | v1 only, 300 B |
 
-Joining a v2 or hybrid torrent someone else made is a different question, and there the
-engine does matter: libtorrent speaks v2, WebTorrent does not.
+`torrentFormat` takes `hybrid` (the default), `v1` or `v2`. A node with no libtorrent falls
+back to v1 rather than failing, because a torrent matters more than the format of a torrent
+— and so does one whose libtorrent refuses for any reason.
+
+Only local files can be built this way: the sidecar opens the file, so a URL streamed past
+the hasher without touching disk is v1. Use `retain` if you want a hybrid from a URL.
+
+Joining a v2 or hybrid torrent somebody else made is a separate question, and there the
+engine matters in the same direction: libtorrent speaks v2, WebTorrent does not.
 
 ## Watch folders
 

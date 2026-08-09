@@ -153,6 +153,7 @@ export class Library {
       : undefined;
 
     const created = await createTorrentFromFile(absolute, {
+      creator: this.#creator(),
       pieceLength: options.pieceLength ?? this.#config.pieceLength,
       trackers: this.#trackersFor(options),
       webSeeds: [...new Set(webSeeds)],
@@ -218,6 +219,26 @@ export class Library {
       return path.join(root, infoHash);
     }
     return root;
+  }
+
+  /**
+   * The engine's own torrent builder, where it has a better one than ours.
+   *
+   * Offered whenever libtorrent is present — primary or secondary — because
+   * what it produces is a hybrid v1+v2 torrent, and a hybrid is not a
+   * trade-off: v2 clients gain per-file merkle trees and 16 KiB block
+   * verification, and v1 clients see an ordinary torrent. An engine that is
+   * only seeding is still the right one to ask for that.
+   * @returns {Function | undefined} - A creator, or undefined to use the default.
+   */
+  #creator() {
+    if (this.#config.torrentFormat === 'v1') return undefined;
+    if (!this.#engine.createTorrent) return undefined;
+    return ({ path: filePath, ...options }) =>
+      this.#engine.createTorrent(filePath, {
+        ...options,
+        format: this.#config.torrentFormat ?? 'hybrid',
+      });
   }
 
   /**

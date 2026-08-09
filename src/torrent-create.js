@@ -249,6 +249,46 @@ async function buildTorrent(input, name, size, options) {
     throw new Error(`pieceLength must be a power of two, got ${pieceLength}`);
   }
 
+  // Where something better is on hand, use it. libtorrent produces hybrid
+  // v1+v2 torrents, which create-torrent cannot, and a hybrid is strictly more
+  // useful: v2 clients get per-file merkle trees and 16 KiB block verification,
+  // v1 clients see an ordinary torrent and notice nothing.
+  //
+  // Only against a real file. A URL being streamed past the hasher never
+  // touches the disk, and there is nothing for libtorrent to open.
+  if (options.creator && typeof input === 'string') {
+    try {
+      const built = await options.creator({
+        path: input,
+        pieceLength,
+        trackers: toAnnounceList(options.trackers ?? []),
+        webSeeds: options.webSeeds ?? [],
+        comment: options.comment,
+        private: options.private ?? false,
+        createdBy: 'pmtiles-swarm',
+        format: options.format ?? 'hybrid',
+      });
+
+      const madeBy = await parseTorrent(built.torrentFile);
+      return {
+        torrentFile: built.torrentFile,
+        infoHash: madeBy.infoHash,
+        magnet: buildMagnet(madeBy, options),
+        name: madeBy.name,
+        size: madeBy.length ?? size,
+        pieceLength: madeBy.pieceLength,
+        pieceCount: madeBy.pieces?.length ?? 0,
+        format: built.format,
+        md5: options.md5Digest,
+      };
+    } catch (error) {
+      // A torrent is more important than the format of a torrent.
+      console.warn(
+        `[create] ${error.message}; falling back to a v1 torrent`,
+      );
+    }
+  }
+
   // create-torrent wants a stream to carry a name and length.
   if (typeof input !== 'string') {
     input.name = name;

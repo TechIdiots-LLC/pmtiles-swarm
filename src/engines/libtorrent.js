@@ -305,6 +305,8 @@ export class LibtorrentEngine {
         trackers: options.trackers ?? [],
         webSeeds: options.webSeeds ?? [],
         comment: options.comment,
+        private: options.private ?? false,
+        createdBy: options.createdBy,
         format: options.format ?? 'hybrid',
       },
       // Hashing a large archive takes as long as it takes.

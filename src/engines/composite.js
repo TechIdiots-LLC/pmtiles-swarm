@@ -278,6 +278,23 @@ export class CompositeEngine {
   }
 
   /**
+   * Builds a torrent, through whichever engine can build the better one.
+   *
+   * Deliberately not "the primary": what matters is whether libtorrent is
+   * present at all, since it is the only one that can produce a hybrid v1+v2
+   * torrent — and a hybrid serves v1 and v2 clients alike, so having it seed
+   * rather than lead is no reason to make a lesser torrent.
+   * @param {object} options - Creation options.
+   * @returns {Promise<object>} - The created torrent.
+   */
+  async createTorrent(filePath, options) {
+    for (const engine of [this.#primary, ...this.#secondaries]) {
+      if (engine.createTorrent) return engine.createTorrent(filePath, options);
+    }
+    throw new Error('no engine here can create a torrent');
+  }
+
+  /**
    * Tracker status, from whichever engine can report it.
    * @param {string} infoHash - The archive.
    * @returns {Promise<object[]>} - One record per tracker.

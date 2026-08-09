@@ -55,6 +55,8 @@
  * @property {() => Promise<TorrentStatus[]>} list - Lists everything the engine holds.
  * @property {(infoHash: string) => Promise<TorrentStatus | null>} get - One torrent's state.
  * @property {(infoHash: string) => Promise<object[]>} [peers] - Per-peer detail, where the engine exposes it.
+ * @property {(filePath: string, options?: object) => Promise<object>} [createTorrent] - Builds a torrent from a local file, where the engine can do it better than the default — libtorrent produces hybrid v1+v2, which create-torrent cannot.
+ * @property {(infoHash: string) => Promise<object[]>} [trackerStatus] - Per-tracker announce results, where the engine keeps them.
  * @property {(infoHash: string) => Promise<Uint8Array | null>} [metadata] - The torrent's metainfo once known, so an archive joined by magnet can be written down rather than re-fetched over BEP 9 on every start.
  * @property {() => Promise<void>} destroy - Releases resources.
  */
