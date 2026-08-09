@@ -255,6 +255,13 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **Stopping a node running the libtorrent engine printed a Python stack trace.** Windows delivers
+  a console Ctrl-C to every process in the group, so the sidecar received it too and reported a
+  `KeyboardInterrupt` on the way out. Nothing was wrong, but a traceback at the end of a clean stop
+  reads as a crash and buries the lines that say what actually happened. Fixed properly in the
+  sidecar, which ships with `pmtiles-torrent`, and suppressed here as well so an older sidecar is
+  quiet too. Separately, the engine no longer reports an exit it asked for as a failure — that
+  rejected a promise nobody was waiting on, which is how Node announces a crash.
 - **An archive adopted from a client on another machine never started.** The magnet built for it
   carried the infohash and nothing else — no trackers — so there was nowhere to look for peers but
   the DHT, and it sat at 0% reporting "downloading" and meaning nothing of the kind. The client

@@ -60,6 +60,8 @@ export class LibtorrentEngine {
   #buffer = '';
   #ready = null;
   #version = null;
+  /** Set once a stop has been asked for, so the exit it causes is expected. */
+  #stopping = false;
 
   /**
    * Creates the engine.
@@ -159,6 +161,12 @@ export class LibtorrentEngine {
       // are the errors an operator most needs to see.
       child.stderr.setEncoding('utf8');
       child.stderr.on('data', (text) => {
+        // On Windows a Ctrl-C goes to the whole process group, so the sidecar
+        // gets it too and Python prints a KeyboardInterrupt traceback on the
+        // way out. Nothing is wrong, but a stack trace at the end of a clean
+        // shutdown reads as though something is, and it buries the lines that
+        // actually say what happened.
+        if (this.#stopping) return;
         for (const line of text.split('\n')) {
           if (line.trim()) console.error(`[libtorrent] ${line}`);
         }
@@ -178,6 +186,19 @@ export class LibtorrentEngine {
       child.on('exit', (code) => {
         clearTimeout(timer);
         this.#child = null;
+
+        // An exit this process asked for is not a failure. Reporting it as one
+        // meant a clean shutdown rejected the readiness promise, which by then
+        // nobody was waiting on — and an unhandled rejection is how Node
+        // announces a crash, so stopping the node printed a stack trace and
+        // looked exactly like one.
+        if (this.#stopping) {
+          for (const { resolve: done } of this.#pending.values()) done(null);
+          this.#pending.clear();
+          resolve();
+          return;
+        }
+
         const error = new Error(`libtorrent sidecar exited (code ${code})`);
         for (const { reject: fail } of this.#pending.values()) fail(error);
         this.#pending.clear();
@@ -344,6 +365,9 @@ export class LibtorrentEngine {
    * @returns {Promise<void>} - Resolves once stopped.
    */
   async destroy() {
+    // Set before anything else, so the exit this is about to cause is
+    // recognised as intended by the handler that sees it.
+    this.#stopping = true;
     if (!this.#child) return;
     await this.#call('shutdown', {}, 15000).catch(() => {});
     this.#child?.kill();
