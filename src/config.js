@@ -815,6 +815,26 @@ export const RELOADABLE = new Map([
  * @param {object} config - The resolved configuration.
  * @returns {Set<string>} - The keys the API may not write.
  */
+/**
+ * Whether an incoming value is the one already in force.
+ *
+ * Compared by serialised shape rather than by reference, because everything
+ * here arrives through JSON and two equal objects are never the same object.
+ * `undefined` and a missing key are the same absence.
+ * @param {unknown} current - What the config holds.
+ * @param {unknown} incoming - What was sent.
+ * @returns {boolean} - True when nothing would change.
+ */
+function unchanged(current, incoming) {
+  if (current === incoming) return true;
+  if (current == null && incoming == null) return true;
+  try {
+    return JSON.stringify(current) === JSON.stringify(incoming);
+  } catch {
+    return false;
+  }
+}
+
 function fileOnlyFor(config) {
   if (config?.allowHooksFromApi) return new Set(['allowHooksFromApi']);
   return new Set(['onAdded', 'onComplete', 'allowHooksFromApi']);
@@ -882,6 +902,16 @@ export async function saveConfig(config, updates, configPath) {
     }
 
     if (fileOnlyFor(config).has(key)) {
+      // Sending back the value that is already there is not an attempt to
+      // change it. The console renders every setting it knows about and posts
+      // the lot, so a guarded key rides along with every save — which made
+      // *every* save fail, not just an edit to a guarded key. Worse, the error
+      // named the way out and the way out did not work: turning
+      // allowHooksFromApi on unlocks the hooks, but the flag itself is
+      // guarded for ever, so the console kept echoing it and kept being
+      // refused. Only a real change is refused now.
+      if (unchanged(config[key], value)) continue;
+
       throw new Error(
         `${key} can only be set in the config file, not through the API. It ` +
           'runs a command as the service user, and an API token should not be ' +

@@ -44,6 +44,14 @@
   at it quietly on every start. Unset keys still take libtorrent's own defaults.
 
 ### 🐞 Bug fixes
+- **Settings save again.** A setting that may only be set in the config file was refused on the
+  key's *presence* rather than on a change, and the console renders every setting it knows about
+  and posts the lot — so `allowHooksFromApi` rode along with every save and failed all of them,
+  including saves that touched nothing but a watch folder. The error even named a way out that
+  could not work: setting `allowHooksFromApi: true` unlocks the hooks, but the flag itself stays
+  guarded for ever, so the console kept echoing it and kept being refused. Echoing back the value
+  already in force is now a no-op; only a real change is refused, which is what the guard was
+  always for.
 - **A preallocated file is no longer mistaken for a finished one.** A torrent client allocates the
   whole file up front — libtorrent creates a 77 GB sparse file the moment a download starts — so an
   archive 0% downloaded already measures exactly its final size. The completion sweep checked the

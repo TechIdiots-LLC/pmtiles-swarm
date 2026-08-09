@@ -132,9 +132,47 @@ describe('who may set a hook', () => {
       () => saveConfig({}, { allowHooksFromApi: true }),
       /only be set in the config file/,
     );
+    // The real escalation: off, and asked to be on.
     await assert.rejects(
-      () => saveConfig({ allowHooksFromApi: true }, { allowHooksFromApi: true }),
+      () => saveConfig({ allowHooksFromApi: false }, { allowHooksFromApi: true }),
       /only be set in the config file/,
     );
+    // And it cannot be switched off through the API either, since that is a
+    // change to a guarded setting like any other.
+    await assert.rejects(
+      () => saveConfig({ allowHooksFromApi: true }, { allowHooksFromApi: false }),
+      /only be set in the config file/,
+    );
+  });
+
+  it('lets a save through that merely echoes the guarded value back', async () => {
+    // The console renders every setting it knows about and posts the lot, so a
+    // guarded key rides along with every save. Refusing on the key's presence
+    // rather than on a change therefore failed *every* save — a watch folder,
+    // a tracker, anything — with an error about hooks. And the way out the
+    // error named did not work: turning allowHooksFromApi on unlocks the
+    // hooks, but the flag itself stays guarded for ever, so the console kept
+    // echoing it and kept being refused.
+    const config = { allowHooksFromApi: true, watch: [] };
+    const result = await saveConfig(config, {
+      allowHooksFromApi: true,
+      watch: [{ path: '/mnt/maps' }],
+    });
+
+    assert.deepEqual(config.watch, [{ path: '/mnt/maps' }]);
+    assert.ok(result.applied.includes('watch'));
+    // Echoed, not applied: nothing changed, so nothing is reported as changed.
+    assert.ok(!result.applied.includes('allowHooksFromApi'));
+  });
+
+  it('lets the hooks themselves be echoed back when they are guarded', async () => {
+    // Same shape, one level down: with allowHooksFromApi off, onAdded and
+    // onComplete are guarded too, and the console still sends them.
+    const config = { onComplete: { command: '/usr/local/bin/build.sh' }, watch: [] };
+    await saveConfig(config, {
+      onComplete: { command: '/usr/local/bin/build.sh' },
+      watch: [{ path: '/mnt/maps' }],
+    });
+    assert.deepEqual(config.watch, [{ path: '/mnt/maps' }]);
   });
 });
