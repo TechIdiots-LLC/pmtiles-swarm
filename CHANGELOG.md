@@ -265,6 +265,25 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **A second engine was handed archives that were still downloading, and wrote its own copy.**
+  `restore` and every re-add claimed `seedOnly` for any mirror-mode archive, which means "the data
+  is already here, do not fetch it" — and for a half-downloaded archive that is untrue. A composite
+  engine took it at its word and passed the archive to the secondary, which honoured the incomplete
+  marker and opened `name.incomplete` while the primary wrote `name`: two clients, two files, one
+  archive, in one directory. `seedOnly` is now claimed only for archives that are actually
+  complete, and a secondary is never given a marker at all, since it only ever receives whole
+  archives.
+- **An archive left with both filenames retried for ever.** Finalising refused to rename over an
+  existing file — correctly — and then tried again every fifteen seconds, logging the same
+  paragraph each time and telling nobody anything they could act on. When the file under the
+  archive's own name is the right size the archive is finished, so that is now recorded and the
+  leftover named once as something that can be deleted. Nothing is deleted automatically.
+- **Two archives could be pointed at one file.** Filenames are not unique — two builds of the same
+  map are both `planet.pmtiles`, and a rebuild keeps the name while minting a new infohash — so
+  adding the second one now fails with a 409 naming the first, instead of letting them take turns
+  writing into the same file.
+- **"marked incomplete" appeared beside a progress bar reading 100%.** It now sits with the state,
+  and only while the file on disk actually carries the marker.
 - **Running two engines silently disabled on-demand tile reading.** The tile reader chose how to
   fetch pieces by switching on the engine's name, and a composite calls itself
   `libtorrent+webtorrent` — which matched neither case, so it fell through to "cannot read pieces

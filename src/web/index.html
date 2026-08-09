@@ -779,16 +779,20 @@
               <div class="track">
                 <i class="${progress >= 1 ? 'done' : ''}" style="width:${Math.min(100, progress * 100)}%"></i>
               </div>
-              <div class="sub">${pct(progress)}${
-                entry.complete === false ? ' · marked incomplete' : ''
-              }</div>
+              <div class="sub">${pct(progress)}</div>
             </td>
             <td>${s.peers ?? 0} / ${s.seeds ?? 0}</td>
             <td>${rate(s.downloadSpeed)}</td>
             <td>${rate(s.uploadSpeed)}</td>
             <td>${ratioCell(entry, s)}</td>
             <td class="sub">${expiryCell(entry)}</td>
-            <td class="sub">${entry.paused ? 'paused' : escapeHtml(s.state ?? '—')}</td>`;
+            <td class="sub">${
+              entry.paused ? 'paused' : escapeHtml(s.state ?? '—')
+            }${
+              entry.complete === false && progress < 1
+                ? `<div class="sub" title="on disk as ${escapeHtml(entry.name)}.incomplete until it is whole">.incomplete</div>`
+                : ''
+            }</td>`;
           tr.onclick = () => {
             selected = selected === entry.infoHash ? null : entry.infoHash;
             renderRows();

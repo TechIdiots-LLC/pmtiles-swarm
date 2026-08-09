@@ -196,3 +196,105 @@ describe('promoting a finished download', () => {
     assert.ok(await fs.stat(path.join(dir, 'swept.pmtiles')));
   });
 });
+
+describe('two files for one archive', () => {
+  /**
+   * A library over a recording engine.
+   * @param {object} seed - The catalog entry.
+   * @returns {Promise<object>} - Library, catalog, engine calls and the path.
+   */
+  async function harness(seed) {
+    const dir = await fs.mkdtemp(path.join(workspace, 'clash-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put({ savePath: dir, ...seed });
+
+    const calls = [];
+    const engine = {
+      name: 'libtorrent',
+      list: async () => [],
+      get: async () => null,
+      add: async (request) => calls.push(request),
+      remove: async () => calls.push('remove'),
+    };
+    return {
+      dir,
+      catalog,
+      calls,
+      library: new Library({
+        catalog,
+        engine,
+        config: { dataDir: dir, webtorrent: { savePath: dir }, trackers: [] },
+      }),
+    };
+  }
+
+  it('settles an archive that is whole under its own name', async () => {
+    // Both names present at once. If the file under the archive's own name is
+    // the right size, the archive is finished and the marked one is a second
+    // copy somebody else wrote. Refusing every fifteen seconds for ever told
+    // nobody anything they could act on.
+    const infoHash = 'a'.repeat(40);
+    const node = await harness({
+      infoHash,
+      name: 'GEBCO.pmtiles',
+      size: 2048,
+      complete: false,
+      magnet: `magnet:?xt=urn:btih:${infoHash}`,
+      mode: 'mirror',
+    });
+    await fs.writeFile(path.join(node.dir, 'GEBCO.pmtiles'), Buffer.alloc(2048, 1));
+    await fs.writeFile(path.join(node.dir, 'GEBCO.pmtiles.incomplete'), Buffer.alloc(900, 2));
+
+    const settled = await node.library.finalize(infoHash);
+
+    assert.equal(settled.complete, true);
+    // The stray is left alone — it is somebody's bytes, and this is not the
+    // place to decide they are worthless.
+    assert.ok(await fs.stat(path.join(node.dir, 'GEBCO.pmtiles.incomplete')));
+    // And the engine was not disturbed, since nothing needed renaming.
+    assert.deepEqual(node.calls, []);
+  });
+
+  it('refuses to put two archives at one path', async () => {
+    // Filenames are not unique: two builds of the same map are both
+    // planet.pmtiles, and a rebuild keeps the name while minting a new
+    // infohash.
+    const node = await harness({
+      infoHash: 'b'.repeat(40),
+      name: 'planet.pmtiles',
+      size: 10,
+      mode: 'mirror',
+    });
+
+    const { default: parseTorrent } = await import('parse-torrent');
+    const other = 'c'.repeat(40);
+    await assert.rejects(
+      () =>
+        node.library.addExistingTorrent(
+          { magnet: `magnet:?xt=urn:btih:${other}&dn=planet.pmtiles` },
+          { savePath: node.dir, mode: 'mirror' },
+        ),
+      /cannot share one file/,
+    );
+    assert.ok(parseTorrent);
+    // Nothing was handed to the engine, so nothing started writing.
+    assert.deepEqual(node.calls, []);
+  });
+
+  it('lets the same archive be re-added to its own path', async () => {
+    const infoHash = 'd'.repeat(40);
+    const node = await harness({
+      infoHash,
+      name: 'planet.pmtiles',
+      size: 10,
+      mode: 'mirror',
+    });
+
+    const again = await node.library.addExistingTorrent(
+      { magnet: `magnet:?xt=urn:btih:${infoHash}&dn=planet.pmtiles` },
+      { savePath: node.dir, mode: 'mirror' },
+    );
+    assert.equal(again.infoHash, infoHash);
+  });
+});

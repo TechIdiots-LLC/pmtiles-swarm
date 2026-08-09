@@ -155,6 +155,12 @@ export class CompositeEngine {
           seedOnly: true,
           mode: 'mirror',
           paused: false,
+          // And never a marker. A secondary only ever receives an archive that
+          // is already whole, so there is nothing to mark — and a marker here
+          // means the secondary opens a *different* filename in the same
+          // directory from the one the primary is using, which is two clients
+          // writing two copies of one archive.
+          incompleteSuffix: undefined,
         })
         .catch((error) => {
           // Dropped rather than propagated: the archive is seeded by the

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { assertPublishable, identifyFile, identifyUrl } from './identify.js';
 import { assertRoomFor, assertWritable, resolveLocation } from './locations.js';
 import {
+  alreadyComplete,
   describeExisting,
   onDiskName,
   onDiskPath,
@@ -211,6 +212,47 @@ export class Library {
   }
 
   /**
+   * Refuses to put two different archives at the same path.
+   *
+   * Filenames are not unique and were never going to be. Two builds of the
+   * same map are both `planet.pmtiles`; a rebuild mints a new infohash and
+   * keeps the name. Point both at one directory and whichever finishes second
+   * overwrites the first, or worse, the two take turns writing pieces into one
+   * file and neither ends up with the archive it thinks it has.
+   *
+   * Caught when the second one is added, where it can still be answered by
+   * choosing somewhere else to put it.
+   * @param {object} candidate - infoHash, name and savePath of what is being added.
+   * @returns {void}
+   * @throws {Error} When another archive already occupies that path.
+   */
+  #assertPathIsFree({ infoHash, name, savePath }) {
+    if (!name || !savePath) return;
+
+    const target = path.resolve(savePath, name);
+    const clash = this.#catalog
+      .list()
+      .find(
+        (held) =>
+          held.infoHash !== infoHash &&
+          held.name === name &&
+          held.savePath &&
+          path.resolve(held.savePath, held.name) === target,
+      );
+
+    if (!clash) return;
+
+    const error = new Error(
+      `${target} is already where ${clash.name} (${clash.infoHash.slice(0, 12)}…) ` +
+        'keeps its data, and two archives cannot share one file. Give this one ' +
+        'a save location of its own — Settings has named locations, or pass a ' +
+        'savePath.',
+    );
+    error.status = 409;
+    throw error;
+  }
+
+  /**
    * The marker to hand an engine when adding, or undefined for none.
    *
    * Everything that adds a torrent goes through this — joining, restoring
@@ -251,6 +293,29 @@ export class Library {
     // otherwise mean removing and re-adding an entire library to no purpose.
     if (!from || !to || from === to) {
       return this.#catalog.put({ infoHash, complete: true });
+    }
+
+    // Both names present at once. That is a real situation and it has a right
+    // answer: if the file under the archive's own name is the right size, the
+    // archive is finished and the marked file is a second copy somebody else
+    // wrote — historically a second engine that had been handed an incomplete
+    // archive and applied the marker to it.
+    //
+    // Recording that and saying so beats refusing every fifteen seconds
+    // forever, which is what happened before and told nobody anything they
+    // could act on.
+    if (await alreadyComplete({ savePath: entry.savePath, name: entry.name, size: entry.size })) {
+      const stray = await fs.stat(from).catch(() => null);
+      if (stray) {
+        console.warn(
+          `[complete] ${entry.name} is whole under its own name; ` +
+            `${path.basename(from)} is a leftover second copy of ` +
+            `${(stray.size / 1024 ** 2).toFixed(0)} MiB and can be deleted.`,
+        );
+      }
+      const settled = await this.#catalog.put({ infoHash, complete: true });
+      await this.#tiles?.invalidate(infoHash).catch(() => {});
+      return settled;
     }
 
     await this.#engine.remove(infoHash, { deleteData: false }).catch(() => {});
@@ -296,7 +361,11 @@ export class Library {
       savePath: entry.savePath,
       category: (entry.categories ?? [])[0],
       mode: entry.mode ?? 'mirror',
-      seedOnly: entry.mode !== 'cache',
+      // Only when the data really is all there. seedOnly says "do not fetch
+      // this, it is already here", and claiming it for a half-downloaded
+      // archive told a composite engine that it was safe to hand to a second
+      // client — which then wrote its own copy alongside the first.
+      seedOnly: entry.complete !== false && entry.mode !== 'cache',
       incompleteSuffix: this.#markerFor(entry),
       paused: entry.paused,
     });
@@ -470,6 +539,12 @@ export class Library {
     // first moment and must not be handed a name saying otherwise. Dropping
     // the finished file into the save path before adding the torrent is the
     // same thing, and works: the engine hash-checks it and starts seeding.
+    this.#assertPathIsFree({
+      infoHash: parsed.infoHash,
+      name: parsed.name,
+      savePath,
+    });
+
     const onDisk = await describeExisting({
       savePath,
       name: parsed.name,
@@ -1202,8 +1277,11 @@ export class Library {
           savePath: entry.savePath,
           category: (entry.categories ?? [])[0],
           mode: entry.mode ?? 'mirror',
-          // The data is already there; this is about resuming, not fetching.
-          seedOnly: entry.mode !== 'cache',
+          // The data is already there; this is about resuming, not fetching —
+          // but only where it actually is. An archive still downloading is not
+          // seed-only, and saying otherwise is how a second engine came to be
+          // handed something incomplete.
+          seedOnly: entry.complete !== false && entry.mode !== 'cache',
           incompleteSuffix: this.#markerFor(entry),
         });
         restored++;

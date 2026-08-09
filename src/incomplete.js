@@ -237,7 +237,22 @@ export class CompletionWatcher {
       }
 
       if (entry.complete) continue;
-      if (!(entry.status?.progress >= 1)) continue;
+
+      // Two ways to be finished, and the disk is the more trustworthy of them.
+      // The engine's progress is the usual signal, but it is only as good as
+      // the engine's account of itself: a client that renames incomplete files
+      // its own way, one that was restarted mid-check, or a list call that
+      // failed a moment ago all leave an archive whole on disk and reported as
+      // something less. Believing only the engine leaves the catalog saying
+      // "incomplete" over a file that plainly is not.
+      const whole =
+        entry.status?.progress >= 1 ||
+        (await alreadyComplete({
+          savePath: entry.savePath,
+          name: entry.name,
+          size: entry.size,
+        }));
+      if (!whole) continue;
       // Promotion removes and re-adds the torrent, which takes long enough for
       // the next tick to come round and start a second one.
       if (this.#busy.has(entry.infoHash)) continue;
@@ -247,7 +262,13 @@ export class CompletionWatcher {
         await this.#library.finalize(entry.infoHash);
         promoted.push(entry);
       } catch (error) {
-        console.error(`[complete] ${entry.name}: ${error.message}`);
+        // Named rather than swallowed: an archive stuck at "incomplete" over a
+        // file that is finished is confusing precisely because nothing says
+        // why.
+        console.error(
+          `[complete] ${entry.name} is finished but could not be marked so: ` +
+            error.message,
+        );
       } finally {
         this.#busy.delete(entry.infoHash);
       }
