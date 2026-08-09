@@ -30,6 +30,8 @@ export class Library {
   #rebuildQueue = Promise.resolve();
   /** In-flight remote adds, by URL, so they can be cancelled. */
   #running = new Map();
+  /** The tile reader, told to forget an archive whose source may have changed. */
+  #tiles;
 
   /**
    * Creates the service.
@@ -38,10 +40,23 @@ export class Library {
    * @param {import('./engines/types.js').SeedEngine} deps.engine - The seeding engine.
    * @param {object} deps.config - Resolved configuration.
    */
-  constructor({ catalog, engine, config }) {
+  constructor({ catalog, engine, config, tiles }) {
     this.#catalog = catalog;
     this.#engine = engine;
     this.#config = config;
+    this.#tiles = tiles;
+  }
+
+  /**
+   * Lets the tile reader be attached after construction.
+   *
+   * It reads through this library, so one of them has to be built first; this
+   * closes the loop without making either optional at the point of use.
+   * @param {import('./tiles.js').TileStore} tiles - The reader.
+   * @returns {void}
+   */
+  attachTiles(tiles) {
+    this.#tiles = tiles;
   }
 
   /**
@@ -696,6 +711,7 @@ export class Library {
       // adds it back and it rechecks what is already on disk.
       await this.#engine.remove(infoHash, { deleteData: false }).catch(() => {});
     }
+    await this.#tiles?.invalidate(infoHash).catch(() => {});
     return this.#catalog.put({ infoHash, paused: true });
   }
 
@@ -726,6 +742,7 @@ export class Library {
         mode: entry.mode ?? 'mirror',
       });
     }
+    await this.#tiles?.invalidate(infoHash).catch(() => {});
     return this.#catalog.put({ infoHash, paused: false });
   }
 
@@ -781,6 +798,9 @@ export class Library {
       });
     }
 
+    // The reader decided how to reach this archive when it opened it, and that
+    // decision is now stale.
+    await this.#tiles?.invalidate(infoHash).catch(() => {});
     return this.#catalog.put({ infoHash, mode });
   }
 
@@ -864,6 +884,7 @@ export class Library {
       mode: 'cache',
     });
 
+    await this.#tiles?.invalidate(infoHash).catch(() => {});
     return { cleared: before };
   }
 

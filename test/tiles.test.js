@@ -2580,3 +2580,56 @@ describe('reading a joined archive on demand', () => {
     }
   });
 });
+
+describe('deciding afresh how to reach an archive', () => {
+  it('forgets an open archive when asked', async () => {
+    // Which source an archive is read through is decided once, when it is
+    // opened. That is right until the answer changes underneath — an archive
+    // switched from cache to mirror, or one whose download has since finished,
+    // would otherwise keep being read a piece at a time out of the swarm while
+    // a complete copy sat on disk beside it.
+    const dir = await fs.mkdtemp(path.join(workspace, 'invalidate-'));
+    const archive = entry({ savePath: dir });
+    await writeArchive(path.join(dir, archive.name), {
+      tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('t') }],
+    });
+
+    const catalog = { get: () => archive };
+    const store = new TileStore({
+      catalog,
+      engine: completeEngine,
+      config: { tiles: {} },
+    });
+
+    await store.getTile(archive.infoHash, 0, 0, 0);
+    assert.ok(store.status(archive.infoHash), 'it is open');
+
+    assert.equal(await store.invalidate(archive.infoHash), true);
+    assert.equal(store.status(archive.infoHash), null, 'and now it is not');
+
+    // Invalidating something that was never open is not an error.
+    assert.equal(await store.invalidate(archive.infoHash), false);
+    await store.close();
+  });
+
+  it('reopens on the next read rather than failing', async () => {
+    const dir = await fs.mkdtemp(path.join(workspace, 'reopen-'));
+    const archive = entry({ savePath: dir });
+    await writeArchive(path.join(dir, archive.name), {
+      tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('reopened') }],
+    });
+
+    const store = new TileStore({
+      catalog: { get: () => archive },
+      engine: completeEngine,
+      config: { tiles: {} },
+    });
+
+    await store.getTile(archive.infoHash, 0, 0, 0);
+    await store.invalidate(archive.infoHash);
+    const tile = await store.getTile(archive.infoHash, 0, 0, 0);
+
+    assert.equal(zlib.gunzipSync(tile.data).toString(), 'reopened');
+    await store.close();
+  });
+});

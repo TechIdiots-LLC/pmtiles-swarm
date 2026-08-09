@@ -129,13 +129,55 @@ export class TileStore {
     const entry = this.#catalog.get(infoHash);
     if (!entry) throw new TileReadError('unknown archive', 404);
 
-    const handle = await this.#acquire(entry);
-    const header = await handle.archive.getHeader();
+    // Bounded, because this is an interactive request. A cache-mode archive
+    // with no web seed and no reachable peers has nothing to read a header
+    // from, and finding that out takes as long as the swarm timeout — long
+    // enough that a browser gives up first and the answer looks like a hang
+    // rather than like "not yet".
+    const timeoutMs = options.timeoutMs ?? this.#config.tiles?.headerTimeoutMs ?? 12000;
+    const deadline = new Promise((_resolve, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new TileReadError(
+              `no header after ${Math.round(timeoutMs / 1000)}s — the swarm may ` +
+                'have no peers holding it yet, and this archive carries no web seed',
+              503,
+            ),
+          ),
+        timeoutMs,
+      ).unref?.(),
+    );
+
+    const handle = await Promise.race([this.#acquire(entry), deadline]);
+    const header = await Promise.race([handle.archive.getHeader(), deadline]);
     // Metadata is a second read and only decorates the result, so an archive
     // whose header arrived but whose metadata has not is still worth
     // describing.
-    const metadata = await handle.archive.getMetadata().catch(() => ({}));
+    const metadata = await Promise.race([
+      handle.archive.getMetadata().catch(() => ({})),
+      deadline.catch(() => ({})),
+    ]);
     return summarize(header, metadata ?? {});
+  }
+
+  /**
+   * Forgets an open archive, so the next read decides afresh how to reach it.
+   *
+   * Which source an archive is read through is decided once, when it is
+   * opened. That is right for the common case and wrong whenever the answer
+   * changes underneath: an archive switched from cache to mirror, or one whose
+   * download has since finished, would otherwise keep being read a piece at a
+   * time out of the swarm while a complete copy sat on disk beside it.
+   * @param {string} infoHash - Which archive.
+   * @returns {Promise<boolean>} - Whether anything was open.
+   */
+  async invalidate(infoHash) {
+    const handle = this.#open.get(infoHash);
+    if (!handle) return false;
+    this.#open.delete(infoHash);
+    await this.#release(handle);
+    return true;
   }
 
   /**

@@ -99,6 +99,14 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **An archive opened in cache mode was read through the swarm forever.** Which source to use was
+  decided once, at open, so switching to mirror — or the download simply finishing — changed
+  nothing, and tiles kept being pulled a piece at a time while a complete copy sat on disk. The
+  reader is now told to forget an archive whenever its mode changes, it is paused or resumed, or
+  its cache is cleared.
+- A TileJSON request for an archive nobody is seeding waited a full minute before saying so, which
+  reads as a hang. It is bounded at twelve seconds now (`tiles.headerTimeoutMs`) and says what is
+  actually wrong: no peers yet, and no web seed to fall back on.
 - **Ctrl-C could hang.** Once archives were restored to the engine at startup, stopping meant
   telling every tracker so — and an unreachable one waits for a timeout each. Every shutdown step
   is now bounded, a watchdog exits regardless after fifteen seconds, in-flight downloads are

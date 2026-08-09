@@ -122,6 +122,7 @@ PMTILES_SWARM_PUBLIC_URL
   }
 
   const tiles = new TileStore({ catalog, engine, config });
+  library.attachTiles(tiles);
   const warm = new WarmRunner(tiles);
 
   const app = createApp({

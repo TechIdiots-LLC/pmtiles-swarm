@@ -214,6 +214,15 @@ const DEFAULTS = {
     /** How long to wait for torrent metadata when opening an archive. */
     readyTimeoutMs: 60000,
     /**
+     * How long a TileJSON request waits for an archive's header.
+     *
+     * Shorter than the other timeouts on purpose: somebody is waiting on this
+     * one. A cache-mode archive with no web seed and no peers holding it has
+     * nothing to read a header from, and taking a full minute to say so looks
+     * like a hang rather than like "not yet".
+     */
+    headerTimeoutMs: 12000,
+    /**
      * What a missing tile answers with: true for 404, false for 204.
      *
      * This is not cosmetic. MapLibre only overzooms a parent tile when the
