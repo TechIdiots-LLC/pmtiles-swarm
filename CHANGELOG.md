@@ -27,6 +27,11 @@
   a textarea full of JSON — the shape a torrent client gives a grid for. Folders take categories, a
   save location, a publish directory and a web seed base; web locations take a URL template or a
   directory to list.
+- **The date in a watched URL is built by clicking, not by remembering.** Paste the URL of a
+  recent build, select the date in it and click `{YYYYMMDD}`, `{YYYY-MM-DD}`, `{YYYY}`, `{MM}` or
+  `{DD}` — the token replaces what is selected. Day offset and look-back are columns of their own
+  (protomaps publishes yesterday's build, so it wants `-1`), and Preview refuses to run on a URL
+  that still has a fixed date in it, since that would ask for the same build forever.
 - **A source can watch a directory instead of guessing filenames.** `sources[].index` reads a
   listing — an HTML autoindex or an S3 `ListBucketResult` — filters it and takes the newest match,
   for upstreams whose naming is not predictable enough to write as a template. Only links

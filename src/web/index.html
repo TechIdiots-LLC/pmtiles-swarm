@@ -1366,7 +1366,7 @@
        * @returns {void}
        */
       function renderRowEditor(spec) {
-        const { into, key, title, blurb, columns, rows, restart, preview } = spec;
+        const { into, key, title, blurb, columns, rows, restart, preview, footnote } = spec;
         rowEditorColumns[key] = columns;
         const panel = document.createElement('div');
         panel.className = 'panel';
@@ -1382,6 +1382,17 @@
               value="${escapeHtml(
                 Array.isArray(value) ? value.join(', ') : (value ?? ''),
               )}" />
+            ${
+              column.tokens
+                ? `<div class="tags" style="margin-top:0.25rem">${column.tokens
+                    .map(
+                      (token) =>
+                        `<span class="tag" data-token="${escapeHtml(token)}" data-for="${column.field}"
+                               title="Insert ${escapeHtml(token)}">${escapeHtml(token)}</span>`,
+                    )
+                    .join('')}</div>`
+                : ''
+            }
           </td>`;
 
         const rowHtml = (row = {}) => `
@@ -1413,12 +1424,29 @@
           <div style="margin-top:0.5rem">
             <button type="button" data-act="add">Add row</button>
             <span class="sub" data-role="note"></span>
-          </div>`;
+          </div>
+          ${footnote ? `<div class="sub" style="margin-top:0.6rem">${escapeHtml(footnote)}</div>` : ''}`;
 
         const tbody = panel.querySelector('tbody');
         const note = panel.querySelector('[data-role="note"]');
 
         panel.onclick = async (event) => {
+          const token = event.target.dataset?.token;
+          if (token) {
+            // At the cursor, not appended: a template is usually built by
+            // pasting the URL of yesterday's build and replacing the date in
+            // the middle of it.
+            const input = event.target
+              .closest('tr')
+              .querySelector(`[data-field="${event.target.dataset.for}"]`);
+            const at = input.selectionStart ?? input.value.length;
+            const to = input.selectionEnd ?? at;
+            input.value = input.value.slice(0, at) + token + input.value.slice(to);
+            input.focus();
+            input.setSelectionRange(at + token.length, at + token.length);
+            return;
+          }
+
           const action = event.target.dataset?.act;
           if (!action) return;
           const row = event.target.closest('tr');
@@ -1437,6 +1465,14 @@
             const body = readRow(row, columns);
             if (!body.url && !body.index) {
               note.textContent = 'give a URL template or a directory first';
+              return;
+            }
+            // The likeliest mistake, and a silent one: a URL pasted straight
+            // from a recent build asks for that same build forever.
+            if (body.url && !body.url.includes('{') && /\d{4}-?\d{2}-?\d{2}/.test(body.url)) {
+              note.textContent =
+                'that URL has a fixed date in it — select the date and click a ' +
+                'token above to make it follow each new build';
               return;
             }
             note.textContent = 'looking…';
@@ -1587,10 +1623,10 @@
           key: 'sources',
           title: 'Watched web locations',
           blurb:
-            'Upstreams that publish a new archive on a schedule. Give a URL ' +
-            'template when the naming is predictable — it asks a direct ' +
-            'question and is the more reliable of the two — or a directory to ' +
-            'list when it is not. Only the newest listed file is taken.',
+            'Upstreams that publish a new archive on a schedule. Paste the URL ' +
+            'of a recent build and click a date token to replace the date in ' +
+            'it — the template is then asked, each poll, whether the current ' +
+            'build exists yet. Preview shows exactly which URLs that means.',
           columns: [
             { field: 'name', label: 'Name', placeholder: 'protomaps daily' },
             {
@@ -1598,18 +1634,28 @@
               label: 'URL template',
               placeholder: 'https://build.protomaps.com/{YYYYMMDD}.pmtiles',
               wide: true,
-            },
-            {
-              field: 'index',
-              label: 'or directory',
-              placeholder: 'https://build.protomaps.com/',
-              wide: true,
+              tokens: ['{YYYYMMDD}', '{YYYY-MM-DD}', '{YYYY}', '{MM}', '{DD}'],
             },
             { field: 'categories', label: 'Categories', placeholder: 'basemaps', list: true },
-            { field: 'newest', label: 'Take newest', placeholder: '1', number: true },
+            { field: 'offsetDays', label: 'Day offset', placeholder: '0', number: true },
+            { field: 'lookbackDays', label: 'Look back', placeholder: '3', number: true },
+            {
+              field: 'index',
+              label: 'Directory instead',
+              placeholder: 'only if the naming is unpredictable',
+              wide: true,
+            },
+            { field: 'newest', label: 'Newest', placeholder: '1', number: true },
           ],
           rows: config.sources ?? [],
           preview: true,
+          footnote:
+            'Day offset shifts which date is asked for — protomaps publishes ' +
+            'yesterday, so it wants -1. Look back covers polls that were ' +
+            'missed. A directory is the fallback for upstreams whose naming ' +
+            'cannot be written as a template; it never takes more than the ' +
+            'Newest files listed, which is one unless you raise it, because ' +
+            'each one is a whole archive.',
         });
 
         for (const [key, value] of Object.entries(config)) {

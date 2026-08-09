@@ -144,7 +144,10 @@ Three ways in, all editable from the Settings screen:
 - **A URL template** (`sources[].url`) — for an upstream that publishes at a predictable address,
   like `https://build.protomaps.com/{YYYYMMDD}.pmtiles`. Expanded per candidate date and probed
   with a `HEAD`. The more reliable of the two web options: it asks a direct question, and needs the
-  upstream to publish no listing at all.
+  upstream to publish no listing at all. In Settings, paste the URL of a recent build, select the
+  date in it and click a token — `{YYYYMMDD}`, `{YYYY-MM-DD}`, `{YYYY}`, `{MM}`, `{DD}`.
+  `offsetDays` shifts which date is asked for (protomaps publishes yesterday's build, so `-1`), and
+  `lookbackDays` covers polls that were missed.
 - **A directory** (`sources[].index`) — for an upstream whose naming is not predictable. The
   listing is read (HTML autoindex or an S3 `ListBucketResult`), filtered, and the newest match
   taken. Only links *underneath* the index URL are considered, since a listing is a document from
