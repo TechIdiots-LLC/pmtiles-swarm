@@ -64,8 +64,19 @@ size is whatever the magnet claimed, which is usually zero.
 
 BEP 9 carries the `info` dictionary and nothing else, so **trackers and web seeds do not arrive
 with it**. They live outside `info`, which is precisely why adding a web seed leaves an infohash
-unchanged. What the magnet's own `tr=` and `ws=` parameters carried is kept; a magnet that had
-neither yields an archive with neither, and web seeds can be added afterwards.
+unchanged. What the magnet's own `tr=` and `ws=` parameters carried is kept, and merged with
+whatever a real `.torrent` turns out to hold.
+
+The magnets this node hands out carry `ws=` for every web seed the torrent advertises, and are
+rewritten when one is added afterwards — so a magnet fetches as well as the `.torrent` it is meant
+to be equivalent to.
+
+That does not weaken the guard against publishing a private source URL. **That decision is made
+once, when the torrent is created**: a pre-signed URL is a credential, so `includeSourceAsWebSeed`
+is opt-out and a URL carrying credentials is refused unless you insist. Once a URL is in the
+torrent's `url-list` it is already published — anyone holding the `.torrent` has it — so leaving it
+out of the magnet would protect nothing and only make the magnet slower. A torrent that advertises
+no web seeds yields a magnet with none.
 
 ## Checking a peer before trusting it
 

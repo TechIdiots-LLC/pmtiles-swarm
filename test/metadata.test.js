@@ -170,3 +170,114 @@ describe('writing down what a magnet did not carry', () => {
     assert.equal(await node.library.captureMetadata('b'.repeat(40)), null);
   });
 });
+
+describe('a magnet carries the web seeds the torrent carries', () => {
+  const seedsIn = (magnet) =>
+    [...String(magnet).matchAll(/ws=([^&]*)/g)].map((match) =>
+      decodeURIComponent(match[1]),
+    );
+
+  /**
+   * A `.torrent` that already advertises a web seed, as a publisher makes one.
+   * @returns {Promise<Uint8Array>} - Its bytes.
+   */
+  async function published() {
+    const dir = await fs.mkdtemp(path.join(workspace, 'pub-'));
+    const file = path.join(dir, 'planet.pmtiles');
+    await fs.writeFile(file, Buffer.alloc(128 * 1024, 1));
+    return new Promise((resolve, reject) =>
+      createTorrent(
+        file,
+        {
+          name: 'planet.pmtiles',
+          urlList: ['https://maps.example.org/files/planet.pmtiles'],
+        },
+        (error, result) => (error ? reject(error) : resolve(new Uint8Array(result))),
+      ),
+    );
+  }
+
+  /**
+   * A library over a recording engine.
+   * @returns {Promise<object>} - Catalog and library.
+   */
+  async function node() {
+    const dir = await fs.mkdtemp(path.join(workspace, 'ws-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    return {
+      catalog,
+      library: new Library({
+        catalog,
+        engine: {
+          name: 'webtorrent',
+          list: async () => [],
+          get: async () => null,
+          add: async () => {},
+          remove: async () => {},
+          addWebSeed: async () => true,
+        },
+        config: {
+          dataDir: dir,
+          webtorrent: { savePath: dir },
+          trackers: ['udp://tracker.example:6969'],
+        },
+      }),
+    };
+  }
+
+  it('takes them from the torrent when one is joined', async () => {
+    // Leaving them out protects nothing — anyone holding the .torrent already
+    // has them — and only makes the magnet slower than the file it is meant to
+    // be equivalent to.
+    const { library } = await node();
+    const entry = await library.addExistingTorrent(
+      { torrentFile: await published() },
+      { mode: 'mirror' },
+    );
+
+    assert.deepEqual(seedsIn(entry.magnet), [
+      'https://maps.example.org/files/planet.pmtiles',
+    ]);
+  });
+
+  it('keeps up when one is added after publication', async () => {
+    // Otherwise a retrofitted seed reached everyone holding the .torrent and
+    // nobody holding the magnet — and the magnet is the link that gets shared.
+    const { catalog, library } = await node();
+    const entry = await library.addExistingTorrent(
+      { torrentFile: await published() },
+      { mode: 'mirror' },
+    );
+
+    await library.addWebSeeds(entry.infoHash, [
+      'https://mirror.example.net/planet.pmtiles',
+    ]);
+    const updated = catalog.get(entry.infoHash);
+
+    assert.deepEqual(seedsIn(updated.magnet), [
+      'https://maps.example.org/files/planet.pmtiles',
+      'https://mirror.example.net/planet.pmtiles',
+    ]);
+    // Which is the whole reason retrofitting is safe: url-list sits outside
+    // the info dictionary, so none of this touches the infohash.
+    assert.equal(updated.infoHash, entry.infoHash);
+  });
+
+  it('publishes none when the torrent advertises none', async () => {
+    // The decision not to publish a source URL is made once, when the torrent
+    // is created. Nothing downstream reverses it.
+    const dir = await fs.mkdtemp(path.join(workspace, 'bare-'));
+    const file = path.join(dir, 'private.pmtiles');
+    await fs.writeFile(file, Buffer.alloc(64 * 1024, 2));
+    const torrentFile = await new Promise((resolve, reject) =>
+      createTorrent(file, { name: 'private.pmtiles' }, (error, result) =>
+        error ? reject(error) : resolve(new Uint8Array(result)),
+      ),
+    );
+
+    const { library } = await node();
+    const entry = await library.addExistingTorrent({ torrentFile }, { mode: 'mirror' });
+    assert.deepEqual(seedsIn(entry.magnet), []);
+  });
+});

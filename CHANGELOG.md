@@ -247,6 +247,12 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **Magnets dropped the web seeds their torrents advertised.** Torrents created here have always
+  put them in the magnet; a torrent that was *joined* did not, and a web seed added after
+  publication reached everyone holding the `.torrent` and nobody holding the magnet — which is the
+  link that actually gets shared. Both now carry `ws=` for every seed the torrent advertises. This
+  does not weaken anything: whether a URL may be published is decided once, when the torrent is
+  created, and once it is in the `url-list` anyone holding the `.torrent` already has it.
 - **An archive joined by magnet forgot everything the swarm told it.** A magnet carries an
   infohash and, if you are lucky, a display name; the real name, the exact size and the piece
   geometry arrive afterwards over BEP 9 — and arrived into nothing. Every restart asked the swarm

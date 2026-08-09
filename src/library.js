@@ -1348,6 +1348,15 @@ export class Library {
       kind: entry.kind ?? guessKind(parsed.name ?? ''),
     };
 
+    // A `.torrent` can carry web seeds that the magnet used to join did not
+    // mention. Republishing the magnet with them costs nothing and makes the
+    // link this node hands out as useful as the one it holds.
+    learned.magnet = magnetFor(
+      { ...parsed, name: learned.name },
+      this.#config.trackers,
+      learned.webSeeds,
+    );
+
     console.log(`[metadata] ${learned.name}: written to ${path.basename(torrentPath)}`);
     return this.#catalog.put(learned);
   }
@@ -1607,7 +1616,15 @@ export class Library {
         .catch(() => {});
     }
 
-    await this.#catalog.put({ ...entry, webSeeds: merged });
+    // The magnet has to keep up with the torrent. Without this, a seed added
+    // after publication reached everyone holding the .torrent and nobody
+    // holding the magnet — and the magnet is the link that actually gets
+    // shared.
+    await this.#catalog.put({
+      ...entry,
+      webSeeds: merged,
+      magnet: magnetFor(parsed, this.#config.trackers, merged),
+    });
 
     // Where the engine can take a seed at runtime, the node benefits now;
     // where it cannot, peers still get it from the rewritten .torrent and this
@@ -1915,15 +1932,26 @@ export async function publish(from, publishDir) {
 
 /**
  * Builds a magnet URI for a parsed torrent.
+ * Web seeds go in as `ws=`, and it is worth being clear why that is safe. The
+ * decision about whether a URL may be published happens once, when the torrent
+ * is created — a pre-signed source URL is a credential, so publishing it is
+ * opt-out. Once a URL is in the torrent's `url-list` that decision has already
+ * been made and anyone holding the `.torrent` already has it, so leaving it out
+ * of the magnet protects nothing. It only means a magnet fetches more slowly
+ * than the `.torrent` it is meant to be equivalent to.
  * @param {object} parsed - A parse-torrent result.
  * @param {string[]} trackers - Announce URLs to include.
+ * @param {string[]} [webSeeds] - Web seeds, when they are not on `parsed`.
  * @returns {string} - The magnet URI.
  */
-function magnetFor(parsed, trackers = []) {
+function magnetFor(parsed, trackers = [], webSeeds) {
   const parts = [`magnet:?xt=urn:btih:${parsed.infoHash}`];
   if (parsed.name) parts.push(`dn=${encodeURIComponent(parsed.name)}`);
   for (const tracker of parsed.announce ?? trackers) {
     parts.push(`tr=${encodeURIComponent(tracker)}`);
+  }
+  for (const seed of webSeeds ?? parsed.urlList ?? []) {
+    parts.push(`ws=${encodeURIComponent(seed)}`);
   }
   return parts.join('&');
 }
