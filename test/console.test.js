@@ -273,3 +273,44 @@ describe('the preview imports what the bundles actually export', () => {
     }
   });
 });
+
+describe('the detail tabs', () => {
+  it('gives every tab a pane to render into', () => {
+    // A tab button with no matching pane looks completely fine — the button
+    // appears, it highlights when clicked, and nothing happens, because
+    // querySelector('[data-pane="…"]') returned null and the renderer bailed.
+    // Exactly how the Pieces tab shipped invisible.
+    const tabs = [...page.matchAll(/data-tab="([^"]+)"/g)].map(([, name]) => name);
+    const panes = new Set(
+      [...page.matchAll(/data-pane="([^"]+)"/g)].map(([, name]) => name),
+    );
+
+    assert.ok(tabs.length > 0, 'there should be tabs');
+    const orphans = tabs.filter((name) => !panes.has(name));
+    assert.deepEqual(orphans, [], 'these tabs have no pane');
+  });
+
+  it('has no pane without a tab to reach it', () => {
+    // The other direction: a pane nothing can open is dead markup, and a
+    // renamed tab leaves one behind.
+    const tabs = new Set([...page.matchAll(/data-tab="([^"]+)"/g)].map(([, n]) => n));
+    // `data-pane` is also matched inside the script that queries it, so only
+    // the ones declared as elements count.
+    const declared = [...page.matchAll(/<div data-pane="([^"]+)"/g)].map(([, n]) => n);
+    const unreachable = declared.filter((name) => !tabs.has(name));
+    assert.deepEqual(unreachable, [], 'these panes cannot be opened');
+  });
+
+  it('renders each tab it declares', () => {
+    // A pane that exists but that fillPane never branches on shows "loading…"
+    // for ever.
+    const tabs = [...page.matchAll(/<button data-tab="([^"]+)"/g)].map(([, n]) => n);
+    for (const name of tabs) {
+      if (name === 'general') continue; // rendered inline, not in fillPane
+      assert.ok(
+        page.includes(`if (name === '${name}')`),
+        `fillPane has no branch for the ${name} tab`,
+      );
+    }
+  });
+});
