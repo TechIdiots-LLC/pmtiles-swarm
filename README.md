@@ -25,8 +25,9 @@ node src/index.js --config swarm.config.json
   feed contents, and updatable torrents.
 - **[docs/serving-tiles.md](docs/serving-tiles.md)** — the TileJSON and z/x/y endpoints, the
   `torrent` block that torrent-aware clients use, caching, and running behind a proxy.
-- **[docs/security.md](docs/security.md)** — what is public, what is guarded, API tokens and
-  console sign-in, and why an unauthenticated node refuses to listen on a reachable address.
+- **[docs/security.md](docs/security.md)** — what is public, what is guarded, named tokens with
+  roles, console sign-in, and why an unauthenticated node refuses to listen on a reachable
+  address.
 - **[docs/architecture-diagram.md](docs/architecture-diagram.md)** — how a publishing node, a
   serving tier, the swarm and both kinds of client fit together.
 
@@ -34,12 +35,20 @@ node src/index.js --config swarm.config.json
 
 **Adds archives four ways.** A local `.pmtiles` file (hashed into a new torrent, data left where
 it is); a remote URL (see below); an existing `.torrent` or magnet, which it simply joins; or
-adoption of everything your torrent client already seeds — the migration path for an existing
-library, which re-hashes nothing.
+adoption of what something else already holds — this node's engine, a qBittorrent instance named
+in the dialog, or another swarm node's catalogue. Adoption re-hashes nothing, and anything whose
+data is not readable from here is joined by magnet instead.
 
-**Watches folders.** A new `.pmtiles` appearing in a watched folder is imported automatically.
-Imports wait for the file to stop changing first, because hashing a half-written archive produces
-a torrent for bytes that no longer exist.
+**Watches folders and web locations.** A new `.pmtiles` in a watched folder is imported
+automatically; imports wait for the file to stop changing first, because hashing a half-written
+archive produces a torrent for bytes that no longer exist. Upstreams that publish a new build per
+day are followed by a dated URL template or by reading a directory listing, on a schedule you set
+per source.
+
+**Has a console.** Everything above is done from a web UI in the shape of a torrent client:
+archives with progress, ratio and expiry; tabbed detail with trackers, peers, HTTP sources and
+content; and a settings screen covering monitored folders, watched web locations, remote nodes,
+save locations, access tokens and the external-program hooks.
 
 **Publishes RSS.** `/feed.xml`, and `/feed/<category>.xml` per category. Plain RSS 2.0 with
 torrent enclosures, so **qBittorrent's built-in RSS auto-downloader can subscribe today** with no
@@ -407,43 +416,60 @@ matters there is `maxConnections`, since every peer holds a NAT table entry. See
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/status` | Engine health, counts, watched folders, subscriptions |
-| `GET` | `/api/torrents` | Catalog joined with live swarm state |
+| `GET` | `/api/status` | Engine health, counts, watched folders, save locations and free space |
+| `GET` | `/api/torrents` | Catalog joined with live swarm state and what is left of each seeding limit |
 | `POST` | `/api/torrents` | Add via `{path}`, `{url}`, `{magnet}`, `{torrentUrl}`, or a raw `.torrent` body |
 | `DELETE` | `/api/torrents/:infoHash` | Remove (`?deleteData=true` to delete data too) |
-| `GET` | `/api/torrents/:infoHash/file` | Download the `.torrent` |
-| `GET` | `/api/torrents/:infoHash/magnet` | Magnet URI |
 | `GET` | `/api/torrents/:infoHash` | One archive, with disk usage and how it is being read |
-| `GET` | `/api/torrents/:infoHash/peers` | Per-peer detail |
+| `GET` | `/api/torrents/:infoHash/file`, `/magnet` | Download the `.torrent`, or its magnet URI |
+| `GET` | `/api/torrents/:infoHash/peers`, `/trackers`, `/content` | Per-peer, per-tracker and per-file detail |
+| `PATCH` | `/api/torrents/:infoHash/mode` | Switch between mirror and cache |
+| `PATCH` | `/api/torrents/:infoHash/categories` | Set, add or remove tags |
+| `PATCH` | `/api/torrents/:infoHash/seeding` | Per-archive seeding limit, or "use the global one" |
+| `PATCH` `GET` | `/api/torrents/:infoHash/location` | Move the data; poll the move |
+| `POST` | `/api/torrents/:infoHash/pause`, `/resume` | Stop offering it, without forgetting it |
 | `POST` | `/api/torrents/:infoHash/webseeds` | Add web seeds — does not change the infohash |
 | `POST` | `/api/torrents/:infoHash/warm` | Pre-fetch a region (`GET` for progress, `DELETE` to cancel) |
 | `DELETE` | `/api/torrents/:infoHash/cache` | Reclaim cached pieces, keep the archive |
 | `POST` | `/api/torrents/:infoHash/check` | Has the source changed since the torrent was made? |
 | `POST` | `/api/torrents/:infoHash/rebuild` | Rebuild from the current source (mints a new infohash) |
 | `POST` | `/api/check-origins` | Check every archive with a watchable source |
-| `POST` | `/api/adopt` | Import what the engine already holds |
+| `GET` | `/api/categories` | Every tag, with the endpoints resolving to its newest build |
+| `POST` | `/api/adopt`, `/api/adopt/candidates` | Take over what an engine or another node holds |
+| `POST` | `/api/sources/preview` | What a watched web location would take, without taking it |
+| `POST` | `/api/subscriptions/preview` | Whether a peer is reachable and what it offers |
 | `POST` | `/api/subscriptions/refresh` | Poll subscribed feeds now |
+| `GET` `POST` `DELETE` | `/api/tokens`, `/api/tokens/:id` | Mint, list and revoke access tokens |
+| `GET` `POST` | `/api/restart` | What a restart would do, and doing it |
 | `GET` `PATCH` | `/api/config` | Read and change settings |
 | `POST` | `/api/login`, `/api/logout` | Console sign-in |
+| `GET` | `/api/catalog` | The whole catalogue, for a peer keeping itself in step |
 | `GET` | `/archives/:infoHash/tiles.json` | TileJSON — **public** |
 | `GET` | `/archives/:infoHash/:z/:x/:y.:ext` | One tile — **public** |
-| `GET` | `/feed.xml`, `/feed/:category.xml` | RSS — **public** |
+| `GET` | `/latest/:category/tiles.json`, `/archive.torrent`, `/magnet` | The newest build in a category — **public** |
+| `GET` | `/feed.xml`, `/feed/:category.xml`, `/latest/:category.xml` | RSS — **public** |
 
 Everything under `/api/` is guarded once a credential is configured; tiles, TileJSON and the feeds
-never are. See [docs/security.md](docs/security.md).
+never are. A `peer` token may read but not change, and may be narrowed to some categories. See
+[docs/security.md](docs/security.md).
 
 ## Status
 
-Working and verified end to end against a live 71.93 GiB OpenMapTiles archive: torrent creation,
-joining existing torrents, catalog persistence, map metadata extraction, category feeds, live
-swarm stats, and cache mode holding at zero bytes on disk.
+Working and verified end to end against live archives — a 71.93 GiB OpenMapTiles build, a 310 GiB
+raster and a 698 GiB sparse raster: torrent creation, joining existing torrents, catalog
+persistence, map metadata extraction, category feeds, live swarm stats, and cache mode holding at
+zero bytes on disk.
 
-Tile serving, region warming, cache accounting, web seed retrofitting and access control are
-covered by tests and verified against a running server.
+Covered by tests and exercised against a running server: tile serving, region warming, cache
+accounting, web seed retrofitting, access control and token roles, incomplete-file marking and
+promotion, save locations and moving an archive between them, adopting from an engine and from
+another node, watched web locations including directory listings and date templates, seeding
+limits and what is left of them, in-place settings reload and process restart, and two-node
+subscription sync in both directions over both RSS and the catalog API.
 
-Not yet exercised: the qBittorrent engine against a real instance, watch-folder imports, feed
-subscription round-trips between two nodes, and BEP 46 publish/resolve against a live DHT (the
-crypto and magnet handling are tested; interop with libtorrent's encoding is not).
+Not yet exercised: the qBittorrent engine against a real instance, watch-folder imports, and
+BEP 46 publish/resolve against a live DHT (the crypto and magnet handling are tested; interop
+with libtorrent's encoding is not).
 
 ## License and attribution
 

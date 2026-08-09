@@ -24,9 +24,9 @@ delete data and rewrite the configuration.
 }
 ```
 
-Any one of `apiKey`, `password` or `passwordHash` switches guarding on. Set none
-and the node behaves exactly as it did before — which is fine on a machine only
-you can reach, and is why the default changes nothing.
+Any one of `apiKey`, `password`, `passwordHash` or a named token switches
+guarding on. Set none and the node behaves exactly as it did before — which is
+fine on a machine only you can reach, and is why the default changes nothing.
 
 **Scripts and sibling nodes** use the token:
 
@@ -57,6 +57,75 @@ owner. `passwordHash` is preferred and holds a scrypt digest:
 Setting a password through the settings screen stores the hash and discards the
 plaintext. Credentials are redacted from every API response, and a redaction
 placeholder is never written back as a real secret.
+
+## Named tokens, and roles
+
+`apiKey` is one credential with one power. That is fine while the only caller is
+you, and stops being fine the moment another node wants to follow this one:
+"let them mirror my internal archives" and "let them delete my library" were the
+same sentence.
+
+So there are named tokens, minted in **Settings → Access tokens** or at
+`POST /api/tokens`:
+
+| role | may |
+| --- | --- |
+| `peer` | read this node — the catalogue, the feeds, tiles and `.torrent` files. What another swarm node needs in order to follow it, and nothing else. |
+| `admin` | everything the console can do. |
+
+One per person or node, so any of them can be revoked without disturbing the
+rest, and each records when it was last used — which is what makes retiring an
+old one an informed decision rather than a guess.
+
+```sh
+curl -X POST -H 'authorization: Bearer <admin token>' \
+  -H 'content-type: application/json' \
+  -d '{"name":"partner org","role":"peer","categories":["internal"]}' \
+  http://maps.internal:8090/api/tokens
+```
+
+The response carries the token itself. That is the only time it is ever
+returned: only a SHA-256 of it is stored, so a lost token is replaced rather
+than recovered — which is the property that makes keeping the list safe.
+
+SHA-256 rather than scrypt, deliberately, and for the opposite reason passwords
+want scrypt. A password is short, human-chosen and worth attacking with a
+dictionary. A token is 32 bytes from the CSPRNG with no dictionary to attack, so
+slowness buys nothing — and it would cost a slow hash per candidate token on
+every single request, which is a denial of service handed out for free. A fast
+hash also lets tokens be looked up by hash rather than compared one at a time,
+so a node with fifty peers checks as quickly as one with one.
+
+### Narrowing a peer to some categories
+
+A `peer` token may carry a category list, and then sees exactly those:
+
+```json
+{
+  "auth": {
+    "tokens": [
+      { "id": "…", "name": "partner org", "role": "peer",
+        "hash": "…", "categories": ["internal"] }
+    ]
+  }
+}
+```
+
+Not even what the node publishes openly. The point of narrowing a token is to
+describe one peer's slice, not to add to the public view, so it applies before
+`feedCategories` rather than on top of it. This holds on the feeds as well as
+the catalogue, which matters because the feeds are public — the token does not
+unlock them, it widens what they show.
+
+An `admin` token cannot be narrowed. It can rewrite the configuration, and the
+configuration is where the categories are, so the restriction would be one it
+could lift.
+
+### The original apiKey
+
+Still works, still means admin. It cannot be listed or revoked through the API,
+because it lives in the config file — remove it from there to retire it. The
+token list reports whether one exists so its presence is not a surprise.
 
 ## Refusing to start
 
@@ -90,4 +159,15 @@ path when adding an archive. What it cannot do is publish a file that is not a
 map archive — that is checked by content, independently of who is asking — but
 an operator credential is still an operator credential.
 
-**There are no roles.** A credential is full access or none.
+**A peer token is a read credential, not a sandbox.** It cannot change
+anything, and it cannot list or revoke tokens — that would tell it who else
+holds a credential for this node. What it can do is read everything it is
+scoped to, including the `.torrent` files and the tiles, which is the whole
+point of issuing one.
+
+**An admin credential is an operator credential.** Whoever holds one can name
+any path when adding an archive, and can turn on `allowHooksFromApi` only by
+editing the config file — that flag is deliberately unreachable from the API,
+including by someone who already has it, because the decision to let a token
+run commands as the service user has to be made somewhere a token cannot
+reach.

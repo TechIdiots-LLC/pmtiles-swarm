@@ -51,6 +51,40 @@ Poll immediately rather than waiting for the interval:
 curl -X POST localhost:8090/api/subscriptions/refresh
 ```
 
+## Checking a peer before trusting it
+
+A peer URL is the one setting where a mistake is silent. A feed that 404s and a token the
+peer rejects both mean nothing ever arrives — which looks exactly like a peer with nothing
+new. So **Remote nodes** in Settings has a **Test** button, over
+`POST /api/subscriptions/preview`:
+
+```
+RSS, 2 archives: planet-20260807.pmtiles, terrain-20260807.pmtiles
+the peer wants a token
+the peer rejected that token
+API, 1 archive (a partial view — pruning is disabled for it)
+```
+
+It counts what this node could actually *take*, not what the feed lists: an item with no
+magnet and no `.torrent` would produce nothing if followed, so reporting it would be a
+lie.
+
+## Where a token comes from
+
+The token in a subscription is one the **other** node issued. If you are the one being
+followed, mint it in **Settings → Access tokens** with the `peer` role, optionally narrowed
+to the categories that peer should see. See [security.md](security.md).
+
+Tokens are redacted from `GET /api/config` like any other credential, and a save that
+echoes the placeholder back keeps the stored one rather than writing asterisks over it.
+
+The token is presented when fetching the `.torrent` as well as the catalogue — it is the
+same peer and the same relationship, so a node guarding its torrent files would otherwise
+refuse the follower it has just told about them. And a `.torrent` that cannot be fetched
+falls back to the magnet in the same catalogue entry rather than losing the archive: the
+`.torrent` is preferred because it carries the trackers and the web seeds, but those are a
+poor trade for the archive itself.
+
 ## Removing what a peer no longer offers
 
 A feed can only ever say "here is something new". Following one, a node

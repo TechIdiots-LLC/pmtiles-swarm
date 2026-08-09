@@ -13,6 +13,23 @@ GET /archives/{infohash}/archive.torrent     the .torrent
 `jpg`, `webp`, `avif` for raster. Asking for the wrong one is a 400 rather than
 a silently wrong content type.
 
+## Only PMTiles is served
+
+An archive that is not PMTiles answers **415** here, with the reason, and the
+console does not offer it a TileJSON URL at all.
+
+MBTiles is SQLite. Reading a tile from it means reading pages scattered across
+the file and running a database engine over them, where PMTiles is flat and
+Hilbert-ordered — which is exactly what makes reading one tile from a swarm a
+matter of fetching one or two pieces. So MBTiles is distributed and seeded here
+perfectly well; it just has no tile endpoint.
+
+A joined torrent takes a first guess at its format from its filename, so an
+`.mbtiles` is known before any byte arrives. The first read settles it for
+certain, and the answer is recorded — otherwise asking for the TileJSON of an
+MBTiles archive would pull pieces out of the swarm on every attempt, doing work
+that could never succeed.
+
 ## Missing tiles
 
 A tile the archive does not hold answers **404 for raster and 204 for vector**,
@@ -331,6 +348,14 @@ plus its piece cache.
 Leave `pieceCacheBytes` unset unless you have a reason. It is then sized from the
 torrent's piece length, which is the safer default — a fixed byte budget is a
 trap with 16 MiB pieces, since 64 MiB holds only four of them.
+
+## Stopping a limit removing an archive underneath a map
+
+A seeding limit can `remove` or `delete` an archive that a style is pointed at.
+The **Ratio** and **Expires** columns exist so that is visible in advance rather
+than discovered by a map going blank; see *Seeding limits* in the README. A
+cache-mode archive never expires, and an individual archive can be told to seed
+forever from its detail panel.
 
 ## What this is not
 

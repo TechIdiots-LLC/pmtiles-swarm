@@ -132,6 +132,35 @@ the libtorrent engine, both of which would have silently broken it:
 A correctly configured cache-mode node reports state `cache`, holds zero bytes until
 something reads from it, and still serves whatever pieces it has picked up.
 
+## Marking incomplete files
+
+An archive that is not whole yet is written under a marked name and renamed when
+it finishes, so a web seed URL 404s until the file is real rather than serving half of
+one. Each engine does it its own way:
+
+| Engine | How |
+| --- | --- |
+| WebTorrent | No rename API — the store is built from the metainfo's file list — but the store itself can be replaced, and that is the only thing deciding where bytes land. A thin wrapper around `fs-chunk-store` rewrites the paths. |
+| qBittorrent | Has this built in as `incomplete_files_ext`, appending `.!qB`. That preference is switched on rather than overridden, so someone looking at that client sees the convention they expect. |
+| libtorrent | **Not marked.** The rename would have to happen in the sidecar, which ships with `pmtiles-torrent` rather than here. |
+
+So on the libtorrent engine, do not point a web server at a save path that is also
+serving web seeds. Completion is still recorded correctly — the watcher finds no marked
+file and simply notes that the archive is whole.
+
+## Adopting from a qBittorrent you are not using as the engine
+
+Adopt can name a qBittorrent instance in the dialog rather than requiring it to be the
+configured engine, which is the usual case for "I have a library over there and want it
+catalogued here". That connection is read-only on purpose: the incomplete-files preference
+is explicitly not set on it, so looking at somebody's client does not change a setting on
+it as a side effect.
+
+Whether that client's save paths are readable from *this* node is a different question
+from whether it holds the data, and the difference is silent — a catalog entry naming a
+file that is not there looks entirely normal and can never serve a tile. Candidates are
+checked and the unreadable ones are joined by magnet instead.
+
 ## Writing another engine
 
 Implement `connect`, `add`, `remove`, `list`, `get`, `destroy`, and optionally `peers`.

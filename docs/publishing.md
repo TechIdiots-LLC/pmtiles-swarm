@@ -9,10 +9,33 @@ How an archive gets into the swarm, and the decisions that matter when it does.
 | Local `.pmtiles` path | A torrent is created; the data stays where it is | Yes |
 | Remote `.pmtiles` URL | Streamed past the hasher; origin becomes a web seed | Yes |
 | Magnet or `.torrent` | Joined — nothing is created | No |
-| `POST /api/adopt` | Everything the engine already seeds is imported | No |
+| `POST /api/adopt` | What something else already holds is taken over | No |
 
 Publishers create; everyone else joins. `adopt` is the migration path for an existing
 library — it re-hashes nothing, so bringing across 50 torrents is instant.
+
+Adopting has three sources, chosen in the dialog:
+
+- **this node's own engine**, for a library already seeded here;
+- **a qBittorrent instance** named in the dialog rather than configured as the engine.
+  That connection is read-only on purpose — nothing about that instance is changed by
+  being looked at;
+- **another pmtiles-swarm node**, read once from its `/api/catalog`. Not the same as
+  following it; for that, add it as a subscription.
+
+`POST /api/adopt/candidates` lists what is there before anything is taken, so the choice
+is made against what actually exists rather than by running an import and reading
+afterwards what it did.
+
+Anything whose data this node can read is adopted **where it lies**, neither re-hashed nor
+re-downloaded. Anything else — a client on another host, a path not mounted here — is
+**joined by magnet** instead, as cache or mirror. Its infohash is right there, and an
+infohash is all it takes to join the swarm that client is already seeding into.
+
+Adopting from a swarm node also carries across what that node already knew: the archive
+summary, its categories, its web seeds and its checksum. That is what makes it better than
+pasting the magnet — a joined magnet has no summary until something reads its header out
+of a swarm it has only just joined, and no web seeds at all.
 
 ```bash
 # Create from a local archive
@@ -250,6 +273,29 @@ becomes the limit. That is a different setting:
 Lower it — 50, or 30 — if the network misbehaves while seeding. It applies to both the
 libtorrent and WebTorrent engines. Reach for that before compromising on piece size.
 
+## Unfinished archives are named as such
+
+An archive that is not whole yet is written as `planet.pmtiles.incomplete` and renamed the
+instant it finishes. `incompleteSuffix: ""` switches that off.
+
+This matters more here than for most downloads, because these files get published. A web
+seed URL is predictable and goes out before the file exists, so an unmarked partial sitting
+in a served directory is a URL that answers with a half-written archive — and every peer
+that tries it fails hash verification against it. With the marker, the URL 404s until the
+exact moment the file is real, then starts working.
+
+The rename is within one directory, so it is atomic and instant however large the archive
+is. Keeping incomplete files in a *different* directory would mean a completed download had
+to move, which is instant only when both paths share a filesystem and otherwise copies the
+whole archive — an hour and twice the disk for a 700 GiB build.
+
+Remote downloads are marked the same way, since a retain directory is routinely the one a
+web server publishes. qBittorrent's own `.!qB` preference is switched on rather than
+overridden, so someone looking at that client sees what they expect. The libtorrent engine
+does not mark incomplete files at all — the rename would have to happen in the sidecar,
+which ships with `pmtiles-torrent` — so do not point a web server at a libtorrent save path
+that is also serving web seeds.
+
 ## BitTorrent v2
 
 The `libtorrent` engine creates **hybrid v1+v2 torrents** by default. v2 (BEP 52) adds
@@ -275,18 +321,33 @@ A new `.pmtiles` appearing in a watched folder is imported automatically.
   "watch": [
     {
       "path": "/mnt/maps/generated",
-      "category": "basemaps",
+      "categories": ["basemaps", "weekly"],
+      "savePath": "/mnt/bulk/archives",
       "webSeedBase": "https://maps.example.org/files",
-      "stabilitySeconds": 30
+      "stabilitySeconds": 30,
+      "pollSeconds": 0
     }
   ]
 }
 ```
 
+Editable in **Settings → Monitored folders** as a table, rather than by hand.
+
 `stabilitySeconds` is the important one. A map build writes its output over minutes or
 hours, and hashing a half-written archive produces a torrent for bytes that no longer
 exist. Nothing is imported until the file has stopped changing for that long. Raise it if
 your archives arrive over a network copy that can stall mid-file.
+
+`pollSeconds` is for **network shares only**, and is off by default. A local directory
+needs nothing: the filesystem says when something lands and the archive is picked up as it
+appears, faster than any interval. SMB and NFS do not deliver those notifications, so a
+watch on one can sit silent forever while files arrive — 15 to 60 seconds suits those. On
+a local folder it is pure waste: stat-ing a directory of terabyte archives every few
+seconds costs real I/O to learn nothing.
+
+`savePath` names where the data should end up, and can be a **named location** instead —
+see *Where the data lands* in the README. Changing any of this applies immediately; the
+watchers are restarted rather than the node.
 
 ## Scheduled upstreams
 
@@ -318,7 +379,22 @@ today's URL and see whether it exists yet:
 ```
 
 `url`
-    Template with `{YYYYMMDD}`, `{YYYY-MM-DD}`, `{YYYY}`, `{MM}` or `{DD}`.
+    A template with the date in it. A `{...}` group is read as a date *pattern* — runs of
+    Y, M and D with separators between them — so it can spell whatever the upstream
+    spells, without each variant having to be supported here first:
+
+    | | | |
+    | --- | --- | --- |
+    | `{YYYYMMDD}` → `20260807` | `{YYYY-MM-DD}` → `2026-08-07` | `{DD.MM.YYYY}` → `07.08.2026` |
+    | `{YYYY}` → `2026` · `{YY}` → `26` | `{MM}` → `08` · `{M}` → `8` | `{DD}` → `07` · `{D}` → `7` |
+
+    Run length decides padding, which is what an upstream naming files `8-7-26.pmtiles`
+    needs, and case is ignored since the length already carries it. A group that is not a
+    date pattern is left exactly as found, so a URL containing `{id}` is not quietly
+    rewritten.
+
+    In **Settings → Watched web locations**, paste the URL of a recent build, select the
+    date in it and click a token — it replaces the selection.
 
 `filename`
     What to call it locally. Upstreams often publish under a bare date; this renames it to
@@ -335,11 +411,64 @@ today's URL and see whether it exists yet:
     A symlink pointing at the newest build. The dated file stays the real one, so it
     remains seedable under its own torrent while consumers can reference a fixed path.
 
+`at`, `everyHours`, `everyMinutes`
+    When to look. `at` is a time of day in UTC — `"03:30"`, or a list of them — for an
+    upstream that publishes on a schedule, which is most of them: polling every six hours
+    from whenever the process started finds a daily build up to six hours late, and those
+    are hours during which nobody could be seeding it. `everyHours` or `everyMinutes` for
+    an upstream that publishes whenever it is ready. Naming none falls back to
+    `sourceCheckIntervalHours`.
+
+    Times are UTC to match the date tokens: a template on one clock and a schedule on
+    another would be a confusing thing to work out at four in the morning. A source that
+    has never run is always due, which is what catches up after the daemon was down over
+    its scheduled time.
+
 Each build becomes its own archive with its own torrent and its own lifetime, which is
 what you want — old builds stay seedable for as long as anyone still wants them.
 
 The origin URL is registered as a web seed automatically, and every candidate URL is
 checked with a HEAD, so a build that has not been published yet costs one request.
+
+### Watching a directory instead
+
+Where the naming is not predictable enough to write as a template, give an `index` — a
+directory URL — and the listing is read, filtered, and the newest match taken:
+
+```json
+{
+  "sources": [
+    {
+      "name": "protomaps daily",
+      "index": "https://build.protomaps.com/",
+      "match": "\\.pmtiles$",
+      "newest": 1,
+      "categories": ["planet"]
+    }
+  ]
+}
+```
+
+HTML autoindexes and S3 `ListBucketResult` documents are both read, which covers most
+static hosts. Prefer a template where you can: it asks a direct question, gets a direct
+answer, and needs the upstream to publish no listing at all.
+
+Two constraints are deliberate.
+
+**Only links underneath the index URL are followed.** A listing is a document from
+somebody else's server, and this node is about to download gigabytes from whatever it
+names and republish the result under your name. An off-site link in that page would let
+the page choose what you distribute.
+
+**`newest` defaults to 1.** A directory holding two years of daily planet builds would
+otherwise read as two years of archives to fetch, beginning without anyone asking. Raise
+it only as far as the number of polls you expect to miss — each step is another full
+archive.
+
+`POST /api/sources/preview`, behind a **Preview** button, reports what a source *would*
+take without taking any of it. It also refuses a URL that still has a fixed date in it and
+no token, which is the likeliest mistake and a silent one: that source would ask for the
+same build forever, find it every time, already have it, and never notice a new one.
 
 ## When the source changes underneath you
 
