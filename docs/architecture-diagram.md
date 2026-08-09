@@ -92,6 +92,13 @@ swarm. Nothing else about the topology changes, which is why only one node in th
 diagram is labelled with its engines. See
 [engines](engines.md#running-two-engines-at-once).
 
+**It needs a `wss://` tracker to work**, and the defaults are UDP-only. A browser
+has no UDP socket and no DHT, so a WebSocket tracker is its only route to finding
+a peer — a torrent announcing only to UDP trackers is one no browser can join,
+however many nodes are seeding it. That dashed half of the diagram is the piece
+most likely to be quietly missing. See
+[ports and reachability](engines.md#browser-peers-need-a-websocket-tracker-in-the-torrent).
+
 The publisher is a single point of failure for **publishing new archives only**.
 Once a torrent exists, the swarm and the serving tier keep working without it —
 including the feed's existing items, which subscribers have already acted on.
@@ -283,7 +290,10 @@ between them.
 
 Bound to loopback like that, the thing that can rewrite configuration is
 *unreachable* rather than merely guarded, and the pool in front of the public
-port carries no route to it at all. Leave `adminPort` unset and both surfaces
+port carries no route to it at all. **Peer traffic never touches the balancer** —
+neither BitTorrent nor WebRTC — so size it for tiles alone, and see
+[ports and reachability](engines.md#ports-and-reachability) for the peer ports,
+which are the only ones wanting a forwarding rule. Leave `adminPort` unset and both surfaces
 share one listener, which is fine for a single machine and wrong for anything
 behind a CDN. See [security](security.md).
 

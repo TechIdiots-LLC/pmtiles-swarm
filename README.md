@@ -20,7 +20,8 @@ node src/index.js --config swarm.config.json
 ## Documentation
 
 - **[docs/engines.md](docs/engines.md)** — libtorrent, qBittorrent and WebTorrent: what each
-  can do, what to install, and how cache mode differs between them.
+  can do, what to install, how cache mode differs between them, and
+  [which ports need forwarding](docs/engines.md#ports-and-reachability).
 - **[docs/publishing.md](docs/publishing.md)** — creating torrents, web seeds, piece size,
   hybrid v1+v2, watch folders, and the keep-or-discard choice when adding from a URL.
 - **[docs/subscribing.md](docs/subscribing.md)** — a worked two-node setup, mirror vs cache,

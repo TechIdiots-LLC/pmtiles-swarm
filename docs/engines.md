@@ -204,6 +204,117 @@ the same fact.
 Verified on Windows with libtorrent 2.0.13 and WebTorrent seeding the same archive together, and
 with a cache-mode archive correctly withheld from the secondary.
 
+## Ports and reachability
+
+Four listeners, and only one of them wants forwarding.
+
+| What | Port | Reach it from |
+| --- | --- | --- |
+| libtorrent peers | `libtorrent.listen`, e.g. `0.0.0.0:6881` — TCP **and** UDP | the internet: **forward it** |
+| WebTorrent peers | `webtorrent.clientOptions.torrentPort` — **random unless you set it** | the internet, if you pin and forward it |
+| WebRTC (browser peers) | no listening port at all | nothing to forward — see below |
+| HTTP: tiles, feeds, `.torrent` | `port`, e.g. 8090 | your load balancer or CDN |
+| HTTP: console and `/api/` | `adminPort`, e.g. 8091 | loopback. Never forward this |
+
+**The peer port is the one that matters**, and it is the same decision you already made for
+qBittorrent. Forwarded, other clients can open connections *to* you; unforwarded, you can still
+only dial *out*, which works but halves the swarm you can reach — two peers both behind
+unforwarded NAT can never connect to each other, so the ones that need you most are the ones you
+cannot serve. UPnP and NAT-PMP are on by default in both engines and will often open it for you;
+a router with either disabled will not say so.
+
+### Every libtorrent network setting
+
+```json
+{
+  "libtorrent": {
+    "listen": "0.0.0.0:6881",
+    "upnp": false,
+    "natpmp": false,
+    "dht": true,
+    "lsd": true,
+    "uploadLimit": 10485760,
+    "downloadLimit": 0
+  }
+}
+```
+
+Anything left out keeps libtorrent's own default, which is on for all four discovery settings and
+unlimited for both rates. Set `upnp` and `natpmp` to `false` on a network where forwards are made
+by hand — the router almost certainly has UPnP off deliberately, and a client that asks anyway
+fails at it quietly on every start. Set `dht` and `lsd` to `false` for a private tracker:
+announcing there tells the wider world about an archive the tracker exists to keep off it. Rates
+are bytes per second, `0` for unlimited.
+
+**Do not reuse the port qBittorrent is already using.** If both run on one machine they cannot
+share it — whichever starts second fails to bind. Give pmtiles-swarm its own, and forward that
+too.
+
+**Running two engines means two peer ports.** libtorrent takes the one you name; WebTorrent
+defaults to `torrentPort: 0`, meaning a fresh OS-assigned port on every start — fine behind UPnP,
+useless for a static forwarding rule, and never the same port twice. Pin it if you want it
+reachable, and pin it to something *other* than libtorrent's:
+
+```json
+{
+  "libtorrent": { "listen": "0.0.0.0:6881" },
+  "webtorrent": { "clientOptions": { "torrentPort": 6882 } }
+}
+```
+
+### WebRTC does not go through the load balancer
+
+It does not go through any of the HTTP listeners. A browser peer is connected in two steps, and
+neither is a port you open:
+
+1. **Signalling** happens over a `wss://` tracker. Both the browser and this node connect
+   *outward* to it, and the tracker relays the offer and answer between them.
+2. **The data path** is ICE — ephemeral UDP ports negotiated per connection, with STUN used to
+   punch through both NATs. WebTorrent's defaults are Google's and Twilio's public STUN servers.
+
+So the requirement is **outbound** UDP and reachable STUN, not an inbound rule. The exception is
+symmetric NAT, where hole punching cannot work and a TURN relay is needed; nothing here configures
+one, so a node behind symmetric NAT will simply not connect browser peers.
+
+Putting the load balancer in front of this changes nothing about it — the balancer carries tiles
+and TileJSON, and the swarm traffic never touches it. That is the point of the design: serving
+load becomes swarm capacity instead of passing through the same pipe.
+
+### Browser peers need a WebSocket tracker in the torrent
+
+This is a configuration requirement, not an automatic one, and it is easy to miss because
+everything looks healthy without it.
+
+The default trackers are UDP:
+
+```json
+"trackers": [
+  "udp://tracker.opentrackr.org:1337/announce",
+  "udp://tracker.torrent.eu.org:451/announce"
+]
+```
+
+**A browser cannot use either of those, and cannot use the DHT.** Both need UDP sockets and raw
+TCP, which a page does not have. A browser's only route to discovery is a `wss://` tracker — so a
+torrent announcing to UDP trackers alone is one no browser can find a peer for, however many
+WebTorrent nodes are seeding it. WebTorrent's own default WebSocket trackers do not fill this gap
+either: they are compiled into its **browser** bundle, and a Node client adds nothing.
+
+To actually reach browser peers, announce to at least one WebSocket tracker as well:
+
+```json
+"trackers": [
+  "udp://tracker.opentrackr.org:1337/announce",
+  "udp://tracker.torrent.eu.org:451/announce",
+  "wss://tracker.openwebtorrent.com",
+  "wss://tracker.webtorrent.dev"
+]
+```
+
+Trackers live outside the torrent's `info` dictionary, so adding them **does not change the
+infohash** — but it only applies to torrents created after the change. An existing archive keeps
+announcing where its own torrent says to.
+
 ## Marking incomplete files
 
 An archive that is not whole yet is written under a marked name and renamed when

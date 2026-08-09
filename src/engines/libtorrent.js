@@ -114,6 +114,13 @@ export class LibtorrentEngine {
             resumeDir: this.#options.resumeDir,
             maxConnections: this.#options.maxConnections,
             dht: this.#options.dht,
+            lsd: this.#options.lsd,
+            // Left undefined the sidecar turns both on. Worth being able to
+            // say no: a network where port forwards are made by hand usually
+            // has UPnP disabled at the router deliberately, and a client
+            // asking anyway just fails quietly on every start.
+            upnp: this.#options.upnp,
+            natpmp: this.#options.natpmp,
             uploadLimit: this.#options.uploadLimit,
             downloadLimit: this.#options.downloadLimit,
           }),

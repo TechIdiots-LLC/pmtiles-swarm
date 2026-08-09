@@ -1,6 +1,13 @@
 # pmtiles-swarm changelog
 
 ## master
+### ✨ Features and improvements
+- **libtorrent's network settings are configurable.** The sidecar has always accepted `upnp`,
+  `natpmp`, `dht`, `lsd`, `uploadLimit` and `downloadLimit`, and nothing passed them — so a node
+  could not decline UPnP however the config was written. That is the wrong default on a network
+  where port forwards are made by hand: the router has UPnP off deliberately and the client fails
+  at it quietly on every start. Unset keys still take libtorrent's own defaults.
+
 ### 🐞 Bug fixes
 - **The peers tab is no longer silently empty on libtorrent.** `peer_info.utp_socket` is absent
   from libtorrent's 2.x Python bindings, so the sidecar raised on the first peer and returned
@@ -14,6 +21,15 @@
   pulling from a swarm until that single server goes away.
 
 ### 📚 Documentation
+- **Ports and reachability**, which nothing covered before: which of the four listeners wants a
+  forwarding rule (the peer port, exactly as in qBittorrent), why WebRTC wants none of them — it
+  is signalled over a `wss://` tracker and carried over ICE with STUN, so it needs outbound UDP
+  rather than an inbound rule — and why peer traffic never touches the load balancer. Also that
+  two engines need two peer ports, since WebTorrent picks a random one unless told otherwise, and
+  that **browser peers need a `wss://` tracker in the announce list**: the defaults are UDP-only,
+  a browser has no UDP socket and no DHT, and WebTorrent's own WebSocket trackers ship only in its
+  browser bundle. Without one, the browser half of the swarm cannot find a peer however many nodes
+  are seeding.
 - The topology diagram shows the **browser bridge**: browsers speak WebRTC and conventional
   clients speak TCP and uTP, so a browser peer is only ever reached by a node running WebTorrent.
   The deployment notes cover the **two-port split**, which decides what a load balancer may be

@@ -60,6 +60,15 @@ function createOneEngine(name, config) {
         python: config.libtorrent?.python,
         maxConnections: config.maxConnections,
         listen: config.libtorrent?.listen,
+        // The sidecar has always accepted these; nothing passed them, so a
+        // node could not turn off UPnP, quiet the DHT for a private tracker,
+        // or cap its own bandwidth however the config was written.
+        dht: config.libtorrent?.dht,
+        lsd: config.libtorrent?.lsd,
+        upnp: config.libtorrent?.upnp,
+        natpmp: config.libtorrent?.natpmp,
+        uploadLimit: config.libtorrent?.uploadLimit,
+        downloadLimit: config.libtorrent?.downloadLimit,
       });
     case 'webtorrent':
       return new WebTorrentSeedEngine({
