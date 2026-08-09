@@ -837,6 +837,9 @@ export function createApp({
         all: body.all ?? req.query.all === 'true',
         infoHashes: body.infoHashes,
         categories: normalizeCategories({ categories: body.categories }),
+        // Only reaches anything whose data is not readable from here: those
+        // join their swarm rather than pointing at a file that is not there.
+        mode: body.mode === 'mirror' ? 'mirror' : 'cache',
       });
       res.json({ added: added.length, entries: added });
     }),

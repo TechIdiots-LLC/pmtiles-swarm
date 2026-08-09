@@ -25,6 +25,16 @@
 export class WebTorrentSeedEngine {
   #options;
   #client = null;
+  /**
+   * A client error that means nothing will ever work.
+   *
+   * WebTorrent reports a failure to bind its listening socket asynchronously,
+   * long after `new WebTorrent()` has returned happily. Logging it and
+   * carrying on is what turned "the port is taken" into a five-minute silent
+   * hang per torrent, since every add then waited out its metadata timeout for
+   * a client that could never talk to anyone.
+   */
+  #fatal = null;
 
   /**
    * Creates the engine.
@@ -58,8 +68,32 @@ export class WebTorrentSeedEngine {
       ...this.#options.clientOptions,
     });
     this.#client.on('error', (error) => {
-      console.error(`[webtorrent] client error: ${error.message}`);
+      const code = error?.code ?? '';
+      const denied = /EACCES|EADDRINUSE|permission denied|address in use/i.test(
+        `${code} ${error?.message ?? ''}`,
+      );
+
+      if (!denied) {
+        console.error(`[webtorrent] client error: ${error.message}`);
+        return;
+      }
+
+      this.#fatal = new Error(
+        `the torrent client could not open its port: ${error.message}. ` +
+          'Usually a previous run has not let go of it yet — give it a few ' +
+          'seconds, check for another pmtiles-swarm or torrent client on the ' +
+          'same port, or set webtorrent.clientOptions.torrentPort to a free one.',
+      );
+      console.error(`[webtorrent] ${this.#fatal.message}`);
     });
+  }
+
+  /**
+   * Whether the client is in a state where anything can be expected to work.
+   * @returns {Error | null} - The fatal error, if there is one.
+   */
+  get fatalError() {
+    return this.#fatal;
   }
 
   /**
@@ -69,6 +103,10 @@ export class WebTorrentSeedEngine {
    */
   async add(request) {
     await this.connect();
+    // Fail now rather than waiting out a metadata timeout against a client
+    // that cannot reach the network.
+    if (this.#fatal) throw this.#fatal;
+
     const id = request.torrentFile ?? request.magnet;
     if (!id) throw new Error('add requires either torrentFile or magnet');
 
@@ -86,7 +124,14 @@ export class WebTorrentSeedEngine {
       addOptions.store = await incompleteStore(request.incompleteSuffix);
     }
 
-    const timeoutMs = this.#options.readyTimeoutMs;
+    // A .torrent carries its own metadata, so there is nothing to wait for
+    // beyond parsing and hashing what is already on disk. Only a magnet has to
+    // find a peer and complete a BEP 9 exchange, which is what the long
+    // default is for — and applying it to both is what made a restart against
+    // a broken client sit silent for five minutes per archive.
+    const timeoutMs =
+      request.readyTimeoutMs ??
+      (request.torrentFile ? 60000 : this.#options.readyTimeoutMs);
     const torrent = await new Promise((resolve, reject) => {
       let settled = false;
       /**
@@ -309,6 +354,7 @@ export class WebTorrentSeedEngine {
     if (!this.#client) return;
     const client = this.#client;
     this.#client = null;
+    this.#fatal = null;
     await new Promise((resolve) => client.destroy(() => resolve()));
   }
 

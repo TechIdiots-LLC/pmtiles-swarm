@@ -50,8 +50,13 @@
   yet know about — name, size, progress, format — and lets you pick, rather than importing
   everything and reading afterwards what it did. Categories can be applied to the lot. It can also
   adopt from **a qBittorrent instance other than the configured engine**, which is what "adopt
-  existing" sounded like it did; anything whose data is not readable from this node is marked and
-  cannot be selected, since adopting it would produce a catalog entry that can never serve a tile.
+  existing" sounded like it did.
+- **Adopting across machines joins the swarm instead.** An archive whose data this node cannot read
+  — a client on another host, or a path that is not mounted here — used to be unusable, since a
+  catalog entry pointing at a file that is not there can never serve a tile. But its infohash is
+  right here, and an infohash is all it takes to join the swarm that client is already seeding
+  into, so those are joined by magnet as cache or mirror, your choice. Anything readable is still
+  adopted where it lies, and neither re-hashed nor re-downloaded.
 - **Remote nodes are editable in Settings**, alongside folders and web locations: feed or catalog
   URL, protocol, whether to take archives as a cache or a mirror, a tag to apply, a name filter, a
   token and the pruning policy. A **Test** button — `POST /api/subscriptions/preview` — reports
@@ -180,6 +185,18 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **Shutting down could leave the port held, so the next run could not start.** Three faults in one
+  loop. The signal handlers were installed at the *end* of startup, so a Ctrl-C while the catalogue
+  was being handed back to the engine reached nothing at all and killed the process outright — port
+  still held, trackers still believing it was seeding. They are installed before any of what they
+  stop exists now. Closing the HTTP server only dropped *idle* connections, so one stuck request —
+  a tile read waiting on the swarm, say — kept it open past its own timeout; anything still
+  in-flight is now forced shortly after. And a WebTorrent client that cannot open its port reports
+  it asynchronously, long after construction: that was logged and ignored, after which every add
+  waited out a five-minute metadata timeout against a client that could never talk to anyone. It is
+  fatal now, reported with what to do about it, and restore stops at the first one rather than
+  repeating it per archive. A `.torrent` also no longer waits on the magnet timeout, since it
+  carries its own metadata.
 - **Peer tokens were returned in plain text by `GET /api/config`.** A token is what persuades a
   peer to publish more than it publishes to the world — the same class of thing as the qBittorrent
   password, which was already redacted. Now redacted too, and a save that echoes the placeholder

@@ -569,7 +569,6 @@ export class Library {
    */
   async adoptFromEngine(options = {}) {
     const engine = options.engine ?? this.#engine;
-    const foreign = engine !== this.#engine;
     const wanted = options.infoHashes ? new Set(options.infoHashes) : null;
     const held = await engine.list();
     const added = [];
@@ -581,59 +580,145 @@ export class Library {
         continue;
       }
 
-      // The engine knows where the data is, so if it is complete we can read
-      // the archive's own metadata straight off disk.
-      let summary;
-      if (torrent.progress === 1 && torrent.savePath) {
-        summary = await probePMTiles(
-          path.join(torrent.savePath, torrent.name),
-        ).catch(() => undefined);
-      }
-
       const magnet =
         `magnet:?xt=urn:btih:${torrent.infoHash}` +
         `&dn=${encodeURIComponent(torrent.name)}`;
 
-      const entry = await this.#catalog.put({
-        infoHash: torrent.infoHash,
-        name: torrent.name,
-        size: torrent.size,
-        categories:
-          options.categories ?? (torrent.category ? [torrent.category] : []),
-        source: {
-          type: 'adopted',
-          location: torrent.savePath ?? 'engine',
-          engine: engine.name,
-        },
-        savePath: torrent.savePath,
-        magnet,
-        webSeeds: [],
-        pmtiles: summary,
-        kind: guessKind(torrent.name ?? ''),
-        // Adopted data is on disk under its real name already, whatever state
-        // the other client left it in, so it must never be given a marker.
-        complete: torrent.progress === 1,
-      });
+      // Whether this node can read the data where the other client keeps it.
+      // Not the same question as whether that client holds it: adopting across
+      // machines, or across a path that is not mounted here, names a file that
+      // is not there.
+      const local = torrent.savePath
+        ? path.join(torrent.savePath, torrent.name)
+        : null;
+      const readable = local
+        ? await fs
+            .stat(local)
+            .then((stat) => stat.isFile())
+            .catch(() => false)
+        : false;
 
-      if (foreign) {
-        // Without this the catalog would list an archive this node neither
-        // seeds nor can serve — the other client holds it, and nothing here
-        // does.
-        await this.#engine
-          .add({
-            magnet,
-            savePath: torrent.savePath,
-            mode: 'mirror',
-            seedOnly: true,
-          })
-          .catch((error) =>
-            console.error(`[adopt] ${torrent.name}: ${error.message}`),
-          );
+      if (readable) {
+        added.push(await this.#adoptInPlace(torrent, magnet, engine, options));
+        continue;
       }
 
-      added.push(entry);
+      // The bytes are elsewhere, but the infohash is not — and an infohash is
+      // all it takes to join a swarm the other client is already seeding into.
+      // So rather than refusing, this joins it as a magnet and lets the data
+      // arrive the normal way, in whichever mode was asked for.
+      added.push(await this.#adoptByMagnet(torrent, magnet, engine, options));
     }
+
     return added;
+  }
+
+  /**
+   * Adopts a torrent whose data this node can already read.
+   * @param {object} torrent - The engine's view of it.
+   * @param {string} magnet - Its magnet URI.
+   * @param {object} engine - The engine it came from.
+   * @param {object} options - Adopt options.
+   * @returns {Promise<object>} - The catalog entry.
+   */
+  async #adoptInPlace(torrent, magnet, engine, options) {
+    // The data is here and complete, so the archive's own metadata can be read
+    // straight off disk rather than out of the swarm.
+    let summary;
+    if (torrent.progress === 1 && torrent.savePath) {
+      summary = await probePMTiles(
+        path.join(torrent.savePath, torrent.name),
+      ).catch(() => undefined);
+    }
+
+    const entry = await this.#catalog.put({
+      infoHash: torrent.infoHash,
+      name: torrent.name,
+      size: torrent.size,
+      categories:
+        options.categories?.length > 0
+          ? options.categories
+          : torrent.category
+            ? [torrent.category]
+            : [],
+      source: {
+        type: 'adopted',
+        location: torrent.savePath ?? 'engine',
+        engine: engine.name,
+      },
+      savePath: torrent.savePath,
+      magnet,
+      webSeeds: [],
+      pmtiles: summary,
+      kind: guessKind(torrent.name ?? ''),
+      mode: 'mirror',
+      // On disk under its real name already, whatever state the other client
+      // left it in, so it must never be given an incomplete marker.
+      complete: torrent.progress === 1,
+    });
+
+    if (engine !== this.#engine) {
+      // Otherwise the catalog would list an archive this node neither seeds
+      // nor can serve: the other client holds it, and nothing here does.
+      await this.#engine
+        .add({ magnet, savePath: torrent.savePath, mode: 'mirror', seedOnly: true })
+        .catch((error) =>
+          console.error(`[adopt] ${torrent.name}: ${error.message}`),
+        );
+    }
+
+    return entry;
+  }
+
+  /**
+   * Adopts a torrent whose data lives somewhere this node cannot reach, by
+   * joining its swarm instead.
+   * @param {object} torrent - The engine's view of it.
+   * @param {string} magnet - Its magnet URI.
+   * @param {object} engine - The engine it came from.
+   * @param {object} options - Adopt options.
+   * @returns {Promise<object>} - The catalog entry.
+   */
+  async #adoptByMagnet(torrent, magnet, engine, options) {
+    const mode = options.mode ?? 'cache';
+    const savePath = this.#savePathFor(mode, options.savePath);
+
+    await this.#engine
+      .add({
+        magnet,
+        savePath,
+        mode,
+        incompleteSuffix: this.#markerFor({ complete: false }),
+      })
+      .catch((error) => {
+        console.error(`[adopt] ${torrent.name}: ${error.message}`);
+      });
+
+    return this.#catalog.put({
+      infoHash: torrent.infoHash,
+      name: torrent.name,
+      size: torrent.size,
+      categories:
+        options.categories?.length > 0
+          ? options.categories
+          : torrent.category
+            ? [torrent.category]
+            : [],
+      source: {
+        type: 'adopted',
+        location: magnet,
+        engine: engine.name,
+        // Worth recording: this entry's data was never here, and the archive
+        // has to arrive from the swarm like any other.
+        remote: torrent.savePath ?? undefined,
+      },
+      savePath,
+      magnet,
+      webSeeds: [],
+      kind: guessKind(torrent.name ?? ''),
+      mode,
+      complete: false,
+    });
   }
 
 
@@ -868,6 +953,16 @@ export class Library {
     let failed = 0;
 
     for (const entry of entries) {
+      // An engine that cannot open its port will fail every one of these, each
+      // after its own timeout. Stopping at the first is the difference between
+      // a startup that reports the problem and one that sits silent for
+      // minutes per archive.
+      if (this.#engine.fatalError) {
+        console.error(`[restore] stopping: ${this.#engine.fatalError.message}`);
+        failed += entries.length - restored;
+        break;
+      }
+
       try {
         const torrentFile = entry.torrentPath
           ? await fs

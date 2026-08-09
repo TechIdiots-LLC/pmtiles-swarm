@@ -12,6 +12,7 @@ import { CompletionWatcher } from './incomplete.js';
 import { Library } from './library.js';
 import { ProgramHooks } from './hooks.js';
 import { SeedingLimits } from './seeding.js';
+import { closeServer, installSignalHandlers } from './shutdown.js';
 import { ScheduledSourceManager } from './sources.js';
 import { SubscriptionManager } from './subscriptions.js';
 import { TileStore } from './tiles.js';
@@ -48,6 +49,7 @@ function createEngine(config) {
   }
 }
 
+
 /**
  * Starts the daemon.
  * @returns {Promise<void>} - Resolves once listening.
@@ -79,6 +81,20 @@ PMTILES_SWARM_PUBLIC_URL
   const config = await loadConfig(values.config);
   if (values.port) config.port = Number(values.port);
 
+  // Everything that has to be stopped, in the order it should be stopped,
+  // filled in as startup proceeds.
+  //
+  // Registered before any of it exists because startup itself can block —
+  // handing a large catalogue back to a torrent client is minutes of work, and
+  // against a client that cannot open its port it used to be far longer. With
+  // the handlers installed at the end of startup, a Ctrl-C during that window
+  // reached no handler at all and killed the process outright, leaving the
+  // port held and the next run unable to bind. Which is the loop this was
+  // reported as.
+  /** @type {Array<{label: string, stop: () => unknown, ms?: number}>} */
+  const stoppers = [];
+  installSignalHandlers(stoppers);
+
   // Before anything is created or any port is bound: an unauthenticated node
   // on a reachable address fails silently, working perfectly right up until
   // somebody else finds it.
@@ -93,6 +109,9 @@ PMTILES_SWARM_PUBLIC_URL
   await catalog.load();
 
   const engine = createEngine(config);
+  // The slowest, because it announces "stopped" to every tracker, and an
+  // unreachable one costs a timeout each. Registered first so it stops last.
+  stoppers.unshift({ label: 'engine', stop: () => engine.destroy(), ms: 8000 });
   try {
     await engine.connect();
     console.log(`[engine] ${engine.name} ready`);
@@ -114,6 +133,17 @@ PMTILES_SWARM_PUBLIC_URL
   // this existed a restart quietly stopped seeding the entire library: the
   // catalog still listed it, the console still showed it, and the engine held
   // nothing at all.
+  stoppers.unshift({
+    label: 'downloads in progress',
+    stop: () => {
+      const cancelled = library.cancelAdd();
+      if (cancelled.length > 0) {
+        console.log(`[shutdown] cancelled ${cancelled.length} download(s)`);
+      }
+    },
+    ms: 1000,
+  });
+
   const catalogued = catalog.list().length;
   if (catalogued > 0) {
     const { restored, failed } = await library.restore();
@@ -183,96 +213,26 @@ PMTILES_SWARM_PUBLIC_URL
     );
   }
 
-  /**
-   * Shuts everything down in order, so trackers see a clean stop.
-   * @param {string} signal - The signal received.
-   * @returns {Promise<void>} - Resolves once stopped.
-   */
-  let stopping = false;
-  const shutdown = async (signal) => {
-    // A second Ctrl-C means "I meant it". Without this, each one starts
-    // another shutdown alongside the one already waiting, which is how the
-    // MaxListenersExceeded warning and the repeated [shutdown] lines appear.
-    if (stopping) {
-      console.log('[shutdown] forcing');
-      process.exit(1);
-    }
-    stopping = true;
-    console.log(`\n[shutdown] ${signal}`);
-
-    // Nothing here may wait forever. Every step below talks to something that
-    // can be slow or unreachable — a tracker being told we are stopping, a
-    // download mid-stream, a sidecar — and a stop that hangs leaves no way out
-    // but killing the process, which is what a stop is meant to avoid.
-    const limit = (label, work, ms = 5000) =>
-      new Promise((resolve) => {
-        let settled = false;
-        // The timer is always cleared, whichever way this ends. Left running it
-        // would hold the loop open for its full duration after the work had
-        // already finished, turning four quick steps into a slow stop; and
-        // unref'ing it instead means it may never fire at all, which is worse
-        // — the bound would quietly not exist.
-        const finish = (message) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          if (message) console.warn(message);
-          resolve();
-        };
-        const timer = setTimeout(
-          () => finish(`[shutdown] ${label} did not finish in ${ms}ms; moving on`),
-          ms,
-        );
-        Promise.resolve()
-          .then(work)
-          .then(
-            () => finish(),
-            (error) => finish(`[shutdown] ${label}: ${error.message}`),
-          );
-      });
-
-    // A last resort, in case something below ignores its own timeout.
-    const watchdog = setTimeout(() => {
-      console.warn('[shutdown] took too long; exiting anyway');
-      process.exit(1);
-    }, 15000);
-
-    // First, because a remote add streams for hours and everything after this
-    // would otherwise queue behind it.
-    const cancelled = library.cancelAdd();
-    if (cancelled.length > 0) {
-      console.log(`[shutdown] cancelled ${cancelled.length} download(s) in progress`);
-    }
-
-    if (originTimer) clearInterval(originTimer);
-    sources.stop();
-    seeding.stop();
-    hooks.stop();
-    completion.stop();
-    subscriptions.stop();
-    warm.stop();
-
-    await limit('watchers', () => watch.stop());
-    await limit('http server', () => {
-      const closed = new Promise((resolve) => server.close(resolve));
-      // A console left open holds a keep-alive socket, and close() waits for
-      // it. Nobody is being served now, so let those go.
-      server.closeIdleConnections?.();
-      return closed;
-    });
+  stoppers.unshift(
+    { label: 'origin checks', stop: () => originTimer && clearInterval(originTimer), ms: 500 },
+    { label: 'schedulers', stop: () => {
+      sources.stop();
+      seeding.stop();
+      hooks.stop();
+      completion.stop();
+      subscriptions.stop();
+      warm.stop();
+    }, ms: 1000 },
+    { label: 'watchers', stop: () => watch.stop() },
+    {
+      label: 'http server',
+      stop: () => closeServer(server),
+      ms: 4000,
+    },
     // Before the engine, so readers let go of their torrents while the client
     // that owns them is still alive.
-    await limit('open archives', () => tiles.close());
-    // The slowest, because it announces "stopped" to every tracker — and an
-    // unreachable one costs a timeout each.
-    await limit('engine', () => engine.destroy(), 8000);
-
-    clearTimeout(watchdog);
-    process.exit(0);
-  };
-
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+    { label: 'open archives', stop: () => tiles.close() },
+  );
 }
 
 main().catch((error) => {
