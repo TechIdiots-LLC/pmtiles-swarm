@@ -326,6 +326,30 @@
       </section>
     </main>
 
+    <dialog id="move-dialog">
+      <form method="dialog" id="move-form">
+        <h2>Set location</h2>
+        <div class="sub" style="margin-bottom:0.8rem">
+          Moves the archive's data. Within one filesystem this is a rename and
+          finishes at once; across two it is a real copy, which for a large
+          archive takes a while and runs in the background.
+        </div>
+
+        <div class="field">
+          <label>Currently</label>
+          <div class="sub"><code id="move-current"></code></div>
+        </div>
+
+        <div id="move-location"></div>
+
+        <div class="sub" id="move-error" style="color:var(--danger)"></div>
+        <menu>
+          <button value="cancel">Cancel</button>
+          <button id="move-go" value="default">Move</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="adopt-dialog">
       <form method="dialog" id="adopt-form">
         <h2>Adopt existing torrents</h2>
@@ -975,6 +999,7 @@
           <h2>Actions</h2>
           <div class="actions">
             ${servable ? '<button id="warm">Warm region</button>' : ''}
+            <button id="set-location">Set location…</button>
             <button id="add-seed">Add web seed</button>
             <button id="clear-cache" ${mode === 'cache' ? '' : 'disabled title="only cache-mode archives have a cache to clear"'}>Clear cache</button>
             <button id="pause">${entry.paused ? 'Resume' : 'Pause'}</button>
@@ -1165,6 +1190,41 @@
         return {};
       }
 
+      /**
+       * Follows a move until it finishes, so a long copy is visible.
+       * @param {string} infoHash - The archive being moved.
+       * @returns {Promise<void>} - Resolves when it is over.
+       */
+      async function watchMove(infoHash) {
+        for (;;) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          let state;
+          try {
+            ({ move: state } = await api(`/api/torrents/${infoHash}/location`));
+          } catch {
+            return;
+          }
+          if (!state) return;
+
+          if (state.state === 'moving') {
+            // Only meaningful for the cross-filesystem copy; a rename is
+            // already done by the first poll.
+            const share = state.total ? Math.floor((state.bytes / state.total) * 100) : 0;
+            toast(`moving ${state.name} — ${share}%`);
+            continue;
+          }
+
+          toast(
+            state.state === 'done'
+              ? `${state.name} moved`
+              : `move failed: ${state.error}`,
+          );
+          refresh();
+          if (selected === infoHash) renderDetail(infoHash);
+          return;
+        }
+      }
+
       // ── Categories ──
         const renderEntryTags = (tags) => {
           const box = $('entry-tags');
@@ -1228,6 +1288,39 @@
             }
           };
         }
+
+        $('set-location').onclick = async () => {
+          $('move-current').textContent = entry.savePath ?? 'nowhere yet';
+          $('move-error').textContent = '';
+          $('move-location').innerHTML = locationPicker('move-loc');
+          await fillLocations('move-loc');
+          $('move-dialog').showModal();
+
+          $('move-form').onsubmit = async (event) => {
+            if (event.submitter?.value === 'cancel') return;
+            event.preventDefault();
+
+            const chosen = chosenLocation('move-loc');
+            if (!chosen.location && !chosen.savePath) {
+              $('move-error').textContent =
+                'choose a named location or type a path — "default" would be a ' +
+                'move to where it already is';
+              return;
+            }
+
+            try {
+              await api(`/api/torrents/${infoHash}/location`, {
+                method: 'PATCH',
+                body: chosen,
+              });
+              $('move-dialog').close();
+              toast('moving');
+              watchMove(infoHash);
+            } catch (error) {
+              $('move-error').textContent = error.message;
+            }
+          };
+        };
 
         $('add-seed').onclick = async () => {
           const url = window.prompt(

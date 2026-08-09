@@ -164,8 +164,16 @@ carry several categories on purpose — a planet build is both `basemaps` and `w
 categories naming two disks is a question with no right answer. So the location is chosen rather
 than derived, and naming them is what makes choosing bearable.
 
-Only new data is placed. An archive records where it was put and keeps it, so repointing a location
-never moves anything that already exists.
+Only new data is placed by a location: an archive records where it was put and keeps it, so
+repointing a location never moves anything that already exists. To move one, use **Set location…**
+in its detail panel or `PATCH /api/torrents/{infohash}/location`.
+
+That move is a real one. The engine is told to let go, the file is moved, and the torrent is handed
+back pointed at the new path — a torrent whose file moves underneath it holds a handle to somewhere
+that no longer exists, and the next piece it verifies fails in a way that reads as disk corruption.
+Within one filesystem it is a rename and finishes at once; across two it is a copy, so it runs in
+the background and reports progress, and the original is removed only after the copy has been
+checked. It refuses to move onto a file that is already there.
 
 ### Watching for new archives
 

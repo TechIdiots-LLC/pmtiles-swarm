@@ -36,6 +36,8 @@ export class Library {
   #config;
   /** Serialises rebuilds so a sweep cannot start several multi-hour hashes at once. */
   #rebuildQueue = Promise.resolve();
+  /** Moves in flight, and the last outcome for each archive. */
+  #moves = new Map();
   /** In-flight remote adds, by URL, so they can be cancelled. */
   #running = new Map();
   /** The tile reader, told to forget an archive whose source may have changed. */
@@ -1286,6 +1288,135 @@ export class Library {
   }
 
   /**
+   * Moves an archive's data somewhere else.
+   *
+   * The engine has to let go first, and be given it back afterwards pointed at
+   * the new path: a torrent whose file moves underneath it holds a handle to
+   * somewhere that no longer exists, and the next piece it verifies fails in a
+   * way that reads as disk corruption rather than as a move.
+   *
+   * Run in the background, and reported rather than awaited. Within one
+   * filesystem this is a rename and finishes instantly; across two it is a
+   * real copy, and for a 700 GiB archive that is an hour during which an HTTP
+   * request would have long since been given up on by something in the middle.
+   * @param {string} infoHash - The archive to move.
+   * @param {object} options - `location` name or literal `savePath`.
+   * @returns {Promise<object>} - The move, as {@link moveStatus} reports it.
+   */
+  async moveArchive(infoHash, options = {}) {
+    const entry = this.#catalog.get(infoHash);
+    if (!entry) {
+      const error = new Error('unknown archive');
+      error.status = 404;
+      throw error;
+    }
+    if (this.#moves.get(infoHash)?.state === 'moving') {
+      const error = new Error(`${entry.name} is already being moved`);
+      error.status = 409;
+      throw error;
+    }
+
+    const target = await this.resolveSavePath(options);
+    if (!target) {
+      const error = new Error('give a location name or a save path');
+      error.status = 400;
+      throw error;
+    }
+
+    const from = onDiskPath(entry, this.#config);
+    const to = path.join(target, onDiskName(entry, this.#config));
+    if (!from) {
+      const error = new Error('this archive has no data to move');
+      error.status = 400;
+      throw error;
+    }
+    if (path.resolve(from) === path.resolve(to)) {
+      return this.#catalog.put({ infoHash, savePath: target });
+    }
+    if (await fs.stat(to).then(() => true).catch(() => false)) {
+      const error = new Error(
+        `${to} already exists; move or remove it first — two files claiming ` +
+          'to be the same archive is not something to resolve by guessing',
+      );
+      error.status = 409;
+      throw error;
+    }
+
+    const move = {
+      infoHash,
+      name: entry.name,
+      from,
+      to,
+      state: 'moving',
+      bytes: 0,
+      total: entry.size ?? 0,
+      startedAt: new Date().toISOString(),
+    };
+    this.#moves.set(infoHash, move);
+
+    // Deliberately not awaited: the caller gets the job, not the outcome.
+    this.#runMove(entry, move, target).catch((error) => {
+      move.state = 'failed';
+      move.error = error.message;
+      console.error(`[move] ${entry.name}: ${error.message}`);
+    });
+
+    return move;
+  }
+
+  /**
+   * How a move is going, or how it went.
+   * @param {string} infoHash - The archive.
+   * @returns {object | null} - The move, or null if there has not been one.
+   */
+  moveStatus(infoHash) {
+    return this.#moves.get(infoHash) ?? null;
+  }
+
+  /**
+   * Every move this process has run.
+   * @returns {object[]} - The moves.
+   */
+  moves() {
+    return [...this.#moves.values()];
+  }
+
+  /**
+   * Does the moving, once the checks have passed.
+   * @param {object} entry - The catalog entry.
+   * @param {object} move - The job to update as it goes.
+   * @param {string} target - The destination directory.
+   * @returns {Promise<void>} - Resolves when moved.
+   */
+  async #runMove(entry, move, target) {
+    // Let go before touching the file. Removing without deleting keeps the
+    // data; it is the handle that has to go.
+    await this.#engine.remove(entry.infoHash, { deleteData: false }).catch(() => {});
+    await this.#tiles?.invalidate(entry.infoHash).catch(() => {});
+
+    try {
+      await moveFile(move.from, move.to, (bytes) => {
+        move.bytes = bytes;
+      });
+    } catch (error) {
+      // Put it back exactly as it was, or a failed move costs the archive.
+      await this.#readd(entry).catch(() => {});
+      throw error;
+    }
+
+    const updated = await this.#catalog.put({
+      infoHash: entry.infoHash,
+      savePath: target,
+    });
+    await this.#readd(updated);
+
+    move.state = 'done';
+    move.bytes = move.total;
+    move.finishedAt = new Date().toISOString();
+    console.log(`[move] ${entry.name} is now under ${target}`);
+  }
+
+  /**
    * Drops an archive's cached pieces without forgetting the archive.
    *
    * The unit of eviction is the whole archive, deliberately. Neither engine can
@@ -1573,6 +1704,86 @@ export function guessKind(name) {
   if (/\.pmtiles$/i.test(name)) return 'pmtiles';
   if (/\.mbtiles$/i.test(name)) return 'mbtiles';
   return undefined;
+}
+
+/**
+ * Moves a file, whether or not the two paths share a filesystem.
+ *
+ * A rename first, because within one filesystem it is atomic and instant
+ * however large the archive is. Only when that is refused with EXDEV does this
+ * become a real copy — and then the original is removed only after the copy has
+ * been verified to be the same length, so an interrupted move leaves the
+ * archive somewhere rather than nowhere.
+ * @param {string} from - Current path.
+ * @param {string} to - Destination path.
+ * @param {Function} [onProgress] - Called with bytes copied, for the slow path.
+ * @returns {Promise<'renamed' | 'copied'>} - Which happened.
+ */
+export async function moveFile(from, to, onProgress) {
+  await fs.mkdir(path.dirname(to), { recursive: true });
+
+  try {
+    await fs.rename(from, to);
+    return 'renamed';
+  } catch (error) {
+    if (error.code !== 'EXDEV') throw error;
+  }
+
+  await copyOver(from, to, onProgress);
+  return 'copied';
+}
+
+/**
+ * Copies a file across filesystems and removes the original.
+ *
+ * Separate from {@link moveFile} because it is the half with something to go
+ * wrong in it — a rename either happens or does not, where a copy can be
+ * interrupted, run out of disk, or produce a file of the wrong length. The
+ * original is removed only after the copy has been checked, so an interrupted
+ * move leaves the archive somewhere rather than nowhere.
+ * @param {string} from - Current path.
+ * @param {string} to - Destination path.
+ * @param {Function} [onProgress] - Called with bytes copied so far.
+ * @returns {Promise<void>} - Resolves once moved.
+ */
+export async function copyOver(from, to, onProgress) {
+  const { createReadStream, createWriteStream } = await import('node:fs');
+  const { pipeline } = await import('node:stream/promises');
+
+  const { size } = await fs.stat(from);
+  console.warn(
+    `[move] ${from} and ${to} are on different filesystems; copying ` +
+      `${(size / 1024 ** 3).toFixed(1)} GiB instead of renaming`,
+  );
+
+  await fs.mkdir(path.dirname(to), { recursive: true });
+
+  let copied = 0;
+  const source = createReadStream(from);
+  source.on('data', (chunk) => {
+    copied += chunk.length;
+    onProgress?.(copied);
+  });
+
+  try {
+    await pipeline(source, createWriteStream(to));
+  } catch (error) {
+    // Never leave a half-written file where a whole one is expected: the next
+    // move would refuse to overwrite it, and a web server pointed at that
+    // directory would serve it.
+    await fs.rm(to, { force: true }).catch(() => {});
+    throw error;
+  }
+
+  const written = await fs.stat(to);
+  if (written.size !== size) {
+    await fs.rm(to, { force: true }).catch(() => {});
+    throw new Error(
+      `copied ${written.size} bytes of ${size}; left the original alone`,
+    );
+  }
+
+  await fs.unlink(from);
 }
 
 /**

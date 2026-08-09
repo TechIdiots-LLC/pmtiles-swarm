@@ -51,6 +51,13 @@
   everything and reading afterwards what it did. Categories can be applied to the lot. It can also
   adopt from **a qBittorrent instance other than the configured engine**, which is what "adopt
   existing" sounded like it did.
+- **An archive's data can be moved after the fact** — **Set location…** in its detail panel, or
+  `PATCH /api/torrents/{infohash}/location`. The engine is told to let go, the file is moved, and
+  the torrent handed back pointed at the new path. Within one filesystem that is a rename and
+  finishes at once; across two it is a real copy, so it runs in the background and reports
+  progress rather than holding a request open for an hour, and the original is removed only after
+  the copy has been checked. An unfinished archive moves under the name it actually has, marker
+  and all.
 - **Named save locations.** Everything used to land in one place. Name the others under
   `locations` in Settings and they are offered wherever something is added — the add dialog, the
   adopt dialog, each monitored folder and each watched web location — alongside the default and a

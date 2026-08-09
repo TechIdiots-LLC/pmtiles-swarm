@@ -681,6 +681,37 @@ export function createApp({
     }),
   );
 
+  // Moving an archive's data, after the fact.
+  //
+  // Answered as soon as the move has been accepted rather than when it has
+  // finished: within one filesystem it is a rename and done by the time the
+  // console next polls, but across two it is a real copy, and for a 700 GiB
+  // archive that is an hour during which something in the middle would have
+  // given up on the request.
+  app.patch(
+    '/api/torrents/:infoHash/location',
+    route(async (req, res) => {
+      try {
+        const move = await library.moveArchive(req.params.infoHash, req.body ?? {});
+        res.status(202).json(move);
+      } catch (error) {
+        res.status(error.status ?? 500).json({ error: error.message });
+      }
+    }),
+  );
+
+  app.get(
+    '/api/torrents/:infoHash/location',
+    route(async (req, res) => {
+      const entry = catalog.get(req.params.infoHash);
+      if (!entry) return res.status(404).json({ error: 'not found' });
+      res.json({
+        savePath: entry.savePath ?? null,
+        move: library.moveStatus?.(req.params.infoHash) ?? null,
+      });
+    }),
+  );
+
   // Tags, after the fact. They could only be set when an archive was added,
   // which is the wrong moment to have to know: a build becomes "weekly" when
   // there is a second one, and an archive is marked for sharing long after it
