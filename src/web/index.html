@@ -232,6 +232,7 @@
       <div class="status" id="status">connecting…</div>
       <nav>
         <button id="tab-archives" class="on">Archives</button>
+        <button id="tab-categories">Categories</button>
         <button id="tab-settings">Settings</button>
         <button id="logout" hidden>Sign out</button>
       </nav>
@@ -269,6 +270,21 @@
         </div>
 
         <div class="panel" id="detail" hidden></div>
+      </section>
+
+      <section id="view-categories" hidden>
+        <div class="sub" style="margin-bottom:0.8rem">
+          A category is the one handle that survives a rebuild. Every archive is
+          addressed by its infohash — which is what makes a tile immutable and
+          cacheable for a year — so a style pointed at one is pinned to that
+          build forever. These endpoints always resolve to the newest archive
+          carrying the tag.
+        </div>
+        <div id="category-list"></div>
+        <div class="empty" id="categories-empty" hidden>
+          No categories yet. Tag an archive when you add it, or from its detail
+          panel, and it will appear here.
+        </div>
       </section>
 
       <section id="view-settings" hidden>
@@ -529,7 +545,9 @@
               <div class="track">
                 <i class="${progress >= 1 ? 'done' : ''}" style="width:${Math.min(100, progress * 100)}%"></i>
               </div>
-              <div class="sub">${pct(progress)}</div>
+              <div class="sub">${pct(progress)}${
+                entry.complete === false ? ' · marked incomplete' : ''
+              }</div>
             </td>
             <td>${s.peers ?? 0} / ${s.seeds ?? 0}</td>
             <td>${rate(s.downloadSpeed)}</td>
@@ -1202,6 +1220,82 @@
         }
       };
 
+      // ── Categories ────────────────────────────────────────────────────────
+      async function loadCategories() {
+        const list = $('category-list');
+        let categories;
+        try {
+          categories = await api('/api/categories');
+        } catch (error) {
+          list.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+          return;
+        }
+
+        $('categories-empty').hidden = categories.length > 0;
+        list.innerHTML = categories
+          .map((entry, index) => {
+            const newest = entry.newest;
+            const rows = [
+              ['TileJSON', entry.endpoints.tileJson],
+              ['Torrent', entry.endpoints.torrent],
+              ['Magnet', entry.endpoints.magnet],
+              ['Feed', entry.endpoints.feed],
+              ['Latest only', entry.endpoints.latestFeed],
+            ];
+
+            return `
+              <div class="panel" style="margin-bottom:0.8rem">
+                <h2 style="margin-top:0">
+                  ${escapeHtml(entry.category)}
+                  <span class="sub">· ${entry.archives} archive${entry.archives === 1 ? '' : 's'}</span>
+                </h2>
+                <div class="sub" style="margin-bottom:0.6rem">
+                  ${
+                    newest
+                      ? `newest: ${escapeHtml(newest.name)} · ${bytes(newest.size)}`
+                      : 'nothing published under this tag yet'
+                  }
+                </div>
+                <table>
+                  <tbody>
+                    ${rows
+                      .map(
+                        ([label, url], row) => `
+                          <tr>
+                            <td style="width:8rem">${label}</td>
+                            <td>${
+                              url
+                                ? `<code>${escapeHtml(url)}</code>`
+                                : '<span class="sub">not a PMTiles archive, so there is no tile endpoint</span>'
+                            }</td>
+                            <td style="width:11rem">${
+                              url
+                                ? `<button data-copy="${index}-${row}">Copy</button>
+                                   <a href="${escapeHtml(url)}" target="_blank" rel="noreferrer"><button type="button">Open</button></a>`
+                                : ''
+                            }</td>
+                          </tr>`,
+                      )
+                      .join('')}
+                  </tbody>
+                </table>
+              </div>`;
+          })
+          .join('');
+
+        for (const button of list.querySelectorAll('[data-copy]')) {
+          const [index, row] = button.dataset.copy.split('-').map(Number);
+          const url = [
+            categories[index].endpoints.tileJson,
+            categories[index].endpoints.torrent,
+            categories[index].endpoints.magnet,
+            categories[index].endpoints.feed,
+            categories[index].endpoints.latestFeed,
+          ][row];
+          button.onclick = () => copy(url, 'URL');
+        }
+      }
+
       // ── Settings ──────────────────────────────────────────────────────────
       let restartKeys = new Set();
 
@@ -1214,7 +1308,51 @@
 
         const body = $('settings-body');
         body.innerHTML = '';
+
+        // Presented as a torrent client presents it, because that is where the
+        // reader's expectations come from: a checkbox for the marker, and the
+        // separate directory as an option that ships off.
+        const marker = config.incompleteSuffix ?? '.incomplete';
+        const group = document.createElement('div');
+        group.className = 'panel';
+        group.style.marginBottom = '1rem';
+        group.innerHTML = `
+          <h2 style="margin-top:0">When downloading</h2>
+          <label style="display:flex; gap:0.5rem; align-items:center">
+            <input type="checkbox" id="cfg-mark" ${marker ? 'checked' : ''} />
+            Append <code>${escapeHtml(marker || '.incomplete')}</code> to incomplete archives
+          </label>
+          <div class="sub" style="margin:0.3rem 0 0.9rem 1.6rem">
+            The rename that drops it is within one directory, so it is instant
+            however large the archive is — and a web seed URL 404s until the
+            exact moment the file is whole, instead of serving half of one.
+          </div>
+          <label style="display:flex; gap:0.5rem; align-items:center">
+            <input type="checkbox" id="cfg-cache-split" ${config.cacheSavePath ? 'checked' : ''} />
+            Keep cache-mode archives in a separate directory
+          </label>
+          <input
+            id="cfg-cache-path"
+            style="margin:0.4rem 0 0 1.6rem; width:calc(100% - 1.6rem)"
+            placeholder="./data/cache"
+            value="${escapeHtml(config.cacheSavePath ?? '')}"
+            ${config.cacheSavePath ? '' : 'disabled'} />
+          <div class="sub" style="margin:0.3rem 0 0 1.6rem">
+            Off by default. The marker above is what tells a partial archive
+            from a whole one; this is only for putting on-demand cache pieces on
+            different disk, and a completed download never has to move between
+            the two. <span class="badge">restart</span>
+          </div>`;
+        body.append(group);
+        group.querySelector('#cfg-cache-split').onchange = (event) => {
+          const field = group.querySelector('#cfg-cache-path');
+          field.disabled = !event.target.checked;
+          if (event.target.checked && !field.value) field.value = './data/cache';
+        };
+
         for (const [key, value] of Object.entries(config)) {
+          // Shown above, in a form that says what they mean.
+          if (key === 'incompleteSuffix' || key === 'cacheSavePath') continue;
           const needsRestart = restartKeys.has(key);
           const field = document.createElement('div');
           field.className = 'field';
@@ -1236,6 +1374,20 @@
 
       $('settings-save').onclick = async () => {
         const updates = {};
+        const mark = document.getElementById('cfg-mark');
+        if (mark) {
+          // An empty string is the off switch, and has to survive the trip: it
+          // is a deliberate value, not a missing one.
+          updates.incompleteSuffix = mark.checked ? '.incomplete' : '';
+          const split = document.getElementById('cfg-cache-split');
+          const cachePath = document.getElementById('cfg-cache-path');
+          // null, not undefined: JSON.stringify drops an undefined value
+          // entirely, so "unset this" would never reach the server.
+          updates.cacheSavePath =
+            split?.checked && cachePath?.value.trim()
+              ? cachePath.value.trim()
+              : null;
+        }
         for (const element of $('settings-body').querySelectorAll('[data-key]')) {
           const key = element.dataset.key;
           const raw = element.value.trim();
@@ -1271,14 +1423,15 @@
 
       // ── Tabs ──────────────────────────────────────────────────────────────
       const showTab = (name) => {
-        const archives = name === 'archives';
-        $('view-archives').hidden = !archives;
-        $('view-settings').hidden = archives;
-        $('tab-archives').classList.toggle('on', archives);
-        $('tab-settings').classList.toggle('on', !archives);
-        if (!archives) loadSettings().catch((e) => toast(e.message));
+        for (const tab of ['archives', 'categories', 'settings']) {
+          $(`view-${tab}`).hidden = tab !== name;
+          $(`tab-${tab}`).classList.toggle('on', tab === name);
+        }
+        if (name === 'settings') loadSettings().catch((e) => toast(e.message));
+        if (name === 'categories') loadCategories().catch((e) => toast(e.message));
       };
       $('tab-archives').onclick = () => showTab('archives');
+      $('tab-categories').onclick = () => showTab('categories');
       $('tab-settings').onclick = () => showTab('settings');
 
       // ── Sign in ───────────────────────────────────────────────────────────

@@ -1,6 +1,13 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { assertPublishable, identifyFile, identifyUrl } from './identify.js';
+import {
+  alreadyComplete,
+  onDiskName,
+  onDiskPath,
+  promote,
+  suffixFor,
+} from './incomplete.js';
 import { checkOrigin, fingerprintOrigin } from './origin.js';
 import { probePMTiles } from './pmtiles-probe.js';
 import {
@@ -166,19 +173,113 @@ export class Library {
   /**
    * Where an archive's data belongs, given how it is being held.
    *
-   * Cache-mode archives go somewhere separate: they are a scatter of pieces
-   * that will never be a complete file, and keeping them apart from mirrors
-   * makes both legible on disk and makes the cache measurable and clearable as
-   * a unit.
+   * One directory by default, for both mirrors and caches. What a partial
+   * archive needed was to be *distinguishable*, not to be somewhere else, and
+   * the marker in its name does that without a completed download having to
+   * move between filesystems. `cacheSavePath` stays available for anyone who
+   * wants the separation as a placement decision — cache on faster disk, say.
    * @param {string} mode - 'mirror' or 'cache'.
    * @param {string} [explicit] - An explicit override.
    * @returns {string} - The save path.
    */
   #savePathFor(mode, explicit) {
     if (explicit) return explicit;
-    return mode === 'cache'
-      ? (this.#config.cacheSavePath ?? path.join(this.#config.dataDir, 'cache'))
-      : this.#config.webtorrent.savePath;
+    if (mode === 'cache' && this.#config.cacheSavePath) {
+      return this.#config.cacheSavePath;
+    }
+    return this.#config.webtorrent.savePath;
+  }
+
+  /**
+   * The marker to hand an engine when adding, or undefined for none.
+   *
+   * Everything that adds a torrent goes through this — joining, restoring
+   * after a restart, re-adding after a mode switch or a cache clear — because
+   * an engine told the wrong name looks in the wrong place, finds nothing and
+   * downloads the whole archive again from zero. That failure is silent and
+   * expensive, so there is exactly one function that can get it wrong.
+   * @param {object} entry - Catalog entry, or the details of one being made.
+   * @returns {string | undefined} - The suffix, or undefined when not wanted.
+   */
+  #markerFor(entry) {
+    if (entry?.complete !== false) return undefined;
+    return suffixFor(this.#config) || undefined;
+  }
+
+  /**
+   * Gives a finished archive its real name.
+   *
+   * The engine has to let go of the file before it can be renamed, so this
+   * removes the torrent, renames, and adds it back as a complete seed. Nothing
+   * is deleted at any point: if the rename fails the torrent goes back exactly
+   * as it was, still marked incomplete, and the next sweep tries again.
+   * @param {string} infoHash - The archive that finished.
+   * @returns {Promise<object>} - The updated catalog entry.
+   */
+  async finalize(infoHash) {
+    const entry = this.#catalog.get(infoHash);
+    if (!entry) throw new Error('unknown archive');
+    if (entry.complete) return entry;
+
+    const from = onDiskPath(entry, this.#config);
+    const to = entry.savePath ? path.join(entry.savePath, entry.name) : null;
+    // Nothing to rename: either there is nowhere to look, or the archive never
+    // carried a marker — an entry from before markers existed, or an engine
+    // that does its own renaming. It is still finished, and recording that is
+    // what stops this being retried every sweep. Doing it without touching the
+    // engine matters on the first run after an upgrade, when it would
+    // otherwise mean removing and re-adding an entire library to no purpose.
+    if (!from || !to || from === to) {
+      return this.#catalog.put({ infoHash, complete: true });
+    }
+
+    await this.#engine.remove(infoHash, { deleteData: false }).catch(() => {});
+
+    let outcome;
+    try {
+      outcome = await promote(from, to);
+    } catch (error) {
+      // Put it back the way it was before giving up, or the archive stops
+      // being seeded because of a failed rename.
+      await this.#readd(entry).catch(() => {});
+      throw error;
+    }
+
+    const updated = await this.#catalog.put({ infoHash, complete: true });
+    await this.#readd(updated);
+    // The reader still has the old path open, and the old path is now gone.
+    await this.#tiles?.invalidate(infoHash).catch(() => {});
+
+    if (outcome === 'renamed') {
+      console.log(`[complete] ${entry.name} is whole; dropped the marker`);
+    }
+    return updated;
+  }
+
+  /**
+   * Hands an archive back to the engine as it currently stands.
+   * @param {object} entry - Catalog entry.
+   * @returns {Promise<void>} - Resolves once added.
+   */
+  async #readd(entry) {
+    const torrentFile = entry.torrentPath
+      ? await fs
+          .readFile(entry.torrentPath)
+          .then((buffer) => new Uint8Array(buffer))
+          .catch(() => null)
+      : null;
+    if (!torrentFile && !entry.magnet) return;
+
+    await this.#engine.add({
+      torrentFile: torrentFile ?? undefined,
+      magnet: torrentFile ? undefined : entry.magnet,
+      savePath: entry.savePath,
+      category: (entry.categories ?? [])[0],
+      mode: entry.mode ?? 'mirror',
+      seedOnly: entry.mode !== 'cache',
+      incompleteSuffix: this.#markerFor(entry),
+      paused: entry.paused,
+    });
   }
 
   /**
@@ -343,12 +444,23 @@ export class Library {
     // is opt-in.
     const mode = options.mode ?? 'cache';
     const savePath = this.#savePathFor(mode, options.savePath);
+
+    // Re-joining something already held is normal — you seeded it before, or
+    // built it and are adding it back — and in that case it is whole from the
+    // first moment and must not be handed a name saying otherwise.
+    const complete = await alreadyComplete({
+      savePath,
+      name: parsed.name,
+      size: parsed.length,
+    });
+
     await this.#engine.add({
       torrentFile,
       magnet: torrentFile ? undefined : input.magnet,
       savePath,
       categories: options.categories ?? options.category,
       mode,
+      incompleteSuffix: this.#markerFor({ complete }),
     });
 
     let storedTorrentPath;
@@ -382,6 +494,7 @@ export class Library {
       magnet: input.magnet ?? magnetFor(parsed, this.#config.trackers),
       webSeeds: parsed.urlList ?? [],
       mode,
+      complete,
     });
   }
 
@@ -681,6 +794,7 @@ export class Library {
           mode: entry.mode ?? 'mirror',
           // The data is already there; this is about resuming, not fetching.
           seedOnly: entry.mode !== 'cache',
+          incompleteSuffix: this.#markerFor(entry),
         });
         restored++;
       } catch (error) {
@@ -736,16 +850,7 @@ export class Library {
     if (this.#engine.resume) {
       await this.#engine.resume(infoHash);
     } else {
-      const torrentFile = await fs
-        .readFile(entry.torrentPath)
-        .then((buffer) => new Uint8Array(buffer))
-        .catch(() => null);
-      await this.#engine.add({
-        torrentFile: torrentFile ?? undefined,
-        magnet: torrentFile ? undefined : entry.magnet,
-        savePath: entry.savePath,
-        mode: entry.mode ?? 'mirror',
-      });
+      await this.#readd({ ...entry, paused: false });
     }
     await this.#tiles?.invalidate(infoHash).catch(() => {});
     return this.#catalog.put({ infoHash, paused: false });
@@ -790,17 +895,7 @@ export class Library {
 
     if (!live) {
       await this.#engine.remove(infoHash, { deleteData: false }).catch(() => {});
-      const torrentFile = await fs
-        .readFile(entry.torrentPath)
-        .then((buffer) => new Uint8Array(buffer))
-        .catch(() => null);
-      await this.#engine.add({
-        torrentFile: torrentFile ?? undefined,
-        magnet: torrentFile ? undefined : entry.magnet,
-        savePath: entry.savePath,
-        category: (entry.categories ?? [])[0],
-        mode,
-      });
+      await this.#readd({ ...entry, mode });
     }
 
     // The reader decided how to reach this archive when it opened it, and that
@@ -876,18 +971,14 @@ export class Library {
     // running torrent leaves it convinced it still holds them.
     await this.#engine.remove(infoHash, { deleteData: true }).catch(() => {});
 
-    const torrentFile = await fs
-      .readFile(entry.torrentPath)
-      .then((buffer) => new Uint8Array(buffer))
-      .catch(() => null);
-
-    await this.#engine.add({
-      torrentFile: torrentFile ?? undefined,
-      magnet: torrentFile ? undefined : entry.magnet,
-      savePath: entry.savePath,
-      categories: entry.categories,
+    // Whatever it held is gone, so it starts again as an incomplete archive
+    // however complete it happened to be a moment ago.
+    const cleared = await this.#catalog.put({
+      infoHash,
       mode: 'cache',
+      complete: false,
     });
+    await this.#readd(cleared);
 
     await this.#tiles?.invalidate(infoHash).catch(() => {});
     return { cleared: before };
@@ -1050,6 +1141,8 @@ export class Library {
       }
     }
 
+    // Nothing to mark: creation hashes a file that is already whole and
+    // already under its real name.
     await this.#engine.add({
       torrentFile: created.torrentFile,
       savePath: details.savePath,
@@ -1070,6 +1163,7 @@ export class Library {
       webSeeds: details.webSeeds ?? [],
       pieceLength: created.pieceLength,
       pieceCount: created.pieceCount,
+      complete: true,
       pmtiles: details.pmtiles,
       kind: details.kind,
       md5: details.md5,

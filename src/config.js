@@ -22,19 +22,37 @@ const DEFAULTS = {
     savePath: './data/torrents-data',
   },
   /**
-   * Where cache-mode archives keep their pieces.
+   * The marker appended to an archive that is not whole yet.
    *
-   * Separate from the mirror path on purpose. A mirror is a whole archive and
-   * can be trusted as a file; a cache-mode archive is a scatter of pieces that
-   * will never be complete, and telling them apart matters when you are
-   * looking at a disk rather than at the API. Keeping them in different
-   * directories says so permanently, where an "incomplete" suffix would have
-   * to be maintained and can drift out of step with the truth.
+   * Set to an empty string to switch it off, in which case a partial archive is
+   * indistinguishable from a finished one on disk — which matters more here
+   * than for most downloads, because these files get published. A web seed URL
+   * is predictable and goes out before the file exists, so an unmarked partial
+   * in a served directory is a URL that answers with a half-written archive,
+   * and every peer that tries it fails hash verification.
    *
-   * It also makes the cache measurable and clearable as a unit: this directory
-   * is exactly the disk that on-demand reading has cost.
+   * The rename that drops it is within one directory, so it is atomic and
+   * instant however large the archive is.
    */
-  cacheSavePath: './data/cache',
+  incompleteSuffix: '.incomplete',
+  /** How often to look for downloads that have finished and need renaming. */
+  completionCheckIntervalSeconds: 15,
+  /**
+   * Where cache-mode archives keep their pieces, when they should be kept
+   * apart from mirrors.
+   *
+   * Unset by default, so everything shares one save path. That was not always
+   * so: the split existed to tell whole archives from partial ones on disk,
+   * which the name now does, and doing it by directory meant a completed
+   * download had to move — instant only if both paths happen to share a
+   * filesystem, and otherwise a full copy of an archive that may be several
+   * hundred gigabytes.
+   *
+   * It remains available as a placement choice rather than a labelling one:
+   * set it to put on-demand cache pieces on faster disk than the mirrors, or
+   * to keep the cache measurable and clearable as a directory.
+   */
+  cacheSavePath: undefined,
   /**
    * Piece length for torrents we create. 4 MiB is a deliberate compromise:
    * tools default much higher for large files, which is fine for whole-file

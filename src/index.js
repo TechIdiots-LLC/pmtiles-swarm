@@ -8,6 +8,7 @@ import { loadConfig } from './config.js';
 import { LibtorrentEngine } from './engines/libtorrent.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { WebTorrentSeedEngine } from './engines/webtorrent.js';
+import { CompletionWatcher } from './incomplete.js';
 import { Library } from './library.js';
 import { CompletionHooks } from './hooks.js';
 import { SeedingLimits } from './seeding.js';
@@ -107,6 +108,7 @@ PMTILES_SWARM_PUBLIC_URL
   const sources = new ScheduledSourceManager(library, catalog, config);
   const seeding = new SeedingLimits(library, config);
   const hooks = new CompletionHooks(library, config);
+  const completion = new CompletionWatcher(library, config);
 
   // Hand the catalogue back to the engine before anything else runs. Until
   // this existed a restart quietly stopped seeding the entire library: the
@@ -152,6 +154,7 @@ PMTILES_SWARM_PUBLIC_URL
   sources.start();
   seeding.start();
   hooks.start();
+  completion.start();
 
   // Watch the sources archives were built from. A changed source does not
   // invalidate its torrent, but it does mean any web seed pointing there will
@@ -245,6 +248,7 @@ PMTILES_SWARM_PUBLIC_URL
     sources.stop();
     seeding.stop();
     hooks.stop();
+    completion.stop();
     subscriptions.stop();
     warm.stop();
 

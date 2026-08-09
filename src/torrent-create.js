@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline as pipelineAsync } from 'node:stream/promises';
+import { DEFAULT_SUFFIX } from './incomplete.js';
 
 /**
  * Turning a PMTiles archive into a torrent.
@@ -103,8 +104,16 @@ export async function createTorrentFromUrl(url, options = {}) {
     // Download first, then hash from disk. Two passes over local storage, but
     // only one trip over the network — which is the expensive part — and it
     // leaves a seedable copy behind.
+    //
+    // Written under a marked name until it is whole. Retain directories are
+    // routinely the ones a web server publishes, and a multi-hour download
+    // sitting there under its final name is a URL that answers with a
+    // half-written archive — which every peer that tries it will fail to
+    // verify. The marker means the URL 404s until the moment it is real.
     const target = path.join(options.retainPath, name);
-    await downloadTo(url, target, options.onProgress, options.signal);
+    const marker = options.incompleteSuffix ?? DEFAULT_SUFFIX;
+    await downloadTo(url, `${target}${marker}`, options.onProgress, options.signal);
+    if (marker) await fs.rename(`${target}${marker}`, target);
     const created = await createTorrentFromFile(target, {
       ...options,
       name,

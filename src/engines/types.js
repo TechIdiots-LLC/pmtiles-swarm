@@ -40,6 +40,7 @@
  * @property {string} [category] - Category to file it under.
  * @property {boolean} [seedOnly] - The data is already complete locally; skip downloading.
  * @property {boolean} [paused] - Add without starting.
+ * @property {string} [incompleteSuffix] - Marker to append to the on-disk filename until the archive is whole, so a partial archive is never mistaken for a finished one — and never served as one. Engines that mark incomplete files their own way ignore it.
  * @property {'mirror' | 'cache'} [mode] - 'mirror' downloads the whole archive and becomes a full seeder. 'cache' joins the swarm but downloads nothing up front, leaving a tile server to pull byte ranges on demand — the difference between spending 72 GiB of disk and spending what is actually viewed. Cache mode needs piece-level control, so it is only honoured by engines that have it.
  */
 

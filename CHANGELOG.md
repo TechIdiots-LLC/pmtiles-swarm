@@ -2,13 +2,32 @@
 
 ## master
 ### ✨ Features and improvements
+- **An archive that is not whole yet is named so.** It downloads as
+  `planet.pmtiles.incomplete` and is renamed the instant it finishes. These files get published:
+  a web seed URL is predictable and goes out before the file exists, so an unmarked partial in a
+  served directory is a URL that answers with half an archive, and every peer that tries it fails
+  hash verification. Now it 404s until the file is real. The rename is inside one directory, so it
+  is atomic and instant at any size — where moving between directories is instant only when they
+  share a filesystem, and otherwise copies the whole archive. Remote downloads are marked the same
+  way, qBittorrent's own `.!qB` preference is turned on rather than overridden, and
+  `incompleteSuffix: ""` switches the whole thing off.
+- **`cacheSavePath` is now off by default.** It existed to tell whole archives from partial ones on
+  disk, which the name above does better; it stays as a placement choice for putting cache pieces
+  on faster disk. Archives already in a catalog keep the save path they were added with.
+- **A Categories screen in the console**, listing every tag with the endpoints that resolve to its
+  newest build — TileJSON, `.torrent`, magnet, feed and latest-only feed — each copyable. Backed by
+  a new `GET /api/categories`. A category whose newest archive is not PMTiles gets everything
+  except the tile endpoint.
+- Settings now presents the download options the way a torrent client does: a checkbox for the
+  marker, and the separate cache directory as an option that ships off.
 - New `sparse` setting, global with a per-archive override, matching tileserver-gl.
 
 - Watch folders can move each archive into the directory a web server serves (`publishDir`) and
   advertise that URL as a web seed, rather than assuming the watched folder is already the web
   root.
-- Cache-mode archives now live under `cacheSavePath`, separate from mirrors, so a glance at the
-  disk says which files are whole archives and which never will be.
+- Cache-mode archives can be kept under `cacheSavePath`, separate from mirrors. This began as the
+  way to tell whole archives from partial ones on disk; the marker above does that job now, and
+  this is a placement choice.
 - **An archive can carry several categories.** A planet build can be both `basemaps` and `weekly`
   without choosing. Feeds match on *any* tag, so it appears in both. Catalogues holding the older
   single `category` string are read as a list of one and normalised on the next write.
@@ -99,6 +118,12 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **Pausing, resuming and switching mode silently did nothing on the WebTorrent engine.**
+  `client.get()` is async — it parses whatever identifier it is handed before matching — so the
+  promise it returned read as a perfectly good torrent whose every property was `undefined`. Every
+  guard therefore saw "no such torrent" and returned false, and `setMode` fell back to removing and
+  re-adding the torrent, which is why it appeared to work at all. Looked up directly by infohash
+  now, which needs no parsing.
 - **The console offered a TileJSON URL for archives that can never have one.** Identification only
   ran when an archive was created here, so a *joined* MBTiles torrent had no recorded format and
   was treated as PMTiles: a tile endpoint was offered, and asking for it read pieces out of the

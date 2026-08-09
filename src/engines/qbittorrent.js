@@ -71,6 +71,7 @@ export class QBittorrentEngine {
     // case there is no session cookie and requests just work.
     if (!this.#options.username) {
       await this.#request('/api/v2/app/version');
+      await this.#markIncompleteFiles();
       return;
     }
 
@@ -90,6 +91,37 @@ export class QBittorrentEngine {
     }
     const setCookie = response.headers.get('set-cookie');
     if (setCookie) this.#cookie = setCookie.split(';')[0];
+
+    await this.#markIncompleteFiles();
+  }
+
+  /**
+   * Asks qBittorrent to mark incomplete files, if it is not doing so already.
+   *
+   * qBittorrent has this built in, appending `.!qB` and renaming on completion
+   * — the same arrangement as the embedded engine, in that client's own
+   * spelling. Using its convention rather than imposing ours means someone
+   * looking at that qBittorrent sees what they expect, and it is one global
+   * preference rather than a per-torrent argument.
+   *
+   * Advisory: the instance may be shared, and refusing to run because a
+   * preference could not be set would be out of proportion. Sent through
+   * #fetch rather than #request deliberately — #request re-authenticates on a
+   * 403 by calling connect(), which calls this.
+   * @returns {Promise<void>} - Resolves whether or not it worked.
+   */
+  async #markIncompleteFiles() {
+    if (this.#options.markIncompleteFiles === false) return;
+    try {
+      const body = new URLSearchParams({
+        json: JSON.stringify({ incomplete_files_ext: true }),
+      });
+      await this.#fetch('/api/v2/app/setPreferences', { method: 'POST', body });
+    } catch (error) {
+      console.warn(
+        `[qbittorrent] could not turn on incomplete-file marking: ${error.message}`,
+      );
+    }
   }
 
   /**

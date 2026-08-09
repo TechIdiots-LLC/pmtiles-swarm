@@ -21,6 +21,11 @@ implementation code is copied.
 from the same ecosystem and also MIT, are used for torrent creation and parsing. No implementation
 code is copied.
 
+`fs-chunk-store` (MIT, Copyright (c) Feross Aboukhadijeh) is used directly as well as through
+WebTorrent: `incompleteStore` in `src/engines/webtorrent.js` wraps it so an unfinished archive is
+written under a marked filename. Only the constructor is called — the store's own code does the
+file handling.
+
 Note the `uint8-util` override pinned in `package.json`: version 2.3.0 rewrote `arr2hex` in a way
 that throws when handed the hex-string infohash that webtorrent's `Torrent._onTorrentId` passes it,
 breaking every magnet add. webtorrent declares `^2.2.5`, so the pin holds it at a working version.

@@ -110,6 +110,7 @@ subscribers forward, and they fail differently, so publishing both is cheap insu
   "engine": "qbittorrent",
   "qbittorrent": { "url": "http://127.0.0.1:8080", "username": "admin", "password": "…" },
   "webtorrent": { "savePath": "./data/torrents-data" },
+  "incompleteSuffix": ".incomplete",
   "pieceLength": 4194304,
   "maxConnections": 100,
   "feedMaxItems": 50,
@@ -128,6 +129,28 @@ subscribers forward, and they fail differently, so publishing both is cheap insu
   ]
 }
 ```
+
+### Incomplete archives
+
+An archive that is not whole yet is written under a marked name —
+`planet.pmtiles.incomplete` — and renamed the instant it finishes. Set
+`incompleteSuffix` to `""` to switch that off.
+
+This matters more here than for most downloads, because these files get published. A web seed URL
+is predictable and goes out before the file exists, so an unmarked partial sitting in a served
+directory is a URL that answers with a half-written archive, and every peer that tries it fails
+hash verification. With the marker, the URL 404s until the exact moment the file is real.
+
+The rename is within one directory, so it is atomic and instant however large the archive is.
+Keeping incomplete files in a *different* directory would mean a completed download had to move,
+which is instant only when both paths share a filesystem and otherwise copies the whole archive.
+`cacheSavePath` remains available for anyone who wants cache-mode pieces on separate disk, but it
+is now a placement choice rather than how completeness is recorded, and it ships unset.
+
+qBittorrent does this itself, appending `.!qB`; this turns that preference on rather than imposing
+its own spelling. The libtorrent engine does not mark incomplete files at all — the rename would
+have to happen in the sidecar, which ships with `pmtiles-torrent` — so do not point a web server at
+a libtorrent save path that is also serving web seeds.
 
 Environment overrides: `PMTILES_SWARM_PORT`, `PMTILES_SWARM_DATA_DIR`, `PMTILES_SWARM_ENGINE`,
 `PMTILES_SWARM_QBT_URL`, `PMTILES_SWARM_QBT_USERNAME`, `PMTILES_SWARM_QBT_PASSWORD`,

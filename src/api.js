@@ -768,6 +768,59 @@ export function createApp({
     );
   };
 
+  // Everything a category offers, in one place. A category is the only stable
+  // handle this system has — every archive is addressed by infohash, which is
+  // what makes a tile immutable, but leaves nothing for a style to point at
+  // that survives a rebuild — and until now the endpoints that give you one
+  // were documented rather than discoverable.
+  app.get(
+    '/api/categories',
+    route(async (req, res) => {
+      const base = baseUrl(req);
+      const visible = catalog
+        .list()
+        .filter((entry) => publishesEntry(entry, req));
+
+      const counts = new Map();
+      for (const entry of visible) {
+        for (const category of normalizeCategories(entry)) {
+          counts.set(category, (counts.get(category) ?? 0) + 1);
+        }
+      }
+
+      res.json(
+        [...counts.keys()].sort().map((category) => {
+          const newest = newestIn(category, req);
+          // Only PMTiles has tiles to serve, so a category whose newest build
+          // is an MBTiles archive gets a feed and a torrent but no tile
+          // endpoint — the same rule as an individual archive.
+          const servable = Boolean(newest?.pmtiles) &&
+            (newest.kind ?? 'pmtiles') === 'pmtiles';
+
+          return {
+            category,
+            archives: counts.get(category),
+            newest: newest && {
+              infoHash: newest.infoHash,
+              name: newest.name,
+              size: newest.size,
+              createdAt: newest.createdAt,
+              kind: newest.kind ?? 'pmtiles',
+            },
+            servable,
+            endpoints: {
+              tileJson: servable ? `${base}/latest/${category}/tiles.json` : null,
+              torrent: `${base}/latest/${category}/archive.torrent`,
+              magnet: `${base}/latest/${category}/magnet`,
+              feed: `${base}/feed/${category}.xml`,
+              latestFeed: `${base}/latest/${category}.xml`,
+            },
+          };
+        }),
+      );
+    }),
+  );
+
   // A stable handle for "the current one". Every archive is addressed by
   // infohash, which is right — it is what makes a tile immutable — but it
   // leaves nothing for a style to point at that survives a rebuild. A category

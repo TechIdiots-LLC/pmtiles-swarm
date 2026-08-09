@@ -79,6 +79,13 @@ export class WebTorrentSeedEngine {
       deselect: request.mode === 'cache',
     };
 
+    // WebTorrent has no rename API — the store is built from the metainfo's own
+    // file list — but it does let the store itself be replaced, and the store
+    // is the only thing that decides where bytes land.
+    if (request.incompleteSuffix) {
+      addOptions.store = await incompleteStore(request.incompleteSuffix);
+    }
+
     const timeoutMs = this.#options.readyTimeoutMs;
     const torrent = await new Promise((resolve, reject) => {
       let settled = false;
@@ -127,12 +134,31 @@ export class WebTorrentSeedEngine {
   }
 
   /**
+   * Finds a torrent this client holds, by infohash.
+   *
+   * Not `client.get()`: that is async, because it parses whatever identifier it
+   * is handed before matching. Every call here already has a plain infohash, so
+   * the parse buys nothing — and being async, it returned a promise that read
+   * as a perfectly good torrent object whose every property was undefined.
+   * Pausing, resuming and switching mode all quietly did nothing as a result.
+   * @param {string} infoHash - Hex v1 infohash.
+   * @returns {object | null} - The torrent, or null.
+   */
+  #find(infoHash) {
+    const wanted = String(infoHash ?? '').toLowerCase();
+    return (
+      this.#client?.torrents.find((torrent) => torrent.infoHash === wanted) ??
+      null
+    );
+  }
+
+  /**
    * Stops a torrent without dropping it.
    * @param {string} infoHash - The torrent.
    * @returns {Promise<boolean>} - Whether it was paused.
    */
   async pause(infoHash) {
-    const torrent = this.#client?.get(infoHash);
+    const torrent = this.#find(infoHash);
     if (!torrent?.pause) return false;
     torrent.pause();
     return true;
@@ -144,7 +170,7 @@ export class WebTorrentSeedEngine {
    * @returns {Promise<boolean>} - Whether it was resumed.
    */
   async resume(infoHash) {
-    const torrent = this.#client?.get(infoHash);
+    const torrent = this.#find(infoHash);
     if (!torrent?.resume) return false;
     torrent.resume();
     return true;
@@ -163,7 +189,7 @@ export class WebTorrentSeedEngine {
    * @returns {Promise<boolean>} - Whether the running torrent took it.
    */
   async setMode(infoHash, mode) {
-    const torrent = this.#client?.get(infoHash);
+    const torrent = this.#find(infoHash);
     if (!torrent) return false;
 
     const last = Math.max(0, (torrent.pieces?.length ?? 1) - 1);
@@ -186,7 +212,7 @@ export class WebTorrentSeedEngine {
    * @returns {Promise<boolean>} - Whether the running torrent took it.
    */
   async addWebSeed(infoHash, url) {
-    const torrent = this.#client?.get(infoHash);
+    const torrent = this.#find(infoHash);
     if (!torrent?.addWebSeed) return false;
     torrent.addWebSeed(url);
     return true;
@@ -248,7 +274,7 @@ export class WebTorrentSeedEngine {
    */
   async get(infoHash) {
     if (!this.#client) return null;
-    const torrent = this.#client.get(infoHash);
+    const torrent = this.#find(infoHash);
     return torrent ? this.#normalise(torrent) : null;
   }
 
@@ -258,7 +284,7 @@ export class WebTorrentSeedEngine {
    * @returns {Promise<object[]>} - One entry per connected peer.
    */
   async peers(infoHash) {
-    const torrent = this.#client?.get(infoHash);
+    const torrent = this.#find(infoHash);
     if (!torrent) return [];
     return torrent.wires.map((wire) => ({
       address: wire.remoteAddress
@@ -315,6 +341,44 @@ export class WebTorrentSeedEngine {
       savePath: torrent.path,
     };
   }
+}
+
+/**
+ * A chunk store that writes to a marked name.
+ *
+ * WebTorrent builds its store from the file list in the metainfo, so the
+ * on-disk name is normally fixed by the torrent. This wraps the default store
+ * and rewrites those paths on the way in, which is enough on its own:
+ * everything else — reads, hash checks, deleting the data on removal — goes
+ * through the same file list and so follows the marker automatically.
+ *
+ * Paths arrive relative to the torrent and are joined with the save path by the
+ * store itself, so appending here appends to the filename rather than to a
+ * directory component.
+ *
+ * Written against fs-chunk-store's public API (MIT, Copyright (c) Feross
+ * Aboukhadijeh). See NOTICE.md.
+ * @param {string} suffix - The marker to append.
+ * @returns {Promise<Function>} - A store constructor for WebTorrent's `store` option.
+ */
+async function incompleteStore(suffix) {
+  const { default: FSChunkStore } = await import('fs-chunk-store');
+
+  /**
+   * @param {number} chunkLength - Piece length.
+   * @param {object} [options] - Store options supplied by WebTorrent.
+   * @returns {object} - The wrapped store.
+   */
+  function MarkedStore(chunkLength, options = {}) {
+    const files = (options.files ?? []).map((file) => ({
+      path: `${file.path}${suffix}`,
+      length: file.length,
+      offset: file.offset,
+    }));
+    return new FSChunkStore(chunkLength, { ...options, files });
+  }
+
+  return MarkedStore;
 }
 
 /**

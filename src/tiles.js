@@ -4,6 +4,7 @@ import zlib from 'node:zlib';
 import { PMTiles, SharedPromiseCache } from 'pmtiles';
 import { TorrentSource } from 'pmtiles-torrent';
 import { NodeFileSource } from './file-source.js';
+import { onDiskPath } from './incomplete.js';
 import { summarize } from './pmtiles-probe.js';
 import { LibtorrentReadEngine } from './read-engine.js';
 
@@ -281,9 +282,14 @@ export class TileStore {
     const status = await this.#engine.get(entry.infoHash).catch(() => null);
     if (status && status.progress < 1) return null;
 
+    // Through the shared helper, so this reads the archive that is actually
+    // there: one that has finished but not yet been renamed is still complete,
+    // and worth reading locally rather than going back to the swarm for the
+    // few seconds until the watcher catches up.
+    //
     // No status at all means the engine does not know this torrent — the file
     // may still be a plain local archive that was added and never seeded.
-    const file = path.join(entry.savePath, entry.name);
+    const file = onDiskPath(entry, this.#config) ?? path.join(entry.savePath, entry.name);
     try {
       const stat = await fs.stat(file);
       if (!stat.isFile()) return null;
