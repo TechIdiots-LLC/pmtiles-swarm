@@ -297,6 +297,22 @@ The clock starts when a complete copy is first seen, not when the archive was ad
 long download would count as time served. A limit never applies to a cache-mode archive, which
 holds a few pieces on purpose and has not been sharing in the sense a ratio measures.
 
+### Two ports
+
+`adminPort` puts the console and the API on a listener of their own, leaving
+tiles, feeds, `.torrent` files and `/api/catalog` on `port`:
+
+```json
+{ "port": 8090, "host": "0.0.0.0", "adminPort": 8091, "adminHost": "127.0.0.1" }
+```
+
+The public port can face the internet while the admin port is bound to
+loopback, so what can rewrite the configuration is unreachable rather than
+merely password-protected. On the public listener the admin surface answers 404
+rather than 403, since a refusal confirms there is something there. Routing is
+by the port a request arrived on, never by a header. See
+[docs/security.md](docs/security.md).
+
 ### Access tokens
 
 `auth.apiKey` is one credential with one power: whoever holds it can do anything. That is fine

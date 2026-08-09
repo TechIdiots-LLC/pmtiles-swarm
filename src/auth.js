@@ -123,6 +123,41 @@ export function verifyPassword(password, stored) {
  * @param {string} path - The request path.
  * @returns {boolean} - True when no credential is needed.
  */
+/**
+ * The surface that belongs on a public listener.
+ *
+ * When the console and the API are given a port of their own, this is what is
+ * left on the other one: the things a stranger or a peer is *meant* to reach.
+ * Everything else stops existing there — answered 404 rather than 401, because
+ * a 401 tells whoever asked that there is something behind it.
+ *
+ * The catalogue is on this list deliberately. It is how another node keeps
+ * itself in step, so it has to be reachable from outside; what it publishes is
+ * already decided by `feedCategories` and by whatever token was presented.
+ * @param {string} path - Request path.
+ * @returns {boolean} - True when a public listener should serve it.
+ */
+export function isPublicSurface(path) {
+  // The map preview is part of the console, not part of the contract. It also
+  // loads MapLibre from /vendor, which is not on this list — so publishing it
+  // here would publish a page that cannot render.
+  if (/^\/archives\/[^/]+\/preview\/?$/.test(path)) return false;
+
+  return (
+    path === '/api/catalog' ||
+    path === '/api/catalog/' ||
+    path === '/feed.xml' ||
+    path.startsWith('/feed/') ||
+    path.startsWith('/archives/') ||
+    path.startsWith('/latest/')
+  );
+}
+
+/**
+ * Whether a request may change anything.
+ * @param {import('express').Request} req - The request.
+ * @returns {boolean} - True for a read.
+ */
 export function isReadOnly(req) {
   if (req.method !== 'GET' && req.method !== 'HEAD') return false;
   // Listing tokens is a GET, and it says who else holds a credential for this
@@ -404,7 +439,14 @@ const LOOPBACK = new Set(['127.0.0.1', '::1', 'localhost']);
  */
 export function assertSafeToListen(config, auth) {
   if (auth.enabled || config.allowUnauthenticated) return;
-  if (LOOPBACK.has(config.host)) return;
+
+  // Which interface actually carries the console and the API. With a separate
+  // admin port that is a different question from where the tiles are served,
+  // and the tiles being on 0.0.0.0 is the entire point of the tiles.
+  const guarded = config.adminPort
+    ? (config.adminHost ?? config.host)
+    : config.host;
+  if (LOOPBACK.has(guarded)) return;
 
   // A ready-to-paste key, because the alternative is the reader going away to
   // find out how to generate one and coming back less inclined to bother.
@@ -424,7 +466,7 @@ export function assertSafeToListen(config, auth) {
 
   throw new ConfigurationError(
     [
-      `Refusing to listen on ${config.host} with no authentication configured.`,
+      `Refusing to listen on ${guarded} with no authentication configured.`,
       '',
       'Every /api/ route can create torrents, move files, delete data and',
       'rewrite this configuration, and none of them would ask who is calling.',

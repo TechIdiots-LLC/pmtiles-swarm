@@ -4,7 +4,13 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { ROLES, createAuth, generateToken, hashToken } from './auth.js';
+import {
+  ROLES,
+  createAuth,
+  generateToken,
+  hashToken,
+  isPublicSurface,
+} from './auth.js';
 import { normalizeCategories } from './catalog.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
@@ -62,6 +68,19 @@ export function createApp({
   // Tiles, TileJSON and the feed stay public — serving them is the point.
   // Everything else is gated, because it can create torrents, move files,
   // delete data and rewrite this configuration.
+  // Where the console and the API have a listener of their own, everything
+  // else is served on the public one — and only what is meant to be public.
+  // Checked by the port the request actually arrived on rather than by a
+  // header, because a header is something the caller controls.
+  if (config.adminPort) {
+    app.use((req, res, next) => {
+      const arrivedOnAdmin = req.socket?.localPort === Number(config.adminPort);
+      if (arrivedOnAdmin || isPublicSurface(req.path)) return next();
+      // 404 rather than 403: a refusal confirms there is something here.
+      res.status(404).json({ error: 'not found' });
+    });
+  }
+
   const auth = createAuth(config);
 
   /**

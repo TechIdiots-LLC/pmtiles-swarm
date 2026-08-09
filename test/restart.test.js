@@ -19,6 +19,8 @@ describe('what actually needs the process to stop', () => {
     assert.deepEqual(
       [...RESTART_REQUIRED].sort(),
       [
+        'adminHost',
+        'adminPort',
         'allowUnauthenticated',
         'dataDir',
         'engine',

@@ -220,6 +220,28 @@ PMTILES_SWARM_PUBLIC_URL
     reloaders,
     shutdown: () => runStoppers(stoppers),
   });
+  // A second listener, where the console and the API have been given a port of
+  // their own. The same app serves both: routing by the port a request arrived
+  // on rather than mounting two routers means a route cannot end up on the
+  // wrong side by being forgotten.
+  let adminServer;
+  if (config.adminPort) {
+    const adminHost = config.adminHost ?? config.host;
+    adminServer = app.listen(config.adminPort, adminHost, () => {
+      const reachable =
+        adminHost === '0.0.0.0' || adminHost === '::' ? 'localhost' : adminHost;
+      console.log(
+        `[http] console and API on http://${reachable}:${config.adminPort}` +
+          (reachable === adminHost ? '' : ` (bound to ${adminHost})`),
+      );
+    });
+    stoppers.unshift({
+      label: 'admin server',
+      stop: () => closeServer(adminServer),
+      ms: 4000,
+    });
+  }
+
   const server = app.listen(config.port, config.host, () => {
     // 0.0.0.0 is a bind address, not a destination — browsers reject it with
     // ERR_ADDRESS_INVALID. Print something that can actually be opened.
@@ -228,7 +250,8 @@ PMTILES_SWARM_PUBLIC_URL
       : config.host;
     const bound = reachable === config.host ? '' : ` (bound to ${config.host})`;
     console.log(
-      `[http] listening on http://${reachable}:${config.port}${bound} ` +
+      `[http] ${config.adminPort ? 'public surface' : 'listening'} on ` +
+        `http://${reachable}:${config.port}${bound} ` +
         `(${catalog.list().length} archives)`,
     );
   });

@@ -58,6 +58,47 @@ Setting a password through the settings screen stores the hash and discards the
 plaintext. Credentials are redacted from every API response, and a redaction
 placeholder is never written back as a real secret.
 
+## Two ports, so the console is not merely guarded but absent
+
+Set `adminPort` and the split stops being about credentials and starts being
+about reachability:
+
+```json
+{
+  "port": 8090,
+  "host": "0.0.0.0",
+  "adminPort": 8091,
+  "adminHost": "127.0.0.1"
+}
+```
+
+| listener | serves |
+| --- | --- |
+| `port` | tiles, TileJSON, `.torrent` files, the feeds, the `latest` endpoints, and `/api/catalog` — everything a stranger or a peer is meant to reach |
+| `adminPort` | the console and the rest of the API, plus all of the above |
+
+The public port can then face the internet while the admin port is bound to
+loopback or a private interface, so the thing that can rewrite the
+configuration is not password-protected — it is *unreachable*. That is a much
+stronger statement, and it is the one a firewall can enforce.
+
+On the public listener the admin surface answers **404, not 403**. A refusal
+confirms there is something behind it; an absence does not.
+
+Routing is by the port the request arrived on, never by a header, because a
+header is something the caller controls.
+
+`/api/catalog` is public on purpose: it is how another node keeps itself in
+step, so it has to be reachable from outside. What it publishes is already
+decided by `feedCategories` and by whatever token was presented. The map
+preview is *not* public — it is part of the console, and it loads MapLibre from
+`/vendor`, which is not published either, so serving it would serve a page that
+cannot render.
+
+With a split, **the refusal to start reads the admin interface** rather than
+the public one. Tiles on `0.0.0.0` is the entire point of the tiles; what
+matters is where the console is.
+
 ## Named tokens, and roles
 
 `apiKey` is one credential with one power. That is fine while the only caller is

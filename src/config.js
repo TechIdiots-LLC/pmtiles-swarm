@@ -71,6 +71,24 @@ const DEFAULTS = {
   /** How often to look for archives that have become safe to share. */
   secondaryShareIntervalSeconds: 60,
   /**
+   * A separate port for the console and the API.
+   *
+   * Unset, one listener serves everything. Set, and the split is by purpose:
+   * `port` keeps the tiles, the TileJSON, the `.torrent` files, the feeds, the
+   * `latest` endpoints and `/api/catalog` — everything a stranger or a peer is
+   * meant to reach — while `adminPort` gets the console and the rest of the
+   * API.
+   *
+   * The point is what it lets you do with a firewall. The public port can face
+   * the internet while the admin port is bound to `127.0.0.1` or a private
+   * interface, so the thing that can rewrite the configuration is not merely
+   * password-protected but unreachable. On the public listener the admin
+   * surface answers 404, because a 401 would confirm it is there.
+   */
+  adminPort: undefined,
+  /** Interface for the admin listener. Defaults to `host`. */
+  adminHost: undefined,
+  /**
    * Named places for archive data to land.
    *
    * `[{ name, path }]`. A torrent client usually hangs the save path off the
@@ -586,9 +604,11 @@ export async function loadConfig(configPath) {
  * worse than one that says plainly it needs a restart.
  */
 export const RESTART_REQUIRED = new Set([
-  // The listening socket.
+  // The listening sockets.
   'port',
   'host',
+  'adminPort',
+  'adminHost',
   // Where the catalogue lives, which everything above it was built from.
   'dataDir',
   // The torrent client itself, and how it was constructed.

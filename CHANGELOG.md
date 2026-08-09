@@ -51,6 +51,16 @@
   everything and reading afterwards what it did. Categories can be applied to the lot. It can also
   adopt from **a qBittorrent instance other than the configured engine**, which is what "adopt
   existing" sounded like it did.
+- **The console and the API can have a port of their own.** `adminPort`, with an optional
+  `adminHost`, leaves tiles, TileJSON, `.torrent` files, the feeds, the `latest` endpoints and
+  `/api/catalog` on the public port and moves everything else. The public port can then face the
+  internet while the admin one is bound to loopback — so the thing that can rewrite the
+  configuration is unreachable rather than merely guarded, which is a statement a firewall can
+  enforce. On the public listener the admin surface answers 404 rather than 403, because a refusal
+  confirms there is something behind it. Routing is by the port a request arrived on, never by a
+  header, since a header is something the caller controls. The refusal to start unauthenticated now
+  reads the admin interface rather than the public one, because tiles on `0.0.0.0` is the point of
+  the tiles.
 - **Two engines can run at once.** `secondaryEngines: ["webtorrent"]` beside a libtorrent or
   qBittorrent primary — the arrangement the docs had been recommending without any code to do it,
   which until now meant two processes and two catalogues. libtorrent handles the bulk and speaks
