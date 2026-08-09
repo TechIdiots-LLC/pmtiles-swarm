@@ -51,6 +51,14 @@
   everything and reading afterwards what it did. Categories can be applied to the lot. It can also
   adopt from **a qBittorrent instance other than the configured engine**, which is what "adopt
   existing" sounded like it did.
+- **Named access tokens, with roles.** `auth.apiKey` was one credential and one power, so letting
+  another node follow this one meant handing over the key that can also delete the library. There
+  are now as many tokens as you like, each named, each `peer` (reads the catalogue, feeds, tiles
+  and torrent files — what a node needs to follow this one) or `admin` (everything). A peer token
+  can be narrowed to categories and then sees exactly those and nothing else. Minted in Settings or
+  at `POST /api/tokens`, shown once, revoked individually, and each records when it was last used
+  so retiring an old one is an informed decision. Only a SHA-256 is stored. The existing `apiKey`
+  keeps working and keeps meaning admin.
 - **Adopt can pull from another pmtiles-swarm node**, reading its `/api/catalog` once and letting
   you pick — which is not the same as following it, and is the right shape for "give me that one
   build" rather than "take everything it ever publishes". What the peer already knew comes across

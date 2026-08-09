@@ -1,8 +1,9 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
-import { createAuth } from './auth.js';
+import { ROLES, createAuth, generateToken, hashToken } from './auth.js';
 import { normalizeCategories } from './catalog.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
@@ -57,6 +58,27 @@ export function createApp({
   // Everything else is gated, because it can create torrents, move files,
   // delete data and rewrite this configuration.
   const auth = createAuth(config);
+
+  /**
+   * Writes the configuration out after a token change.
+   *
+   * Tokens are the one credential minted through the API rather than typed
+   * into a file, so they are the one that has to survive a restart without
+   * anybody copying anything by hand.
+   * @returns {Promise<void>} - Resolves once written, or logs and continues.
+   */
+  const persistConfig = async () => {
+    if (!config.configPath) {
+      console.warn(
+        '[auth] no config file, so this token lives only until the process ' +
+          'restarts. Start with --config to keep it.',
+      );
+      return;
+    }
+    await saveConfig(config, {}, config.configPath).catch((error) =>
+      console.error(`[auth] could not write the token: ${error.message}`),
+    );
+  };
   app.use((req, res, next) => auth.middleware(req, res, next));
 
   // Lets the console decide between showing a login form and showing the app,
@@ -126,6 +148,100 @@ export function createApp({
    */
   const isSparse = (entry) =>
     entry.sparse ?? config.tiles?.sparse ?? entry.pmtiles?.format !== 'pbf';
+
+  /**
+   * A stored token, as it may be shown.
+   *
+   * Never the hash. It is not a secret in the sense the token is — you cannot
+   * work backwards from it — but there is nothing to do with it either, and a
+   * value that looks like a credential invites being treated as one.
+   * @param {object} token - The stored record.
+   * @returns {object} - The safe view.
+   */
+  const describeToken = (token) => ({
+    id: token.id,
+    name: token.name,
+    role: token.role,
+    categories: token.categories,
+    createdAt: token.createdAt,
+    lastUsedAt: token.lastUsedAt ?? null,
+    // Enough to tell two entries apart in a list without revealing anything.
+    hint: token.hint,
+  });
+
+  app.get(
+    '/api/tokens',
+    route(async (_req, res) => {
+      res.json({
+        tokens: (config.auth?.tokens ?? []).map(describeToken),
+        // Worth saying plainly: it exists, it is an admin credential, and it
+        // cannot be listed or revoked here because it lives in the config file.
+        apiKey: Boolean(config.auth?.apiKey),
+      });
+    }),
+  );
+
+  app.post(
+    '/api/tokens',
+    route(async (req, res) => {
+      const { name, role = 'peer', categories } = req.body ?? {};
+      if (!name?.trim()) {
+        return res.status(400).json({ error: 'a token needs a name' });
+      }
+      if (!ROLES.has(role)) {
+        return res.status(400).json({ error: `role must be one of: ${[...ROLES].join(', ')}` });
+      }
+
+      const scope = normalizeCategories({ categories });
+      if (role === 'admin' && scope.length > 0) {
+        return res.status(400).json({
+          error:
+            'an admin token cannot be narrowed to categories — it can change ' +
+            'the configuration, which includes what the categories are',
+        });
+      }
+
+      const token = generateToken();
+      const record = {
+        id: crypto.randomUUID(),
+        name: name.trim(),
+        role,
+        categories: scope.length > 0 ? scope : undefined,
+        hash: hashToken(token),
+        // The last few characters, so an entry in the list can be recognised
+        // against a token someone still holds.
+        hint: `…${token.slice(-6)}`,
+        createdAt: new Date().toISOString(),
+      };
+
+      config.auth ??= {};
+      config.auth.tokens = [...(config.auth.tokens ?? []), record];
+      await persistConfig();
+
+      res.status(201).json({
+        ...describeToken(record),
+        // The only time this is ever returned. Only the hash is kept, so a
+        // token that is lost is replaced rather than recovered — which is the
+        // property that makes the stored list safe to keep.
+        token,
+      });
+    }),
+  );
+
+  app.delete(
+    '/api/tokens/:id',
+    route(async (req, res) => {
+      const held = config.auth?.tokens ?? [];
+      const remaining = held.filter((token) => token.id !== req.params.id);
+      if (remaining.length === held.length) {
+        return res.status(404).json({ error: 'no such token' });
+      }
+
+      config.auth.tokens = remaining;
+      await persistConfig();
+      res.json({ revoked: true });
+    }),
+  );
 
   app.get(
     '/api/status',
@@ -965,6 +1081,16 @@ export function createApp({
    * @returns {boolean} - True when it is published to this caller.
    */
   const publishesEntry = (entry, req) => {
+    const scope = req.auth?.categories;
+    // A token narrowed to some categories sees those and nothing else — not
+    // even what is public, since the point of narrowing it is to describe one
+    // peer's slice rather than to add to the public view. This applies before
+    // feedCategories, because a narrowed token is a tighter statement than the
+    // node's own default.
+    if (Array.isArray(scope)) {
+      return normalizeCategories(entry).some((name) => scope.includes(name));
+    }
+
     const allowed = config.feedCategories;
     if (!Array.isArray(allowed)) return true;
     if (auth.enabled && auth.isAuthenticated(req)) return true;

@@ -209,6 +209,24 @@ const DEFAULTS = {
    * the plaintext.
    */
   auth: {
+    /**
+     * Named tokens, each with a role.
+     *
+     * `apiKey` is one credential and one power: whoever holds it can do
+     * anything. That was fine while the only caller was you, and stopped being
+     * fine as soon as another node wanted to follow this one — "let them
+     * mirror my internal archives" and "let them delete my library" were the
+     * same sentence.
+     *
+     * So: as many as you like, each named, each `admin` or `peer`, and a peer
+     * token optionally narrowed to some categories so different people see
+     * different slices. Only a SHA-256 of each is kept, so a lost token is
+     * replaced rather than recovered.
+     *
+     * Minted through the console or `POST /api/tokens`, which is why these are
+     * written back to this file rather than only being read from it.
+     */
+    tokens: [],
     apiKey: undefined,
     username: 'admin',
     password: undefined,
@@ -678,7 +696,10 @@ export async function saveConfig(config, updates, configPath) {
     if (RESTART_REQUIRED.has(key)) restartRequired.push(key);
   }
 
-  if (configPath && applied.length > 0) {
+  // An empty update still writes: minting a token mutates `config` directly
+  // and then asks for it to be persisted, which is the one change that has to
+  // survive a restart without anybody copying anything by hand.
+  if (configPath && (applied.length > 0 || Object.keys(updates ?? {}).length === 0)) {
     // Persist the whole resolved config rather than a diff: the file is meant
     // to be readable and hand-editable, and a file of overrides accumulated
     // over time is neither.

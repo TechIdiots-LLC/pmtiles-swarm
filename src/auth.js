@@ -15,6 +15,63 @@ import crypto from 'node:crypto';
  * request.
  */
 
+/**
+ * Roles a token can hold.
+ *
+ *   admin  everything the console can do, which is everything.
+ *   peer   reads only: the catalogue, the feeds, tiles and .torrent files.
+ *          What another node needs to follow this one, and nothing else.
+ *
+ * The split exists because the alternative was handing a peer the admin key.
+ * "Let that node mirror my internal archives" and "let that node delete my
+ * library" were the same sentence, and the first is a thing people reasonably
+ * want to say to someone they would not say the second to.
+ */
+export const ROLES = new Set(['admin', 'peer']);
+
+/**
+ * Mints a token.
+ *
+ * 32 bytes from the CSPRNG, base64url so it survives being pasted into a
+ * config file, a shell and a header without escaping.
+ * @returns {string} - The new token.
+ */
+export function generateToken() {
+  return crypto.randomBytes(32).toString('base64url');
+}
+
+/**
+ * Hashes a token for storage.
+ *
+ * SHA-256 rather than scrypt, deliberately, and the reasoning is the opposite
+ * of the reasoning for passwords. A password is short, human-chosen and worth
+ * attacking with a dictionary, so it wants a slow hash. A token is 32 bytes of
+ * randomness with no dictionary to attack, so slowness buys nothing — and it
+ * would cost a slow hash per candidate token on every single request, which is
+ * a denial-of-service handed out for free.
+ *
+ * A fast hash also lets tokens be looked up by their hash rather than compared
+ * one at a time, so a node with fifty peers checks as quickly as one with one.
+ * @param {string} token - The token.
+ * @returns {string} - Hex digest.
+ */
+export function hashToken(token) {
+  return crypto.createHash('sha256').update(String(token), 'utf8').digest('hex');
+}
+
+/**
+ * Builds the lookup from configured tokens.
+ * @param {object[]} tokens - Stored token records.
+ * @returns {Map<string, object>} - Hash to record.
+ */
+function indexTokens(tokens) {
+  const index = new Map();
+  for (const token of tokens ?? []) {
+    if (token?.hash) index.set(token.hash, token);
+  }
+  return index;
+}
+
 /** Endpoints needed to obtain a credential in the first place. */
 const AUTH_PATHS = new Set(['/api/login', '/api/session']);
 
@@ -66,6 +123,18 @@ export function verifyPassword(password, stored) {
  * @param {string} path - The request path.
  * @returns {boolean} - True when no credential is needed.
  */
+export function isReadOnly(req) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  // Listing tokens is a GET, and it says who else holds a credential for this
+  // node. That belongs to whoever administers it.
+  return !/^\/api\/tokens\b/.test(req.path);
+}
+
+/**
+ * Whether a path is served without any credential at all.
+ * @param {string} path - Request path.
+ * @returns {boolean} - True when no credential is needed.
+ */
 export function isPublicPath(path) {
   // Only the API is guarded. Tiles, TileJSON, the feeds and the console's own
   // HTML are all public, and the console must be: a sign-in page nobody can
@@ -100,8 +169,20 @@ function readCookie(req, name) {
  * @returns {object} - Middleware and the login and logout handlers.
  */
 export function createAuth(config) {
-  const auth = config.auth ?? {};
-  const enabled = Boolean(auth.apiKey || auth.password || auth.passwordHash);
+  // Read fresh on every use, never captured. Tokens are minted at runtime and
+  // the route that mints them replaces `config.auth` wholesale, so a captured
+  // reference would keep describing the state at startup — and a token created
+  // through the console would be rejected until the process restarted, which
+  // is a confusing way to learn this.
+  const settings = () => config.auth ?? {};
+
+  const auth = settings();
+  const enabled = Boolean(
+    auth.apiKey ||
+      auth.password ||
+      auth.passwordHash ||
+      (auth.tokens ?? []).length > 0,
+  );
   const ttlMs = (auth.sessionTtlSeconds ?? DEFAULT_SESSION_SECONDS) * 1000;
 
   // In memory on purpose: sessions do not survive a restart, which is the
@@ -122,6 +203,7 @@ export function createAuth(config) {
    * @returns {boolean} - Whether they are correct.
    */
   const checkPassword = (username, password) => {
+    const auth = settings();
     if (!auth.password && !auth.passwordHash) return false;
     // Both halves are always evaluated, so a wrong username and a wrong
     // password cost the same.
@@ -137,12 +219,36 @@ export function createAuth(config) {
    * @param {import('express').Request} req - The request.
    * @returns {boolean} - True when authenticated.
    */
-  const isAuthenticated = (req) => {
-    if (!enabled) return true;
+  const identify = (req) => {
+    const auth = settings();
+    if (!enabled) return { role: 'admin', source: 'open' };
 
     const header = req.headers.authorization ?? '';
-    if (auth.apiKey && header.toLowerCase().startsWith('bearer ')) {
-      if (constantTimeEquals(header.slice(7).trim(), auth.apiKey)) return true;
+    if (header.toLowerCase().startsWith('bearer ')) {
+      const offered = header.slice(7).trim();
+
+      // The original single key, which predates named tokens and stays an
+      // admin credential so nothing that worked stops working.
+      if (auth.apiKey && constantTimeEquals(offered, auth.apiKey)) {
+        return { role: 'admin', source: 'apiKey' };
+      }
+
+      // Looked up by hash rather than compared one at a time, so this costs
+      // the same with fifty tokens as with one.
+      const record = indexTokens(auth.tokens).get(hashToken(offered));
+      if (record) {
+        // Recorded on the object the config holds, so it survives to be
+        // written out and shown in the console. Knowing a token has not been
+        // used in a year is what makes revoking it an easy decision.
+        record.lastUsedAt = new Date().toISOString();
+        return {
+          role: ROLES.has(record.role) ? record.role : 'peer',
+          categories: record.categories,
+          tokenId: record.id,
+          name: record.name,
+          source: 'token',
+        };
+      }
     }
 
     const id = readCookie(req, 'pmtiles_swarm_session');
@@ -153,11 +259,31 @@ export function createAuth(config) {
         // Sliding expiry: an operator with a console open is not logged out
         // mid-task.
         sessions.set(id, Date.now() + ttlMs);
-        return true;
+        return { role: 'admin', source: 'session' };
       }
     }
 
-    return false;
+    return null;
+  };
+
+  /**
+   * Whether a request carries any valid credential.
+   * @param {import('express').Request} req - The request.
+   * @returns {boolean} - True when authenticated.
+   */
+  const isAuthenticated = (req) => Boolean(identify(req));
+
+  /**
+   * Whether a string is an admin credential for this node.
+   * @param {string} offered - The candidate.
+   * @returns {boolean} - True for the apiKey or an admin token.
+   */
+  const isAdminCredential = (offered) => {
+    if (!offered) return false;
+    const auth = settings();
+    if (auth.apiKey && constantTimeEquals(offered, auth.apiKey)) return true;
+    const record = indexTokens(auth.tokens).get(hashToken(offered));
+    return record?.role === 'admin';
   };
 
   return {
@@ -166,10 +292,11 @@ export function createAuth(config) {
 
     /** Whether a password login is possible, as opposed to only a token. */
     get passwordLoginEnabled() {
-      return Boolean(auth.password || auth.passwordHash);
+      return Boolean(settings().password || settings().passwordHash);
     },
 
     isAuthenticated,
+    identify,
 
     /**
      * Express middleware guarding everything that is not public.
@@ -179,10 +306,28 @@ export function createAuth(config) {
      * @returns {void}
      */
     middleware(req, res, next) {
-      if (!enabled || isPublicPath(req.path) || isAuthenticated(req)) {
-        return next();
+      const who = identify(req);
+      // Attached whether or not it was needed, so routes can narrow what they
+      // publish to the caller rather than only deciding whether to answer.
+      req.auth = who ?? undefined;
+
+      if (!enabled || isPublicPath(req.path)) return next();
+      if (!who) {
+        return res.status(401).json({ error: 'authentication required' });
       }
-      res.status(401).json({ error: 'authentication required' });
+
+      // A peer token reads. Everything that changes something — creating
+      // torrents, moving files, deleting data, rewriting this configuration —
+      // needs the role that was given that power on purpose.
+      if (who.role !== 'admin' && !isReadOnly(req)) {
+        return res.status(403).json({
+          error:
+            'that token can read this node but not change it. An admin token ' +
+            'or a console sign-in is needed here.',
+        });
+      }
+
+      next();
     },
 
     /**
@@ -198,8 +343,14 @@ export function createAuth(config) {
       // apiKey still has a usable console. This grants nothing new: whoever
       // holds the token already has full access to every route, and trading it
       // for a session means it is typed once rather than kept in the browser.
-      const byToken =
-        Boolean(auth.apiKey) && constantTimeEquals(password, auth.apiKey);
+      // Checked against the credentials directly rather than through
+      // identify(), which answers "admin" to everything on a node where
+      // guarding is switched off — and would therefore have handed a session
+      // to anyone who submitted an empty password.
+      //
+      // An admin credential, not merely any token: a session can do everything
+      // the console can, which is more than a peer token is meant to.
+      const byToken = isAdminCredential(password);
 
       if (!byToken && !checkPassword(username, password)) return false;
 

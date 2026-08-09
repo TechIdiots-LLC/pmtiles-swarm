@@ -221,6 +221,35 @@ joined magnet has no summary until something reads its header out of a swarm it 
 joined, and no web seeds at all, so it would be slower to a first tile and thinner in a feed than
 the archive the peer is describing.
 
+### Access tokens
+
+`auth.apiKey` is one credential with one power: whoever holds it can do anything. That is fine
+while the only caller is you, and stops being fine the moment another node wants to follow this one
+— "let them mirror my internal archives" and "let them delete my library" were the same sentence.
+
+So there are named tokens, minted in **Settings → Access tokens** or at `POST /api/tokens`:
+
+| role | can |
+|---|---|
+| `peer` | read this node — its catalogue, feeds, tiles and `.torrent` files. What another swarm node needs to follow it, and nothing else. |
+| `admin` | everything the console can do. |
+
+One per person or node, so any of them can be revoked without disturbing the rest. A peer token can
+also be narrowed to a list of categories, and then sees exactly those — not even what this node
+publishes openly, since the point of narrowing it is to describe one peer's slice rather than to
+add to the public view. An admin token cannot be narrowed, because it can rewrite the configuration
+and the configuration is where the categories are.
+
+Only a SHA-256 of each token is stored, so it is shown once when created and a lost one is replaced
+rather than recovered. SHA-256 rather than scrypt deliberately: a token is 32 bytes of randomness
+with no dictionary to attack, so a slow hash buys nothing and would cost a slow hash per candidate
+on every request. Each token records when it was last used, which is what makes revoking an old one
+an easy decision.
+
+`auth.apiKey` still works and still means admin — it just cannot be listed or revoked through the
+API, since it lives in the config file. Tokens are written back to that file, so they survive a
+restart.
+
 ### Following other nodes
 
 `subscriptions` are the peers this node takes archives from, editable in Settings under **Remote

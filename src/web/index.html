@@ -2056,6 +2056,184 @@
         return updates;
       }
 
+      /**
+       * Tokens this node issues, and what each of them may do.
+       *
+       * Separate from the rest of settings because these are not settings —
+       * they are minted, shown once and revoked, and each change takes effect
+       * immediately rather than on Save.
+       * @param {HTMLElement} into - Where to render.
+       * @returns {Promise<void>} - Resolves once rendered.
+       */
+      async function renderTokenEditor(into) {
+        const panel = document.createElement('div');
+        panel.className = 'panel';
+        panel.style.marginBottom = '1rem';
+        into.append(panel);
+
+        const draw = async () => {
+          let state;
+          try {
+            state = await api('/api/tokens');
+          } catch (error) {
+            panel.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+            return;
+          }
+
+          panel.innerHTML = `
+            <h2 style="margin-top:0">Access tokens</h2>
+            <div class="sub" style="margin-bottom:0.7rem">
+              One token per person or node, so any of them can be revoked
+              without disturbing the rest. A <b>peer</b> token reads this node —
+              its catalogue, feeds, tiles and torrent files — which is what
+              another swarm node needs to follow it, and nothing more. An
+              <b>admin</b> token can do everything the console can.
+            </div>
+
+            <div style="overflow-x:auto">
+              <table>
+                <thead>
+                  <tr><th>Name</th><th>Role</th><th>Categories</th><th>Last used</th><th></th></tr>
+                </thead>
+                <tbody>
+                  ${
+                    state.tokens.length === 0
+                      ? '<tr><td colspan="5" class="sub">None yet.</td></tr>'
+                      : state.tokens
+                          .map(
+                            (token) => `
+                              <tr>
+                                <td>
+                                  ${escapeHtml(token.name)}
+                                  <div class="sub"><code>${escapeHtml(token.hint ?? '')}</code></div>
+                                </td>
+                                <td><span class="pill ${token.role === 'admin' ? 'mirror' : 'cache'}">${escapeHtml(token.role)}</span></td>
+                                <td class="sub">${
+                                  token.categories?.length
+                                    ? escapeHtml(token.categories.join(', '))
+                                    : 'everything published'
+                                }</td>
+                                <td class="sub">${
+                                  token.lastUsedAt
+                                    ? escapeHtml(new Date(token.lastUsedAt).toLocaleString())
+                                    : 'never'
+                                }</td>
+                                <td>
+                                  <button type="button" class="danger"
+                                    data-revoke="${escapeHtml(token.id)}"
+                                    data-name="${escapeHtml(token.name)}">Revoke</button>
+                                </td>
+                              </tr>`,
+                          )
+                          .join('')
+                  }
+                </tbody>
+              </table>
+            </div>
+
+            ${
+              state.apiKey
+                ? `<div class="sub" style="margin-top:0.6rem">
+                     This node also has an <code>auth.apiKey</code> in its config file. It
+                     is an admin credential and cannot be listed or revoked here — remove
+                     it from the file to retire it.
+                   </div>`
+                : ''
+            }
+
+            <h2>New token</h2>
+            <div style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:flex-end">
+              <div class="field" style="margin:0">
+                <label for="token-name">Name</label>
+                <input id="token-name" placeholder="wifidb-secondary" style="width:14rem" />
+              </div>
+              <div class="field" style="margin:0">
+                <label for="token-role">Role</label>
+                <select id="token-role" style="width:9rem">
+                  <option value="peer">peer — read only</option>
+                  <option value="admin">admin — everything</option>
+                </select>
+              </div>
+              <div class="field" style="margin:0">
+                <label for="token-categories">Categories</label>
+                <input id="token-categories" placeholder="all of them" style="width:14rem" />
+              </div>
+              <button type="button" id="token-create">Create</button>
+            </div>
+            <div class="sub" style="margin-top:0.3rem">
+              Naming categories narrows a peer token to exactly those — it will
+              not see anything else, including archives this node publishes
+              openly. Leave it empty for everything this node publishes.
+            </div>
+            <div id="token-result"></div>`;
+
+          for (const button of panel.querySelectorAll('[data-revoke]')) {
+            button.onclick = async () => {
+              if (!confirm(`Revoke "${button.dataset.name}"? Anything using it stops working.`)) {
+                return;
+              }
+              try {
+                await api(`/api/tokens/${button.dataset.revoke}`, { method: 'DELETE' });
+                toast('revoked');
+                await draw();
+              } catch (error) {
+                toast(error.message);
+              }
+            };
+          }
+
+          const role = panel.querySelector('#token-role');
+          const categories = panel.querySelector('#token-categories');
+          role.onchange = () => {
+            // An admin token can rewrite the configuration, and the
+            // configuration is where the categories are — so the restriction
+            // would be one it could lift.
+            categories.disabled = role.value === 'admin';
+            if (categories.disabled) categories.value = '';
+          };
+
+          panel.querySelector('#token-create').onclick = async () => {
+            const name = panel.querySelector('#token-name').value.trim();
+            if (!name) return toast('give it a name');
+
+            try {
+              const created = await api('/api/tokens', {
+                method: 'POST',
+                body: {
+                  name,
+                  role: role.value,
+                  categories: categories.value
+                    .split(',')
+                    .map((part) => part.trim())
+                    .filter(Boolean),
+                },
+              });
+
+              // Shown once, because only the hash is kept. Rendered above the
+              // redraw so it survives it.
+              const shown = document.createElement('div');
+              shown.className = 'panel';
+              shown.style.marginTop = '0.8rem';
+              shown.innerHTML = `
+                <b>${escapeHtml(created.name)}</b> created. This is the only time it is shown.
+                <div style="display:flex; gap:0.4rem; margin-top:0.5rem">
+                  <input readonly value="${escapeHtml(created.token)}" style="flex:1" />
+                  <button type="button">Copy</button>
+                </div>`;
+              shown.querySelector('button').onclick = () => copy(created.token, 'Token');
+
+              await draw();
+              panel.append(shown);
+              shown.querySelector('input').select();
+            } catch (error) {
+              toast(error.message);
+            }
+          };
+        };
+
+        await draw();
+      }
+
       // ── Settings ──────────────────────────────────────────────────────────
       let restartKeys = new Set();
       let rowEditorColumns = {};
@@ -2115,6 +2293,7 @@
         // are lists of small records, which is exactly what a torrent client
         // gives a grid for, and what a textarea full of braces is worst at.
         rowEditorColumns = {};
+        await renderTokenEditor(body);
         renderHookEditor(body, config, restartKeys);
 
         renderRowEditor({
