@@ -214,3 +214,62 @@ describe('the archives table', () => {
     ]);
   });
 });
+
+describe('the preview imports what the bundles actually export', () => {
+  // Getting this wrong is a SyntaxError raised before a line of the module
+  // runs, so the page shows its loading state and nothing else — no failed
+  // request, no clue in the markup. Only the browser console says why, which
+  // makes it exactly the sort of thing worth asserting here.
+  const preview = fsSync.readFileSync(
+    path.join(here, '..', 'src', 'web', 'preview.html'),
+    'utf8',
+  );
+
+  /**
+   * Whether a bundle has a default export.
+   * @param {string} file - Path to the bundle, relative to the repo.
+   * @returns {boolean} - True when it does.
+   */
+  const hasDefault = (file) => {
+    const source = fsSync.readFileSync(path.join(here, '..', file), 'utf8');
+    return / as default\b/.test(source) || /\bexport default\b/.test(source);
+  };
+
+  it('imports maplibre-gl as a namespace, because it has no default', () => {
+    assert.equal(
+      hasDefault('node_modules/maplibre-gl/dist/maplibre-gl.mjs'),
+      false,
+      'if this changed, the import below can change with it',
+    );
+    assert.match(
+      preview,
+      /import \* as maplibregl from '\/vendor\/maplibre-gl\/maplibre-gl\.mjs'/,
+    );
+  });
+
+  it('imports the inspect control as a default, because it has one', () => {
+    assert.equal(
+      hasDefault('node_modules/@maplibre/maplibre-gl-inspect/dist/maplibre-gl-inspect.mjs'),
+      true,
+    );
+    assert.match(
+      preview,
+      /import MaplibreInspect from '\/vendor\/maplibre-gl-inspect\/maplibre-gl-inspect\.mjs'/,
+    );
+  });
+
+  it('only uses names maplibre-gl actually exports', () => {
+    const bundle = fsSync.readFileSync(
+      path.join(here, '..', 'node_modules', 'maplibre-gl', 'dist', 'maplibre-gl.mjs'),
+      'utf8',
+    );
+    const exports = bundle.match(/export\{[^}]*\}/g).at(-1);
+
+    for (const [, name] of preview.matchAll(/maplibregl\.(\w+)/g)) {
+      assert.ok(
+        new RegExp(`(?:^|[,{])(?:\\w+ as )?${name}(?=[,}])`).test(exports),
+        `maplibre-gl does not export ${name}`,
+      );
+    }
+  });
+});

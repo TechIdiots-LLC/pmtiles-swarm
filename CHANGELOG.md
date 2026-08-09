@@ -265,6 +265,12 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **The map preview showed nothing but "Loading…".** It imported MapLibre as a default export, and
+  MapLibre's ESM build has only named ones — which is a `SyntaxError` raised before a line of the
+  module runs, so there was no failed request and no clue in the page, only a line in the browser
+  console. It is a namespace import now, and a test reads both bundles and asserts the import form
+  matches what each actually exports, and that every `maplibregl.X` the page uses is a name the
+  bundle provides.
 - **Stopping a node running the libtorrent engine printed a Python stack trace.** Windows delivers
   a console Ctrl-C to every process in the group, so the sidecar received it too and reported a
   `KeyboardInterrupt` on the way out. Nothing was wrong, but a traceback at the end of a clean stop

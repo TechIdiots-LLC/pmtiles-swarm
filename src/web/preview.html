@@ -63,7 +63,11 @@
     <div id="map"></div>
 
     <script type="module">
-      import maplibregl from '/vendor/maplibre-gl/maplibre-gl.mjs';
+      // A namespace import, not a default one: MapLibre's ESM build exports
+      // Map, Popup and the controls by name and has no default export at all.
+      // Importing a default that is not there is a SyntaxError before a line
+      // of this runs, so the page shows nothing but "Loading…".
+      import * as maplibregl from '/vendor/maplibre-gl/maplibre-gl.mjs';
       import MaplibreInspect from '/vendor/maplibre-gl-inspect/maplibre-gl-inspect.mjs';
 
       const infoHash = location.pathname.split('/')[2];
