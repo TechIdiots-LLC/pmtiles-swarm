@@ -1306,31 +1306,33 @@ export class Library {
       }
 
       try {
-        const torrentFile = entry.torrentPath
-          ? await fs
-              .readFile(entry.torrentPath)
-              .then((buffer) => new Uint8Array(buffer))
-              .catch(() => null)
-          : null;
-
-        if (!torrentFile && !entry.magnet) {
+        if (!entry.torrentPath && !entry.magnet) {
           failed++;
           continue;
         }
 
-        await this.#engine.add({
-          torrentFile: torrentFile ?? undefined,
-          magnet: torrentFile ? undefined : entry.magnet,
-          savePath: entry.savePath,
-          category: (entry.categories ?? [])[0],
-          mode: entry.mode ?? 'mirror',
-          // The data is already there; this is about resuming, not fetching —
-          // but only where it actually is. An archive still downloading is not
-          // seed-only, and saying otherwise is how a second engine came to be
-          // handed something incomplete.
-          seedOnly: entry.complete !== false && entry.mode !== 'cache',
-          incompleteSuffix: this.#markerFor(entry),
-        });
+        // A save path that has gone — an unmounted share, a directory tidied
+        // away, a config edited — leaves the engine unable to open anything and
+        // the archive sitting at nothing, reporting no error of its own.
+        if (entry.savePath) {
+          try {
+            await fs.mkdir(entry.savePath, { recursive: true });
+          } catch (error) {
+            console.error(
+              `[restore] ${entry.name}: its save path ${entry.savePath} is not ` +
+                `usable (${error.code ?? error.message}), so it cannot start. ` +
+                'Move it with Set location, or make that path reachable again.',
+            );
+            failed++;
+            continue;
+          }
+        }
+
+        // Through the same path as every other re-add, so an archive stored
+        // with no trackers is repaired here too. Restoring used to build its
+        // own add and skip that, which is why an archive that could not find a
+        // peer stayed unable to find one across every restart.
+        await this.#readd(entry);
         restored++;
       } catch (error) {
         failed++;

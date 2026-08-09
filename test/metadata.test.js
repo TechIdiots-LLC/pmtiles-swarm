@@ -331,6 +331,43 @@ describe('an archive joined from a bare infohash', () => {
     assert.match(entry.magnet, /tr=udp%3A%2F%2Fother.example%3A6969/);
   });
 
+  it('repairs one on restore, which is when a restart would fix it', async () => {
+    // Restoring used to build its own add and skip the repair, so an archive
+    // that could not find a peer stayed unable to find one across every
+    // restart — which is exactly when somebody expects a fix to take effect.
+    const infoHash = 'e'.repeat(40);
+    const { library, adds } = await node({
+      infoHash,
+      name: 'restored.pmtiles',
+      size: 10,
+      mode: 'mirror',
+      complete: false,
+      magnet: `magnet:?xt=urn:btih:${infoHash}`,
+    });
+
+    const result = await library.restore();
+    assert.equal(result.restored, 1);
+    assert.match(adds[0].magnet, /tr=udp%3A%2F%2Ftracker.example%3A6969/);
+  });
+
+  it('reports a save path that has gone, rather than sitting silent', async () => {
+    // An unmounted share or a tidied-away directory leaves the engine unable
+    // to open anything, and the archive at nothing with no error of its own.
+    const infoHash = 'f'.repeat(40);
+    const { library, adds } = await node({
+      infoHash,
+      name: 'homeless.pmtiles',
+      size: 10,
+      mode: 'mirror',
+      magnet: `magnet:?xt=urn:btih:${infoHash}`,
+      savePath: path.join('\\\\?', 'nowhere', 'at', 'all'),
+    });
+
+    const result = await library.restore();
+    assert.equal(result.restored + result.failed, 1);
+    if (result.failed === 1) assert.deepEqual(adds, []);
+  });
+
   it('repairs one that was stored without any', async () => {
     // The archives most likely to be in that state were added before there
     // was anything to repair them, so this happens whenever one is handed

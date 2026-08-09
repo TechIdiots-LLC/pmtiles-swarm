@@ -841,9 +841,27 @@ export function createApp({
       const entry = catalog.get(req.params.infoHash);
       if (!entry) return res.status(404).json({ error: 'not found' });
 
+      // What the magnet itself carries, which is all an archive joined from
+      // one has until its metainfo turns up. Worth reporting separately: an
+      // archive with no trackers anywhere has nowhere to look for a peer, and
+      // "downloading, 0 peers, forever" is otherwise a mystery.
+      const fromMagnet = [
+        ...String(entry.magnet ?? '').matchAll(/[?&]tr=([^&]*)/g),
+      ].map((match) => decodeURIComponent(match[1]));
+
       const parsed = await readTorrent(entry);
       if (!parsed) {
-        return res.json({ tiers: [], note: 'no .torrent is stored for this archive' });
+        return res.json({
+          tiers: fromMagnet.length > 0 ? [fromMagnet] : [],
+          fromMagnet,
+          note:
+            fromMagnet.length > 0
+              ? 'from the magnet; no .torrent is stored yet'
+              : 'this archive has no trackers and no .torrent, so it can only ' +
+                'find peers through the DHT — which on a private or quiet ' +
+                'swarm means it may never start. Add trackers to the node ' +
+                'config and restart, or re-add it from a .torrent.',
+        });
       }
 
       // Read the tiers from the bencode rather than from parse-torrent, which

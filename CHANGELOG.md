@@ -277,6 +277,17 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **Restoring skipped the tracker repair**, which is the one moment somebody expects a fix to take
+  effect. It built its own add rather than going through the shared one, so an archive stored
+  without trackers stayed unable to find a peer across every restart. It now takes the same path as
+  every other re-add.
+- **A save path that has gone is reported.** An unmounted share or a tidied-away directory left the
+  engine unable to open anything and the archive sitting at nothing, with no error of its own.
+  Restore now says which archive, which path and what to do about it.
+- **The Trackers tab explains an empty list.** An archive with no trackers and no `.torrent` can
+  only find peers through the DHT, which on a private or quiet swarm means it may never start —
+  and "downloading, 0 peers, indefinitely" is otherwise a mystery. It now says so, and shows what
+  the magnet itself carries while the metainfo has not arrived.
 - **An archive joined from a bare infohash never started.** It was given no trackers, so there was
   nowhere to look for a peer, and it sat reporting "downloading" indefinitely. Two causes, both
   now fixed: `parse-torrent` gives a bare magnet an `announce` of `[]` rather than leaving it
