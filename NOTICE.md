@@ -40,6 +40,10 @@ Served to the console from `node_modules/maplibre-gl/dist` — the same arrangem
 uses — so a node on an internal network can render its own previews without reaching a CDN. The
 library is used unmodified through its public API; `src/web/preview.html` is our own code.
 
+`@maplibre/maplibre-gl-inspect` (BSD-3-Clause, same project) provides the vector inspector, and is
+served the same way from its own `dist`. Used through its documented options; no implementation
+code is copied.
+
 ## qBittorrent — GPL-2.0-or-later
 
 > https://github.com/qbittorrent/qBittorrent

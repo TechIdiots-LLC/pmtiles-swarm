@@ -88,7 +88,20 @@ describe('the map preview', () => {
       path.join(here, '..', 'src', 'web', 'preview.html'),
       'utf8',
     );
-    assert.match(preview, /sources: \{ archive: \{ type: vector \? 'vector' : 'raster', url: tileJsonUrl \} \}/);
+    assert.match(preview, /url: tileJsonUrl/);
+  });
+
+  it("uses MapLibre's own inspect control", () => {
+    // Maintained alongside the renderer, so it keeps working across major
+    // versions without this having to notice.
+    const preview = fsSync.readFileSync(
+      path.join(here, '..', 'src', 'web', 'preview.html'),
+      'utf8',
+    );
+    assert.match(preview, /maplibre-gl-inspect\/maplibre-gl-inspect\.mjs/);
+    assert.match(preview, /new MaplibreInspect\(/);
+    // It does not import maplibre-gl at runtime, so it cannot make its own.
+    assert.match(preview, /popup: new maplibregl\.Popup\(/);
   });
 
   it('draws no symbol layers, since an archive carries no fonts', () => {

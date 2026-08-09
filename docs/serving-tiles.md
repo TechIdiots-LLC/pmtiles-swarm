@@ -356,11 +356,17 @@ beside it. Nothing there reconstructs a source description: the endpoint is
 already a complete, valid TileJSON, which is most of the reason it is worth
 having.
 
-**Vector archives get an inspector.** Every `vector_layer` the archive declares
-is drawn in a colour derived from its name — so a layer keeps its colour as
-others come and go, and two copies of the same data look alike — with fills,
-lines and circles by geometry type. Click anywhere to see the features under the
-cursor and their properties; click a layer in the list to hide it.
+**Vector archives get an inspector** — MapLibre's own
+[`@maplibre/maplibre-gl-inspect`](https://github.com/maplibre/maplibre-gl-inspect),
+rather than something equivalent written here, because it is maintained
+alongside the renderer and so keeps working across major versions without this
+having to notice. Every declared layer is coloured and listed in a legend, and
+clicking shows the features under the cursor with their properties.
+
+The source layers are handed to it from the TileJSON rather than left to be
+detected once the source loads. Both work; this one draws the legend
+immediately, which matters on an archive being read out of a swarm, where the
+first tile can be seconds away.
 
 **Raster archives get the raster.** There is nothing to inspect in an image, so
 the panel says so and the map is for checking coverage.

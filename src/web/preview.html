@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Preview — pmtiles-swarm</title>
     <link rel="stylesheet" href="/vendor/maplibre-gl/maplibre-gl.css" />
+    <link rel="stylesheet" href="/vendor/maplibre-gl-inspect/maplibre-gl-inspect.css" />
     <style>
       :root {
         --bg: #12141a;
@@ -30,51 +31,13 @@
         padding: 0.6rem 1rem;
         border-bottom: 1px solid var(--line);
         background: var(--panel);
+        flex-wrap: wrap;
       }
       header h1 { font-size: 1rem; margin: 0; }
       header .sub { color: var(--muted); font-size: 0.8rem; }
+      header code { font-size: 0.75rem; color: var(--muted); }
       header a { color: var(--accent); font-size: 0.8rem; margin-left: auto; }
-      main { flex: 1; display: flex; min-height: 0; }
-      #map { flex: 1; min-width: 0; }
-      aside {
-        width: 20rem;
-        flex: none;
-        border-left: 1px solid var(--line);
-        background: var(--panel);
-        overflow: auto;
-        padding: 0.8rem 1rem;
-      }
-      aside h2 {
-        font-size: 0.75rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        color: var(--muted);
-        margin: 1rem 0 0.4rem;
-      }
-      aside h2:first-child { margin-top: 0; }
-      .layer {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.15rem 0;
-        cursor: pointer;
-        font-size: 0.85rem;
-      }
-      .swatch {
-        width: 0.9rem;
-        height: 0.9rem;
-        border-radius: 3px;
-        flex: none;
-        border: 1px solid rgba(255, 255, 255, 0.25);
-      }
-      .layer.off { opacity: 0.35; }
-      table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-      td { padding: 0.15rem 0.3rem 0.15rem 0; vertical-align: top; }
-      td:first-child { color: var(--muted); white-space: nowrap; }
-      .empty { color: var(--muted); font-size: 0.85rem; }
-      code { font-size: 0.78rem; word-break: break-all; }
-      .feature { border-top: 1px solid var(--line); padding-top: 0.5rem; margin-top: 0.5rem; }
-      .feature:first-of-type { border-top: 0; }
+      #map { flex: 1; min-height: 0; }
       .banner {
         margin: auto;
         max-width: 34rem;
@@ -82,51 +45,33 @@
         text-align: center;
         color: var(--muted);
       }
+      /* The inspect legend is written for a light page. */
+      .maplibregl-ctrl-inspect .maplibregl-ctrl-inspect-legend,
+      .maplibregl-ctrl-inspect-legend {
+        background: var(--panel);
+        color: var(--fg);
+      }
     </style>
   </head>
   <body>
     <header>
       <h1 id="name">Loading…</h1>
       <span class="sub" id="summary"></span>
+      <code id="endpoint"></code>
       <a href="/">← console</a>
     </header>
-    <main>
-      <div id="map"></div>
-      <aside id="side"><div class="empty">Loading…</div></aside>
-    </main>
+    <div id="map"></div>
 
     <script type="module">
       import maplibregl from '/vendor/maplibre-gl/maplibre-gl.mjs';
+      import MaplibreInspect from '/vendor/maplibre-gl-inspect/maplibre-gl-inspect.mjs';
 
       const infoHash = location.pathname.split('/')[2];
       const tileJsonUrl = `/archives/${infoHash}/tiles.json`;
       const $ = (id) => document.getElementById(id);
-      const escapeHtml = (value) =>
-        String(value ?? '').replace(
-          /[&<>"']/g,
-          (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
-        );
-
-      /**
-       * A stable colour per layer name.
-       *
-       * Derived from the name rather than assigned in order, so a layer keeps
-       * its colour as others are added or removed and two archives of the same
-       * data look the same.
-       * @param {string} name - The source layer.
-       * @returns {string} - An hsl colour.
-       */
-      function colourFor(name) {
-        let hash = 0;
-        for (const character of name) {
-          hash = (hash * 31 + character.charCodeAt(0)) % 360;
-        }
-        return `hsl(${hash}, 70%, 60%)`;
-      }
 
       const fail = (message) => {
-        document.querySelector('main').innerHTML =
-          `<div class="banner">${escapeHtml(message)}</div>`;
+        document.body.innerHTML = `<div class="banner">${message}</div>`;
       };
 
       let tilejson;
@@ -142,66 +87,31 @@
         throw error;
       }
 
+      const vectorLayers = tilejson.vector_layers ?? [];
+      const vector =
+        vectorLayers.length > 0 || /\.(pbf|mvt)(\?|$)/.test(tilejson.tiles?.[0] ?? '');
+
       $('name').textContent = tilejson.name ?? infoHash;
-      const vector = (tilejson.vector_layers ?? []).length > 0 ||
-        /\.(pbf|mvt)(\?|$)/.test(tilejson.tiles?.[0] ?? '');
       $('summary').textContent =
         `${vector ? 'vector' : 'raster'} · z${tilejson.minzoom ?? 0}–${tilejson.maxzoom ?? 14}` +
-        (tilejson.attribution ? ` · ${tilejson.attribution.replace(/<[^>]*>/g, '')}` : '');
+        (vector ? ` · ${vectorLayers.length} layers` : '');
+      $('endpoint').textContent = tilejson.tiles?.[0] ?? '';
 
-      // Both kinds point at the same TileJSON. It is a complete source
-      // description already, so there is nothing to reconstruct here — which is
-      // the whole reason the endpoint is worth having.
+      // One source, described entirely by the archive's own TileJSON. That
+      // endpoint is already a complete, valid source description, so there is
+      // nothing to reconstruct here — which is most of the reason it is worth
+      // having.
       const style = {
         version: 8,
         sources: { archive: { type: vector ? 'vector' : 'raster', url: tileJsonUrl } },
-        layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#12141a' } }],
+        layers: [
+          { id: 'bg', type: 'background', paint: { 'background-color': '#12141a' } },
+        ],
       };
-
-      // No glyphs are configured and no symbol layers are drawn: an archive
-      // carries tiles, not fonts, and a preview that needed a font server to
-      // render would not be a preview of the archive.
-      const drawn = [];
-      if (vector) {
-        for (const layer of tilejson.vector_layers ?? []) {
-          const colour = colourFor(layer.id);
-          drawn.push({ id: layer.id, colour, description: layer.description });
-          style.layers.push(
-            {
-              id: `${layer.id}-fill`,
-              type: 'fill',
-              source: 'archive',
-              'source-layer': layer.id,
-              filter: ['==', ['geometry-type'], 'Polygon'],
-              paint: { 'fill-color': colour, 'fill-opacity': 0.25 },
-            },
-            {
-              id: `${layer.id}-line`,
-              type: 'line',
-              source: 'archive',
-              'source-layer': layer.id,
-              filter: ['!=', ['geometry-type'], 'Point'],
-              paint: { 'line-color': colour, 'line-width': 1 },
-            },
-            {
-              id: `${layer.id}-point`,
-              type: 'circle',
-              source: 'archive',
-              'source-layer': layer.id,
-              filter: ['==', ['geometry-type'], 'Point'],
-              paint: {
-                'circle-color': colour,
-                'circle-radius': 2.5,
-                'circle-opacity': 0.85,
-              },
-            },
-          );
-        }
-      } else {
+      if (!vector) {
         style.layers.push({ id: 'archive', type: 'raster', source: 'archive' });
       }
 
-      const bounds = tilejson.bounds ?? [-180, -85, 180, 85];
       const map = new maplibregl.Map({
         container: 'map',
         style,
@@ -213,14 +123,43 @@
       map.addControl(new maplibregl.NavigationControl(), 'top-left');
       map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
 
+      if (vector) {
+        // MapLibre's own inspect control, rather than something equivalent
+        // written here: it is maintained alongside the renderer, so it keeps
+        // working across major versions without this having to notice.
+        //
+        // The source layers are handed over explicitly from the TileJSON
+        // instead of being detected once the source loads. Both work, but this
+        // one draws the legend immediately, and on an archive being read out of
+        // a swarm the first tile can be seconds away.
+        map.addControl(
+          new MaplibreInspect({
+            showInspectMap: true,
+            showInspectButton: false,
+            showInspectMapPopup: true,
+            blockHoverPopupOnClick: true,
+            backgroundColor: '#12141a',
+            sources: { archive: vectorLayers.map((layer) => layer.id) },
+            // Passed in rather than left to a default: the control does not
+            // import maplibre-gl at runtime, so it cannot make one itself.
+            popup: new maplibregl.Popup({
+              closeButton: true,
+              closeOnClick: false,
+              maxWidth: '32rem',
+            }),
+          }),
+        );
+      }
+
       map.on('error', (event) => {
         // Worth surfacing rather than swallowing: a tile that will not load
-        // usually means the swarm has not found the piece yet, and silence
+        // usually means the swarm has not found that piece yet, and silence
         // reads as an empty map.
         console.warn('[preview]', event.error?.message ?? event);
       });
 
       map.once('load', () => {
+        const bounds = tilejson.bounds ?? [-180, -85, 180, 85];
         if (!location.hash) {
           map.fitBounds(
             [
@@ -231,91 +170,6 @@
           );
         }
       });
-
-      // ── the side panel ────────────────────────────────────────────────────
-      const hidden = new Set();
-
-      function renderSide(features = []) {
-        const side = $('side');
-        const layerList = vector
-          ? `<h2>Layers</h2>${
-              drawn.length === 0
-                ? '<div class="empty">This archive declares no vector layers.</div>'
-                : drawn
-                    .map(
-                      (layer) => `
-                        <div class="layer ${hidden.has(layer.id) ? 'off' : ''}"
-                             data-layer="${escapeHtml(layer.id)}"
-                             title="${escapeHtml(layer.description ?? '')}">
-                          <span class="swatch" style="background:${layer.colour}"></span>
-                          ${escapeHtml(layer.id)}
-                        </div>`,
-                    )
-                    .join('')
-            }`
-          : '';
-
-        const inspector = vector
-          ? `<h2>Features</h2>${
-              features.length === 0
-                ? '<div class="empty">Click the map to inspect what is there.</div>'
-                : features
-                    .map(
-                      (feature) => `
-                        <div class="feature">
-                          <b>${escapeHtml(feature.sourceLayer)}</b>
-                          <div class="sub">${escapeHtml(feature.geometry.type)}</div>
-                          <table>${Object.entries(feature.properties ?? {})
-                            .map(
-                              ([key, value]) =>
-                                `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`,
-                            )
-                            .join('')}</table>
-                        </div>`,
-                    )
-                    .join('')
-            }`
-          : '<h2>Raster</h2><div class="empty">Tiles are images, so there is nothing to inspect — pan and zoom to check coverage.</div>';
-
-        side.innerHTML = `
-          ${layerList}
-          ${inspector}
-          <h2>Endpoints</h2>
-          <div class="sub"><code>${escapeHtml(new URL(tileJsonUrl, location.href).href)}</code></div>
-          <div class="sub" style="margin-top:0.4rem"><code>${escapeHtml(tilejson.tiles?.[0] ?? '')}</code></div>`;
-
-        for (const element of side.querySelectorAll('[data-layer]')) {
-          element.onclick = () => {
-            const id = element.dataset.layer;
-            const off = hidden.has(id);
-            if (off) hidden.delete(id);
-            else hidden.add(id);
-            for (const suffix of ['fill', 'line', 'point']) {
-              const layerId = `${id}-${suffix}`;
-              if (map.getLayer(layerId)) {
-                map.setLayoutProperty(layerId, 'visibility', off ? 'visible' : 'none');
-              }
-            }
-            renderSide(features);
-          };
-        }
-      }
-
-      renderSide();
-
-      if (vector) {
-        map.on('click', (event) => {
-          const found = map
-            .queryRenderedFeatures(event.point)
-            .filter((feature) => feature.sourceLayer)
-            .slice(0, 12);
-          renderSide(found);
-        });
-        map.on('mousemove', (event) => {
-          const over = map.queryRenderedFeatures(event.point).some((f) => f.sourceLayer);
-          map.getCanvas().style.cursor = over ? 'pointer' : '';
-        });
-      }
     </script>
   </body>
 </html>

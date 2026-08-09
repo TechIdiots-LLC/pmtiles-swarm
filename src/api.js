@@ -1625,14 +1625,18 @@ export function createApp({
   // and imports a shared chunk and a worker from beside itself.
   //
   // BSD-3-Clause, © MapLibre contributors. See NOTICE.md.
-  try {
-    const maplibre = path.dirname(
-      createRequire(import.meta.url).resolve('maplibre-gl/package.json'),
-    );
-    app.use('/vendor/maplibre-gl', express.static(path.join(maplibre, 'dist')));
-  } catch {
-    // Optional at runtime: everything except the preview works without it.
-    console.warn('[web] maplibre-gl is not installed; map previews are unavailable');
+  const require = createRequire(import.meta.url);
+  for (const [name, mount] of [
+    ['maplibre-gl', '/vendor/maplibre-gl'],
+    ['@maplibre/maplibre-gl-inspect', '/vendor/maplibre-gl-inspect'],
+  ]) {
+    try {
+      const root = path.dirname(require.resolve(`${name}/package.json`));
+      app.use(mount, express.static(path.join(root, 'dist')));
+    } catch {
+      // Optional at runtime: everything except the preview works without them.
+      console.warn(`[web] ${name} is not installed; map previews are unavailable`);
+    }
   }
 
   app.use(express.static(path.join(here, 'web')));

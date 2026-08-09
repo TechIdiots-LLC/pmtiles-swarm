@@ -54,11 +54,13 @@
 - **A map preview for every archive**, at `/archives/{infohash}/preview` and behind an
   **Inspect** or **Preview** button in the detail panel. Vector archives get an inspector: each
   declared layer drawn in a colour derived from its name, toggleable, with click-to-see-properties
-  on the features under the cursor. Raster archives get the raster. It is built from the archive's
+  on the features under the cursor, using MapLibre's own `@maplibre/maplibre-gl-inspect` — it is
+  maintained alongside the renderer, so it keeps working across major versions without this having
+  to notice. Raster archives get the raster. It is built from the archive's
   own TileJSON, which is already a complete source description — nothing is reconstructed. No
-  symbol layers and no glyphs, since an archive carries tiles and not fonts. MapLibre GL JS is a
-  dependency served out of `node_modules`, the way tileserver-gl does it, so a node on an internal
-  network can render its own previews.
+  symbol layers and no glyphs, since an archive carries tiles and not fonts. Both libraries are
+  ordinary dependencies served out of `node_modules`, the way tileserver-gl does it, so a node on
+  an internal network can render its own previews.
 - **Ratio and Expires columns**, so a seeding limit can be seen coming rather than noticed
   afterwards. Expires counts down a time limit — `42d 1h` — and says `∞` where nothing applies,
   with the reason on hover: a cache-mode archive, or one told to seed forever. A ratio target is
