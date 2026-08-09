@@ -883,21 +883,46 @@
 
         try {
           if (name === 'trackers') {
-            const { tiers, note } = await api(`/api/torrents/${infoHash}/trackers`);
+            const { tiers, note, live = [] } = await api(
+              `/api/torrents/${infoHash}/trackers`,
+            );
+            // What the engine says about each announce, keyed by URL. A
+            // tracker listed in the torrent and never successfully announced
+            // to is the difference between "nobody has this" and "we never
+            // asked" — and the two look identical in the status.
+            const announces = new Map(live.map((entry) => [entry.url, entry]));
+            const describe = (url) => {
+              const seen = announces.get(url);
+              if (!seen) return '<span class="sub">not announced yet</span>';
+              if (seen.lastError || seen.message) {
+                return `<span style="color:var(--danger)">${escapeHtml(
+                  seen.lastError || seen.message,
+                )}</span>`;
+              }
+              if (seen.updating) return '<span class="sub">announcing…</span>';
+              if (seen.verified) return 'working';
+              return seen.fails > 0
+                ? `<span style="color:var(--danger)">${seen.fails} failed attempts</span>`
+                : '<span class="sub">no reply yet</span>';
+            };
+
             pane.innerHTML = note
               ? `<div class="sub">${escapeHtml(note)}</div>`
               : table(
-                  ['Tier', 'URL'],
+                  ['Tier', 'URL', 'Last announce'],
                   tiers.flatMap((tier) =>
                     tier.urls.map((url) => [
                       String(tier.tier),
                       escapeHtml(url),
+                      describe(url),
                     ]),
                   ),
                 ) +
                 `<div class="sub" style="margin-top:0.5rem">
                    Trackers in the same tier are tried together; the next tier is
-                   only reached if that one fails.
+                   only reached if that one fails. An archive whose trackers all
+                   fail can still find peers through the DHT, but on a private or
+                   quiet swarm it may never start.
                  </div>`;
             return;
           }

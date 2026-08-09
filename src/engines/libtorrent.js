@@ -244,6 +244,20 @@ export class LibtorrentEngine {
    * Lists every torrent in the session.
    * @returns {Promise<import('./types.js').TorrentStatus[]>} - Statuses.
    */
+  /**
+   * Each tracker, and how its last announce actually went.
+   *
+   * "Downloading, 0 peers" looks identical whether the swarm is empty, the
+   * tracker refused the connection, or it has never been announced to at all.
+   * libtorrent knows which, and this is the only way to ask.
+   * @param {string} infoHash - The torrent.
+   * @returns {Promise<object[]>} - One record per tracker.
+   */
+  async trackerStatus(infoHash) {
+    const result = await this.#call('trackers', { infoHash });
+    return result?.trackers ?? [];
+  }
+
   async list() {
     // A node that is shutting down still has a console polling it and a sweep
     // or two in flight. Answering "the sidecar exited" to each of them fills

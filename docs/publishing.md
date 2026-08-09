@@ -298,19 +298,33 @@ that is also serving web seeds.
 
 ## BitTorrent v2
 
-The `libtorrent` engine creates **hybrid v1+v2 torrents** by default. v2 (BEP 52) adds
-per-file merkle trees with 16 KiB leaf blocks, so a peer can verify a small block without
-holding the entire hash list — which matters precisely for the random-access reads a tile
-server does. The v1 half keeps every existing client working.
+**pmtiles-swarm currently creates v1 torrents only**, whichever engine is configured.
+Creation goes through `create-torrent`, not through the engine, so choosing libtorrent
+changes how archives are *seeded* and *read* but not how they are *made*:
 
-Neither `mktorrent` nor `create-torrent` can produce these; only libtorrent can. Verified
-against libtorrent 2.0.13, the same archive yields three distinct torrents:
+```
+info keys      : length, name, piece length, pieces, private
+meta version   : (absent — v1 only)
+file tree (v2) : absent
+```
+
+The capability exists one layer down and is not yet wired up here. The libtorrent sidecar
+that ships with `pmtiles-torrent` can produce **hybrid v1+v2** torrents, and does so by
+default when asked directly. v2 (BEP 52) adds per-file merkle trees with 16 KiB leaf
+blocks, so a peer can verify a small block without holding the entire hash list — which
+matters precisely for the random-access reads a tile server does — while the v1 half keeps
+every existing client working. Neither `mktorrent` nor `create-torrent` can produce these.
+
+Against libtorrent 2.0.13 the same archive yields three distinct torrents:
 
 | Format | `.torrent` size |
 | --- | --- |
-| `hybrid` (default) | 415 B — carries both hash sets |
+| `hybrid` (its default) | 415 B — carries both hash sets |
 | `v1` | 274 B |
 | `v2` | 371 B |
+
+Joining a v2 or hybrid torrent someone else made is a different question, and there the
+engine does matter: libtorrent speaks v2, WebTorrent does not.
 
 ## Watch folders
 

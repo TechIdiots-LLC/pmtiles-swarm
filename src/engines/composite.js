@@ -278,6 +278,20 @@ export class CompositeEngine {
   }
 
   /**
+   * Tracker status, from whichever engine can report it.
+   * @param {string} infoHash - The archive.
+   * @returns {Promise<object[]>} - One record per tracker.
+   */
+  async trackerStatus(infoHash) {
+    for (const engine of [this.#primary, ...this.#secondaries]) {
+      if (!engine.trackerStatus) continue;
+      const found = await engine.trackerStatus(infoHash).catch(() => null);
+      if (found?.length) return found;
+    }
+    return [];
+  }
+
+  /**
    * The metainfo, from whichever engine has it.
    * @param {string} infoHash - The archive.
    * @returns {Promise<Uint8Array | null>} - The .torrent bytes.

@@ -841,6 +841,13 @@ export function createApp({
       const entry = catalog.get(req.params.infoHash);
       if (!entry) return res.status(404).json({ error: 'not found' });
 
+      // What the engine says about each announce. The difference between an
+      // empty swarm and a tracker that refused the connection is invisible in
+      // the status — both are "0 peers" — and this is where it lives.
+      const live = engine.trackerStatus
+        ? await engine.trackerStatus(entry.infoHash).catch(() => [])
+        : [];
+
       // What the magnet itself carries, which is all an archive joined from
       // one has until its metainfo turns up. Worth reporting separately: an
       // archive with no trackers anywhere has nowhere to look for a peer, and
@@ -854,6 +861,7 @@ export function createApp({
         return res.json({
           tiers: fromMagnet.length > 0 ? [fromMagnet] : [],
           fromMagnet,
+          live,
           note:
             fromMagnet.length > 0
               ? 'from the magnet; no .torrent is stored yet'
@@ -885,7 +893,14 @@ export function createApp({
         }))
         .filter((tier) => tier.urls.length > 0);
 
-      res.json({ tiers, total: tiers.reduce((n, t) => n + t.urls.length, 0) });
+      res.json({
+        tiers,
+        total: tiers.reduce((n, t) => n + t.urls.length, 0),
+        // What each announce actually did, where the engine can say. A tracker
+        // listed in the torrent and never successfully announced to is the
+        // difference between "nobody has this" and "we never asked".
+        live,
+      });
     }),
   );
 
