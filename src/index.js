@@ -11,6 +11,7 @@ import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { WebTorrentSeedEngine } from './engines/webtorrent.js';
 import { CompletionWatcher } from './incomplete.js';
 import { Library } from './library.js';
+import { assertPortsFree, claimDataDir } from './lock.js';
 import { ProgramHooks } from './hooks.js';
 import { SeedingLimits } from './seeding.js';
 import { closeServer, installSignalHandlers, runStoppers } from './shutdown.js';
@@ -122,6 +123,12 @@ PMTILES_SWARM_PUBLIC_URL
   // somebody else finds it.
   assertSafeToListen(config, createAuth(config));
 
+  // Both before anything is built, so a node that cannot run has not already
+  // connected an engine and restored half a library by the time it says so.
+  await assertPortsFree(config);
+  const lock = await claimDataDir(config);
+  stoppers.unshift({ label: 'data directory lock', stop: () => lock.release(), ms: 2000 });
+
   await fs.mkdir(config.dataDir, { recursive: true });
   if (config.engine === 'webtorrent') {
     await fs.mkdir(config.webtorrent.savePath, { recursive: true });
@@ -185,7 +192,10 @@ PMTILES_SWARM_PUBLIC_URL
   const reloaders = {
     watchers: () => {
       watch.stop();
-      watch.start(config.watch);
+      server.on('error', onListenError('public', config.port));
+  adminServer?.on('error', onListenError('admin', config.adminPort));
+
+  watch.start(config.watch);
     },
     hooks: () => {
       hooks.stop();
@@ -241,6 +251,17 @@ PMTILES_SWARM_PUBLIC_URL
       ms: 4000,
     });
   }
+
+  // The pre-flight above closes its probe before this binds, so something
+  // could take the port in between. Rare, but the alternative to handling it
+  // is an unhandled 'error' event and a stack trace.
+  const onListenError = (which, port) => (error) => {
+    console.error(
+      `\n[http] could not listen on ${which} port ${port}: ${error.message}\n` +
+        'Something took it between the startup check and now. Try again.',
+    );
+    process.exit(1);
+  };
 
   const server = app.listen(config.port, config.host, () => {
     // 0.0.0.0 is a bind address, not a destination — browsers reject it with

@@ -312,6 +312,23 @@ The clock starts when a complete copy is first seen, not when the archive was ad
 long download would count as time served. A limit never applies to a cache-mode archive, which
 holds a few pieces on purpose and has not been sharing in the sense a ratio measures.
 
+### Only one node per data directory
+
+Startup checks its ports are free and claims the data directory with a lock file, before anything
+is built that would have to be unwound. Both failures explain themselves and say what to change:
+
+```
+Cannot listen on 127.0.0.1:8090 — the public port is not available (EADDRINUSE).
+…
+  • choose another port:  { "port": 8100 }
+On Windows, `netstat -ano | findstr :8090` names the process holding it.
+```
+
+The lock matters more than the port. Two nodes sharing a data directory is not a busy socket — the
+catalog is a file each of them rewrites whole, so the last writer wins and the other node's changes
+disappear with nothing reporting a problem. A lock left by a node that was killed rather than
+stopped is taken over automatically, so it never needs deleting by hand.
+
 ### Two ports
 
 `adminPort` puts the console and the API on a listener of their own, leaving

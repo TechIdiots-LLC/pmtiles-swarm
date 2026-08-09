@@ -51,6 +51,11 @@
   everything and reading afterwards what it did. Categories can be applied to the lot. It can also
   adopt from **a qBittorrent instance other than the configured engine**, which is what "adopt
   existing" sounded like it did.
+- **Startup refuses to run two nodes over one data directory, and checks its ports first.** The
+  port is the symptom people notice; the data directory is the one that costs something, since the
+  catalog is rewritten whole by each node and the last writer silently wins. Both are checked
+  before an engine is connected or a library restored, and both explain what to change. A lock left
+  by a node that was killed rather than stopped is taken over rather than needing to be deleted.
 - **The console and the API can have a port of their own.** `adminPort`, with an optional
   `adminHost`, leaves tiles, TileJSON, `.torrent` files, the feeds, the `latest` endpoints and
   `/api/catalog` on the public port and moves everything else. The public port can then face the
