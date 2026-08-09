@@ -127,6 +127,31 @@ export class WebTorrentSeedEngine {
   }
 
   /**
+   * Switches a torrent between mirroring and caching.
+   *
+   * Cache mode is a selection, not a separate kind of torrent: the pieces are
+   * simply not wanted until something reads them. So changing mode is changing
+   * that selection, and nothing already on disk is disturbed either way —
+   * switching to mirror keeps whatever the cache had accumulated and fills in
+   * the rest.
+   * @param {string} infoHash - The torrent.
+   * @param {string} mode - 'mirror' or 'cache'.
+   * @returns {Promise<boolean>} - Whether the running torrent took it.
+   */
+  async setMode(infoHash, mode) {
+    const torrent = this.#client?.get(infoHash);
+    if (!torrent) return false;
+
+    const last = Math.max(0, (torrent.pieces?.length ?? 1) - 1);
+    if (mode === 'mirror') {
+      torrent.select(0, last, 0);
+    } else {
+      torrent.deselect(0, last, 0);
+    }
+    return true;
+  }
+
+  /**
    * Tells a running torrent about a web seed.
    *
    * Optional across engines. Where it is missing the seed still reaches peers

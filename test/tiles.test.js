@@ -2349,3 +2349,86 @@ describe('torrent detail', () => {
     }
   });
 });
+
+describe('switching between mirror and cache', () => {
+  /**
+   * A library holding one joined archive, with a recording engine.
+   * @returns {Promise<object>} - The library, entry and engine calls.
+   */
+  async function joined() {
+    const dir = await fs.mkdtemp(path.join(workspace, 'mode-'));
+    const archive = entry({ mode: 'cache', savePath: dir, torrentPath: undefined });
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put(archive);
+
+    const calls = [];
+    const library = new Library({
+      catalog,
+      engine: {
+        name: 'x',
+        add: async (r) => calls.push({ op: 'add', mode: r.mode }),
+        remove: async () => calls.push({ op: 'remove' }),
+        setMode: async (_hash, mode) => {
+          calls.push({ op: 'setMode', mode });
+          return true;
+        },
+      },
+      config: { dataDir: dir, webtorrent: { savePath: dir } },
+    });
+    return { library, catalog, calls, hash: archive.infoHash };
+  }
+
+  it('switches in place when the engine can', async () => {
+    // Changing the selection is instant and the torrent never leaves the
+    // swarm, which re-adding it would not manage.
+    const { library, calls, hash } = await joined();
+    const updated = await library.setMode(hash, 'mirror');
+
+    assert.equal(updated.mode, 'mirror');
+    assert.deepEqual(calls, [{ op: 'setMode', mode: 'mirror' }]);
+  });
+
+  it('re-adds, keeping the data, when the engine cannot', async () => {
+    const dir = await fs.mkdtemp(path.join(workspace, 'mode2-'));
+    const archive = entry({ mode: 'cache', savePath: dir });
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put(archive);
+
+    const calls = [];
+    const library = new Library({
+      catalog,
+      engine: {
+        name: 'x',
+        add: async (r) => calls.push({ op: 'add', mode: r.mode }),
+        remove: async (_h, o) => calls.push({ op: 'remove', ...o }),
+      },
+      config: { dataDir: dir, webtorrent: { savePath: dir } },
+    });
+
+    await library.setMode(archive.infoHash, 'mirror');
+    assert.equal(calls[0].op, 'remove');
+    assert.equal(calls[0].deleteData, false, 'nothing downloaded is thrown away');
+    assert.equal(calls[1].op, 'add');
+    assert.equal(calls[1].mode, 'mirror');
+  });
+
+  it('does nothing when the mode is already what was asked for', async () => {
+    const { library, calls, hash } = await joined();
+    await library.setMode(hash, 'cache');
+    assert.deepEqual(calls, [], 'no reason to disturb a running torrent');
+  });
+
+  it('rejects a mode that is not one of the two', async () => {
+    const { library, hash } = await joined();
+    await assert.rejects(() => library.setMode(hash, 'sideways'), { status: 400 });
+  });
+
+  it('reports an unknown archive', async () => {
+    const { library } = await joined();
+    await assert.rejects(() => library.setMode('f'.repeat(40), 'mirror'), {
+      status: 404,
+    });
+  });
+});

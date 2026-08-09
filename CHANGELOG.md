@@ -12,6 +12,10 @@
 - **An archive can carry several categories.** A planet build can be both `basemaps` and `weekly`
   without choosing. Feeds match on *any* tag, so it appears in both. Catalogues holding the older
   single `category` string are read as a list of one and normalised on the next write.
+- **Mirror or cache is now a choice you can make, and change.** The add dialog offers it when
+  joining a magnet or a `.torrent`, and `PATCH /api/torrents/{infohash}/mode` switches an archive
+  afterwards — with buttons in the detail panel. Nothing already downloaded is discarded in
+  either direction: going to mirror keeps what the cache accumulated and fills in the rest.
 - **Tabbed detail per archive**, as a torrent client has: General, Trackers, Peers, HTTP sources
   and Content. Trackers are shown in their tiers, files with piece geometry, comment and creator.
   Panes load when first opened. New `trackers` and `content` endpoints back them.

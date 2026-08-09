@@ -625,6 +625,61 @@ export class Library {
   }
 
   /**
+   * Switches an archive between mirroring and caching.
+   *
+   * Joining defaults to cache, because committing a disk to a copy of
+   * something that may be hundreds of gigabytes should be a decision rather
+   * than a side effect. This is how that decision gets made afterwards.
+   *
+   * Nothing already downloaded is discarded in either direction. Going to
+   * mirror keeps whatever the cache accumulated and fills in the rest; going
+   * to cache stops fetching and keeps what is there.
+   * @param {string} infoHash - The archive.
+   * @param {string} mode - 'mirror' or 'cache'.
+   * @returns {Promise<object>} - The updated catalog entry.
+   */
+  async setMode(infoHash, mode) {
+    if (mode !== 'mirror' && mode !== 'cache') {
+      const error = new Error(`mode must be 'mirror' or 'cache', got '${mode}'`);
+      error.status = 400;
+      throw error;
+    }
+
+    const entry = this.#catalog.get(infoHash);
+    if (!entry) {
+      const error = new Error('unknown archive');
+      error.status = 404;
+      throw error;
+    }
+    if (entry.mode === mode) return entry;
+
+    // Where the engine can change the selection in place, do that: it is
+    // instant and the torrent never leaves the swarm. Otherwise re-add it,
+    // keeping the data, which every engine can manage.
+    let live = false;
+    if (this.#engine.setMode) {
+      live = await this.#engine.setMode(infoHash, mode).catch(() => false);
+    }
+
+    if (!live) {
+      await this.#engine.remove(infoHash, { deleteData: false }).catch(() => {});
+      const torrentFile = await fs
+        .readFile(entry.torrentPath)
+        .then((buffer) => new Uint8Array(buffer))
+        .catch(() => null);
+      await this.#engine.add({
+        torrentFile: torrentFile ?? undefined,
+        magnet: torrentFile ? undefined : entry.magnet,
+        savePath: entry.savePath,
+        category: (entry.categories ?? [])[0],
+        mode,
+      });
+    }
+
+    return this.#catalog.put({ infoHash, mode });
+  }
+
+  /**
    * Reports how much disk an archive's data is occupying.
    *
    * For a mirror this is the archive; for a cache-mode archive it is the pieces

@@ -306,6 +306,26 @@
           </div>
         </div>
 
+        <fieldset id="join-options">
+          <legend>Joining an existing torrent</legend>
+          <div class="field">
+            <label>
+              <input type="radio" name="join-mode" value="cache" checked />
+              Cache — join the swarm, download only what is read
+            </label>
+            <label>
+              <input type="radio" name="join-mode" value="mirror" />
+              Mirror — download the whole archive and seed it
+            </label>
+            <div class="sub">
+              Cache is the default because committing a disk to a copy of
+              something that may be hundreds of gigabytes should be a decision.
+              Either can be changed afterwards without losing what is already
+              downloaded.
+            </div>
+          </div>
+        </fieldset>
+
         <fieldset id="tracker-options">
           <legend>Trackers</legend>
           <div class="sub" id="default-trackers"></div>
@@ -724,6 +744,13 @@
           </div>
           <div class="sub" style="margin-bottom:1rem"><code>${escapeHtml(tileJson)}</code></div>
 
+          <h2>Mode</h2>
+          <div class="actions" id="mode-box">
+            <button id="mode-mirror">Switch to mirror</button>
+            <button id="mode-cache">Switch to cache</button>
+            <span class="sub" id="mode-note"></span>
+          </div>
+
           <h2>Seeding limit</h2>
           <div class="field" id="seeding-box">
             <label>
@@ -791,6 +818,28 @@
             }
           };
         }
+
+        const setMode = async (next) => {
+          try {
+            const result = await api(`/api/torrents/${infoHash}/mode`, {
+              method: 'PATCH',
+              body: { mode: next },
+            });
+            toast(`now ${result.mode}`);
+            refresh();
+            renderDetail(infoHash);
+          } catch (error) {
+            toast(error.message);
+          }
+        };
+        $('mode-mirror').disabled = mode === 'mirror';
+        $('mode-cache').disabled = mode === 'cache';
+        $('mode-mirror').onclick = () => setMode('mirror');
+        $('mode-cache').onclick = () => setMode('cache');
+        $('mode-note').textContent =
+          mode === 'cache'
+            ? 'Holding only what has been read. Switching to mirror keeps that and fetches the rest.'
+            : 'Holding a complete copy. Switching to cache stops fetching and keeps what is here.';
 
         // Seeding limit: the same three-way choice a torrent client offers,
         // because "this one stays" has to survive a change to the global rule.
@@ -982,6 +1031,9 @@
         // Only a torrent created here can carry a digest; joining one takes
         // whatever that torrent already says.
         $('md5-options').hidden = kind !== 'url' && kind !== 'path';
+        // Only joining has a mode to choose. Creating a torrent here always
+        // means holding the file, so the question does not arise.
+        $('join-options').hidden = kind !== 'magnet' && kind !== 'torrentUrl';
       }
 
       /** Draws the category chips, existing ones plus whatever was typed. */
@@ -1027,6 +1079,7 @@
             'Defaults come from the trackers setting.';
         }
         document.querySelector('input[name="retain"][value="keep"]').checked = true;
+        document.querySelector('input[name="join-mode"][value="cache"]').checked = true;
 
         let known = [];
         try {
@@ -1074,6 +1127,9 @@
         if (trackers.length > 0) body.addTrackers = trackers;
 
         if ($('want-md5').checked) body.md5 = true;
+        if (kind === 'magnet' || kind === 'torrentUrl') {
+          body.mode = document.querySelector('input[name="join-mode"]:checked').value;
+        }
 
         if (kind === 'url') {
           body.retain =

@@ -308,6 +308,23 @@ export function createApp({
     }),
   );
 
+  // Joining defaults to cache, deliberately. This is how that is changed
+  // afterwards, without re-adding the archive by hand.
+  app.patch(
+    '/api/torrents/:infoHash/mode',
+    route(async (req, res) => {
+      try {
+        const entry = await library.setMode(
+          req.params.infoHash,
+          req.body?.mode,
+        );
+        res.json({ mode: entry.mode });
+      } catch (error) {
+        res.status(error.status ?? 500).json({ error: error.message });
+      }
+    }),
+  );
+
   // Seeding limits per archive. The per-torrent override a client offers, so
   // one archive can be told to stay whatever the global policy says.
   app.patch(
