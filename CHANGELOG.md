@@ -28,8 +28,13 @@
   save location, a publish directory and a web seed base; web locations take a URL template or a
   directory to list.
 - **The date in a watched URL is built by clicking, not by remembering.** Paste the URL of a
-  recent build, select the date in it and click `{YYYYMMDD}`, `{YYYY-MM-DD}`, `{YYYY}`, `{MM}` or
-  `{DD}` — the token replaces what is selected. Day offset and look-back are columns of their own
+  recent build, select the date in it and click a token — the token replaces what is selected.
+  A `{...}` group is now read as a date *pattern* rather than matched against a fixed list of
+  spellings, so it can say whatever the upstream says: `{M}-{D}-{YY}` gives `8-7-26`,
+  `{DD.MM.YYYY}` gives `07.08.2026`, `{YY}` gives `26`. Run length decides padding — `MM` is
+  padded, `M` is not — and case is ignored, since using case for padding as well would make `{m}`
+  and `{M}` differ with nothing to see. A group that is not a date is left exactly as found, so a
+  URL containing `{id}` is not quietly rewritten. Every spelling that worked before still does. Day offset and look-back are columns of their own
   (protomaps publishes yesterday's build, so it wants `-1`), and Preview refuses to run on a URL
   that still has a fixed date in it, since that would ask for the same build forever.
 - **A source can watch a directory instead of guessing filenames.** `sources[].index` reads a

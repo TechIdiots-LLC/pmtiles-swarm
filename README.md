@@ -145,9 +145,19 @@ Three ways in, all editable from the Settings screen:
   like `https://build.protomaps.com/{YYYYMMDD}.pmtiles`. Expanded per candidate date and probed
   with a `HEAD`. The more reliable of the two web options: it asks a direct question, and needs the
   upstream to publish no listing at all. In Settings, paste the URL of a recent build, select the
-  date in it and click a token — `{YYYYMMDD}`, `{YYYY-MM-DD}`, `{YYYY}`, `{MM}`, `{DD}`.
-  `offsetDays` shifts which date is asked for (protomaps publishes yesterday's build, so `-1`), and
-  `lookbackDays` covers polls that were missed.
+  date in it and click a token. `offsetDays` shifts which date is asked for (protomaps publishes
+  yesterday's build, so `-1`), and `lookbackDays` covers polls that were missed.
+
+  A `{...}` group is read as a date pattern — runs of Y, M and D with separators between them — so
+  it spells whatever the upstream spells. Run length decides padding, and case is ignored:
+
+  | | | | |
+  |---|---|---|---|
+  | `{YYYYMMDD}` → `20260807` | `{YYYY-MM-DD}` → `2026-08-07` | `{DD.MM.YYYY}` → `07.08.2026` | `{M}-{D}-{YY}` → `8-7-26` |
+  | `{YYYY}` → `2026` | `{YY}` → `26` | `{MM}` → `08` · `{M}` → `8` | `{DD}` → `07` · `{D}` → `7` |
+
+  A group that is not a date pattern is left exactly as found, so a URL containing `{id}` is not
+  quietly rewritten.
 - **A directory** (`sources[].index`) — for an upstream whose naming is not predictable. The
   listing is read (HTML autoindex or an S3 `ListBucketResult`), filtered, and the newest match
   taken. Only links *underneath* the index URL are considered, since a listing is a document from

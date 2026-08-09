@@ -1386,9 +1386,9 @@
               column.tokens
                 ? `<div class="tags" style="margin-top:0.25rem">${column.tokens
                     .map(
-                      (token) =>
+                      ([token, hint]) =>
                         `<span class="tag" data-token="${escapeHtml(token)}" data-for="${column.field}"
-                               title="Insert ${escapeHtml(token)}">${escapeHtml(token)}</span>`,
+                               title="${escapeHtml(hint)} — replaces whatever is selected">${escapeHtml(token)}</span>`,
                     )
                     .join('')}</div>`
                 : ''
@@ -1634,7 +1634,16 @@
               label: 'URL template',
               placeholder: 'https://build.protomaps.com/{YYYYMMDD}.pmtiles',
               wide: true,
-              tokens: ['{YYYYMMDD}', '{YYYY-MM-DD}', '{YYYY}', '{MM}', '{DD}'],
+              tokens: [
+                ['{YYYYMMDD}', '20260807'],
+                ['{YYYY-MM-DD}', '2026-08-07'],
+                ['{YYYY}', 'four-digit year, 2026'],
+                ['{YY}', 'two-digit year, 26'],
+                ['{MM}', 'month, zero-padded: 08'],
+                ['{M}', 'month, unpadded: 8'],
+                ['{DD}', 'day, zero-padded: 07'],
+                ['{D}', 'day, unpadded: 7'],
+              ],
             },
             { field: 'categories', label: 'Categories', placeholder: 'basemaps', list: true },
             { field: 'offsetDays', label: 'Day offset', placeholder: '0', number: true },
@@ -1650,6 +1659,9 @@
           rows: config.sources ?? [],
           preview: true,
           footnote:
+            'Tokens combine however the upstream spells its filenames — ' +
+            '{M}-{D}-{YY} gives 8-7-26, {DD.MM.YYYY} gives 07.08.2026 — and ' +
+            'case does not matter, since the length is what decides padding. ' +
             'Day offset shifts which date is asked for — protomaps publishes ' +
             'yesterday, so it wants -1. Look back covers polls that were ' +
             'missed. A directory is the fallback for upstreams whose naming ' +

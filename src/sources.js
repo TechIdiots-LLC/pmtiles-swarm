@@ -32,22 +32,50 @@ import path from 'node:path';
 /**
  * Expands date placeholders in a template.
  *
- * Supported: {YYYYMMDD} {YYYY-MM-DD} {YYYY} {MM} {DD}
+ * Rather than a fixed list of spellings, a `{...}` group is read as a date
+ * pattern: runs of Y, M and D, with separators between them. So all of these
+ * work without any of them being special-cased —
+ *
+ *   {YYYYMMDD}     20260807      {YYYY-MM-DD}   2026-08-07
+ *   {YY}           26            {M}-{D}-{YY}   8-7-26
+ *   {DD.MM.YYYY}   07.08.2026    {YYYY}/{MM}    2026/08
+ *
+ * A run's length decides padding: `MM` is zero-padded, `M` is not, which is
+ * what an upstream naming files `8-7-26.pmtiles` needs. Year is the exception,
+ * since an unpadded year means nothing: `YY` is the last two digits and any
+ * other length is all four.
+ *
+ * Case is ignored, because length already carries the padding and using case
+ * for it as well would make `{m}` and `{M}` differ for no visible reason.
+ *
+ * A group that is not a date pattern is left exactly as it was found. URLs
+ * legitimately contain braces, and silently rewriting `{id}` into a date would
+ * be worse than not supporting it.
  * @param {string} template - The template string.
  * @param {Date} date - The date to substitute.
  * @returns {string} - The expanded string.
  */
 export function expandTemplate(template, date) {
-  const yyyy = String(date.getUTCFullYear());
-  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
-  const dd = String(date.getUTCDate()).padStart(2, '0');
+  const parts = {
+    y: String(date.getUTCFullYear()),
+    m: String(date.getUTCMonth() + 1),
+    d: String(date.getUTCDate()),
+  };
 
-  return template
-    .replaceAll('{YYYYMMDD}', `${yyyy}${mm}${dd}`)
-    .replaceAll('{YYYY-MM-DD}', `${yyyy}-${mm}-${dd}`)
-    .replaceAll('{YYYY}', yyyy)
-    .replaceAll('{MM}', mm)
-    .replaceAll('{DD}', dd);
+  return String(template).replace(/\{([^{}]*)\}/g, (whole, body) => {
+    // Separators an upstream might put between the fields. Anything else means
+    // this is not a date at all.
+    if (!/^[YMDymd]+([-_./ ]?[YMDymd]+)*$/.test(body)) return whole;
+
+    return body.replace(/([YMDymd])\1*|[-_./ ]/g, (run) => {
+      const field = run[0].toLowerCase();
+      if (!(field in parts)) return run;
+
+      const value = parts[field];
+      if (field === 'y') return run.length === 2 ? value.slice(-2) : value;
+      return value.padStart(Math.min(run.length, 2), '0');
+    });
+  });
 }
 
 /**

@@ -6,7 +6,11 @@ import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { createApp } from '../src/api.js';
 import { Catalog } from '../src/catalog.js';
-import { ScheduledSourceManager, parseListing } from '../src/sources.js';
+import {
+  ScheduledSourceManager,
+  expandTemplate,
+  parseListing,
+} from '../src/sources.js';
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-watched-'));
 after(() => fs.rm(workspace, { recursive: true, force: true }));
@@ -198,5 +202,52 @@ describe('previewing a source before it downloads anything', () => {
     } finally {
       await server.close();
     }
+  });
+});
+
+describe('spelling a date the way an upstream does', () => {
+  const date = new Date(Date.UTC(2026, 7, 7));
+
+  it('keeps every spelling that already worked', () => {
+    assert.equal(expandTemplate('{YYYYMMDD}', date), '20260807');
+    assert.equal(expandTemplate('{YYYY-MM-DD}', date), '2026-08-07');
+    assert.equal(expandTemplate('{YYYY}/{MM}/{DD}', date), '2026/08/07');
+  });
+
+  it('pads by run length, so a single letter is unpadded', () => {
+    // What an upstream naming files 8-7-26.pmtiles needs, and the reason
+    // length rather than case decides: {m} and {M} differing would be a
+    // distinction with nothing to see.
+    assert.equal(expandTemplate('{M}-{D}-{YY}', date), '8-7-26');
+    assert.equal(expandTemplate('{m}-{d}-{yy}', date), '8-7-26');
+    assert.equal(expandTemplate('{MM}-{DD}', date), '08-07');
+  });
+
+  it('takes a whole pattern inside one group', () => {
+    assert.equal(expandTemplate('{DD.MM.YYYY}', date), '07.08.2026');
+    assert.equal(expandTemplate('{YYYY_MM_DD}', date), '2026_08_07');
+    assert.equal(expandTemplate('{DDMMYY}', date), '070826');
+  });
+
+  it('reads a year by length, since an unpadded year means nothing', () => {
+    assert.equal(expandTemplate('{YY}', date), '26');
+    assert.equal(expandTemplate('{YYYY}', date), '2026');
+    assert.equal(expandTemplate('{Y}', date), '2026');
+  });
+
+  it('leaves anything that is not a date exactly as it was', () => {
+    // URLs legitimately contain braces. Rewriting {id} into a date would be
+    // worse than not supporting it, because it would happen silently.
+    assert.equal(expandTemplate('{id}', date), '{id}');
+    assert.equal(expandTemplate('{}', date), '{}');
+    assert.equal(expandTemplate('{build-2}', date), '{build-2}');
+    assert.equal(expandTemplate('no tokens here', date), 'no tokens here');
+  });
+
+  it('handles a real upstream URL', () => {
+    assert.equal(
+      expandTemplate('https://build.protomaps.com/{YYYYMMDD}.pmtiles', date),
+      'https://build.protomaps.com/20260807.pmtiles',
+    );
   });
 });
