@@ -364,6 +364,21 @@ export class WebTorrentSeedEngine {
   }
 
   /**
+   * Sets the global rate limits, in bytes per second.
+   *
+   * WebTorrent throttles the whole client rather than per torrent, which is
+   * what is wanted here: the thing being protected is one uplink, not one
+   * archive. `-1` disables the throttle rather than setting it to zero, which
+   * would stop traffic entirely.
+   * @param {object} limits - `{ download, upload }`, -1 for unlimited.
+   * @returns {Promise<void>} - Resolves once applied.
+   */
+  async setRateLimits({ download, upload }) {
+    this.#client?.throttleDownload(download ?? -1);
+    this.#client?.throttleUpload(upload ?? -1);
+  }
+
+  /**
    * Shuts the client down, announcing 'stopped' to trackers.
    * @returns {Promise<void>} - Resolves once destroyed.
    */

@@ -39,15 +39,15 @@ function resolveSidecar() {
  * It reaches it through a child process rather than a native binding because
  * Node has no maintained libtorrent binding — the packages on npm are
  * abandoned 2022 stubs, and the one live fork exposes neither piece deadlines
- * Unlike the other two engines this does not mark incomplete files: the
- * rename would have to happen in the sidecar, which ships with pmtiles-torrent
- * rather than here. A download therefore sits under its final name until it
- * finishes, so do not point a web server at a libtorrent save path that is
- * also serving web seeds. Completion is still recorded correctly — the watcher
- * finds no marked file and simply notes that the archive is whole.
- *
  * nor v2. A sidecar also keeps the install honest: one distro package rather
  * than a C++ toolchain plus Boost.
+ *
+ * Unlike the other two engines this does not mark incomplete files: the rename
+ * would have to happen in the sidecar, which ships with pmtiles-torrent rather
+ * than here. A download therefore sits under its final name until it finishes,
+ * so do not point a web server at a libtorrent save path that is also serving
+ * web seeds. Completion is still recorded correctly — the watcher finds no
+ * marked file and simply notes that the archive is whole.
  *
  * The protocol is line-delimited JSON, so this class is unchanged if the other
  * end is later replaced by a real N-API addon.
@@ -281,6 +281,18 @@ export class LibtorrentEngine {
    */
   async get(infoHash) {
     return this.#call('get', { infoHash });
+  }
+
+  /**
+   * Sets the session's global rate limits, in bytes per second.
+   *
+   * Applied live. A schedule that only took effect on restart could not do the
+   * one thing a schedule is for.
+   * @param {object} limits - `{ download, upload }`, -1 for unlimited.
+   * @returns {Promise<object>} - What the session now holds.
+   */
+  async setRateLimits({ download, upload }) {
+    return this.#call('rate_limits', { download, upload });
   }
 
   /**

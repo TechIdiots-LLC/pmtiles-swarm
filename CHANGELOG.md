@@ -2,6 +2,20 @@
 
 ## master
 ### ✨ Features and improvements
+- **Speed limits, with a schedule.** Two sets of global limits and a window that swaps them,
+  modelled on qBittorrent: `speed.uploadLimit` / `downloadLimit`, `speed.alternative`, and
+  `speed.schedule` taking `from`, `to` and `days` (`everyday`, `weekdays`, `weekends`, or weekday
+  numbers). A window whose end is before its start wraps past midnight, so `22:00`–`06:00` is one
+  overnight window rather than an empty one, and `days` picks the night it opens. The console has
+  the settings and a header switch that forces either set, handing control back to the schedule the
+  next time the window itself changes — so forcing "slow" at lunchtime does not leave the node
+  throttled tomorrow. Applied live, enforced by whichever engines can throttle, and applied whole
+  to each rather than divided between them, since they share one uplink.
+- **A listen failure is reported rather than thrown.** The two `server.on('error')` registrations
+  had been spliced into the middle of the watch-folder reloader, so nothing was listening for the
+  event at startup: a port taken between the pre-flight check and the actual bind produced a raw
+  stack trace instead of the sentence explaining it, and every settings reload added two more
+  listeners.
 - **libtorrent's network settings are configurable.** The sidecar has always accepted `upnp`,
   `natpmp`, `dht`, `lsd`, `uploadLimit` and `downloadLimit`, and nothing passed them — so a node
   could not decline UPnP however the config was written. That is the wrong default on a network

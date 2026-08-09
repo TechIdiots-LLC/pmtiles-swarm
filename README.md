@@ -314,6 +314,44 @@ The clock starts when a complete copy is first seen, not when the archive was ad
 long download would count as time served. A limit never applies to a cache-mode archive, which
 holds a few pieces on purpose and has not been sharing in the sense a ratio measures.
 
+### Speed limits
+
+Two sets of limits for the whole node, and a window that swaps them — the same shape
+qBittorrent uses, because the useful version of "slow down" is almost never about an archive. It
+is about the hours somebody else is using the line.
+
+```json
+{
+  "speed": {
+    "uploadLimit": 20480000,
+    "downloadLimit": 40960000,
+    "alternative": { "uploadLimit": 2048000, "downloadLimit": 20480000 },
+    "schedule": { "enabled": true, "from": "11:00", "to": "22:00", "days": "weekdays" }
+  }
+}
+```
+
+Bytes per second, `0` for unlimited. The console shows and takes **KiB/s** — the unit anyone
+setting one thinks in, and the one qBittorrent's boxes use — and converts.
+
+`days` takes `everyday`, `weekdays`, `weekends`, or a list of weekday numbers with 0 as Sunday. **A
+window whose end is before its start wraps past midnight**, so `22:00`–`06:00` is one overnight
+window rather than an empty one; on those, `days` picks the night the window *opens*, so a weekday
+overnight window covers Friday night into Saturday morning and does not open again on Saturday.
+
+The switch in the console header forces one set or the other, and hands control back to the
+schedule the next time the window itself opens or closes — so forcing "slow" at lunchtime stays
+slow, and does not leave the node throttled tomorrow. All of it applies to a running node; none of
+it needs a restart.
+
+Limits are enforced by the engine, so an engine that cannot throttle simply has no switch. Running
+two engines applies the same limit to both rather than dividing it: they share one uplink, and
+halving it would make a two-engine node slower than a one-engine node.
+
+> Where qBittorrent is the engine, this writes its plain global limits and deliberately does not
+> touch its own alternative-limits mode or scheduler. Two schedulers over one setting means
+> whichever ran last wins, and the speed you get is a race.
+
 ### Only one node per data directory
 
 Startup checks its ports are free and claims the data directory with a lock file, before anything
@@ -487,6 +525,7 @@ matters there is `maxConnections`, since every peer holds a NAT table entry. See
 | `POST` | `/api/torrents/:infoHash/rebuild` | Rebuild from the current source (mints a new infohash) |
 | `POST` | `/api/check-origins` | Check every archive with a watchable source |
 | `GET` `DELETE` | `/api/adds` | Downloads still in flight, and cancelling one by URL |
+| `GET` `POST` | `/api/speed` | Which speed limits are in force, and the manual switch between the two sets |
 | `GET` | `/api/categories` | Every tag, with the endpoints resolving to its newest build |
 | `POST` | `/api/adopt`, `/api/adopt/candidates` | Take over what an engine or another node holds |
 | `POST` | `/api/sources/preview` | What a watched web location would take, without taking it |

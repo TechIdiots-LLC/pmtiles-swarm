@@ -13,6 +13,7 @@ import { CompletionWatcher } from './incomplete.js';
 import { Library } from './library.js';
 import { assertPortsFree, claimDataDir } from './lock.js';
 import { ProgramHooks } from './hooks.js';
+import { SpeedLimits } from './rate-limits.js';
 import { SeedingLimits } from './seeding.js';
 import { closeServer, installSignalHandlers, runStoppers } from './shutdown.js';
 import { ScheduledSourceManager } from './sources.js';
@@ -176,6 +177,7 @@ PMTILES_SWARM_PUBLIC_URL
   const watch = new WatchManager(library);
   const sources = new ScheduledSourceManager(library, catalog, config);
   const seeding = new SeedingLimits(library, config);
+  const speed = new SpeedLimits(engine, config);
   const hooks = new ProgramHooks(library, config);
   const completion = new CompletionWatcher(library, config);
 
@@ -213,10 +215,7 @@ PMTILES_SWARM_PUBLIC_URL
   const reloaders = {
     watchers: () => {
       watch.stop();
-      server.on('error', onListenError('public', config.port));
-  adminServer?.on('error', onListenError('admin', config.adminPort));
-
-  watch.start(config.watch);
+      watch.start(config.watch);
     },
     hooks: () => {
       hooks.stop();
@@ -234,6 +233,10 @@ PMTILES_SWARM_PUBLIC_URL
       seeding.stop();
       seeding.start();
     },
+    speed: () => {
+      speed.stop();
+      speed.start();
+    },
     completion: () => {
       completion.stop();
       completion.start();
@@ -248,6 +251,7 @@ PMTILES_SWARM_PUBLIC_URL
     tiles,
     warm,
     config,
+    speed,
     reloaders,
     shutdown: () => runStoppers(stoppers),
   });
@@ -298,10 +302,18 @@ PMTILES_SWARM_PUBLIC_URL
     );
   });
 
+  // Registered here rather than anywhere else, because a listen failure is
+  // emitted as an 'error' event and an 'error' event with no listener is
+  // rethrown — so without these, a port taken between the startup check and
+  // the actual bind crashes with a raw stack instead of the sentence above.
+  server.on('error', onListenError('public', config.port));
+  adminServer?.on('error', onListenError('admin', config.adminPort));
+
   watch.start(config.watch);
   subscriptions.start();
   sources.start();
   seeding.start();
+  speed.start();
   hooks.start();
   completion.start();
 

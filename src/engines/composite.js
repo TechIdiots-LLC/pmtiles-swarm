@@ -263,6 +263,31 @@ export class CompositeEngine {
   }
 
   /**
+   * Applies the limits to every engine.
+   *
+   * Not divided between them: they share one uplink, and halving a cap would
+   * leave a node running two engines slower than the same node running one,
+   * whichever of them happened to be busy.
+   *
+   * An engine that will not take a limit is logged and skipped rather than
+   * fatal — a cap honoured by the engine doing the work beats none at all.
+   * @param {object} limits - `{ download, upload }`, -1 for unlimited.
+   * @returns {Promise<void>} - Resolves once every engine has been told.
+   */
+  async setRateLimits(limits) {
+    for (const engine of [this.#primary, ...this.#secondaries]) {
+      if (!engine.setRateLimits) continue;
+      try {
+        await engine.setRateLimits(limits);
+      } catch (error) {
+        console.warn(
+          `[composite] ${engine.name} would not take a rate limit: ${error.message}`,
+        );
+      }
+    }
+  }
+
+  /**
    * Peers from every engine, labelled with which one found them.
    * @param {string} infoHash - The archive.
    * @returns {Promise<object[]>} - Peers.

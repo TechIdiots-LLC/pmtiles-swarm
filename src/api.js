@@ -54,6 +54,7 @@ export function createApp({
   tiles,
   warm,
   config,
+  speed,
   reloaders = {},
   shutdown,
 }) {
@@ -930,6 +931,31 @@ export function createApp({
         created: parsed?.created,
         infoHashV2: parsed?.infoHashV2,
       });
+    }),
+  );
+
+  // What speed limits are in force, and the manual switch between the two
+  // sets. Reading it is how the console shows which is active without having
+  // to work out the schedule itself, which would be the same logic twice.
+  app.get(
+    '/api/speed',
+    route(async (_req, res) => {
+      if (!speed) return res.status(501).json({ error: 'speed limits are not running' });
+      res.json(speed.current());
+    }),
+  );
+
+  app.post(
+    '/api/speed',
+    route(async (req, res) => {
+      if (!speed) return res.status(501).json({ error: 'speed limits are not running' });
+      const mode = req.body?.mode ?? null;
+      if (mode !== null && mode !== 'global' && mode !== 'alternative') {
+        return res.status(400).json({
+          error: 'mode must be "global", "alternative", or null to follow the schedule',
+        });
+      }
+      res.json(await speed.setOverride(mode));
     }),
   );
 

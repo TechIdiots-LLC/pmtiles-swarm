@@ -235,6 +235,29 @@ export class QBittorrentEngine {
   }
 
   /**
+   * Sets the global rate limits, in bytes per second.
+   *
+   * qBittorrent has its own alternative-limits mode and its own scheduler, and
+   * this drives neither on purpose: two schedulers writing one setting means
+   * whichever ran last wins, and the speed you actually get is a race. This
+   * writes the plain global limits, so the schedule lives in one place.
+   * @param {object} limits - `{ download, upload }`, -1 for unlimited.
+   * @returns {Promise<void>} - Resolves once applied.
+   */
+  async setRateLimits({ download, upload }) {
+    // Its API takes 0 for unlimited, where -1 means the same thing here.
+    const rate = (value) => String(value == null || value < 0 ? 0 : Math.floor(value));
+    await this.#request('/api/v2/transfer/setDownloadLimit', {
+      method: 'POST',
+      body: new URLSearchParams({ limit: rate(download) }),
+    });
+    await this.#request('/api/v2/transfer/setUploadLimit', {
+      method: 'POST',
+      body: new URLSearchParams({ limit: rate(upload) }),
+    });
+  }
+
+  /**
    * Per-peer detail for a torrent.
    * @param {string} infoHash - The torrent to inspect.
    * @returns {Promise<object[]>} - One entry per connected peer.

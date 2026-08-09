@@ -511,6 +511,39 @@ const DEFAULTS = {
   /** How often to check seeding limits, in seconds. Zero disables it. */
   seedingCheckIntervalSeconds: 3600,
   /**
+   * Global speed limits, and a schedule that swaps in a second set.
+   *
+   * Bytes per second, `0` for unlimited — the console shows and takes KiB/s,
+   * the same as qBittorrent's box, and converts. These are limits for the whole
+   * node rather than per archive: the thing being protected is one uplink.
+   *
+   * The schedule exists because the useful version of "slow down" is almost
+   * never about the archive, it is about the hours when somebody else is using
+   * the line. `days` takes `everyday`, `weekdays`, `weekends`, or a list of
+   * weekday numbers with 0 as Sunday. A window whose end is before its start
+   * wraps past midnight, so 22:00–06:00 means overnight rather than nothing.
+   *
+   * Applied live: changing any of this takes effect without a restart, and the
+   * console's toggle overrides the schedule until the next time the window
+   * itself changes.
+   */
+  speed: {
+    uploadLimit: 0,
+    downloadLimit: 0,
+    alternative: {
+      uploadLimit: 0,
+      downloadLimit: 0,
+    },
+    schedule: {
+      enabled: false,
+      from: '11:00',
+      to: '22:00',
+      days: 'weekdays',
+    },
+  },
+  /** How often to re-check which speed limits should be in force, in seconds. */
+  speedCheckIntervalSeconds: 60,
+  /**
    * Run something when a download finishes.
    *
    * This is what closes the loop for a build pipeline: subscribe to a feed of
@@ -738,6 +771,10 @@ export const RELOADABLE = new Map([
   ['subscriptions', 'subscriptions'],
   ['subscriptionIntervalSeconds', 'subscriptions'],
   ['seeding', 'seeding'],
+  // Applied to a running session, so a schedule can be corrected at the moment
+  // it turns out to be wrong rather than at the next convenient restart.
+  ['speed', 'speed'],
+  ['speedCheckIntervalSeconds', 'speed'],
   ['incompleteSuffix', 'completion'],
   ['completionCheckIntervalSeconds', 'completion'],
 ]);

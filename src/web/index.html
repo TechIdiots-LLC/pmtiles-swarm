@@ -253,12 +253,29 @@
         flex: none;
       }
       .choice > span { flex: 1; }
+
+      /* Speed limits. Declared after .field on purpose: `.field input` is
+         width:100%, which would push the unit label onto its own line. */
+      .rates { display: flex; gap: 1rem; flex-wrap: wrap; }
+      .rates .rate { flex: 1 1 12rem; margin-bottom: 0.5rem; }
+      .rates .rate > span { display: block; font-size: 0.8rem; color: var(--muted); }
+      .rates .rate input { width: 7rem; min-width: 0; }
+      .rates .rate .unit { color: var(--muted); font-size: 0.8rem; margin-left: 0.4rem; }
+      .when { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+      .when input, .when select { width: auto; min-width: 0; }
+
+      /* The alternative-limits switch, in the header where its state is
+         visible without opening anything — qBittorrent puts its turtle in the
+         status bar for the same reason. */
+      button.speed { border-color: var(--line); color: var(--muted); }
+      button.speed.on { border-color: var(--warn); color: var(--warn); }
     </style>
   </head>
   <body>
     <header>
       <h1>pmtiles-swarm</h1>
       <div class="status" id="status">connecting…</div>
+      <button id="speed-toggle" class="speed" hidden title="Switch between the normal and alternative speed limits"></button>
       <nav>
         <button id="tab-archives" class="on">Archives</button>
         <button id="tab-categories">Categories</button>
@@ -671,12 +688,59 @@
       let selected = null;
       let activeTab = 'general';
 
+      // What the header switch shows, so a click knows what it is toggling to.
+      let speedState = null;
+
+      /**
+       * Draws the alternative-limits switch from the node's own answer.
+       *
+       * Read rather than worked out here: the schedule logic lives on the
+       * server, and a second copy in the console would be a second copy to get
+       * wrong — including the window that wraps past midnight.
+       * @param {object|null} state - `/api/speed`, or null when unavailable.
+       * @returns {void}
+       */
+      function renderSpeed(state) {
+        speedState = state;
+        const button = $('speed-toggle');
+        if (!state || !state.engineEnforced) {
+          button.hidden = true;
+          return;
+        }
+        const alt = state.mode === 'alternative';
+        button.hidden = false;
+        button.classList.toggle('on', alt);
+        button.textContent = alt ? '🐢 alternative' : '⚡ normal';
+        button.title = alt
+          ? `Alternative limits: down ${state.downLabel}, up ${state.upLabel}.` +
+            (state.override ? ' Forced — click for normal.' : ' On schedule.')
+          : `Normal limits: down ${state.downLabel}, up ${state.upLabel}. Click to slow down.`;
+      }
+
+      $('speed-toggle').onclick = async () => {
+        if (!speedState) return;
+        // Clicking while the schedule already agrees hands control back to it,
+        // rather than pinning the state it happens to be in.
+        const wanted = speedState.mode === 'alternative' ? 'global' : 'alternative';
+        try {
+          const nextState = await api('/api/speed', {
+            method: 'POST',
+            body: { mode: speedState.scheduled === (wanted === 'alternative') ? null : wanted },
+          });
+          renderSpeed(nextState);
+        } catch (error) {
+          toast(error.message);
+        }
+      };
+
       async function refresh() {
         try {
-          const [status, list] = await Promise.all([
+          const [status, list, speed] = await Promise.all([
             api('/api/status'),
             api('/api/torrents'),
+            api('/api/speed').catch(() => null),
           ]);
+          renderSpeed(speed);
           const engine = status.engine;
           $('status').innerHTML =
             `engine <b>${engine.name}</b> ${engine.ok ? 'ready' : 'unavailable'}` +
@@ -2343,6 +2407,93 @@
        * Reads the hook panel back, when it is editable.
        * @returns {object} - Updates, empty when read-only.
        */
+      // Speed limits are in bytes/second in the config and KiB/s in the boxes,
+      // because KiB/s is the unit anyone setting one thinks in — and it is what
+      // qBittorrent's own boxes take, which is where the expectation comes from.
+      const toKiB = (bytes) => (Number(bytes) > 0 ? Math.round(Number(bytes) / 1024) : 0);
+      const fromKiB = (kib) => {
+        const value = Number(kib);
+        return Number.isFinite(value) && value > 0 ? Math.round(value * 1024) : 0;
+      };
+
+      function speedPanel(config) {
+        const speed = config.speed ?? {};
+        const alt = speed.alternative ?? {};
+        const schedule = speed.schedule ?? {};
+        const panel = document.createElement('div');
+        panel.className = 'panel';
+        panel.style.marginBottom = '1rem';
+        panel.dataset.speedEditor = 'true';
+        panel.innerHTML = `
+          <h2 style="margin-top:0">Speed limits</h2>
+          <div class="sub" style="margin-bottom:0.8rem">
+            For the whole node rather than per archive — the thing being
+            protected is one uplink. <b>0 means unlimited.</b>
+          </div>
+
+          <div class="rates">
+            <label class="rate"><span>Upload</span>
+              <input type="number" min="0" data-speed="uploadLimit" value="${toKiB(speed.uploadLimit)}" /><span class="unit">KiB/s</span></label>
+            <label class="rate"><span>Download</span>
+              <input type="number" min="0" data-speed="downloadLimit" value="${toKiB(speed.downloadLimit)}" /><span class="unit">KiB/s</span></label>
+          </div>
+
+          <h3 style="margin:1rem 0 0.3rem">Alternative limits</h3>
+          <div class="rates">
+            <label class="rate"><span>Upload</span>
+              <input type="number" min="0" data-speed="alt.uploadLimit" value="${toKiB(alt.uploadLimit)}" /><span class="unit">KiB/s</span></label>
+            <label class="rate"><span>Download</span>
+              <input type="number" min="0" data-speed="alt.downloadLimit" value="${toKiB(alt.downloadLimit)}" /><span class="unit">KiB/s</span></label>
+          </div>
+
+          <label class="choice" style="margin-top:0.9rem">
+            <input type="checkbox" data-speed="schedule.enabled" ${schedule.enabled ? 'checked' : ''} />
+            <span>Use the alternative limits on a schedule</span>
+          </label>
+          <div class="when" style="margin:0.4rem 0 0 1.6rem">
+            <span class="sub">From</span>
+            <input type="time" data-speed="schedule.from" value="${escapeHtml(schedule.from ?? '11:00')}" />
+            <span class="sub">to</span>
+            <input type="time" data-speed="schedule.to" value="${escapeHtml(schedule.to ?? '22:00')}" />
+            <select data-speed="schedule.days">
+              ${['everyday', 'weekdays', 'weekends']
+                .map(
+                  (value) =>
+                    `<option value="${value}" ${schedule.days === value ? 'selected' : ''}>${value}</option>`,
+                )
+                .join('')}
+            </select>
+          </div>
+          <div class="sub" style="margin:0.4rem 0 0 1.6rem">
+            An end earlier than the start means overnight — 22:00 to 06:00 is one
+            window, not an empty one. On those, the days above pick the night the
+            window <i>opens</i>.
+          </div>`;
+        return panel;
+      }
+
+      function readSpeedEditor() {
+        const panel = document.querySelector('[data-speed-editor]');
+        if (!panel) return {};
+        const read = (key) => panel.querySelector(`[data-speed="${key}"]`);
+        return {
+          speed: {
+            uploadLimit: fromKiB(read('uploadLimit').value),
+            downloadLimit: fromKiB(read('downloadLimit').value),
+            alternative: {
+              uploadLimit: fromKiB(read('alt.uploadLimit').value),
+              downloadLimit: fromKiB(read('alt.downloadLimit').value),
+            },
+            schedule: {
+              enabled: read('schedule.enabled').checked,
+              from: read('schedule.from').value || '11:00',
+              to: read('schedule.to').value || '22:00',
+              days: read('schedule.days').value,
+            },
+          },
+        };
+      }
+
       function readHookEditor() {
         const panel = document.querySelector('[data-hook-editor]');
         if (!panel) return {};
@@ -2595,6 +2746,7 @@
             the two. <span class="badge">restart</span>
           </div>`;
         body.append(group);
+        body.append(speedPanel(config));
         group.querySelector('#cfg-cache-split').onchange = (event) => {
           const field = group.querySelector('#cfg-cache-path');
           field.disabled = !event.target.checked;
@@ -2822,7 +2974,11 @@
        * @returns {Promise<void>} - Resolves once saved.
        */
       async function saveSettings(thenRestart) {
-        const updates = { ...readRowEditors(rowEditorColumns), ...readHookEditor() };
+        const updates = {
+          ...readRowEditors(rowEditorColumns),
+          ...readHookEditor(),
+          ...readSpeedEditor(),
+        };
         const mark = document.getElementById('cfg-mark');
         if (mark) {
           // An empty string is the off switch, and has to survive the trip: it
