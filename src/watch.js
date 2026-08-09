@@ -1,4 +1,5 @@
 import chokidar from 'chokidar';
+import { normalizeCategories } from './catalog.js';
 
 /**
  * Watches folders for new PMTiles archives and imports them automatically.
@@ -49,8 +50,10 @@ export class WatchManager {
       });
 
       this.#watchers.push(watcher);
+      const tags = normalizeCategories(folder);
       console.log(
-        `[watch] watching ${folder.path}${folder.category ? ` as "${folder.category}"` : ''}`,
+        `[watch] watching ${folder.path}` +
+          (tags.length > 0 ? ` as "${tags.join('", "')}"` : ''),
       );
     }
   }

@@ -12,6 +12,18 @@
  * Each build therefore becomes its own archive with its own torrent and its own
  * lifetime, which is what you want: old builds stay seedable for as long as
  * anyone still wants them.
+ *
+ * Two ways to find the new one:
+ *
+ *   url    a template with the date in it, expanded and probed. Costs one HEAD
+ *          per candidate date and works against anything, including origins
+ *          that publish no listing at all.
+ *   index  a directory URL, listed and filtered. For upstreams whose filenames
+ *          are not predictable, or where you would rather not encode the
+ *          naming scheme by hand.
+ *
+ * A template is the more reliable of the two — it asks a direct question and
+ * gets a direct answer — so where the naming is predictable, prefer it.
  */
 
 import fs from 'node:fs/promises';
@@ -61,6 +73,56 @@ export function candidateDates(source, now = new Date()) {
   return dates;
 }
 
+/** Files worth importing, when a listing does not say which are archives. */
+const ARCHIVE_PATTERN = /\.(pmtiles|mbtiles)$/i;
+
+/**
+ * Pulls candidate file URLs out of a directory listing.
+ *
+ * Handles the two listings actually met in the wild: an HTML index, where the
+ * files are `<a href>` targets, and an S3-style `ListBucketResult`, where they
+ * are `<Key>` elements. Anything else yields nothing rather than guessing.
+ *
+ * Every result is resolved against the index URL and then checked to still sit
+ * underneath it. A listing is a document from somewhere else that this node is
+ * about to download gigabytes from and publish under its own name; following an
+ * off-site link out of one would mean the page decides what this node
+ * distributes.
+ * @param {string} body - The listing document.
+ * @param {string} indexUrl - Where it came from.
+ * @returns {string[]} - Absolute URLs, in the order they appeared.
+ */
+export function parseListing(body, indexUrl) {
+  const base = new URL(indexUrl);
+  const prefix = new URL('.', base).href;
+  const found = [];
+
+  const add = (raw) => {
+    if (!raw) return;
+    let resolved;
+    try {
+      resolved = new URL(raw, base);
+    } catch {
+      return;
+    }
+    if (resolved.protocol !== 'http:' && resolved.protocol !== 'https:') return;
+    // Underneath the index, not merely on the same host: a listing that links
+    // to /../../elsewhere is not offering its own contents.
+    if (!resolved.href.startsWith(prefix)) return;
+    if (resolved.href === prefix) return;
+    if (!found.includes(resolved.href)) found.push(resolved.href);
+  };
+
+  for (const match of body.matchAll(/<a\s[^>]*href\s*=\s*["']([^"']+)["']/gi)) {
+    add(match[1]);
+  }
+  for (const match of body.matchAll(/<Key>([^<]+)<\/Key>/gi)) {
+    add(match[1]);
+  }
+
+  return found;
+}
+
 /**
  * Polls scheduled sources and imports whatever has appeared.
  */
@@ -89,8 +151,9 @@ export class ScheduledSourceManager {
    */
   start() {
     const sources = this.#config.sources ?? [];
-    if (sources.length === 0) return;
-
+    // The timer runs even with nothing to poll. Every pass reads the list
+    // fresh, so this is what lets a source added through the console start
+    // working without a restart; an empty pass costs nothing.
     const intervalMs = (this.#config.sourceCheckIntervalHours ?? 6) * 3600 * 1000;
     this.poll().catch((error) =>
       console.error(`[source] initial poll failed: ${error.message}`),
@@ -102,9 +165,11 @@ export class ScheduledSourceManager {
     }, intervalMs);
     this.#timer.unref?.();
 
-    console.log(
-      `[source] following ${sources.length} scheduled source(s) every ${intervalMs / 3600000}h`,
-    );
+    if (sources.length > 0) {
+      console.log(
+        `[source] following ${sources.length} scheduled source(s) every ${intervalMs / 3600000}h`,
+      );
+    }
   }
 
   /**
@@ -136,8 +201,12 @@ export class ScheduledSourceManager {
    * @returns {Promise<object[]>} - Entries imported.
    */
   async #pollSource(source) {
+    if (source.index) return this.#pollIndex(source);
+
     if (!source.url) {
-      console.error(`[source] ${source.name ?? 'unnamed'}: no url template`);
+      console.error(
+        `[source] ${source.name ?? 'unnamed'}: needs either a url template or an index url`,
+      );
       return [];
     }
 
@@ -159,7 +228,7 @@ export class ScheduledSourceManager {
       try {
         const entry = await this.#library.addRemoteArchive(url, {
           name: filename,
-          category: source.category,
+          categories: source.categories ?? source.category,
           savePath: source.savePath,
           trackers: source.trackers,
           addTrackers: source.addTrackers,
@@ -182,6 +251,92 @@ export class ScheduledSourceManager {
       }
     }
     return imported;
+  }
+
+  /**
+   * Polls a source that publishes into a directory rather than at a
+   * predictable URL.
+   *
+   * Only the newest few listed files are ever considered, and `newest` defaults
+   * to one. That bound is the whole safety of this: an upstream keeping two
+   * years of daily planet builds would otherwise be read as two years of
+   * archives to fetch, which is several hundred terabytes and would begin
+   * without anyone asking. Raising it costs one full archive per step, so it is
+   * worth raising only as far as the number of polls you expect to miss.
+   * @param {object} source - The source definition.
+   * @returns {Promise<object[]>} - Entries imported.
+   */
+  async #pollIndex(source) {
+    const label = source.name ?? source.index;
+
+    let listing;
+    try {
+      const response = await fetch(source.index);
+      if (!response.ok) {
+        console.error(`[source] ${label}: listing returned ${response.status}`);
+        return [];
+      }
+      listing = await response.text();
+    } catch (error) {
+      console.error(`[source] ${label}: could not read listing: ${error.message}`);
+      return [];
+    }
+
+    const candidates = this.constructor.select(listing, source);
+    const imported = [];
+
+    for (const url of candidates) {
+      if (this.#catalog.findBySource(url)) continue;
+
+      console.log(`[source] ${label}: found ${url}, importing`);
+      try {
+        const entry = await this.#library.addRemoteArchive(url, {
+          categories: source.categories ?? source.category,
+          savePath: source.savePath,
+          trackers: source.trackers,
+          addTrackers: source.addTrackers,
+          pieceLength: source.pieceLength,
+          retain: source.retain !== false,
+          comment: source.comment,
+        });
+        imported.push(entry);
+        console.log(`[source] ${label}: imported ${entry.name} (${entry.infoHash})`);
+        if (source.latestLink) await this.#linkLatest(source, entry);
+      } catch (error) {
+        console.error(`[source] ${url}: ${error.message}`);
+      }
+    }
+
+    return imported;
+  }
+
+  /**
+   * The URLs from a listing this source would consider, newest first.
+   *
+   * Separated out so the console can show what a directory would yield before
+   * anything is downloaded — pointing this at the wrong URL is otherwise a
+   * mistake measured in hundreds of gigabytes.
+   *
+   * "Newest" is by name, descending. Dated filenames sort chronologically, and
+   * a listing's own order cannot be relied on.
+   * @param {string} listing - The listing document.
+   * @param {object} source - The source definition.
+   * @returns {string[]} - Candidate URLs.
+   */
+  static select(listing, source) {
+    let pattern = ARCHIVE_PATTERN;
+    if (source.match) {
+      try {
+        pattern = new RegExp(source.match, 'i');
+      } catch (error) {
+        throw new Error(`match is not a valid regular expression: ${error.message}`);
+      }
+    }
+
+    return parseListing(listing, source.index)
+      .filter((url) => pattern.test(url))
+      .sort((a, b) => b.localeCompare(a))
+      .slice(0, Math.max(1, source.newest ?? 1));
   }
 
   /**

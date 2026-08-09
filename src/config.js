@@ -141,7 +141,26 @@ const DEFAULTS = {
    * archive has not been marked for sharing.
    */
   feedCategories: undefined,
-  /** Scheduled upstreams that publish a new archive per date. See sources.js. */
+  /**
+   * Upstreams that publish a new archive on a schedule.
+   *
+   * Two ways to find it, and an entry gives one or the other:
+   *
+   *   url    a template with the date in it — `{YYYYMMDD}`, `{YYYY-MM-DD}`,
+   *          `{YYYY}`, `{MM}`, `{DD}` — expanded and probed. Prefer this where
+   *          the naming is predictable: it asks a direct question, gets a
+   *          direct answer, and needs the upstream to publish no listing at all.
+   *   index  a directory URL, listed and filtered. For upstreams whose naming
+   *          is not predictable, or where encoding it by hand is not worth it.
+   *
+   * `newest` bounds how many of the listed files an index source will consider,
+   * and defaults to one. That bound is the safety of the whole thing: a
+   * directory holding two years of daily planet builds would otherwise read as
+   * two years of archives to fetch. Raise it only as far as the number of polls
+   * you expect to miss, since each step is another full archive.
+   *
+   * See sources.js.
+   */
   sources: [],
   /** How often to poll scheduled sources, in hours. */
   sourceCheckIntervalHours: 6,

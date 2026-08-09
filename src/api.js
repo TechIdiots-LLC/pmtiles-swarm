@@ -6,6 +6,7 @@ import { createAuth } from './auth.js';
 import { normalizeCategories } from './catalog.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
 import { renderFeed } from './feed.js';
+import { ScheduledSourceManager, candidateDates, expandTemplate } from './sources.js';
 import { limitFor } from './seeding.js';
 import { buildTileJson, extensionMatches } from './tilejson.js';
 import { TileReadError } from './tiles.js';
@@ -196,6 +197,63 @@ export function createApp({
         return res.status(404).json({ error: 'nothing to cancel' });
       }
       res.json({ cancelled });
+    }),
+  );
+
+  // What a source would pick up, without picking anything up.
+  //
+  // Worth an endpoint of its own because the mistake it prevents is expensive:
+  // a directory URL typed slightly wrong, or a pattern that matches more than
+  // intended, is otherwise discovered by watching several hundred gigabytes
+  // arrive. Nothing here downloads an archive — a listing is read, or a
+  // templated URL is asked whether it exists.
+  app.post(
+    '/api/sources/preview',
+    route(async (req, res) => {
+      const source = req.body ?? {};
+
+      if (source.index) {
+        let listing;
+        try {
+          const response = await fetch(source.index, {
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!response.ok) {
+            return res.status(502).json({
+              error: `the listing at ${source.index} returned ${response.status}`,
+            });
+          }
+          listing = await response.text();
+        } catch (error) {
+          return res.status(502).json({
+            error: `could not read ${source.index}: ${error.message}`,
+          });
+        }
+
+        try {
+          const urls = ScheduledSourceManager.select(listing, source);
+          return res.json({
+            kind: 'index',
+            urls,
+            known: urls.filter((url) => Boolean(catalog.findBySource(url))),
+          });
+        } catch (error) {
+          return res.status(400).json({ error: error.message });
+        }
+      }
+
+      if (source.url) {
+        const urls = candidateDates(source).map((date) =>
+          expandTemplate(source.url, date),
+        );
+        return res.json({
+          kind: 'template',
+          urls,
+          known: urls.filter((url) => Boolean(catalog.findBySource(url))),
+        });
+      }
+
+      res.status(400).json({ error: 'give either a url template or an index url' });
     }),
   );
 

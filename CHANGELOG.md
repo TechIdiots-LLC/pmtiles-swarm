@@ -23,6 +23,21 @@
   could only be set at the moment of adding, which is the wrong time to have to know: a build
   becomes `weekly` once there is a second one, and an archive is marked for sharing long after it
   arrives.
+- **Monitored folders and watched web locations are editable in Settings**, as tables rather than
+  a textarea full of JSON — the shape a torrent client gives a grid for. Folders take categories, a
+  save location, a publish directory and a web seed base; web locations take a URL template or a
+  directory to list.
+- **A source can watch a directory instead of guessing filenames.** `sources[].index` reads a
+  listing — an HTML autoindex or an S3 `ListBucketResult` — filters it and takes the newest match,
+  for upstreams whose naming is not predictable enough to write as a template. Only links
+  underneath the index URL are followed: a listing is a document from somewhere else, and this node
+  is about to download gigabytes from whatever it names and republish the result under its own
+  name. `newest` bounds how many are considered and defaults to one.
+- **`POST /api/sources/preview`**, and a Preview button beside each web location, reporting what a
+  source would take without taking any of it. A directory URL typed slightly wrong is otherwise
+  discovered by watching several hundred gigabytes arrive.
+- Adding a scheduled source no longer needs a restart. The poll timer only started when the list
+  was already non-empty, and every pass reads the list fresh.
 - Settings now presents the download options the way a torrent client does: a checkbox for the
   marker, and the separate cache directory as an option that ships off.
 - New `sparse` setting, global with a per-archive override, matching tileserver-gl.

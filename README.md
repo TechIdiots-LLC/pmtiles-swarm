@@ -124,11 +124,40 @@ subscribers forward, and they fail differently, so publishing both is cheap insu
       "webSeedBase": "https://maps.example.org/files"
     }
   ],
+  "sources": [
+    { "name": "protomaps daily", "index": "https://build.protomaps.com/", "categories": ["basemaps"] }
+  ],
   "subscriptions": [
     { "url": "https://other.example.org/feed.xml", "mode": "cache", "filter": "terrain" }
   ]
 }
 ```
+
+### Watching for new archives
+
+Three ways in, all editable from the Settings screen:
+
+- **Monitored folders** (`watch`) — a directory scanned for new archives, the way a torrent client
+  watches for `.torrent` files. `publishDir` moves each one into the directory a web server serves
+  before the torrent is built, and `webSeedBase` is the URL that directory answers on, so a
+  brand-new archive has a working web seed before any peer holds a copy.
+- **A URL template** (`sources[].url`) — for an upstream that publishes at a predictable address,
+  like `https://build.protomaps.com/{YYYYMMDD}.pmtiles`. Expanded per candidate date and probed
+  with a `HEAD`. The more reliable of the two web options: it asks a direct question, and needs the
+  upstream to publish no listing at all.
+- **A directory** (`sources[].index`) — for an upstream whose naming is not predictable. The
+  listing is read (HTML autoindex or an S3 `ListBucketResult`), filtered, and the newest match
+  taken. Only links *underneath* the index URL are considered, since a listing is a document from
+  somewhere else and following an off-site link out of one would let that page decide what this
+  node downloads and republishes.
+
+`newest` bounds how many listed files an index source considers, and defaults to `1`. That bound
+matters: a directory holding two years of daily planet builds would otherwise read as two years of
+archives to fetch. Raise it only as far as the number of polls you expect to miss.
+
+`POST /api/sources/preview` reports what a source *would* take without taking any of it — the
+**Preview** button in Settings — because a directory URL typed slightly wrong is otherwise
+discovered by watching several hundred gigabytes arrive.
 
 ### Incomplete archives
 
