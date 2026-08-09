@@ -7,7 +7,9 @@ import { after, describe, it } from 'node:test';
 import { createApp } from '../src/api.js';
 import { Catalog } from '../src/catalog.js';
 import { redactConfig, saveConfig } from '../src/config.js';
+import { Library } from '../src/library.js';
 import { isDue, intervalMs } from '../src/sources.js';
+import { SubscriptionManager } from '../src/subscriptions.js';
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-peers-'));
 after(() => fs.rm(workspace, { recursive: true, force: true }));
@@ -259,5 +261,121 @@ describe('polling more often than hourly', () => {
   it('will not poll faster than the tick underneath it', () => {
     assert.equal(intervalMs({ everyMinutes: 0 }), 6 * 3600 * 1000);
     assert.equal(intervalMs({ everyMinutes: 0.1 }), 60 * 1000);
+  });
+});
+
+describe('following a node with a token it issued', () => {
+  /**
+   * A node that can be followed, and one that follows it.
+   * @param {Function} handler - How the publisher answers.
+   * @param {object} subscription - The follower's subscription.
+   * @returns {Promise<object>} - The follower's catalog, its engine calls, and close().
+   */
+  async function following(handler, subscription) {
+    const publisher = http.createServer(handler);
+    await new Promise((resolve) => publisher.listen(0, '127.0.0.1', resolve));
+    const url = `http://127.0.0.1:${publisher.address().port}`;
+
+    const dir = await fs.mkdtemp(path.join(workspace, 'follow-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+
+    const adds = [];
+    const library = new Library({
+      catalog,
+      engine: {
+        name: 'webtorrent',
+        list: async () => [],
+        get: async () => null,
+        add: async (request) => {
+          adds.push(request);
+        },
+        remove: async () => {},
+      },
+      config: { dataDir: dir, webtorrent: { savePath: dir }, trackers: [] },
+    });
+
+    const config = { subscriptions: [{ ...subscription, url: `${url}${subscription.path}` }] };
+    const manager = new SubscriptionManager(library, config);
+    await manager.refresh();
+
+    return {
+      catalog,
+      adds,
+      url,
+      close: () => new Promise((resolve) => publisher.close(resolve)),
+    };
+  }
+
+  const CATALOG = (base) => ({
+    format: 'pmtiles-swarm-catalog/1',
+    complete: true,
+    archives: [
+      {
+        infoHash: 'a'.repeat(40),
+        name: 'internal.pmtiles',
+        size: 1024,
+        categories: ['internal'],
+        magnet: `magnet:?xt=urn:btih:${'a'.repeat(40)}&dn=internal.pmtiles`,
+        torrent: `${base}/archives/${'a'.repeat(40)}/archive.torrent`,
+      },
+    ],
+  });
+
+  it('presents the token when fetching the .torrent, not only the catalogue', async () => {
+    // It is the same peer and the same relationship. A node that guards its
+    // torrent files would otherwise refuse the follower it has just told about
+    // them.
+    const seen = [];
+    const node = await following(
+      (req, res) => {
+        seen.push([req.url.split('?')[0], req.headers.authorization ?? null]);
+        if (req.url.startsWith('/api/catalog')) {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(CATALOG(`http://127.0.0.1:${req.socket.localPort}`)));
+          return;
+        }
+        // A real .torrent is not needed; that it was asked for with the token
+        // is the point.
+        res.writeHead(404).end();
+      },
+      { path: '/api/catalog', protocol: 'api', mode: 'cache', token: 'issued-to-us' },
+    );
+
+    try {
+      const torrentRequest = seen.find(([route]) => route.endsWith('archive.torrent'));
+      assert.ok(torrentRequest, 'it should have tried the .torrent');
+      assert.equal(torrentRequest[1], 'Bearer issued-to-us');
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('joins by magnet when the .torrent cannot be fetched', async () => {
+    // The magnet names the same archive by the same infohash. Losing the whole
+    // thing because one URL is unreachable would be a poor trade for the
+    // trackers and web seeds the .torrent would have carried.
+    const node = await following(
+      (req, res) => {
+        if (req.url.startsWith('/api/catalog')) {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify(CATALOG(`http://127.0.0.1:${req.socket.localPort}`)));
+          return;
+        }
+        res.writeHead(404).end();
+      },
+      { path: '/api/catalog', protocol: 'api', mode: 'cache' },
+    );
+
+    try {
+      assert.deepEqual(
+        node.catalog.list().map((entry) => entry.name),
+        ['internal.pmtiles'],
+      );
+      assert.equal(node.adds.length, 1);
+      assert.match(node.adds[0].magnet ?? '', /btih:a{40}/);
+    } finally {
+      await node.close();
+    }
   });
 });

@@ -313,16 +313,38 @@ export class SubscriptionManager {
       paused: (subscription.mode ?? 'cache') === 'cache',
     };
 
+    // The .torrent is preferred where there is one: it carries the trackers
+    // and the web seeds, and a web seed is what makes a brand-new archive
+    // usable before any peer holds a copy.
     if (item.torrentUrl) {
-      const response = await fetch(item.torrentUrl);
-      if (!response.ok) {
-        throw new Error(
-          `torrent fetch failed: ${response.status} ${response.statusText}`,
+      try {
+        const response = await fetch(item.torrentUrl, {
+          // The same credential as the request that named this URL. It is the
+          // same peer and the same relationship, and a peer that guards its
+          // torrent files would otherwise refuse the follower it just told
+          // about them.
+          headers: subscription.token
+            ? { authorization: `Bearer ${subscription.token}` }
+            : {},
+        });
+        if (!response.ok) {
+          throw new Error(`${response.status} ${response.statusText}`);
+        }
+        const torrentFile = new Uint8Array(await response.arrayBuffer());
+        return this.#library.addExistingTorrent({ torrentFile }, options);
+      } catch (error) {
+        // Falling back rather than giving up. The magnet is right there and
+        // names the same archive by the same infohash; losing the whole thing
+        // because one URL is temporarily unreachable would be a poor trade for
+        // the trackers and web seeds it would have carried.
+        if (!item.magnet) throw error;
+        console.warn(
+          `[sync] ${item.title ?? item.infoHash}: could not fetch its .torrent ` +
+            `(${error.message}); joining by magnet instead`,
         );
       }
-      const torrentFile = new Uint8Array(await response.arrayBuffer());
-      return this.#library.addExistingTorrent({ torrentFile }, options);
     }
+
     if (item.magnet) {
       return this.#library.addExistingTorrent({ magnet: item.magnet }, options);
     }
