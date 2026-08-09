@@ -296,6 +296,77 @@
       </section>
     </main>
 
+    <dialog id="adopt-dialog">
+      <form method="dialog" id="adopt-form">
+        <h2>Adopt existing torrents</h2>
+        <div class="sub" style="margin-bottom:0.8rem">
+          Takes over archives a torrent client is already seeding, so they are
+          catalogued, served and published from here without being re-hashed or
+          downloaded again.
+        </div>
+
+        <div class="field">
+          <label>Where from</label>
+          <label style="display:flex; gap:0.5rem; align-items:center">
+            <input type="radio" name="adopt-source" value="local" checked />
+            This node's own engine (<span id="adopt-engine">…</span>)
+          </label>
+          <label style="display:flex; gap:0.5rem; align-items:center">
+            <input type="radio" name="adopt-source" value="qbittorrent" />
+            A qBittorrent instance
+          </label>
+        </div>
+
+        <fieldset id="adopt-qbt" hidden>
+          <legend>qBittorrent</legend>
+          <div class="field">
+            <label for="adopt-url">Web UI URL</label>
+            <input id="adopt-url" placeholder="http://127.0.0.1:8080" />
+          </div>
+          <div class="field" style="display:flex; gap:0.5rem">
+            <input id="adopt-user" placeholder="username" />
+            <input id="adopt-pass" type="password" placeholder="password" autocomplete="off" />
+          </div>
+          <div class="sub">
+            Its save paths have to be readable from this node — the same
+            machine, or the same mount. Anything that is not is marked below.
+            Nothing about that instance is changed by looking at it.
+          </div>
+        </fieldset>
+
+        <div class="field">
+          <button type="button" id="adopt-scan">Look for archives</button>
+          <span class="status" id="adopt-status"></span>
+        </div>
+
+        <div id="adopt-list" class="panel" hidden style="max-height:22rem; overflow:auto"></div>
+
+        <div class="field">
+          <label>Categories</label>
+          <div id="adopt-picker" class="tags"></div>
+          <div style="display: flex; gap: 0.4rem; margin-top: 0.4rem">
+            <input id="adopt-new-category" placeholder="add a category" />
+            <button type="button" id="adopt-add-category">Add</button>
+          </div>
+          <div class="sub">
+            Applied to everything taken. Leave empty to keep whatever category
+            the other client had them under.
+          </div>
+        </div>
+
+        <label style="display:flex; gap:0.5rem; align-items:center">
+          <input type="checkbox" id="adopt-all" />
+          Show everything, not just map archives
+        </label>
+
+        <div class="sub" id="adopt-error" style="color:var(--danger)"></div>
+        <menu>
+          <button value="cancel">Cancel</button>
+          <button id="adopt-go" value="default" disabled>Adopt selected</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="add-dialog">
       <form method="dialog" id="add-form">
         <h2>Add an archive</h2>
@@ -1270,13 +1341,209 @@
         }
       };
 
+      // ── Adopt ─────────────────────────────────────────────────────────────
+      let adoptCandidates = [];
+      let adoptChosen = new Set();
+      let adoptTags = new Set();
+
+      const adoptSource = () =>
+        document.querySelector('[name="adopt-source"]:checked').value;
+
+      /**
+       * The body describing where to adopt from.
+       * @returns {object} - Request body.
+       */
+      function adoptBody() {
+        if (adoptSource() !== 'qbittorrent') return {};
+        return {
+          qbittorrent: {
+            url: $('adopt-url').value.trim(),
+            username: $('adopt-user').value.trim() || undefined,
+            password: $('adopt-pass').value || undefined,
+          },
+        };
+      }
+
+      function renderAdoptTags(known) {
+        const picker = $('adopt-picker');
+        picker.innerHTML = '';
+        const all = [...new Set([...known, ...adoptTags])].sort();
+        if (all.length === 0) {
+          picker.innerHTML = '<span class="sub">None yet — add one below.</span>';
+          return;
+        }
+        for (const name of all) {
+          const chip = document.createElement('span');
+          chip.className = `tag${adoptTags.has(name) ? ' on' : ''}`;
+          chip.textContent = name;
+          chip.onclick = () => {
+            if (adoptTags.has(name)) adoptTags.delete(name);
+            else adoptTags.add(name);
+            renderAdoptTags(known);
+          };
+          picker.append(chip);
+        }
+      }
+
+      function renderAdoptList() {
+        const box = $('adopt-list');
+        const showAll = $('adopt-all').checked;
+        const shown = adoptCandidates.filter(
+          (candidate) => showAll || candidate.kind,
+        );
+
+        box.hidden = false;
+        if (shown.length === 0) {
+          box.innerHTML =
+            '<div class="empty">Nothing there this node does not already have.' +
+            (showAll ? '' : ' Tick "show everything" if it is not a .pmtiles or .mbtiles file.') +
+            '</div>';
+          $('adopt-go').disabled = true;
+          return;
+        }
+
+        box.innerHTML = `
+          <div style="margin-bottom:0.5rem">
+            <button type="button" id="adopt-all-on">Select all</button>
+            <button type="button" id="adopt-all-off">Select none</button>
+          </div>
+          <table><tbody>
+            ${shown
+              .map(
+                (candidate) => `
+                  <tr>
+                    <td style="width:1.5rem">
+                      <input type="checkbox" data-hash="${candidate.infoHash}"
+                        ${adoptChosen.has(candidate.infoHash) ? 'checked' : ''}
+                        ${candidate.readable ? '' : 'disabled'} />
+                    </td>
+                    <td>
+                      ${escapeHtml(candidate.name)}
+                      <div class="sub">
+                        ${bytes(candidate.size)} · ${pct(candidate.progress ?? 0)}
+                        ${candidate.kind ? ` · ${escapeHtml(candidate.kind)}` : ''}
+                        ${candidate.category ? ` · ${escapeHtml(candidate.category)}` : ''}
+                      </div>
+                      ${
+                        candidate.readable
+                          ? ''
+                          : `<div class="sub" style="color:var(--danger)">
+                               not readable from this node at
+                               <code>${escapeHtml(candidate.savePath ?? 'nowhere')}</code>
+                             </div>`
+                      }
+                    </td>
+                  </tr>`,
+              )
+              .join('')}
+          </tbody></table>`;
+
+        const boxes = [...box.querySelectorAll('[data-hash]')];
+        const sync = () => {
+          $('adopt-go').disabled = adoptChosen.size === 0;
+        };
+        for (const input of boxes) {
+          input.onchange = () => {
+            if (input.checked) adoptChosen.add(input.dataset.hash);
+            else adoptChosen.delete(input.dataset.hash);
+            sync();
+          };
+        }
+        $('adopt-all-on').onclick = () => {
+          for (const input of boxes) {
+            if (input.disabled) continue;
+            input.checked = true;
+            adoptChosen.add(input.dataset.hash);
+          }
+          sync();
+        };
+        $('adopt-all-off').onclick = () => {
+          for (const input of boxes) input.checked = false;
+          adoptChosen.clear();
+          sync();
+        };
+        sync();
+      }
+
       $('adopt').onclick = async () => {
+        adoptCandidates = [];
+        adoptChosen = new Set();
+        adoptTags = new Set();
+        $('adopt-list').hidden = true;
+        $('adopt-status').textContent = '';
+        $('adopt-error').textContent = '';
+        $('adopt-go').disabled = true;
+
         try {
-          const result = await api('/api/adopt', { method: 'POST' });
-          toast(`adopted ${result?.length ?? 0}`);
+          const status = await api('/api/status');
+          $('adopt-engine').textContent = status.engine?.name ?? 'unknown';
+          renderAdoptTags(status.categories ?? []);
+        } catch {
+          renderAdoptTags([]);
+        }
+        $('adopt-dialog').showModal();
+      };
+
+      for (const radio of document.querySelectorAll('[name="adopt-source"]')) {
+        radio.onchange = () => {
+          $('adopt-qbt').hidden = adoptSource() !== 'qbittorrent';
+        };
+      }
+
+      $('adopt-all').onchange = () => {
+        if (adoptCandidates.length > 0) renderAdoptList();
+      };
+
+      $('adopt-add-category').onclick = () => {
+        const value = $('adopt-new-category').value.trim();
+        if (!value) return;
+        adoptTags.add(value);
+        $('adopt-new-category').value = '';
+        renderAdoptTags([...adoptTags]);
+      };
+
+      $('adopt-scan').onclick = async () => {
+        $('adopt-error').textContent = '';
+        $('adopt-status').textContent = 'looking…';
+        try {
+          const result = await api('/api/adopt/candidates', {
+            method: 'POST',
+            body: adoptBody(),
+          });
+          adoptCandidates = result.candidates ?? [];
+          adoptChosen = new Set(
+            adoptCandidates.filter((c) => c.kind && c.readable).map((c) => c.infoHash),
+          );
+          const unreadable = adoptCandidates.filter((c) => !c.readable).length;
+          $('adopt-status').textContent =
+            `${adoptCandidates.length} not yet catalogued` +
+            (unreadable ? `, ${unreadable} of them not readable from here` : '');
+          renderAdoptList();
+        } catch (error) {
+          $('adopt-status').textContent = '';
+          $('adopt-error').textContent = error.message;
+        }
+      };
+
+      $('adopt-form').onsubmit = async (event) => {
+        if (event.submitter?.value === 'cancel') return;
+        event.preventDefault();
+        $('adopt-error').textContent = '';
+
+        try {
+          const result = await api('/api/adopt', {
+            method: 'POST',
+            body: {
+              ...adoptBody(),
+              infoHashes: [...adoptChosen],
+              categories: [...adoptTags],
+            },
+          });
+          $('adopt-dialog').close();
+          toast(`adopted ${result?.added ?? 0}`);
           refresh();
         } catch (error) {
-          toast(error.message);
+          $('adopt-error').textContent = error.message;
         }
       };
 
@@ -1577,6 +1844,114 @@
         return updates;
       }
 
+      /**
+       * The two external-program hooks, laid out the way a torrent client
+       * lays them out.
+       *
+       * Read-only unless `allowHooksFromApi` is set in the config file. A hook
+       * runs a command as the service user, so a token that could choose it
+       * would stop being a token that manages maps and start being one that
+       * runs code. The panel still shows what is configured and what the
+       * placeholders are, because a setting nobody can find is not much safer
+       * than one anybody can change — it is just harder to use.
+       * @param {HTMLElement} into - Where to render.
+       * @param {object} config - The redacted config.
+       * @param {Set<string>} restart - Keys needing a restart.
+       * @returns {void}
+       */
+      function renderHookEditor(into, config, restart) {
+        const editable = Boolean(config.allowHooksFromApi);
+        const panel = document.createElement('div');
+        panel.className = 'panel';
+        panel.style.marginBottom = '1rem';
+        panel.dataset.hookEditor = 'true';
+
+        const line = (key, label, hook = {}) => `
+          <div class="field">
+            <label style="display:flex; gap:0.5rem; align-items:center">
+              <input type="checkbox" data-hook-on="${key}"
+                ${hook.command ? 'checked' : ''} ${editable ? '' : 'disabled'} />
+              ${escapeHtml(label)}
+              ${restart.has(key) ? '<span class="badge">restart</span>' : ''}
+            </label>
+            <input data-hook-cmd="${key}" style="width:100%"
+              placeholder="/path/to/script.sh %N %F %I"
+              value="${escapeHtml(
+                [hook.command, ...(hook.args ?? [])].filter(Boolean).join(' '),
+              )}" ${editable ? '' : 'disabled'} />
+          </div>`;
+
+        panel.innerHTML = `
+          <h2 style="margin-top:0">Run external program</h2>
+          ${line('onAdded', 'Run external program on archive added', config.onAdded)}
+          ${line('onComplete', 'Run external program on archive finished', config.onComplete)}
+          <div class="sub">
+            <b>Supported parameters</b> (case sensitive):
+            <ul style="margin:0.3rem 0 0 1.2rem; padding:0">
+              <li><code>%N</code> archive name</li>
+              <li><code>%L</code> first category</li>
+              <li><code>%G</code> all categories, comma separated</li>
+              <li><code>%F</code> content path</li>
+              <li><code>%R</code> root path</li>
+              <li><code>%D</code> save path</li>
+              <li><code>%C</code> file count</li>
+              <li><code>%Z</code> size in bytes</li>
+              <li><code>%T</code> first tracker</li>
+              <li><code>%I</code> infohash v1</li>
+              <li><code>%J</code> infohash v2</li>
+            </ul>
+            <p style="margin:0.5rem 0 0">
+              Arguments are split on spaces here and passed as a vector, never
+              through a shell — so an archive name containing a space stays one
+              argument, and quoting it is unnecessary. Anything needing a shell
+              should be a line inside your script.
+            </p>
+            ${
+              editable
+                ? ''
+                : `<p style="margin:0.5rem 0 0">
+                     <b>Read-only.</b> These run a command as the service user,
+                     so an API token that could set them would no longer be a
+                     token that manages maps — it would be one that runs code.
+                     Edit them in the config file, or set
+                     <code>"allowHooksFromApi": true</code> there to take that
+                     trade deliberately and unlock this panel.
+                   </p>`
+            }
+          </div>`;
+
+        into.append(panel);
+      }
+
+      /**
+       * Reads the hook panel back, when it is editable.
+       * @returns {object} - Updates, empty when read-only.
+       */
+      function readHookEditor() {
+        const panel = document.querySelector('[data-hook-editor]');
+        if (!panel) return {};
+        const updates = {};
+
+        for (const key of ['onAdded', 'onComplete']) {
+          const on = panel.querySelector(`[data-hook-on="${key}"]`);
+          const command = panel.querySelector(`[data-hook-cmd="${key}"]`);
+          if (!on || on.disabled) return {};
+
+          if (!on.checked) {
+            updates[key] = null;
+            continue;
+          }
+          const parts = command.value.trim().split(/\s+/).filter(Boolean);
+          if (parts.length === 0) {
+            updates[key] = null;
+            continue;
+          }
+          updates[key] = { command: parts[0], args: parts.slice(1) };
+        }
+
+        return updates;
+      }
+
       // ── Settings ──────────────────────────────────────────────────────────
       let restartKeys = new Set();
       let rowEditorColumns = {};
@@ -1636,6 +2011,8 @@
         // are lists of small records, which is exactly what a torrent client
         // gives a grid for, and what a textarea full of braces is worst at.
         rowEditorColumns = {};
+        renderHookEditor(body, config, restartKeys);
+
         renderRowEditor({
           into: body,
           key: 'watch',
@@ -1785,7 +2162,8 @@
         for (const [key, value] of Object.entries(config)) {
           // Shown above, in a form that says what they mean.
           if (key === 'incompleteSuffix' || key === 'cacheSavePath') continue;
-          if (key === 'watch' || key === 'sources') continue;
+          if (key === 'watch' || key === 'sources' || key === 'subscriptions') continue;
+          if (key === 'onAdded' || key === 'onComplete') continue;
           const needsRestart = restartKeys.has(key);
           const field = document.createElement('div');
           field.className = 'field';
@@ -1806,7 +2184,7 @@
       }
 
       $('settings-save').onclick = async () => {
-        const updates = readRowEditors(rowEditorColumns);
+        const updates = { ...readRowEditors(rowEditorColumns), ...readHookEditor() };
         const mark = document.getElementById('cfg-mark');
         if (mark) {
           // An empty string is the off switch, and has to survive the trip: it

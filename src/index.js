@@ -10,7 +10,7 @@ import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { WebTorrentSeedEngine } from './engines/webtorrent.js';
 import { CompletionWatcher } from './incomplete.js';
 import { Library } from './library.js';
-import { CompletionHooks } from './hooks.js';
+import { ProgramHooks } from './hooks.js';
 import { SeedingLimits } from './seeding.js';
 import { ScheduledSourceManager } from './sources.js';
 import { SubscriptionManager } from './subscriptions.js';
@@ -107,7 +107,7 @@ PMTILES_SWARM_PUBLIC_URL
   const watch = new WatchManager(library);
   const sources = new ScheduledSourceManager(library, catalog, config);
   const seeding = new SeedingLimits(library, config);
-  const hooks = new CompletionHooks(library, config);
+  const hooks = new ProgramHooks(library, config);
   const completion = new CompletionWatcher(library, config);
 
   // Hand the catalogue back to the engine before anything else runs. Until

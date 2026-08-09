@@ -411,11 +411,26 @@ const DEFAULTS = {
    * hook eventually meets one and does something surprising; an argument vector
    * means a filename is a filename however it is spelled.
    *
-   * **Config file only.** This cannot be set through the API, because a token
-   * that manages torrents turning into a token that runs arbitrary commands as
-   * the service user is a large step to take by accident.
+   * `onAdded` fires when an archive enters the catalog, `onComplete` when its
+   * data is whole — the same pair a torrent client offers, and they are
+   * different moments: an archive joined in cache mode is added and will never
+   * be complete, while one built here is both at once.
+   *
+   * **Config file only by default.** A token that manages torrents turning
+   * into a token that runs arbitrary commands as the service user is a large
+   * step to take by accident. Set `allowHooksFromApi` to take it deliberately.
    */
+  onAdded: undefined,
   onComplete: undefined,
+  /**
+   * Whether the console may edit the two hook commands.
+   *
+   * Off, and settable only here. A hook runs a command as the service user, so
+   * an API token that could choose it would no longer be a token that manages
+   * maps — it would be one that runs code. Turning this on is a decision to
+   * accept that, and it has to be made somewhere a token cannot reach.
+   */
+  allowHooksFromApi: false,
   /** How often to look for finished downloads, in seconds. */
   onCompleteCheckIntervalSeconds: 60,
   /** How often to poll subscribed feeds, in seconds. */
@@ -524,6 +539,7 @@ export async function loadConfig(configPath) {
  */
 export const RESTART_REQUIRED = new Set([
   'port',
+  'onAdded',
   'onComplete',
   'allowUnauthenticated',
   'host',
@@ -542,9 +558,19 @@ export const RESTART_REQUIRED = new Set([
  *
  * Not secrets — these decide what code the service runs. An operator token is
  * meant to manage archives; letting it also choose a command to execute is a
- * different power, and one worth having to reach the filesystem for.
+ * different power, since it turns "can publish a map" into "can run anything
+ * as the service user", and one worth having to reach the filesystem for.
+ *
+ * `allowHooksFromApi` lifts it for the two hooks, deliberately from the config
+ * file only: the decision to hand that power to a token has to be made
+ * somewhere a token cannot reach.
+ * @param {object} config - The resolved configuration.
+ * @returns {Set<string>} - The keys the API may not write.
  */
-const FILE_ONLY = new Set(['onComplete']);
+function fileOnlyFor(config) {
+  if (config?.allowHooksFromApi) return new Set(['allowHooksFromApi']);
+  return new Set(['onAdded', 'onComplete', 'allowHooksFromApi']);
+}
 
 /** Settings never sent to a client, because they are credentials. */
 const SECRET_PATHS = [
@@ -606,11 +632,12 @@ export async function saveConfig(config, updates, configPath) {
       throw new Error(`unknown setting: ${key}`);
     }
 
-    if (FILE_ONLY.has(key)) {
+    if (fileOnlyFor(config).has(key)) {
       throw new Error(
         `${key} can only be set in the config file, not through the API. It ` +
           'runs a command as the service user, and an API token should not be ' +
-          'a way to choose which one.',
+          'a way to choose which one. Set "allowHooksFromApi": true in the ' +
+          'config file if you want the console to edit it.',
       );
     }
 

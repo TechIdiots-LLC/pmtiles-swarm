@@ -37,6 +37,21 @@
   URL containing `{id}` is not quietly rewritten. Every spelling that worked before still does. Day offset and look-back are columns of their own
   (protomaps publishes yesterday's build, so it wants `-1`), and Preview refuses to run on a URL
   that still has a fixed date in it, since that would ask for the same build forever.
+- **`onAdded`, beside the existing `onComplete`** — the same pair a torrent client offers, and
+  different moments: an archive joined in cache mode is added and will never be complete, while one
+  built here is both at once. Both are now shown in Settings under **Run external program**, with
+  the full placeholder list, laid out the way a client lays it out.
+- **`allowHooksFromApi`.** The hooks stayed config-file-only because a token that manages torrents
+  becoming one that runs arbitrary commands as the service user is a large step to take by
+  accident — but a setting nobody can find is not much safer than one anybody can change, it is
+  just harder to use. The panel is read-only until this is set in the config file, where a token
+  cannot reach, and says so.
+- **Adopting is a dialog now**, like adding. It lists what an engine holds that this node does not
+  yet know about — name, size, progress, format — and lets you pick, rather than importing
+  everything and reading afterwards what it did. Categories can be applied to the lot. It can also
+  adopt from **a qBittorrent instance other than the configured engine**, which is what "adopt
+  existing" sounded like it did; anything whose data is not readable from this node is marked and
+  cannot be selected, since adopting it would produce a catalog entry that can never serve a tile.
 - **Remote nodes are editable in Settings**, alongside folders and web locations: feed or catalog
   URL, protocol, whether to take archives as a cache or a mirror, a tag to apply, a name filter, a
   token and the pruning policy. A **Test** button — `POST /api/subscriptions/preview` — reports

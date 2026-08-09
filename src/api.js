@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { createAuth } from './auth.js';
 import { normalizeCategories } from './catalog.js';
+import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
 import { parseFeed, renderFeed } from './feed.js';
 import { ScheduledSourceManager, candidateDates, expandTemplate } from './sources.js';
@@ -772,13 +773,70 @@ export function createApp({
     }),
   );
 
-  // Pulls in whatever the engine already seeds — the migration path for an
+  /**
+   * The engine an adopt request is talking about.
+   *
+   * Normally the configured one — "adopt what this node already seeds". A
+   * request naming a qBittorrent instead gets a throwaway connection to it,
+   * for the case this feature exists to serve: a client already holding a
+   * library, beside a node that would rather run its own.
+   *
+   * Read-only, deliberately: `markIncompleteFiles: false` keeps an import from
+   * changing a preference on somebody else's client as a side effect of being
+   * looked at.
+   * @param {object} body - The request body.
+   * @returns {Promise<object | undefined>} - An engine, or undefined for the configured one.
+   */
+  const adoptFrom = async (body) => {
+    if (!body?.qbittorrent?.url) return undefined;
+    const engine = new QBittorrentEngine({
+      ...body.qbittorrent,
+      markIncompleteFiles: false,
+    });
+    await engine.connect();
+    return engine;
+  };
+
+  // What could be adopted, before adopting any of it.
+  app.post(
+    '/api/adopt/candidates',
+    route(async (req, res) => {
+      let engine;
+      try {
+        engine = await adoptFrom(req.body);
+      } catch (error) {
+        return res.status(502).json({ error: `could not reach it: ${error.message}` });
+      }
+
+      try {
+        res.json({
+          engine: engine?.name ?? engine ?? undefined,
+          candidates: await library.adoptCandidates({ engine }),
+        });
+      } catch (error) {
+        res.status(502).json({ error: error.message });
+      }
+    }),
+  );
+
+  // Pulls in whatever an engine already seeds — the migration path for an
   // existing qBittorrent library.
   app.post(
     '/api/adopt',
     route(async (req, res) => {
+      const body = req.body ?? {};
+      let engine;
+      try {
+        engine = await adoptFrom(body);
+      } catch (error) {
+        return res.status(502).json({ error: `could not reach it: ${error.message}` });
+      }
+
       const added = await library.adoptFromEngine({
-        all: req.query.all === 'true',
+        engine,
+        all: body.all ?? req.query.all === 'true',
+        infoHashes: body.infoHashes,
+        categories: normalizeCategories({ categories: body.categories }),
       });
       res.json({ added: added.length, entries: added });
     }),

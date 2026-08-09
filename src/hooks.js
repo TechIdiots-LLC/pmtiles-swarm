@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 
 /**
- * Running something when a download finishes.
+ * Running something when an archive arrives, and when it finishes.
  *
  * The point is to close the loop that a build pipeline needs: subscribe to a
  * feed of source data, let the swarm fetch it, and start the job that turns it
@@ -63,13 +63,26 @@ export function substitute(argument, entry) {
 }
 
 /**
- * Watches for downloads finishing and runs the configured command.
+ * Runs the configured commands when an archive arrives and when it finishes.
  */
-export class CompletionHooks {
+export class ProgramHooks {
   #library;
   #config;
   #timer;
   #running = new Set();
+  /**
+   * Archives already announced as added.
+   *
+   * Seeded with whatever the catalog holds at startup, and kept in memory
+   * rather than written down. The alternative — a field on each entry — fires
+   * the added-hook for an entire existing library the first time a node runs a
+   * version that has one, which for a hook that starts a build job is a very
+   * bad first impression. The cost is that an archive that arrived while the
+   * process was down does not announce itself; it is still caught by the
+   * finished-hook.
+   */
+  #announced = new Set();
+  #baselined = false;
 
   /**
    * @param {import('./library.js').Library} library - The library.
@@ -80,9 +93,11 @@ export class CompletionHooks {
     this.#config = config;
   }
 
-  /** Whether a command is configured. @returns {boolean} - True when armed. */
+  /** Whether either command is configured. @returns {boolean} - True when armed. */
   get enabled() {
-    return Boolean(this.#config.onComplete?.command);
+    return Boolean(
+      this.#config.onComplete?.command || this.#config.onAdded?.command,
+    );
   }
 
   /**
@@ -100,7 +115,13 @@ export class CompletionHooks {
     run();
     this.#timer = setInterval(run, seconds * 1000);
     this.#timer.unref?.();
-    console.log(`[hook] will run ${this.#config.onComplete.command} on completion`);
+
+    if (this.#config.onAdded?.command) {
+      console.log(`[hook] will run ${this.#config.onAdded.command} on add`);
+    }
+    if (this.#config.onComplete?.command) {
+      console.log(`[hook] will run ${this.#config.onComplete.command} on completion`);
+    }
   }
 
   /** Stops watching. @returns {void} */
@@ -117,7 +138,19 @@ export class CompletionHooks {
     const live = await this.#library.listWithStatus().catch(() => []);
     const fired = [];
 
+    // First look: everything already here counts as known, not as new.
+    if (!this.#baselined) {
+      this.#baselined = true;
+      for (const entry of live) this.#announced.add(entry.infoHash);
+    }
+
     for (const entry of live) {
+      if (!this.#announced.has(entry.infoHash)) {
+        this.#announced.add(entry.infoHash);
+        this.#fire('onAdded', entry);
+        fired.push(entry);
+      }
+
       if (entry.completedAt) continue;
       if (!(entry.status?.progress >= 1)) continue;
       // A slow hook must not be started twice by the next sweep.
@@ -133,22 +166,38 @@ export class CompletionHooks {
 
       this.#running.add(entry.infoHash);
       fired.push(entry);
-      this.#run(entry).finally(() => this.#running.delete(entry.infoHash));
+      this.#fire('onComplete', entry).finally(() =>
+        this.#running.delete(entry.infoHash),
+      );
     }
 
     return fired;
   }
 
   /**
-   * Runs the command for one archive.
-   * @param {object} entry - The archive that finished.
+   * Runs one of the configured hooks, if it is configured.
+   * @param {string} which - 'onAdded' or 'onComplete'.
+   * @param {object} entry - The archive it is about.
    * @returns {Promise<void>} - Resolves when the command exits.
    */
-  #run(entry) {
-    const { command, args = [], timeoutSeconds } = this.#config.onComplete;
+  #fire(which, entry) {
+    const hook = this.#config[which];
+    if (!hook?.command) return Promise.resolve();
+    return this.#run(entry, hook, which);
+  }
+
+  /**
+   * Runs a command for one archive.
+   * @param {object} entry - The archive it is about.
+   * @param {object} hook - The hook definition.
+   * @param {string} label - Which hook this is, for the log.
+   * @returns {Promise<void>} - Resolves when the command exits.
+   */
+  #run(entry, hook, label) {
+    const { command, args = [], timeoutSeconds } = hook;
     const filled = args.map((argument) => substitute(argument, entry));
 
-    console.log(`[hook] ${entry.name}: ${command} ${filled.join(' ')}`);
+    console.log(`[${label}] ${entry.name}: ${command} ${filled.join(' ')}`);
 
     return new Promise((resolve) => {
       execFile(
@@ -159,19 +208,19 @@ export class CompletionHooks {
           // so the default is no timeout at all.
           timeout: (timeoutSeconds ?? 0) * 1000,
           maxBuffer: 4 * 1024 * 1024,
-          cwd: this.#config.onComplete.cwd,
-          env: { ...process.env, ...(this.#config.onComplete.env ?? {}) },
+          cwd: hook.cwd,
+          env: { ...process.env, ...(hook.env ?? {}) },
         },
         (error, stdout, stderr) => {
           if (error) {
-            console.error(`[hook] ${entry.name}: ${error.message}`);
+            console.error(`[${label}] ${entry.name}: ${error.message}`);
           } else {
-            console.log(`[hook] ${entry.name}: finished`);
+            console.log(`[${label}] ${entry.name}: finished`);
           }
           const output = `${stdout ?? ''}${stderr ?? ''}`.trim();
           if (output) {
             for (const line of output.split('\n').slice(-20)) {
-              console.log(`[hook]   ${line}`);
+              console.log(`[${label}]   ${line}`);
             }
           }
           resolve();

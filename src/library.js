@@ -499,22 +499,87 @@ export class Library {
   }
 
   /**
-   * Imports torrents the engine already holds but the catalog does not know
+   * What an engine is holding that the catalog does not know about.
+   *
+   * Listed before anything is imported so the choice can be made against what
+   * is actually there, rather than by running an import and reading what it
+   * did afterwards.
+   * @param {object} [options] - Listing options.
+   * @param {object} [options.engine] - Ask this engine instead of the configured one.
+   * @returns {Promise<object[]>} - One record per adoptable torrent.
+   */
+  async adoptCandidates(options = {}) {
+    const engine = options.engine ?? this.#engine;
+    const held = await engine.list();
+    const candidates = [];
+
+    for (const torrent of held) {
+      if (this.#catalog.get(torrent.infoHash)) continue;
+
+      const file = torrent.savePath
+        ? path.join(torrent.savePath, torrent.name)
+        : null;
+
+      // Whether this node can actually read the data, which is not the same
+      // question as whether the engine holds it. Adopting from a client on
+      // another machine, or one whose save path is not mounted here, produces
+      // a catalog entry that can never serve a tile — and does so silently,
+      // because everything else about it looks right.
+      let readable = false;
+      if (file) {
+        const stat = await fs.stat(file).catch(() => null);
+        readable = Boolean(stat?.isFile());
+      }
+
+      candidates.push({
+        infoHash: torrent.infoHash,
+        name: torrent.name,
+        size: torrent.size,
+        progress: torrent.progress,
+        state: torrent.state,
+        savePath: torrent.savePath,
+        category: torrent.category,
+        kind: guessKind(torrent.name ?? ''),
+        readable,
+      });
+    }
+
+    return candidates;
+  }
+
+  /**
+   * Imports torrents an engine already holds but the catalog does not know
    * about — the migration path for an existing qBittorrent library.
    *
-   * Only archives that look like PMTiles are taken, since the rest of a general
-   * torrent library is not ours to manage.
+   * By default only archives are taken, since the rest of a general torrent
+   * library is not this node's to manage, and `infoHashes` narrows it further
+   * to an explicit list.
+   *
+   * A torrent may be adopted from an engine other than the configured one, for
+   * the case this exists to serve: a qBittorrent already seeding a library,
+   * beside a node that would rather run its own client. Where that happens the
+   * archive is also handed to the local engine, since otherwise the catalog
+   * would list something this node does not seed and cannot serve.
    * @param {object} [options] - Import options.
-   * @param {boolean} [options.all] - Import every torrent, not just .pmtiles ones.
+   * @param {object} [options.engine] - Import from this engine instead of the configured one.
+   * @param {boolean} [options.all] - Import every torrent, not just archives.
+   * @param {string[]} [options.infoHashes] - Take only these.
+   * @param {string[]} [options.categories] - Tags to apply to everything taken.
    * @returns {Promise<object[]>} - The entries that were added.
    */
   async adoptFromEngine(options = {}) {
-    const held = await this.#engine.list();
+    const engine = options.engine ?? this.#engine;
+    const foreign = engine !== this.#engine;
+    const wanted = options.infoHashes ? new Set(options.infoHashes) : null;
+    const held = await engine.list();
     const added = [];
 
     for (const torrent of held) {
       if (this.#catalog.get(torrent.infoHash)) continue;
-      if (!options.all && !/\.pmtiles$/i.test(torrent.name)) continue;
+      if (wanted && !wanted.has(torrent.infoHash)) continue;
+      if (!wanted && !options.all && !/\.(pmtiles|mbtiles)$/i.test(torrent.name)) {
+        continue;
+      }
 
       // The engine knows where the data is, so if it is complete we can read
       // the archive's own metadata straight off disk.
@@ -525,22 +590,52 @@ export class Library {
         ).catch(() => undefined);
       }
 
-      added.push(
-        await this.#catalog.put({
-          infoHash: torrent.infoHash,
-          name: torrent.name,
-          size: torrent.size,
-          categories: torrent.category ? [torrent.category] : [],
-          source: { type: 'adopted', location: torrent.savePath ?? 'engine' },
-          savePath: torrent.savePath,
-          magnet: `magnet:?xt=urn:btih:${torrent.infoHash}&dn=${encodeURIComponent(torrent.name)}`,
-          webSeeds: [],
-          pmtiles: summary,
-        }),
-      );
+      const magnet =
+        `magnet:?xt=urn:btih:${torrent.infoHash}` +
+        `&dn=${encodeURIComponent(torrent.name)}`;
+
+      const entry = await this.#catalog.put({
+        infoHash: torrent.infoHash,
+        name: torrent.name,
+        size: torrent.size,
+        categories:
+          options.categories ?? (torrent.category ? [torrent.category] : []),
+        source: {
+          type: 'adopted',
+          location: torrent.savePath ?? 'engine',
+          engine: engine.name,
+        },
+        savePath: torrent.savePath,
+        magnet,
+        webSeeds: [],
+        pmtiles: summary,
+        kind: guessKind(torrent.name ?? ''),
+        // Adopted data is on disk under its real name already, whatever state
+        // the other client left it in, so it must never be given a marker.
+        complete: torrent.progress === 1,
+      });
+
+      if (foreign) {
+        // Without this the catalog would list an archive this node neither
+        // seeds nor can serve — the other client holds it, and nothing here
+        // does.
+        await this.#engine
+          .add({
+            magnet,
+            savePath: torrent.savePath,
+            mode: 'mirror',
+            seedOnly: true,
+          })
+          .catch((error) =>
+            console.error(`[adopt] ${torrent.name}: ${error.message}`),
+          );
+      }
+
+      added.push(entry);
     }
     return added;
   }
+
 
   /**
    * Checks whether an archive's source has changed since its torrent was made.

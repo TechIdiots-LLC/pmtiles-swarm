@@ -222,6 +222,33 @@ protocol it speaks, and how many archives it is offering that this node could ac
 that 404s and a token the peer rejects both otherwise fail silently — nothing arrives, which looks
 exactly like a peer with nothing new.
 
+### Running a script when something arrives or finishes
+
+`onAdded` fires when an archive enters the catalog, `onComplete` when its data is whole — the same
+pair a torrent client offers, and genuinely different moments: an archive joined in cache mode is
+added and will never be complete, while one built here is both at once.
+
+```json
+"onComplete": {
+  "command": "/mnt/raid0/work/scripts/torrent_finished.sh",
+  "args": ["%N", "%F", "%I"]
+}
+```
+
+Placeholders match a torrent client's, so an existing `torrent_finished.sh` keeps working: `%N`
+name, `%L` first category, `%G` all categories, `%F` content path, `%R` root path, `%D` save path,
+`%C` file count, `%Z` size, `%T` first tracker, `%I` infohash v1, `%J` infohash v2.
+
+Command and arguments are separate rather than one string a shell pulls apart. Archive names
+contain spaces and brackets, and every shell-string hook eventually meets one and does something
+surprising; an argument vector means a filename is a filename however it is spelled, and quoting is
+unnecessary. Anything that needs a shell belongs inside the script.
+
+**These are config-file-only by default**, and Settings shows them read-only. A hook runs a command
+as the service user, so an API token that could set one would stop being a token that manages maps
+and start being one that runs code. Set `"allowHooksFromApi": true` in the config file — where a
+token cannot reach — to take that trade deliberately and unlock the panel.
+
 ### Incomplete archives
 
 An archive that is not whole yet is written under a marked name —
