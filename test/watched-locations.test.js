@@ -9,6 +9,8 @@ import { Catalog } from '../src/catalog.js';
 import {
   ScheduledSourceManager,
   expandTemplate,
+  isDue,
+  lastScheduled,
   parseListing,
 } from '../src/sources.js';
 
@@ -249,5 +251,81 @@ describe('spelling a date the way an upstream does', () => {
       expandTemplate('https://build.protomaps.com/{YYYYMMDD}.pmtiles', date),
       'https://build.protomaps.com/20260807.pmtiles',
     );
+  });
+});
+
+describe('when a source is looked at', () => {
+  const now = new Date(Date.UTC(2026, 7, 8, 4, 0));
+  const at = (hour, minute = 0) => new Date(Date.UTC(2026, 7, 8, hour, minute));
+
+  it('finds the most recent occurrence of a time of day', () => {
+    assert.equal(lastScheduled(['03:30'], now).toISOString(), '2026-08-08T03:30:00.000Z');
+    // Not reached yet today, so the most recent one was yesterday.
+    assert.equal(lastScheduled(['06:00'], now).toISOString(), '2026-08-07T06:00:00.000Z');
+  });
+
+  it('takes the latest of several times', () => {
+    assert.equal(
+      lastScheduled(['03:30', '12:00'], now).toISOString(),
+      '2026-08-08T03:30:00.000Z',
+    );
+  });
+
+  it('ignores a time it cannot read rather than inventing one', () => {
+    assert.equal(lastScheduled(['nope', '25:00', '10:99'], now), null);
+  });
+
+  it('is due once its time has passed, and not again until the next one', () => {
+    // The reason a time exists at all: an upstream publishing daily at 03:00
+    // is found within the minute, where a six-hour interval starting from
+    // whenever the process happened to boot finds it up to six hours late —
+    // hours during which nobody could be seeding it.
+    assert.equal(isDue({ at: '03:30' }, at(3, 0), { now }), true);
+    assert.equal(isDue({ at: '03:30' }, at(3, 45), { now }), false);
+  });
+
+  it('is always due when it has never run', () => {
+    // What catches up after the daemon was down over a scheduled time. Safe
+    // because a poll that finds nothing costs one HEAD request.
+    assert.equal(isDue({ at: '03:30' }, undefined, { now }), true);
+    assert.equal(isDue({}, undefined, { now }), true);
+  });
+
+  it('falls back to an interval when no time is named', () => {
+    assert.equal(isDue({}, new Date(now - 3 * 3600e3), { defaultHours: 6, now }), false);
+    assert.equal(isDue({}, new Date(now - 7 * 3600e3), { defaultHours: 6, now }), true);
+  });
+
+  it('lets one source poll more often than the rest', () => {
+    assert.equal(isDue({ everyHours: 1 }, new Date(now - 2 * 3600e3), { now }), true);
+    assert.equal(isDue({ everyHours: 24 }, new Date(now - 2 * 3600e3), { now }), false);
+  });
+
+  it('only polls what is due, and does not repeat it', async () => {
+    const manager = new ScheduledSourceManager(
+      {
+        addRemoteArchive: async () => {
+          throw new Error('should not download in this test');
+        },
+      },
+      { findBySource: () => true },
+      {
+        sourceCheckIntervalHours: 6,
+        sources: [
+          { name: 'hourly', url: 'https://x.example/{YYYYMMDD}.pmtiles', everyHours: 1 },
+          { name: 'daily', url: 'https://y.example/{YYYYMMDD}.pmtiles', everyHours: 24 },
+        ],
+      },
+    );
+
+    // Everything is due the first time, since nothing has run yet.
+    await manager.sweep(now);
+    // An hour later only the hourly one is.
+    const later = new Date(now.getTime() + 61 * 60 * 1000);
+    const before = manager.lastRunFor('daily');
+    await manager.sweep(later);
+
+    assert.equal(manager.lastRunFor('hourly').getTime(), later.getTime());
+    assert.equal(manager.lastRunFor('daily').getTime(), before.getTime());
   });
 });

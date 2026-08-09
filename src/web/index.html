@@ -1646,6 +1646,8 @@
               ],
             },
             { field: 'categories', label: 'Categories', placeholder: 'basemaps', list: true },
+            { field: 'at', label: 'Check at (UTC)', placeholder: '03:30' },
+            { field: 'everyHours', label: 'or every (h)', placeholder: '6', number: true },
             { field: 'offsetDays', label: 'Day offset', placeholder: '0', number: true },
             { field: 'lookbackDays', label: 'Look back', placeholder: '3', number: true },
             {
@@ -1662,6 +1664,8 @@
             'Tokens combine however the upstream spells its filenames — ' +
             '{M}-{D}-{YY} gives 8-7-26, {DD.MM.YYYY} gives 07.08.2026 — and ' +
             'case does not matter, since the length is what decides padding. ' +
+            'Check at is a time of day in UTC, for an upstream that publishes ' +
+            'on a schedule; leave it blank to poll on an interval instead. ' +
             'Day offset shifts which date is asked for — protomaps publishes ' +
             'yesterday, so it wants -1. Look back covers polls that were ' +
             'missed. A directory is the fallback for upstreams whose naming ' +

@@ -125,7 +125,13 @@ subscribers forward, and they fail differently, so publishing both is cheap insu
     }
   ],
   "sources": [
-    { "name": "protomaps daily", "index": "https://build.protomaps.com/", "categories": ["basemaps"] }
+    {
+      "name": "protomaps daily",
+      "url": "https://build.protomaps.com/{YYYYMMDD}.pmtiles",
+      "at": "04:00",
+      "offsetDays": -1,
+      "categories": ["basemaps"]
+    }
   ],
   "subscriptions": [
     { "url": "https://other.example.org/feed.xml", "mode": "cache", "filter": "terrain" }
@@ -163,6 +169,20 @@ Three ways in, all editable from the Settings screen:
   taken. Only links *underneath* the index URL are considered, since a listing is a document from
   somewhere else and following an off-site link out of one would let that page decide what this
   node downloads and republishes.
+
+**When each one is checked** is per source. Give `at` a time of day in UTC — `"03:30"`, or a list
+of them — for an upstream that publishes on a schedule, which is most of them: polling every six
+hours from whenever the process started finds a daily build up to six hours late, and those are
+hours during which nobody could be seeding it. Give `everyHours` instead for an upstream that
+publishes whenever it is ready. Neither set falls back to `sourceCheckIntervalHours`, which
+defaults to 6.
+
+Times are UTC to match the date tokens, since a template on one clock and a schedule on another
+would be a confusing thing to work out at four in the morning. A source that has never run is
+always due, which is what catches up after the daemon was down over a scheduled time.
+
+Monitored *folders* need no schedule: they are watched for filesystem events and pick up an archive
+as it lands, once it has stopped growing for `stabilitySeconds`.
 
 `newest` bounds how many listed files an index source considers, and defaults to `1`. That bound
 matters: a directory holding two years of daily planet builds would otherwise read as two years of

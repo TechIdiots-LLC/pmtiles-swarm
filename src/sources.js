@@ -105,6 +105,88 @@ export function candidateDates(source, now = new Date()) {
 const ARCHIVE_PATTERN = /\.(pmtiles|mbtiles)$/i;
 
 /**
+ * The most recent scheduled instant at or before `now`, or null.
+ *
+ * Times are read as UTC, matching the date tokens. A source watching
+ * `{YYYYMMDD}` and one checking `at: "03:30"` should not disagree about which
+ * day it is, and a template quietly using one clock while its schedule used
+ * another would be a confusing thing to work out at four in the morning.
+ * @param {string[]} times - Times of day as "HH:MM".
+ * @param {Date} now - The current time.
+ * @returns {Date | null} - The instant, or null when nothing parses.
+ */
+export function lastScheduled(times, now) {
+  let latest = null;
+
+  for (const raw of times) {
+    const match = /^(\d{1,2}):(\d{2})$/.exec(String(raw).trim());
+    if (!match) continue;
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (hours > 23 || minutes > 59) continue;
+
+    const instant = new Date(now);
+    instant.setUTCHours(hours, minutes, 0, 0);
+    // Not reached yet today, so the most recent one was yesterday.
+    if (instant > now) instant.setUTCDate(instant.getUTCDate() - 1);
+    if (!latest || instant > latest) latest = instant;
+  }
+
+  return latest;
+}
+
+/**
+ * Whether a source is due to be looked at.
+ *
+ * Two ways to say when, because upstreams come in two shapes. A build
+ * published at a known hour wants a time: checking every six hours from
+ * whenever the process happened to start finds it up to six hours late, which
+ * for a daily archive is most of a day during which nobody could seed it.
+ * Anything else wants an interval.
+ *
+ * A source never looked at is always due. That is what catches up after the
+ * daemon has been down over a scheduled time, and it is safe because a poll
+ * that finds nothing new costs one HEAD request.
+ * @param {object} source - The source definition.
+ * @param {Date | undefined} lastRun - When it was last polled.
+ * @param {object} [options] - Fallback interval in hours, and the current time.
+ * @returns {boolean} - True when it should be polled.
+ */
+export function isDue(source, lastRun, options = {}) {
+  const { defaultHours = 6, now = new Date() } = options;
+  if (!lastRun) return true;
+
+  if (source.at) {
+    const scheduled = lastScheduled([].concat(source.at), now);
+    return scheduled ? scheduled > lastRun : false;
+  }
+
+  const hours = source.everyHours ?? defaultHours;
+  return now - lastRun >= hours * 3600 * 1000;
+}
+
+/**
+ * A stable key for a source, for remembering when it last ran.
+ * @param {object} source - The source definition.
+ * @returns {string} - The key.
+ */
+function scheduleKey(source) {
+  return source.name ?? source.url ?? source.index ?? JSON.stringify(source);
+}
+
+/**
+ * How a source is scheduled, for the startup log.
+ * @param {object} source - The source definition.
+ * @param {number} defaultHours - The fallback interval.
+ * @returns {string} - Something readable.
+ */
+function describeSchedule(source, defaultHours) {
+  const name = source.name ?? source.url ?? source.index ?? 'unnamed';
+  if (source.at) return `${name} at ${[].concat(source.at).join(' and ')} UTC`;
+  return `${name} every ${source.everyHours ?? defaultHours}h`;
+}
+
+/**
  * Pulls candidate file URLs out of a directory listing.
  *
  * Handles the two listings actually met in the wild: an HTML index, where the
@@ -160,6 +242,7 @@ export class ScheduledSourceManager {
   #config;
   #timer;
   #running = false;
+  #lastRun = new Map();
 
   /**
    * Creates the manager.
@@ -179,29 +262,75 @@ export class ScheduledSourceManager {
    */
   start() {
     const sources = this.#config.sources ?? [];
-    // The timer runs even with nothing to poll. Every pass reads the list
-    // fresh, so this is what lets a source added through the console start
-    // working without a restart; an empty pass costs nothing.
-    const intervalMs = (this.#config.sourceCheckIntervalHours ?? 6) * 3600 * 1000;
-    this.poll().catch((error) =>
-      console.error(`[source] initial poll failed: ${error.message}`),
-    );
-    this.#timer = setInterval(() => {
-      this.poll().catch((error) =>
+
+    // A minute, whatever the sources ask for. Each tick decides per source
+    // whether anything is due, so this is the *resolution* of the schedule
+    // rather than its frequency: a source set to 03:30 is looked at within a
+    // minute of 03:30, and one set to every six hours costs 359 ticks that do
+    // nothing but compare two dates. Reading the list fresh each time is also
+    // what lets a source added through the console start working without a
+    // restart.
+    const tick = () =>
+      this.sweep().catch((error) =>
         console.error(`[source] poll failed: ${error.message}`),
       );
-    }, intervalMs);
+    tick();
+    this.#timer = setInterval(tick, 60 * 1000);
     this.#timer.unref?.();
 
     if (sources.length > 0) {
+      const fallback = this.#config.sourceCheckIntervalHours ?? 6;
       console.log(
-        `[source] following ${sources.length} scheduled source(s) every ${intervalMs / 3600000}h`,
+        `[source] following ${sources.length} scheduled source(s): ` +
+          sources.map((source) => describeSchedule(source, fallback)).join(', '),
       );
     }
   }
 
   /**
-   * Polls every configured source once.
+   * Polls the sources whose schedule says they are due.
+   * @param {Date} [now] - Override the current time, for testing.
+   * @returns {Promise<object[]>} - Entries imported this pass.
+   */
+  async sweep(now = new Date()) {
+    if (this.#running) return [];
+    this.#running = true;
+    try {
+      const defaultHours = this.#config.sourceCheckIntervalHours ?? 6;
+      const imported = [];
+
+      for (const source of this.#config.sources ?? []) {
+        const key = scheduleKey(source);
+        if (!isDue(source, this.#lastRun.get(key), { defaultHours, now })) {
+          continue;
+        }
+        // Recorded before the work, not after. A source that spends an hour
+        // importing a planet archive must not come back due the moment it
+        // finishes, and one that throws must not be retried every minute.
+        this.#lastRun.set(key, now);
+        imported.push(...(await this.#pollSource(source)));
+      }
+
+      return imported;
+    } finally {
+      this.#running = false;
+    }
+  }
+
+  /**
+   * When a source was last looked at, by name.
+   * @param {string} key - The source's name, url or index.
+   * @returns {Date | undefined} - When it last ran, if it has.
+   */
+  lastRunFor(key) {
+    return this.#lastRun.get(key);
+  }
+
+  /**
+   * Polls every configured source now, whatever their schedules say.
+   *
+   * What "check for new builds" means when a person asks for it, rather than
+   * when the clock does.
    * @returns {Promise<object[]>} - Entries imported this pass.
    */
   async poll() {

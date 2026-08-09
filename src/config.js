@@ -159,10 +159,24 @@ const DEFAULTS = {
    * two years of archives to fetch. Raise it only as far as the number of polls
    * you expect to miss, since each step is another full archive.
    *
+   * When to look is per source, either way:
+   *
+   *   at          a time of day in UTC, or a list of them — "03:30". For an
+   *               upstream that publishes on a schedule, which is most of
+   *               them. Polling every six hours from whenever the process
+   *               started finds a daily build up to six hours late, and those
+   *               are hours during which nobody could be seeding it.
+   *   everyHours  an interval instead, for an upstream that publishes whenever
+   *               it is ready.
+   *
+   * Neither set falls back to `sourceCheckIntervalHours`. Times are UTC to
+   * match the date tokens: a template on one clock and a schedule on another
+   * would be a confusing thing to work out at four in the morning.
+   *
    * See sources.js.
    */
   sources: [],
-  /** How often to poll scheduled sources, in hours. */
+  /** Fallback poll interval, in hours, for a source that names no schedule. */
   sourceCheckIntervalHours: 6,
   /**
    * Publish files that are not recognised as map archives.

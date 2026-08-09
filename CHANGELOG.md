@@ -37,6 +37,12 @@
   URL containing `{id}` is not quietly rewritten. Every spelling that worked before still does. Day offset and look-back are columns of their own
   (protomaps publishes yesterday's build, so it wants `-1`), and Preview refuses to run on a URL
   that still has a fixed date in it, since that would ask for the same build forever.
+- **Each watched location says when to check.** `at: "03:30"` — a time of day in UTC, or a list of
+  them — for an upstream that publishes on a schedule, or `everyHours` for one that publishes
+  whenever it is ready. Polling every six hours from whenever the process started found a daily
+  build up to six hours late, and those are hours during which nobody could be seeding it. Sources
+  naming neither fall back to `sourceCheckIntervalHours` as before. A source that has never run is
+  always due, so a daemon that was down over a scheduled time catches up on start.
 - **A source can watch a directory instead of guessing filenames.** `sources[].index` reads a
   listing — an HTML autoindex or an S3 `ListBucketResult` — filters it and takes the newest match,
   for upstreams whose naming is not predictable enough to write as a template. Only links
