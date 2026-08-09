@@ -2579,6 +2579,81 @@ describe('reading a joined archive on demand', () => {
       await new Promise((resolve) => server.close(resolve));
     }
   });
+
+  it('refuses a tile endpoint for an archive that is not PMTiles', async () => {
+    // MBTiles is SQLite. It can be distributed here perfectly well, but it
+    // cannot be read a byte range at a time, so there is no tile endpoint to
+    // give out — and offering one produces a URL that fails later, somewhere
+    // less obvious.
+    const dir = await fs.mkdtemp(path.join(workspace, 'mbtiles-'));
+    const archive = entry({ savePath: dir, pmtiles: undefined, kind: 'mbtiles' });
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put(archive);
+
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog,
+      engine: { name: 'webtorrent', list: async () => [] },
+      subscriptions: {},
+      tiles: { summarize: async () => assert.fail('should not read the archive') },
+      config: { watch: [], subscriptions: [] },
+    });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const { port } = server.address();
+    const base = `http://127.0.0.1:${port}/archives/${archive.infoHash}`;
+
+    try {
+      const json = await fetch(`${base}/tiles.json`);
+      assert.equal(json.status, 415);
+      assert.match((await json.json()).error, /only PMTiles can be served/);
+
+      // The tiles themselves too, not just the description of them.
+      assert.equal((await fetch(`${base}/0/0/0.png`)).status, 415);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('records the format once the content contradicts the name', async () => {
+    // A joined torrent is guessed from its filename, and a filename can lie.
+    // The first read settles it, and the answer is kept so the next request is
+    // refused from the catalog rather than pulling from the swarm again.
+    const dir = await fs.mkdtemp(path.join(workspace, 'notpmtiles-'));
+    const archive = entry({ savePath: dir, pmtiles: undefined });
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put(archive);
+
+    let reads = 0;
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog,
+      engine: { name: 'webtorrent', list: async () => [] },
+      subscriptions: {},
+      tiles: {
+        summarize: async () => {
+          reads += 1;
+          throw new Error('Wrong magic number for PMTiles archive');
+        },
+      },
+      config: { watch: [], subscriptions: [] },
+    });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const { port } = server.address();
+    const url = `http://127.0.0.1:${port}/archives/${archive.infoHash}/tiles.json`;
+
+    try {
+      assert.equal((await fetch(url)).status, 415);
+      assert.equal(catalog.get(archive.infoHash).kind, 'unknown');
+      assert.equal((await fetch(url)).status, 415);
+      assert.equal(reads, 1, 'the swarm should be asked once, not on every retry');
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
 });
 
 describe('deciding afresh how to reach an archive', () => {

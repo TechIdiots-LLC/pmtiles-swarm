@@ -518,7 +518,11 @@
               ${escapeHtml(entry.name)}
               <div class="sub">${escapeHtml(entry.category ?? '')}</div>
             </td>
-            <td>${bytes(entry.size)}</td>
+            <td>${bytes(entry.size)}${
+              (entry.kind ?? 'pmtiles') !== 'pmtiles'
+                ? `<div class="sub">${escapeHtml(entry.kind)} · not servable</div>`
+                : ''
+            }</td>
             <td><span class="pill ${mode}">${mode}</span></td>
             <td>${originCell(entry)}</td>
             <td>
@@ -707,6 +711,10 @@
 
         const base = location.origin;
         const tileJson = `${base}/archives/${entry.infoHash}/tiles.json`;
+        // Only PMTiles can be a tile endpoint. Offering the URL for anything
+        // else hands out a link that will never work and reads as a fault in
+        // the server rather than a fact about the archive.
+        const servable = (entry.kind ?? 'pmtiles') === 'pmtiles';
         const torrentUrl = `${base}/archives/${entry.infoHash}/archive.torrent`;
         const summary = entry.pmtiles ?? {};
         const mode = entry.mode ?? 'mirror';
@@ -739,11 +747,19 @@
           <div class="actions">
             <a href="${torrentUrl}" download><button type="button">Download .torrent</button></a>
             <button id="copy-magnet">Copy magnet</button>
-            <button id="copy-tilejson">Copy TileJSON URL</button>
             <button id="copy-hash">Copy infohash</button>
-            <a href="${tileJson}" target="_blank" rel="noreferrer"><button type="button">Open TileJSON</button></a>
+            ${servable ? `<button id="copy-tilejson">Copy TileJSON URL</button>
+            <a href="${tileJson}" target="_blank" rel="noreferrer"><button type="button">Open TileJSON</button></a>` : ''}
           </div>
-          <div class="sub" style="margin-bottom:1rem"><code>${escapeHtml(tileJson)}</code></div>
+          ${
+            servable
+              ? `<div class="sub" style="margin-bottom:1rem"><code>${escapeHtml(tileJson)}</code></div>`
+              : `<div class="sub" style="margin-bottom:1rem">
+                   This is ${escapeHtml(entry.kind ?? 'not a PMTiles')} archive, so it has no tile
+                   endpoint — only PMTiles can be read a byte range at a time, which is what
+                   serving tiles from a swarm needs. It is still distributed and seeded normally.
+                 </div>`
+          }
 
           <h2>Mode</h2>
           <div class="actions" id="mode-box">
@@ -783,7 +799,7 @@
 
           <h2>Actions</h2>
           <div class="actions">
-            <button id="warm">Warm region</button>
+            ${servable ? '<button id="warm">Warm region</button>' : ''}
             <button id="add-seed">Add web seed</button>
             <button id="clear-cache" ${mode === 'cache' ? '' : 'disabled title="only cache-mode archives have a cache to clear"'}>Clear cache</button>
             <button id="pause">${entry.paused ? 'Resume' : 'Pause'}</button>
@@ -792,8 +808,7 @@
 
           ${(entry.webSeeds ?? []).length ? `<h2>Web seeds</h2><div class="sub" style="margin-bottom:1rem">${entry.webSeeds.map((u) => `<div><code>${escapeHtml(u)}</code></div>`).join('')}</div>` : ''}
 
-          <h2>Preview</h2>
-          <div id="preview"></div>
+          ${servable ? '<h2>Preview</h2><div id="preview"></div>' : ''}
           </div>
 
           <div data-pane="trackers" hidden><div class="sub">loading…</div></div>
@@ -903,17 +918,21 @@
         };
 
         $('copy-magnet').onclick = () => copy(entry.magnet ?? '', 'Magnet link');
-        $('copy-tilejson').onclick = () => copy(tileJson, 'TileJSON URL');
+        if (servable) {
+          $('copy-tilejson').onclick = () => copy(tileJson, 'TileJSON URL');
+        }
         $('copy-hash').onclick = () => copy(entry.infoHash, 'Infohash');
 
-        $('warm').onclick = async () => {
-          try {
-            await api(`/api/torrents/${infoHash}/warm`, { method: 'POST', body: {} });
-            toast('warming started');
-          } catch (error) {
-            toast(error.message);
-          }
-        };
+        if (servable) {
+          $('warm').onclick = async () => {
+            try {
+              await api(`/api/torrents/${infoHash}/warm`, { method: 'POST', body: {} });
+              toast('warming started');
+            } catch (error) {
+              toast(error.message);
+            }
+          };
+        }
 
         $('add-seed').onclick = async () => {
           const url = window.prompt(
@@ -975,7 +994,7 @@
           }
         };
 
-        renderPreview(entry);
+        if (servable) renderPreview(entry);
       }
 
       /**

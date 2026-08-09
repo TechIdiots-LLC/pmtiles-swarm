@@ -99,6 +99,13 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **The console offered a TileJSON URL for archives that can never have one.** Identification only
+  ran when an archive was created here, so a *joined* MBTiles torrent had no recorded format and
+  was treated as PMTiles: a tile endpoint was offered, and asking for it read pieces out of the
+  swarm until the reader hit the magic-number check. A joined torrent now takes an initial format
+  from its filename, the first read records what the content actually is, and both `tiles.json`
+  and the tile route answer 415 rather than retrying forever. The console hides the TileJSON,
+  preview and warm controls for anything that is not PMTiles and says why.
 - **An archive opened in cache mode was read through the swarm forever.** Which source to use was
   decided once, at open, so switching to mirror — or the download simply finishing — changed
   nothing, and tiles kept being pulled a piece at a time while a complete copy sat on disk. The

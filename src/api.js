@@ -877,6 +877,16 @@ export function createApp({
       let entry = catalog.get(req.params.infoHash);
       if (!entry) return res.status(404).json({ error: 'unknown archive' });
 
+      // Only PMTiles can be read a tile at a time. MBTiles is SQLite: reading
+      // it needs the whole file and a database engine, so it is distributed
+      // here but never served.
+      if (entry.kind && entry.kind !== 'pmtiles') {
+        return res.status(415).json({
+          error: `this is a ${entry.kind} archive, and only PMTiles can be served as tiles`,
+          kind: entry.kind,
+        });
+      }
+
       // A joined torrent arrives with no summary, because at that moment there
       // is nothing to read one from. Read it now rather than refusing: for a
       // cache-mode archive that means pulling the single piece the header
@@ -890,6 +900,18 @@ export function createApp({
             pmtiles: summary,
           });
         } catch (error) {
+          // The content had its say. Record it so this is answered from the
+          // catalog next time rather than read again, and so the console stops
+          // offering something that cannot work.
+          if (/magic number/i.test(error.message)) {
+            await catalog.put({ infoHash: entry.infoHash, kind: 'unknown' });
+            return res.status(415).json({
+              error:
+                'this archive is not PMTiles, so it has no tiles to serve — ' +
+                'it can still be distributed',
+              kind: 'unknown',
+            });
+          }
           const status = error instanceof TileReadError ? error.status : 503;
           return res.status(status).json({
             error: `could not read this archive's header yet: ${error.message}`,
@@ -939,6 +961,11 @@ export function createApp({
       const { infoHash, ext } = req.params;
       const entry = catalog.get(infoHash);
       if (!entry) return res.status(404).json({ error: 'unknown archive' });
+      if (entry.kind && entry.kind !== 'pmtiles') {
+        return res.status(415).json({
+          error: `this is a ${entry.kind} archive, and only PMTiles can be served as tiles`,
+        });
+      }
 
       const z = Number(req.params.z);
       const x = Number(req.params.x);

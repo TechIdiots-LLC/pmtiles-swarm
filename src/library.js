@@ -362,6 +362,11 @@ export class Library {
       infoHash: parsed.infoHash,
       name: parsed.name ?? parsed.infoHash,
       size: parsed.length ?? 0,
+      // A first guess from the name, since nothing has been read yet. It is
+      // only a guess — the content decides, and does so the moment anything is
+      // read — but it is enough to stop offering a tile endpoint for something
+      // that plainly is not going to have one.
+      kind: guessKind(parsed.name ?? ''),
       categories: options.categories ?? options.category,
       source: {
         type: input.magnet ? 'magnet' : 'torrent',
@@ -1115,6 +1120,22 @@ export function carriesCredentials(url) {
     if (SIGNATURE_PARAMS.includes(key.toLowerCase())) return true;
   }
   return false;
+}
+
+/**
+ * Guesses an archive's format from its filename.
+ *
+ * Used only where nothing has been read yet — a torrent that has just been
+ * joined. The content is authoritative and overrides this as soon as anything
+ * is read; until then a name is better than nothing, and stops the console
+ * offering a tile endpoint for an MBTiles archive that will never have one.
+ * @param {string} name - The filename.
+ * @returns {string | undefined} - 'pmtiles', 'mbtiles', or undefined.
+ */
+export function guessKind(name) {
+  if (/\.pmtiles$/i.test(name)) return 'pmtiles';
+  if (/\.mbtiles$/i.test(name)) return 'mbtiles';
+  return undefined;
 }
 
 /**
