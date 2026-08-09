@@ -41,6 +41,61 @@ export function limitFor(entry, globalLimit) {
 }
 
 /**
+ * What is left before a limit removes an archive.
+ *
+ * The counterpart to {@link evaluate}, which answers "is it time yet". This
+ * answers "how much longer", which is the thing worth showing in a list: a
+ * limit that silently removes an archive one day is much easier to live with
+ * when you can see it coming.
+ *
+ * A ratio target cannot be turned into a time — that depends on how fast peers
+ * happen to be downloading — so it is reported as progress towards a number
+ * rather than as a duration. A time limit can, and is.
+ * @param {object} entry - Catalog entry.
+ * @param {object} status - Live status from the engine, for the ratio.
+ * @param {object} globalLimit - The node's default.
+ * @param {number} [now] - Override the clock, for testing.
+ * @returns {object} - What applies, and what is left of it.
+ */
+export function remaining(entry, status, globalLimit, now = Date.now()) {
+  // Cache mode holds a few pieces on purpose and has not been sharing in the
+  // sense a ratio measures, so nothing here ever applies to it.
+  if ((entry?.mode ?? 'mirror') === 'cache') {
+    return { forever: true, why: 'cache mode' };
+  }
+
+  const limit = limitFor(entry, globalLimit);
+  if (limit.forever) {
+    return {
+      forever: true,
+      why: entry?.seeding === false ? 'set to seed forever' : undefined,
+    };
+  }
+
+  const result = { forever: false, then: limit.then };
+
+  if (limit.ratio !== undefined) {
+    result.ratio = Number(status?.ratio ?? 0);
+    result.ratioTarget = limit.ratio;
+  }
+
+  if (limit.minutes !== undefined) {
+    const since = Date.parse(entry?.seedingSince ?? '');
+    if (Number.isFinite(since)) {
+      const expires = since + limit.minutes * 60 * 1000;
+      result.expiresAt = new Date(expires).toISOString();
+      result.msLeft = Math.max(0, expires - now);
+    } else {
+      // The clock starts when a complete copy is first seen, not when the
+      // archive was added — a long download must not count as time served.
+      result.pending = true;
+    }
+  }
+
+  return result;
+}
+
+/**
  * Fills in the parts of a limit that were left out.
  * @param {object} limit - A partial limit.
  * @returns {object} - A complete one, or forever when it constrains nothing.

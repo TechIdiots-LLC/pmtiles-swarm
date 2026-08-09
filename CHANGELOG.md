@@ -51,6 +51,13 @@
   everything and reading afterwards what it did. Categories can be applied to the lot. It can also
   adopt from **a qBittorrent instance other than the configured engine**, which is what "adopt
   existing" sounded like it did.
+- **Ratio and Expires columns**, so a seeding limit can be seen coming rather than noticed
+  afterwards. Expires counts down a time limit — `42d 1h` — and says `∞` where nothing applies,
+  with the reason on hover: a cache-mode archive, or one told to seed forever. A ratio target is
+  reported as progress towards a number rather than as a duration, because how long it takes
+  depends on how fast peers happen to be downloading, and the ratio is coloured as it approaches
+  the point where it would remove the archive. The detail panel carries the same countdown beside
+  the limit in effect.
 - **A move checks there is room first**, before the engine is disturbed — running out of disk
   halfway through several hundred gigabytes means an hour spent, a partial file to clean up and an
   archive to put back. Only when it will actually be a copy: a move within one filesystem is a

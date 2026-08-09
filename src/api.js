@@ -11,7 +11,7 @@ import { freeSpace, listLocations } from './locations.js';
 import { restart, restartMode } from './restart.js';
 import { parseFeed, renderFeed } from './feed.js';
 import { ScheduledSourceManager, candidateDates, expandTemplate } from './sources.js';
-import { limitFor } from './seeding.js';
+import { limitFor, remaining } from './seeding.js';
 import { buildTileJson, extensionMatches } from './tilejson.js';
 import { TileReadError } from './tiles.js';
 
@@ -540,7 +540,18 @@ export function createApp({
 
   app.get(
     '/api/torrents',
-    route(async (_req, res) => res.json(await library.listWithStatus())),
+    route(async (_req, res) => {
+      const held = await library.listWithStatus();
+      // Decorated here rather than in the library: how much of a limit is left
+      // is a question about the moment it is asked, not a fact about the
+      // archive, so it does not belong in the catalog.
+      res.json(
+        held.map((entry) => ({
+          ...entry,
+          seedingLimit: remaining(entry, entry.status, config.seeding),
+        })),
+      );
+    }),
   );
 
   app.get(

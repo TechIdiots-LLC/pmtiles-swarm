@@ -272,6 +272,20 @@ before anything happens. Under systemd, Docker, pm2 or Kubernetes it simply stop
 *is* the restart there and starting a replacement would leave two processes fighting over one port.
 Started by hand from a terminal it starts a replacement itself, because nothing else would.
 
+### Seeding limits
+
+Set `seeding` globally — a ratio, a time, or both, and what to do when one is reached (`stop`,
+`remove`, `delete`) — and override it per archive from that archive's detail panel: use the global
+limit, seed forever, or set your own. Same arrangement a torrent client uses.
+
+The **Ratio** and **Expires** columns show it coming. Expires counts down a time limit; a ratio
+target is shown as progress towards a number instead, because how long that takes depends on how
+fast peers happen to be downloading. `∞` means nothing applies, and says why on hover.
+
+The clock starts when a complete copy is first seen, not when the archive was added — otherwise a
+long download would count as time served. A limit never applies to a cache-mode archive, which
+holds a few pieces on purpose and has not been sharing in the sense a ratio measures.
+
 ### Access tokens
 
 `auth.apiKey` is one credential with one power: whoever holds it can do anything. That is fine

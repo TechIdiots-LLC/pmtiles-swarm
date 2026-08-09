@@ -288,6 +288,8 @@
               <th>Peers</th>
               <th>Down</th>
               <th>Up</th>
+              <th>Ratio</th>
+              <th>Expires</th>
               <th>State</th>
             </tr>
           </thead>
@@ -686,6 +688,68 @@
         }
       }
 
+      /**
+       * The share ratio, against its target where there is one.
+       * @param {object} entry - The archive.
+       * @param {object} status - Its live status.
+       * @returns {string} - Cell markup.
+       */
+      function ratioCell(entry, status) {
+        const ratio = Number(status.ratio ?? 0);
+        const target = entry.seedingLimit?.ratioTarget;
+        if (target === undefined) return ratio.toFixed(2);
+
+        // Coloured as it approaches, because reaching it removes the archive.
+        const share = Math.min(1, ratio / target);
+        const colour =
+          share >= 1 ? 'var(--danger)' : share > 0.8 ? 'var(--warn, orange)' : 'inherit';
+        return `<span style="color:${colour}">${ratio.toFixed(2)}</span>` +
+          `<div class="sub">of ${target}</div>`;
+      }
+
+      /**
+       * How long before a limit removes this archive.
+       *
+       * A ratio target cannot be turned into a time — that depends on how fast
+       * peers happen to be downloading — so where only a ratio applies this
+       * says so rather than inventing a duration.
+       * @param {object} entry - The archive.
+       * @returns {string} - Cell markup.
+       */
+      function expiryCell(entry) {
+        const limit = entry.seedingLimit;
+        if (!limit || limit.forever) {
+          return `<span title="${escapeHtml(limit?.why ?? 'no limit applies')}">∞</span>`;
+        }
+
+        if (limit.msLeft !== undefined) {
+          const when = new Date(limit.expiresAt).toLocaleString();
+          return `<span title="${escapeHtml(`${when}, then ${limit.then}`)}">${duration(limit.msLeft)}</span>`;
+        }
+        if (limit.pending) {
+          return '<span title="the clock starts when a complete copy is first seen">not yet</span>';
+        }
+        if (limit.ratioTarget !== undefined) {
+          return '<span title="depends on how fast peers download; see the ratio">on ratio</span>';
+        }
+        return '∞';
+      }
+
+      /**
+       * A duration, in the shape a torrent client writes one.
+       * @param {number} ms - Milliseconds remaining.
+       * @returns {string} - Something like "42d 1h".
+       */
+      function duration(ms) {
+        const minutes = Math.floor(ms / 60000);
+        if (minutes < 1) return 'now';
+        const days = Math.floor(minutes / 1440);
+        const hours = Math.floor((minutes % 1440) / 60);
+        if (days > 0) return `${days}d ${hours}h`;
+        if (hours > 0) return `${hours}h ${minutes % 60}m`;
+        return `${minutes}m`;
+      }
+
       function renderRows() {
         const rows = $('rows');
         rows.innerHTML = '';
@@ -721,7 +785,8 @@
             </td>
             <td>${s.peers ?? 0} / ${s.seeds ?? 0}</td>
             <td>${rate(s.downloadSpeed)}</td>
-            <td>${rate(s.uploadSpeed)}</td>
+            <td>${ratioCell(entry, s)}</td>
+            <td class="sub">${expiryCell(entry)}</td>
             <td class="sub">${entry.paused ? 'paused' : escapeHtml(s.state ?? '—')}</td>`;
           tr.onclick = () => {
             selected = selected === entry.infoHash ? null : entry.infoHash;
@@ -1086,9 +1151,20 @@
             $('seed-minutes').value = own.minutes ?? '';
             $('seed-then').value = own.then ?? 'stop';
           }
-          $('seed-current').textContent = `in effect: ${describe(
-            own === false ? { forever: true } : (own ?? config.seeding),
-          )}`;
+          const left = entry.seedingLimit;
+          const countdown = left?.forever
+            ? ''
+            : left?.msLeft !== undefined
+              ? ` · ${duration(left.msLeft)} left`
+              : left?.pending
+                ? ' · the clock starts when a complete copy is first seen'
+                : left?.ratioTarget !== undefined
+                  ? ` · at ${Number(entry.status?.ratio ?? 0).toFixed(2)} of ${left.ratioTarget}`
+                  : '';
+          $('seed-current').textContent =
+            `in effect: ${describe(
+              own === false ? { forever: true } : (own ?? config.seeding),
+            )}${countdown}`;
         } catch {
           $('seeding-box').hidden = true;
         }
