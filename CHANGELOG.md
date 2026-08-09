@@ -99,6 +99,10 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **Ctrl-C could hang.** Once archives were restored to the engine at startup, stopping meant
+  telling every tracker so — and an unreachable one waits for a timeout each. Every shutdown step
+  is now bounded, a watchdog exits regardless after fifteen seconds, in-flight downloads are
+  cancelled first, and a second Ctrl-C forces the issue instead of stacking another shutdown.
 - Opening a detail tab and waiting sent you back to General. The three-second poll rebuilt the
   whole panel; it now updates the table only, and an action that does re-render the panel returns
   to the tab you were on.

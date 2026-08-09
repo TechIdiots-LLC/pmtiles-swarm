@@ -184,20 +184,85 @@ PMTILES_SWARM_PUBLIC_URL
    * @param {string} signal - The signal received.
    * @returns {Promise<void>} - Resolves once stopped.
    */
+  let stopping = false;
   const shutdown = async (signal) => {
+    // A second Ctrl-C means "I meant it". Without this, each one starts
+    // another shutdown alongside the one already waiting, which is how the
+    // MaxListenersExceeded warning and the repeated [shutdown] lines appear.
+    if (stopping) {
+      console.log('[shutdown] forcing');
+      process.exit(1);
+    }
+    stopping = true;
     console.log(`\n[shutdown] ${signal}`);
+
+    // Nothing here may wait forever. Every step below talks to something that
+    // can be slow or unreachable — a tracker being told we are stopping, a
+    // download mid-stream, a sidecar — and a stop that hangs leaves no way out
+    // but killing the process, which is what a stop is meant to avoid.
+    const limit = (label, work, ms = 5000) =>
+      new Promise((resolve) => {
+        let settled = false;
+        // The timer is always cleared, whichever way this ends. Left running it
+        // would hold the loop open for its full duration after the work had
+        // already finished, turning four quick steps into a slow stop; and
+        // unref'ing it instead means it may never fire at all, which is worse
+        // — the bound would quietly not exist.
+        const finish = (message) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (message) console.warn(message);
+          resolve();
+        };
+        const timer = setTimeout(
+          () => finish(`[shutdown] ${label} did not finish in ${ms}ms; moving on`),
+          ms,
+        );
+        Promise.resolve()
+          .then(work)
+          .then(
+            () => finish(),
+            (error) => finish(`[shutdown] ${label}: ${error.message}`),
+          );
+      });
+
+    // A last resort, in case something below ignores its own timeout.
+    const watchdog = setTimeout(() => {
+      console.warn('[shutdown] took too long; exiting anyway');
+      process.exit(1);
+    }, 15000);
+
+    // First, because a remote add streams for hours and everything after this
+    // would otherwise queue behind it.
+    const cancelled = library.cancelAdd();
+    if (cancelled.length > 0) {
+      console.log(`[shutdown] cancelled ${cancelled.length} download(s) in progress`);
+    }
+
     if (originTimer) clearInterval(originTimer);
     sources.stop();
     seeding.stop();
     hooks.stop();
     subscriptions.stop();
-    await watch.stop().catch(() => {});
-    await new Promise((resolve) => server.close(resolve));
     warm.stop();
+
+    await limit('watchers', () => watch.stop());
+    await limit('http server', () => {
+      const closed = new Promise((resolve) => server.close(resolve));
+      // A console left open holds a keep-alive socket, and close() waits for
+      // it. Nobody is being served now, so let those go.
+      server.closeIdleConnections?.();
+      return closed;
+    });
     // Before the engine, so readers let go of their torrents while the client
     // that owns them is still alive.
-    await tiles.close().catch(() => {});
-    await engine.destroy().catch(() => {});
+    await limit('open archives', () => tiles.close());
+    // The slowest, because it announces "stopped" to every tracker — and an
+    // unreachable one costs a timeout each.
+    await limit('engine', () => engine.destroy(), 8000);
+
+    clearTimeout(watchdog);
     process.exit(0);
   };
 
