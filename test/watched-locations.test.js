@@ -329,3 +329,85 @@ describe('when a source is looked at', () => {
     assert.equal(manager.lastRunFor('daily').getTime(), before.getTime());
   });
 });
+
+describe('publishing a watched location as a web seed', () => {
+  /**
+   * Runs one scheduled source against a server that has the file, and reports
+   * what the library was asked for.
+   * @param {object} source - The source entry, minus its url.
+   * @returns {Promise<object>} - The options addRemoteArchive received.
+   */
+  async function importWith(source) {
+    // Answers for whatever date the template expands to today, so the first
+    // candidate hits and no lookback is needed. A wide lookback would send
+    // thousands of probes to find one file and make this test take seconds.
+    const server = http.createServer((req, res) => {
+      if (req.url.endsWith('.pmtiles')) {
+        res.writeHead(200, { 'content-type': 'application/octet-stream' });
+        res.end('not really an archive');
+        return;
+      }
+      res.writeHead(404).end();
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+
+    const asked = [];
+    const dir = await fs.mkdtemp(path.join(workspace, 'src-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+
+    const manager = new ScheduledSourceManager(
+      {
+        addRemoteArchive: async (url, options) => {
+          asked.push({ url, options });
+          return { infoHash: 'a'.repeat(40), name: '20260807.pmtiles' };
+        },
+      },
+      catalog,
+      {
+        sources: [
+          {
+            name: 'test',
+            url: `${base}/{YYYYMMDD}.pmtiles`,
+            lookbackDays: 0,
+            ...source,
+          },
+        ],
+      },
+    );
+
+    try {
+      await manager.poll();
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+    return asked[0]?.options;
+  }
+
+  it('leaves the choice to the library when nothing is said', async () => {
+    // Which means: published, unless the URL carries credentials. Passing
+    // `false` here rather than `undefined` would quietly switch off the single
+    // biggest lever on a cold start.
+    const options = await importWith({});
+    assert.ok(options, 'the source should have imported something');
+    assert.equal(options.webSeed, undefined);
+  });
+
+  it('carries an explicit yes', async () => {
+    const options = await importWith({ webSeed: true });
+    assert.equal(options.webSeed, true);
+  });
+
+  it('carries an explicit no', async () => {
+    // For an upstream that deletes old builds: the URL would outlive the file
+    // it points at, and every peer that tried it would fail.
+    const options = await importWith({ webSeed: false });
+    assert.equal(options.webSeed, false);
+  });
+
+  it('carries a separate public URL where one is given', async () => {
+    const options = await importWith({ webSeeds: ['https://cdn.example/a.pmtiles'] });
+    assert.deepEqual(options.webSeeds, ['https://cdn.example/a.pmtiles']);
+  });
+});

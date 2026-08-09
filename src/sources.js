@@ -409,6 +409,13 @@ export class ScheduledSourceManager {
           addTrackers: source.addTrackers,
           pieceLength: source.pieceLength,
           retain: source.retain !== false,
+          // Left undefined the library decides, which is to publish the URL
+          // unless it carries credentials. Set explicitly it is obeyed either
+          // way — worth having in both directions, since an upstream that
+          // deletes old builds leaves a web seed pointing at nothing, and one
+          // behind a login must never be published at all.
+          webSeed: source.webSeed,
+          webSeeds: source.webSeeds,
           comment: source.comment
             ? `${source.comment} ${expandTemplate('{YYYY-MM-DD}', date)}`
             : undefined,
@@ -472,6 +479,8 @@ export class ScheduledSourceManager {
           addTrackers: source.addTrackers,
           pieceLength: source.pieceLength,
           retain: source.retain !== false,
+          webSeed: source.webSeed,
+          webSeeds: source.webSeeds,
           comment: source.comment,
         });
         imported.push(entry);

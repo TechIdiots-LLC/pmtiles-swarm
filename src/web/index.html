@@ -2996,6 +2996,16 @@
                 ...(config.locations ?? []).map((entry) => [entry.path, entry.name]),
               ],
             },
+            {
+              field: 'webSeed',
+              label: 'Use URL as web seed',
+              boolean: true,
+              options: [
+                ['', 'default'],
+                ['true', 'yes'],
+                ['false', 'no'],
+              ],
+            },
           ],
           rows: config.sources ?? [],
           preview: true,
@@ -3011,7 +3021,14 @@
             'missed. A directory is the fallback for upstreams whose naming ' +
             'cannot be written as a template; it never takes more than the ' +
             'Newest files listed, which is one unless you raise it, because ' +
-            'each one is a whole archive.',
+            'each one is a whole archive. Use URL as web seed publishes the ' +
+            'address the archive came from inside the torrent, so peers can ' +
+            'fetch from it over HTTP before anyone is seeding — the single ' +
+            'biggest difference to a cold start. Default is yes, unless the ' +
+            'URL carries credentials, in which case it is never published: a ' +
+            'torrent goes out to the swarm and cannot be recalled. Choose no ' +
+            'for an upstream that deletes old builds, where the URL would ' +
+            'outlive what it points at.',
         });
 
         renderRowEditor({

@@ -382,6 +382,7 @@ today's URL and see whether it exists yet:
       "lookbackDays": 3,
       "savePath": "/mnt/hd-16TB/store/generated/protomaps",
       "latestLink": "planetiler-protomaps-latest.pmtiles",
+      "webSeed": true,
       "category": "planet",
       "comment": "Planetiler protomaps data export",
       "pieceLength": 4194304
@@ -436,11 +437,26 @@ today's URL and see whether it exists yet:
     has never run is always due, which is what catches up after the daemon was down over
     its scheduled time.
 
+`webSeed`, `webSeeds`
+    Whether to publish the URL the archive came from inside the torrent, and any other
+    URLs to publish alongside it. Unset it is decided for you: **yes**, unless the URL
+    appears to carry credentials, in which case never — a torrent goes out to the swarm
+    and cannot be recalled, so a pre-signed link published once is published for good.
+
+    Worth setting to `false` for an upstream that **deletes old builds**. A web seed is
+    only useful while the file is still there; once it is gone, the URL outlives what it
+    pointed at and every peer that tries it fails and eventually stops. `webSeeds` is the
+    other half of the same choice: where the archive is also on public storage under a
+    different address, name that instead, and keep the fetch URL private.
+
+    In the console this is **Use URL as web seed** on each watched location, with
+    *default* / *yes* / *no*.
+
 Each build becomes its own archive with its own torrent and its own lifetime, which is
 what you want — old builds stay seedable for as long as anyone still wants them.
 
-The origin URL is registered as a web seed automatically, and every candidate URL is
-checked with a HEAD, so a build that has not been published yet costs one request.
+Every candidate URL is checked with a HEAD, so a build that has not been published yet
+costs one request.
 
 ### Watching a directory instead
 

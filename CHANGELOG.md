@@ -2,6 +2,15 @@
 
 ## master
 ### ✨ Features and improvements
+- **A watched web location can say whether its URL is published as a web seed.** `webSeed` on a
+  source, and **Use URL as web seed** on each row in the console. The behaviour was already the
+  right default — the origin is a valid web seed for exactly those bytes, and publishing it is the
+  single biggest difference to a cold start — but it was not settable per source, and there are two
+  reasons to change it. An upstream that deletes old builds leaves a URL that outlives the file it
+  points at, so every peer that tries it fails; and where the archive also sits on public storage
+  under another address, `webSeeds` names that instead and keeps the fetch URL private. A URL that
+  appears to carry credentials is still never published unless `webSeed: true` says so explicitly,
+  because a torrent goes to the swarm and cannot be recalled.
 - **Piece maps.** A **Pieces** tab showing what this node holds, how rare each piece is across the
   swarm, and what each connected peer has — plus `firstPiece` and `pieceCount` per file on
   `/content`, which need no engine at all, since a torrent is one byte stream cut into equal pieces
