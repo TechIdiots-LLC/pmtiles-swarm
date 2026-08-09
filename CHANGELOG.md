@@ -272,6 +272,18 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **An archive joined from a bare infohash never started.** It was given no trackers, so there was
+  nowhere to look for a peer, and it sat reporting "downloading" indefinitely. Two causes, both
+  now fixed: `parse-torrent` gives a bare magnet an `announce` of `[]` rather than leaving it
+  undefined, so the nullish fallback to this node's own trackers kept the empty array and never
+  fired; and a magnet supplied by hand was stored verbatim rather than rebuilt, so it kept whatever
+  it lacked. The magnet is rebuilt from what was parsed — nothing is lost, since a supplied
+  magnet's trackers and web seeds are in there — and an archive already stored without any is
+  repaired whenever it is handed back to the engine, which is how the ones added before this get
+  fixed.
+- **Stopping a node logged a page of engine errors.** The console keeps polling and a sweep or two
+  is still in flight while the engine is being torn down, and each of them was told the sidecar had
+  exited. An engine on its way out now reports an empty library instead, which is what it has.
 - **A second engine was handed archives that were still downloading, and wrote its own copy.**
   `restore` and every re-add claimed `seedOnly` for any mirror-mode archive, which means "the data
   is already here, do not fetch it" — and for a half-downloaded archive that is untrue. A composite

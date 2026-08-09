@@ -245,6 +245,11 @@ export class LibtorrentEngine {
    * @returns {Promise<import('./types.js').TorrentStatus[]>} - Statuses.
    */
   async list() {
+    // A node that is shutting down still has a console polling it and a sweep
+    // or two in flight. Answering "the sidecar exited" to each of them fills
+    // the log with failures at exactly the moment nothing is wrong: an engine
+    // on its way out holds nothing worth reporting.
+    if (this.#stopping) return [];
     return this.#call('list', {});
   }
 

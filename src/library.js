@@ -221,6 +221,38 @@ export class Library {
   }
 
   /**
+   * An archive's magnet, with this node's trackers where it carries none.
+   *
+   * An archive joined from a bare infohash has nothing to announce to, so it
+   * waits for the DHT to turn up a peer and — on a private swarm, or a quiet
+   * one — never starts at all. That is worth repairing every time it is handed
+   * back to the engine rather than only when it was first added, because the
+   * archives most likely to be in that state were added before there was
+   * anything to repair them.
+   * @param {object} entry - Catalog entry.
+   * @returns {string | undefined} - A magnet, or undefined when there is none.
+   */
+  #withTrackers(entry) {
+    if (!entry.magnet) return undefined;
+    if (entry.magnet.includes('tr=')) return entry.magnet;
+
+    const trackers = this.#config.trackers ?? [];
+    if (trackers.length === 0) return entry.magnet;
+
+    const repaired = magnetFor(
+      { infoHash: entry.infoHash, name: entry.name },
+      trackers,
+      entry.webSeeds,
+    );
+    console.log(
+      `[trackers] ${entry.name} had none; announcing to ${trackers.length} instead`,
+    );
+    // Written down, so the magnet this node hands out is the repaired one too.
+    this.#catalog.put({ infoHash: entry.infoHash, magnet: repaired }).catch(() => {});
+    return repaired;
+  }
+
+  /**
    * Refuses to put two different archives at the same path.
    *
    * Filenames are not unique and were never going to be. Two builds of the
@@ -362,11 +394,12 @@ export class Library {
           .then((buffer) => new Uint8Array(buffer))
           .catch(() => null)
       : null;
-    if (!torrentFile && !entry.magnet) return;
+    const magnet = torrentFile ? undefined : this.#withTrackers(entry);
+    if (!torrentFile && !magnet) return;
 
     await this.#engine.add({
       torrentFile: torrentFile ?? undefined,
-      magnet: torrentFile ? undefined : entry.magnet,
+      magnet,
       savePath: entry.savePath,
       category: (entry.categories ?? [])[0],
       mode: entry.mode ?? 'mirror',
@@ -611,7 +644,12 @@ export class Library {
       },
       savePath,
       torrentPath: storedTorrentPath,
-      magnet: input.magnet ?? magnetFor(parsed, this.#config.trackers),
+      // Rebuilt rather than kept verbatim. Everything the supplied magnet
+      // carried is in `parsed` — its trackers as `announce`, its web seeds as
+      // `urlList` — so nothing is lost, and an infohash that arrived with no
+      // trackers at all picks up this node's, without which it has nowhere to
+      // look for a peer and never starts.
+      magnet: magnetFor(parsed, this.#config.trackers),
       webSeeds: parsed.urlList ?? [],
       mode,
       complete,
@@ -2092,7 +2130,14 @@ export async function publish(from, publishDir) {
 function magnetFor(parsed, trackers = [], webSeeds) {
   const parts = [`magnet:?xt=urn:btih:${parsed.infoHash}`];
   if (parsed.name) parts.push(`dn=${encodeURIComponent(parsed.name)}`);
-  for (const tracker of parsed.announce ?? trackers) {
+
+  // Length, not nullishness. parse-torrent gives a bare magnet an `announce`
+  // of `[]` rather than leaving it undefined, so `?? trackers` kept the empty
+  // array and this node's own trackers were never substituted — which left an
+  // archive joined from a bare infohash with nowhere at all to look for peers,
+  // and it simply never started.
+  const announce = parsed.announce?.length ? parsed.announce : trackers;
+  for (const tracker of announce ?? []) {
     parts.push(`tr=${encodeURIComponent(tracker)}`);
   }
   for (const seed of webSeeds ?? parsed.urlList ?? []) {

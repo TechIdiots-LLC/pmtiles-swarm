@@ -281,3 +281,92 @@ describe('a magnet carries the web seeds the torrent carries', () => {
     assert.deepEqual(seedsIn(entry.magnet), []);
   });
 });
+
+describe('an archive joined from a bare infohash', () => {
+  /**
+   * A library whose config carries trackers, over a recording engine.
+   * @param {object} entry - The catalog entry to seed.
+   * @returns {Promise<object>} - Library, catalog and the engine's adds.
+   */
+  async function node(entry) {
+    const dir = await fs.mkdtemp(path.join(workspace, 'bare-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    if (entry) await catalog.put({ savePath: dir, ...entry });
+
+    const adds = [];
+    return {
+      catalog,
+      adds,
+      library: new Library({
+        catalog,
+        engine: {
+          name: 'webtorrent',
+          list: async () => [],
+          get: async () => null,
+          add: async (request) => adds.push(request),
+          remove: async () => {},
+        },
+        config: {
+          dataDir: dir,
+          webtorrent: { savePath: dir },
+          trackers: ['udp://tracker.example:6969', 'udp://other.example:6969'],
+        },
+      }),
+    };
+  }
+
+  it('gets the trackers this node knows when it is joined', async () => {
+    // parse-torrent gives a bare magnet an `announce` of [] rather than
+    // leaving it undefined, so a nullish fallback kept the empty array and
+    // this node's trackers were never substituted. The archive then had
+    // nowhere at all to look for peers and simply never started.
+    const { library } = await node();
+    const entry = await library.addExistingTorrent(
+      { magnet: `magnet:?xt=urn:btih:${'a'.repeat(40)}` },
+      { mode: 'mirror' },
+    );
+
+    assert.match(entry.magnet, /tr=udp%3A%2F%2Ftracker.example%3A6969/);
+    assert.match(entry.magnet, /tr=udp%3A%2F%2Fother.example%3A6969/);
+  });
+
+  it('repairs one that was stored without any', async () => {
+    // The archives most likely to be in that state were added before there
+    // was anything to repair them, so this happens whenever one is handed
+    // back to the engine rather than only when it is first added.
+    const infoHash = 'b'.repeat(40);
+    const { library, catalog, adds } = await node({
+      infoHash,
+      name: 'stuck.pmtiles',
+      size: 10,
+      mode: 'mirror',
+      complete: false,
+      magnet: `magnet:?xt=urn:btih:${infoHash}`,
+    });
+
+    await library.resume(infoHash);
+
+    assert.equal(adds.length, 1);
+    assert.match(adds[0].magnet, /tr=udp%3A%2F%2Ftracker.example%3A6969/);
+    // And written down, so the magnet this node hands out is repaired too.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.match(catalog.get(infoHash).magnet, /tr=/);
+  });
+
+  it('leaves a magnet that already names trackers alone', async () => {
+    const infoHash = 'c'.repeat(40);
+    const magnet = `magnet:?xt=urn:btih:${infoHash}&tr=${encodeURIComponent('udp://theirs.example:80')}`;
+    const { library, adds } = await node({
+      infoHash,
+      name: 'fine.pmtiles',
+      size: 10,
+      mode: 'mirror',
+      complete: false,
+      magnet,
+    });
+
+    await library.resume(infoHash);
+    assert.equal(adds[0].magnet, magnet);
+  });
+});

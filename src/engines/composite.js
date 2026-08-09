@@ -36,6 +36,8 @@ export class CompositeEngine {
   #timer;
   /** Infohashes handed to secondaries, so they are not handed over twice. */
   #shared = new Set();
+  /** Set once a stop has begun, so late timers do nothing. */
+  #stopping = false;
 
   /**
    * @param {object} options - The engines and how often to sweep.
@@ -181,7 +183,7 @@ export class CompositeEngine {
    * @returns {Promise<string[]>} - The infohashes newly shared.
    */
   async shareComplete() {
-    if (this.#secondaries.length === 0) return [];
+    if (this.#stopping || this.#secondaries.length === 0) return [];
 
     const held = await this.#primary.list();
     const shared = [];
@@ -226,6 +228,7 @@ export class CompositeEngine {
    * @returns {Promise<import('./types.js').TorrentStatus[]>} - Merged status.
    */
   async list() {
+    if (this.#stopping) return [];
     const primary = await this.#primary.list();
     const merged = new Map(primary.map((status) => [status.infoHash, { ...status }]));
 
@@ -355,6 +358,7 @@ export class CompositeEngine {
    * @returns {Promise<void>} - Resolves once all are stopped.
    */
   async destroy() {
+    this.#stopping = true;
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = undefined;
 
