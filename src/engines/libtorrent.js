@@ -76,6 +76,15 @@ export class LibtorrentEngine {
       throw new Error('libtorrent engine requires a savePath');
     }
     this.name = 'libtorrent';
+    if (options.listen !== undefined && typeof options.listen !== 'string') {
+      // Caught here because the alternative is a C++ converter error four
+      // frames into a Python traceback, which says nothing about which setting
+      // was wrong.
+      throw new Error(
+        'libtorrent listen must be a string like "0.0.0.0:6881", not ' +
+          `${typeof options.listen}`,
+      );
+    }
     this.#options = { python: 'python3', startTimeoutMs: 20000, ...options };
   }
 

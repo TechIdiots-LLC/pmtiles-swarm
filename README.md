@@ -6,8 +6,10 @@ A torrent client and server that knows what a map is: it creates torrents from P
 watches folders for new builds, publishes an RSS feed carrying each archive's coverage and zoom
 range, and follows other nodes' feeds to mirror or cache what they publish.
 
-It does not reimplement BitTorrent. Seeding is delegated to an engine — your existing qBittorrent,
-or an embedded WebTorrent client — so libtorrent keeps doing what it is good at.
+It does not reimplement BitTorrent. Seeding is delegated to an engine — libtorrent, your existing
+qBittorrent, or an embedded WebTorrent client — so libtorrent keeps doing what it is good at. Two
+can run at once, which is how one node both handles a multi-terabyte library and serves browser
+peers over WebRTC.
 
 ```sh
 npm install

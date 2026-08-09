@@ -132,6 +132,52 @@ the libtorrent engine, both of which would have silently broken it:
 A correctly configured cache-mode node reports state `cache`, holds zero bytes until
 something reads from it, and still serves whatever pieces it has picked up.
 
+## Running two engines at once
+
+The engines are good at different things, and `secondaryEngines` lets one node have both:
+
+```json
+{
+  "engine": "libtorrent",
+  "secondaryEngines": ["webtorrent"],
+  "libtorrent": { "savePath": "/mnt/maps", "python": "python" },
+  "webtorrent": { "savePath": "/mnt/maps" }
+}
+```
+
+libtorrent handles a multi-terabyte library and speaks BitTorrent v2; WebTorrent is the only
+one that can talk to a **browser**, over WebRTC. Running both means a browser peer fetches from
+the same swarm a thousand ordinary clients are seeding into, without either engine having to grow
+the other's abilities. qBittorrent works as the primary just as well.
+
+One rule makes it safe, and the rest follows from it:
+
+> **Only the primary ever writes.**
+
+Two BitTorrent clients pointed at the same incomplete file both write to it, and the result is not
+a race one of them wins — it is a file neither client's bitfield describes, which both then try to
+repair for ever. So a secondary is handed an archive **only once it is complete**, and only as a
+seed. A cache-mode archive is never handed over at all: it is a scatter of pieces on purpose, and a
+second client would see a mostly-missing file and start filling it in.
+
+What follows:
+
+| | |
+| --- | --- |
+| adding a download | primary only, until it finishes |
+| adding a complete archive | both |
+| switching to cache | withdrawn from secondaries first |
+| removing | both, but only the primary may delete data |
+| pause, resume, web seeds | both |
+| progress and state | the primary's — it is the only one that downloads |
+| peers, seeds, speeds | added together, since a peer is a peer whichever client found it |
+
+A secondary that will not start is a warning, not a failure. It is an addition to what the primary
+already does, and losing the browser bridge should not take the node down.
+
+Verified on Windows with libtorrent 2.0.13 and WebTorrent seeding the same archive together, and
+with a cache-mode archive correctly withheld from the secondary.
+
 ## Marking incomplete files
 
 An archive that is not whole yet is written under a marked name and renamed when

@@ -54,6 +54,23 @@ const DEFAULTS = {
    */
   cacheSavePath: undefined,
   /**
+   * Engines to run alongside the primary, seeding only.
+   *
+   * `["webtorrent"]` beside a libtorrent or qBittorrent primary is the reason
+   * this exists: libtorrent handles a multi-terabyte library and speaks
+   * BitTorrent v2, and WebTorrent is the only one that can talk to a browser.
+   * Running both lets a browser peer fetch from the same swarm without either
+   * engine having to grow the other's abilities.
+   *
+   * Only the primary ever writes. A secondary is handed an archive once it is
+   * complete and never in cache mode, because two clients writing one
+   * incomplete file do not race — they produce a file neither one's bitfield
+   * describes, and then both try to repair it forever.
+   */
+  secondaryEngines: [],
+  /** How often to look for archives that have become safe to share. */
+  secondaryShareIntervalSeconds: 60,
+  /**
    * Named places for archive data to land.
    *
    * `[{ name, path }]`. A torrent client usually hangs the save path off the
@@ -576,6 +593,8 @@ export const RESTART_REQUIRED = new Set([
   'dataDir',
   // The torrent client itself, and how it was constructed.
   'engine',
+  'secondaryEngines',
+  'secondaryShareIntervalSeconds',
   'qbittorrent',
   'webtorrent',
   'libtorrent',

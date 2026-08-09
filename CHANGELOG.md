@@ -51,6 +51,14 @@
   everything and reading afterwards what it did. Categories can be applied to the lot. It can also
   adopt from **a qBittorrent instance other than the configured engine**, which is what "adopt
   existing" sounded like it did.
+- **Two engines can run at once.** `secondaryEngines: ["webtorrent"]` beside a libtorrent or
+  qBittorrent primary — the arrangement the docs had been recommending without any code to do it,
+  which until now meant two processes and two catalogues. libtorrent handles the bulk and speaks
+  BitTorrent v2; WebTorrent is the only one that can talk to a browser. One rule keeps it safe:
+  only the primary writes, so a secondary is handed an archive only once it is complete and never
+  in cache mode — two clients writing one incomplete file produce a file neither one's bitfield
+  describes. Progress and state come from the primary; peers, seeds and speeds are added together.
+  A secondary that will not start is a warning, not a failure.
 - **A map preview for every archive**, at `/archives/{infohash}/preview` and behind an
   **Inspect** or **Preview** button in the detail panel. Vector archives get an inspector: each
   declared layer drawn in a colour derived from its name, toggleable, with click-to-see-properties

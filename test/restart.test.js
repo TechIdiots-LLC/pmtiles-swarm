@@ -27,6 +27,8 @@ describe('what actually needs the process to stop', () => {
         'maxConnections',
         'port',
         'qbittorrent',
+        'secondaryEngines',
+        'secondaryShareIntervalSeconds',
         'webtorrent',
       ],
     );

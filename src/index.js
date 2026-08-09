@@ -5,6 +5,7 @@ import { createApp } from './api.js';
 import { assertSafeToListen, createAuth } from './auth.js';
 import { Catalog } from './catalog.js';
 import { loadConfig } from './config.js';
+import { CompositeEngine } from './engines/composite.js';
 import { LibtorrentEngine } from './engines/libtorrent.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { WebTorrentSeedEngine } from './engines/webtorrent.js';
@@ -25,7 +26,28 @@ import { WatchManager } from './watch.js';
  * @returns {import('./engines/types.js').SeedEngine} - The engine.
  */
 function createEngine(config) {
-  switch (config.engine) {
+  const primary = createOneEngine(config.engine, config);
+  const secondaries = (config.secondaryEngines ?? [])
+    .filter((name) => name !== config.engine)
+    .map((name) => createOneEngine(name, config));
+
+  if (secondaries.length === 0) return primary;
+
+  return new CompositeEngine({
+    primary,
+    secondaries,
+    shareIntervalSeconds: config.secondaryShareIntervalSeconds,
+  });
+}
+
+/**
+ * Builds one engine by name.
+ * @param {string} name - The engine.
+ * @param {object} config - Resolved configuration.
+ * @returns {import('./engines/types.js').SeedEngine} - The engine.
+ */
+function createOneEngine(name, config) {
+  switch (name) {
     case 'qbittorrent':
       return new QBittorrentEngine(config.qbittorrent);
     case 'libtorrent':
@@ -44,7 +66,7 @@ function createEngine(config) {
       });
     default:
       throw new Error(
-        `unknown engine "${config.engine}"; expected libtorrent, qbittorrent or webtorrent`,
+        `unknown engine "${name}"; expected libtorrent, qbittorrent or webtorrent`,
       );
   }
 }
