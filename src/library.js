@@ -209,7 +209,7 @@ export class Library {
       explicit ??
       (mode === 'cache' && this.#config.cacheSavePath
         ? this.#config.cacheSavePath
-        : this.#config.webtorrent.savePath);
+        : this.#config.savePath ?? this.#config.webtorrent?.savePath);
 
     // A directory per archive, where that has been asked for. Only joined
     // archives get one: an archive created here keeps the file it was made

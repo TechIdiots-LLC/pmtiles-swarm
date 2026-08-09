@@ -53,7 +53,9 @@ function createOneEngine(name, config) {
       return new QBittorrentEngine(config.qbittorrent);
     case 'libtorrent':
       return new LibtorrentEngine({
-        savePath: config.libtorrent?.savePath ?? config.webtorrent.savePath,
+        // The node's path, not this engine's. Two engines seeding one archive
+        // are seeding one file, so they have to be looking at the same one.
+        savePath: config.savePath,
         resumeDir: config.libtorrent?.resumeDir,
         python: config.libtorrent?.python,
         maxConnections: config.maxConnections,
@@ -61,7 +63,7 @@ function createOneEngine(name, config) {
       });
     case 'webtorrent':
       return new WebTorrentSeedEngine({
-        savePath: config.webtorrent.savePath,
+        savePath: config.savePath,
         clientOptions: config.webtorrent.clientOptions,
         maxConnections: config.maxConnections,
       });
@@ -130,9 +132,19 @@ PMTILES_SWARM_PUBLIC_URL
   stoppers.unshift({ label: 'data directory lock', stop: () => lock.release(), ms: 2000 });
 
   await fs.mkdir(config.dataDir, { recursive: true });
-  if (config.engine === 'webtorrent') {
-    await fs.mkdir(config.webtorrent.savePath, { recursive: true });
+
+  // Folded to one value when the config was loaded. Saying so matters: obeying
+  // two different paths would point a seeding secondary at a directory the
+  // primary's files are not in, which it answers by downloading its own copy.
+  if (config.savePathConflict) {
+    console.warn(
+      `[config] engines were given different save paths ` +
+        `(${config.savePathConflict.join(', ')}). Using ${config.savePath} for ` +
+        'all of them — two engines seeding one archive are seeding one file, ' +
+        'and have to be looking at the same directory.',
+    );
   }
+  await fs.mkdir(config.savePath, { recursive: true });
 
   const catalog = new Catalog(config.dataDir);
   await catalog.load();

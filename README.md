@@ -120,7 +120,7 @@ subscribers forward, and they fail differently, so publishing both is cheap insu
   "dataDir": "./data",
   "engine": "qbittorrent",
   "qbittorrent": { "url": "http://127.0.0.1:8080", "username": "admin", "password": "…" },
-  "webtorrent": { "savePath": "./data/torrents-data" },
+  "savePath": "./data/torrents-data",
   "incompleteSuffix": ".incomplete",
   "pieceLength": 4194304,
   "maxConnections": 100,
@@ -153,7 +153,8 @@ subscribers forward, and they fail differently, so publishing both is cheap insu
 
 ### Where the data lands
 
-By default everything goes to `webtorrent.savePath`. Name the other places you use under
+By default everything goes to `savePath` — one directory for the node, not one per engine.
+Name the other places you use under
 `locations`, and they are offered wherever something is added — the add dialog, the adopt dialog,
 each monitored folder and each watched web location:
 

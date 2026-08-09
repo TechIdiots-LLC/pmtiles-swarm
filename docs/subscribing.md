@@ -13,7 +13,7 @@ Watches a build directory, creates torrents, publishes a feed.
   "port": 8090,
   "engine": "libtorrent",
   "publicUrl": "https://maps.example.org",
-  "libtorrent": { "savePath": "/mnt/maps/generated" },
+  "savePath": "/mnt/maps/generated",
   "watch": [
     {
       "path": "/mnt/maps/generated",
@@ -37,7 +37,7 @@ Its feed is then at `https://maps.example.org/feed.xml`, with per-category feeds
 {
   "port": 8090,
   "engine": "libtorrent",
-  "libtorrent": { "savePath": "/var/lib/maps" },
+  "savePath": "/var/lib/maps",
   "subscriptions": [
     { "url": "https://maps.example.org/feed.xml", "mode": "cache" }
   ],

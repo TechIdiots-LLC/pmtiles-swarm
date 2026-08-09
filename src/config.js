@@ -18,8 +18,24 @@ const DEFAULTS = {
     username: undefined,
     password: undefined,
   },
+  /**
+   * Where archive data lives.
+   *
+   * One path for the node, not one per engine, and that is not a
+   * simplification — it is the only arrangement that works. Two engines
+   * running together are seeding *the same file*: the secondary is handed an
+   * archive the primary has already finished, and it seeds those exact bytes.
+   * Point them at different directories and the secondary finds nothing where
+   * it was told to look, and starts downloading its own copy of something that
+   * is already on the disk.
+   *
+   * The per-engine `savePath` settings below are still read, for
+   * configurations written before this existed, but they are folded into one
+   * value and a disagreement between them is reported rather than obeyed.
+   */
+  savePath: undefined,
   webtorrent: {
-    savePath: './data/torrents-data',
+    savePath: undefined,
   },
   /**
    * The marker appended to an archive that is not whole yet.
@@ -621,7 +637,19 @@ export async function loadConfig(configPath) {
   // unit with the data it points at.
   const base = configPath ? path.dirname(path.resolve(configPath)) : process.cwd();
   config.dataDir = path.resolve(base, config.dataDir);
-  config.webtorrent.savePath = path.resolve(base, config.webtorrent.savePath);
+
+  // Folded to one value here rather than at startup, so everything downstream
+  // — including anything that only reads the config — sees the same path every
+  // engine will be given.
+  const { savePath, conflict } = resolveSavePath(config);
+  config.savePath = path.resolve(base, savePath);
+  config.savePathConflict = conflict;
+  // Kept in step, because older code and older configs both reach for it.
+  config.webtorrent = { ...config.webtorrent, savePath: config.savePath };
+  if (config.libtorrent) config.libtorrent.savePath = config.savePath;
+  if (config.cacheSavePath) {
+    config.cacheSavePath = path.resolve(base, config.cacheSavePath);
+  }
   config.watch = config.watch.map((entry) => ({
     ...entry,
     path: path.resolve(base, entry.path),
@@ -642,12 +670,39 @@ export async function loadConfig(configPath) {
  * silently accepted a port change and kept serving on the old one would be
  * worse than one that says plainly it needs a restart.
  */
+/**
+ * The one save path every engine must use, and whether the config disagreed.
+ *
+ * Reads the older per-engine settings so an existing config keeps working, but
+ * refuses to let two engines end up in different directories: that silently
+ * turns a seeding secondary into a second downloader.
+ * @param {object} config - Resolved configuration.
+ * @returns {{savePath: string, conflict?: string[]}} - The path, and any disagreement.
+ */
+export function resolveSavePath(config) {
+  const named = [
+    config.savePath,
+    config.libtorrent?.savePath,
+    config.webtorrent?.savePath,
+  ].filter(Boolean);
+
+  // Unset rather than defaulted above, so that a config naming only
+  // `libtorrent.savePath` is honoured instead of being outranked by a default
+  // nobody chose. The default belongs here, where it applies last.
+  const distinct = [...new Set(named.map((value) => String(value)))];
+  return {
+    savePath: distinct[0] ?? './data/torrents-data',
+    conflict: distinct.length > 1 ? distinct : undefined,
+  };
+}
+
 export const RESTART_REQUIRED = new Set([
   // The listening sockets.
   'port',
   'host',
   'adminPort',
   'adminHost',
+  'savePath',
   // Where the catalogue lives, which everything above it was built from.
   'dataDir',
   // The torrent client itself, and how it was constructed.

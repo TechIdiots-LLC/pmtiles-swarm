@@ -26,8 +26,8 @@ re-hash the store, piece-level control, and seeding that holds at multi-terabyte
 ```json
 {
   "engine": "libtorrent",
+  "savePath": "./data/torrents-data",
   "libtorrent": {
-    "savePath": "./data/torrents-data",
     "resumeDir": "./data/resume",
     "listen": "0.0.0.0:6881",
     "python": "python3"
@@ -92,7 +92,7 @@ each other directly. A WebTorrent node is what bridges the two halves of a swarm
 ```json
 {
   "engine": "webtorrent",
-  "webtorrent": { "savePath": "./data/torrents-data" }
+  "savePath": "./data/torrents-data"
 }
 ```
 
@@ -140,10 +140,19 @@ The engines are good at different things, and `secondaryEngines` lets one node h
 {
   "engine": "libtorrent",
   "secondaryEngines": ["webtorrent"],
-  "libtorrent": { "savePath": "/mnt/maps", "python": "python" },
-  "webtorrent": { "savePath": "/mnt/maps" }
+  "savePath": "/mnt/maps",
+  "libtorrent": { "python": "python" }
 }
 ```
+
+`savePath` is one setting for the node, and both engines use it. That is not a
+simplification — it is the only arrangement that works. The two engines are seeding *the
+same file*: the secondary is handed an archive the primary has already finished and seeds
+those exact bytes. Point them at different directories and the secondary finds nothing where
+it was told to look, and answers that by downloading its own copy of something that is
+already on the disk. Older configs naming `libtorrent.savePath` or `webtorrent.savePath` are
+still read and folded into one value; if they disagree, the node says so and uses one of
+them rather than obeying both. Changing it needs a restart.
 
 libtorrent handles a multi-terabyte library and speaks BitTorrent v2; WebTorrent is the only
 one that can talk to a **browser**, over WebRTC. Running both means a browser peer fetches from
