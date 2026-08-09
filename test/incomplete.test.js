@@ -374,3 +374,71 @@ describe('a directory per archive', () => {
     assert.equal(entry.savePath, path.join(elsewhere, 'c'.repeat(40)));
   });
 });
+
+describe('a preallocated file is not a finished one', () => {
+  it('believes the engine over the size on disk', async () => {
+    // The bug: libtorrent creates the whole file up front, so an archive 0%
+    // downloaded already measures exactly its final size. A disk check called
+    // that complete, the catalog recorded it, and on the next restart the
+    // composite handed a 10%-downloaded archive to a secondary as a finished
+    // seed — precisely what "only the primary writes" exists to prevent.
+    const dir = await fs.mkdtemp(path.join(workspace, 'prealloc-'));
+    const name = 'planet.pmtiles';
+    // Full size, as libtorrent leaves it the moment a download starts.
+    await fs.writeFile(path.join(dir, name), Buffer.alloc(4096));
+
+    const finalized = [];
+    const catalog = { list: () => [entry] };
+    const entry = {
+      infoHash: 'a'.repeat(40),
+      name,
+      size: 4096,
+      savePath: dir,
+      complete: false,
+      status: { progress: 0.1 },
+    };
+
+    const watcher = new CompletionWatcher(
+      {
+        list: () => catalog.list(),
+        listWithStatus: async () => catalog.list(),
+        finalize: async (hash) => finalized.push(hash),
+      },
+      { completionCheckIntervalSeconds: 0 },
+    );
+
+    await watcher.sweep();
+    assert.deepEqual(finalized, [], 'a 10% archive must not be finalized');
+  });
+
+  it('still trusts the disk when the engine holds no opinion', async () => {
+    // The case the disk check was written for: a finished file dropped into
+    // the save path before its torrent was added. Nothing is writing there,
+    // so the size means what it says.
+    const dir = await fs.mkdtemp(path.join(workspace, 'dropped-'));
+    const name = 'planet.pmtiles';
+    await fs.writeFile(path.join(dir, name), Buffer.alloc(4096));
+
+    const finalized = [];
+    const entry = {
+      infoHash: 'b'.repeat(40),
+      name,
+      size: 4096,
+      savePath: dir,
+      complete: false,
+      // No status: the engine is not holding this one.
+    };
+
+    const watcher = new CompletionWatcher(
+      {
+        list: () => [entry],
+        listWithStatus: async () => [entry],
+        finalize: async (hash) => finalized.push(hash),
+      },
+      { completionCheckIntervalSeconds: 0 },
+    );
+
+    await watcher.sweep();
+    assert.deepEqual(finalized, ['b'.repeat(40)]);
+  });
+});

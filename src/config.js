@@ -87,6 +87,17 @@ const DEFAULTS = {
   /** How often to look for archives that have become safe to share. */
   secondaryShareIntervalSeconds: 60,
   /**
+   * How long a secondary may take to accept an archive it has been handed.
+   *
+   * It is not waiting for metadata — the `.torrent` carries that. It is
+   * hashing every byte of the file against it, which is what any client does
+   * before it will serve a piece it did not download itself. Minutes for tens
+   * of gigabytes, hours for a real library, against the seconds a normal add
+   * is given. An hour by default, because this is background work and the only
+   * cost of waiting is that the browser bridge starts late.
+   */
+  secondaryShareTimeoutSeconds: 3600,
+  /**
    * A separate port for the console and the API.
    *
    * Unset, one listener serves everything. Set, and the split is by purpose:

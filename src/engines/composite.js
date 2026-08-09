@@ -44,12 +44,19 @@ export class CompositeEngine {
    * @param {import('./types.js').SeedEngine} options.primary - Does the downloading.
    * @param {import('./types.js').SeedEngine[]} options.secondaries - Seed only.
    * @param {number} [options.shareIntervalSeconds] - How often to look for newly complete archives.
+   * @param {number} [options.shareTimeoutSeconds] - How long a secondary may take to verify an archive it has been handed. Hashing tens of gigabytes is minutes of work.
    */
-  constructor({ primary, secondaries = [], shareIntervalSeconds = 60 }) {
+  constructor({
+    primary,
+    secondaries = [],
+    shareIntervalSeconds = 60,
+    shareTimeoutSeconds = 3600,
+  }) {
     if (!primary) throw new Error('a composite engine needs a primary');
     this.#primary = primary;
     this.#secondaries = secondaries.filter(Boolean);
     this.shareIntervalMs = Math.max(5, shareIntervalSeconds) * 1000;
+    this.shareTimeoutMs = Math.max(60, shareTimeoutSeconds) * 1000;
     this.name = [primary.name, ...this.#secondaries.map((e) => e.name)].join('+');
   }
 
@@ -122,11 +129,34 @@ export class CompositeEngine {
   async add(request) {
     const infoHash = await this.#primary.add(request);
 
-    if (this.#shareable(request)) {
+    if (this.#shareable(request) && (await this.#primaryHasItAll(infoHash))) {
       await this.#shareOne(infoHash, request);
     }
 
     return infoHash;
+  }
+
+  /**
+   * Whether the primary actually holds the whole archive.
+   *
+   * Asked rather than taken on trust. `seedOnly` is the caller's claim, and a
+   * caller reading it from a catalog can be wrong — a `complete` flag set by a
+   * disk check against a preallocated file said "finished" about an archive
+   * 10% downloaded, and that claim is the only thing standing between one
+   * incomplete file and two clients writing to it.
+   *
+   * An engine still checking has no answer yet, and gets a no. Under-sharing
+   * costs a minute: the periodic sweep hands it over as soon as it is really
+   * finished. Over-sharing costs the file.
+   * @param {string} infoHash - The archive.
+   * @returns {Promise<boolean>} - True when the primary reports it whole.
+   */
+  async #primaryHasItAll(infoHash) {
+    const status = await this.#primary.get?.(infoHash).catch(() => null);
+    // No status at all is the "dropped a finished file in before adding it"
+    // case, where nothing is writing and the caller's word is all there is.
+    if (!status) return true;
+    return status.progress >= 1;
   }
 
   /**
@@ -157,6 +187,14 @@ export class CompositeEngine {
           seedOnly: true,
           mode: 'mirror',
           paused: false,
+          // A seeding client handed an archive it has not seen before must
+          // hash every byte of it against the torrent before it will serve
+          // any. That is minutes for tens of gigabytes and hours for a real
+          // library, against a default measured in seconds — which is why
+          // this appeared as "timed out waiting for torrent metadata" for an
+          // archive whose metadata was in the .torrent all along. Background
+          // work, so it can afford to wait.
+          readyTimeoutMs: this.shareTimeoutMs,
           // And never a marker. A secondary only ever receives an archive that
           // is already whole, so there is nothing to mark — and a marker here
           // means the secondary opens a *different* filename in the same

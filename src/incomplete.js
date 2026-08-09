@@ -238,20 +238,30 @@ export class CompletionWatcher {
 
       if (entry.complete) continue;
 
-      // Two ways to be finished, and the disk is the more trustworthy of them.
-      // The engine's progress is the usual signal, but it is only as good as
-      // the engine's account of itself: a client that renames incomplete files
-      // its own way, one that was restarted mid-check, or a list call that
-      // failed a moment ago all leave an archive whole on disk and reported as
-      // something less. Believing only the engine leaves the catalog saying
-      // "incomplete" over a file that plainly is not.
-      const whole =
-        entry.status?.progress >= 1 ||
-        (await alreadyComplete({
-          savePath: entry.savePath,
-          name: entry.name,
-          size: entry.size,
-        }));
+      // Two ways to be finished, and the engine's account wins whenever it has
+      // one.
+      //
+      // This used to be the other way round — disk first, on the reasoning
+      // that a file of the right size plainly is finished. It is not: a
+      // torrent client allocates the whole file up front. libtorrent creates
+      // a 77 GB sparse file the moment a download starts, so an archive 0%
+      // downloaded already measures exactly its final size, and the disk check
+      // called it complete. The catalog then said so, and on the next restart
+      // the composite handed a 10%-downloaded archive to a secondary as a
+      // finished seed — the one thing that rule exists to prevent.
+      //
+      // Size still answers where nothing else can: an archive the engine has
+      // no opinion about, because it is not holding it yet. That is the case
+      // this was written for — a finished file dropped into the save path
+      // before its torrent was added — and it is only sound precisely because
+      // no client is writing there.
+      const whole = entry.status
+        ? entry.status.progress >= 1
+        : await alreadyComplete({
+            savePath: entry.savePath,
+            name: entry.name,
+            size: entry.size,
+          });
       if (!whole) continue;
       // Promotion removes and re-adds the torrent, which takes long enough for
       // the next tick to come round and start a second one.

@@ -35,6 +35,22 @@
   at it quietly on every start. Unset keys still take libtorrent's own defaults.
 
 ### 🐞 Bug fixes
+- **A preallocated file is no longer mistaken for a finished one.** A torrent client allocates the
+  whole file up front — libtorrent creates a 77 GB sparse file the moment a download starts — so an
+  archive 0% downloaded already measures exactly its final size. The completion sweep checked the
+  disk *first*, called that complete, and recorded it. On the next restart the composite then
+  handed a 10%-downloaded archive to a secondary as a finished seed, which is the one thing "only
+  the primary writes" exists to prevent. The engine's own progress now wins whenever it has an
+  opinion; the size check remains for the case it was written for, an archive the engine is not
+  holding at all.
+- **A secondary is given long enough to hash what it was handed.** It is not waiting for metadata —
+  the `.torrent` carries that — it is verifying every byte against it, which is minutes for tens of
+  gigabytes. Against a default measured in seconds this appeared as `timed out after 60000ms
+  waiting for torrent metadata`, blaming the one thing that was never missing. Now
+  `secondaryShareTimeoutSeconds`, an hour by default.
+- **The composite asks the primary before handing anything over**, rather than trusting the
+  caller's `seedOnly`. That flag is read from the catalog on restore, and a wrong `complete` there
+  was all that stood between one incomplete file and two clients writing to it.
 - **A partial vector archive now gets its `vector_layers`, so the preview is not black.** A
   PMTiles header is the first 127 bytes, but the JSON metadata carrying the layer list goes
   wherever the writer put it — and planetiler puts it at the *end*, after every tile: byte

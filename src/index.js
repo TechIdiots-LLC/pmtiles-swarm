@@ -39,6 +39,7 @@ function createEngine(config) {
     primary,
     secondaries,
     shareIntervalSeconds: config.secondaryShareIntervalSeconds,
+    shareTimeoutSeconds: config.secondaryShareTimeoutSeconds,
   });
 }
 

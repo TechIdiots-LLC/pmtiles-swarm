@@ -341,3 +341,90 @@ describe('reading tiles while two engines are running', () => {
     assert.doesNotMatch(failure.message, /\+/);
   });
 });
+
+describe('what a secondary is allowed to be handed', () => {
+  /** A primary reporting a given progress, recording what it was asked. */
+  const primaryAt = (progress) => ({
+    name: 'libtorrent',
+    added: [],
+    connect: async () => {},
+    list: async () => [],
+    get: async () => ({ infoHash: 'a'.repeat(40), progress }),
+    add: async function (request) {
+      this.added.push(request);
+      return 'a'.repeat(40);
+    },
+    remove: async () => {},
+    destroy: async () => {},
+  });
+
+  const recordingSecondary = () => ({
+    name: 'webtorrent',
+    added: [],
+    connect: async () => {},
+    list: async () => [],
+    get: async () => null,
+    add: async function (request) {
+      this.added.push(request);
+    },
+    remove: async () => {},
+    destroy: async () => {},
+  });
+
+  it('refuses an archive the primary has not finished', async () => {
+    // The caller said seedOnly. The primary says 10%. The primary wins:
+    // `complete` in the catalog was set by a disk check against a file the
+    // engine had preallocated to its full size, so it claimed finished about
+    // an archive barely started — and that claim is all that stands between
+    // one incomplete file and two clients writing to it.
+    const secondary = recordingSecondary();
+    const engine = new CompositeEngine({
+      primary: primaryAt(0.1),
+      secondaries: [secondary],
+    });
+
+    await engine.add({ torrentFile: new Uint8Array([1]), seedOnly: true, mode: 'mirror' });
+    assert.deepEqual(secondary.added, [], 'nothing should have been handed over');
+  });
+
+  it('hands over one the primary has finished', async () => {
+    const secondary = recordingSecondary();
+    const engine = new CompositeEngine({
+      primary: primaryAt(1),
+      secondaries: [secondary],
+    });
+
+    await engine.add({ torrentFile: new Uint8Array([1]), seedOnly: true, mode: 'mirror' });
+    assert.equal(secondary.added.length, 1);
+  });
+
+  it('gives it long enough to hash what it was handed', async () => {
+    // A secondary must verify every byte against the torrent before it will
+    // serve any — minutes for tens of gigabytes. Against the seconds a normal
+    // add gets, that surfaced as "timed out waiting for torrent metadata" for
+    // an archive whose metadata was in the .torrent all along.
+    const secondary = recordingSecondary();
+    const engine = new CompositeEngine({
+      primary: primaryAt(1),
+      secondaries: [secondary],
+      shareTimeoutSeconds: 1800,
+    });
+
+    await engine.add({ torrentFile: new Uint8Array([1]), seedOnly: true, mode: 'mirror' });
+    assert.equal(secondary.added[0].readyTimeoutMs, 1800000);
+  });
+
+  it('still shares when the primary has no opinion', async () => {
+    // The "finished file dropped in before its torrent was added" case: the
+    // engine is not holding it, nothing is writing, and the caller's word is
+    // all there is.
+    const secondary = recordingSecondary();
+    const engine = new CompositeEngine({
+      primary: { ...primaryAt(1), get: async () => null },
+      secondaries: [secondary],
+    });
+
+    await engine.add({ torrentFile: new Uint8Array([1]), seedOnly: true, mode: 'mirror' });
+    assert.equal(secondary.added.length, 1);
+  });
+});
