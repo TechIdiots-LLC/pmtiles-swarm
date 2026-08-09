@@ -35,16 +35,20 @@
   at it quietly on every start. Unset keys still take libtorrent's own defaults.
 
 ### 🐞 Bug fixes
-- **A vector preview no longer renders black when the archive has no `vector_layers`.** Two
-  independent causes, both silent. Passing `sources` to maplibre-gl-inspect switches its automatic
-  layer detection off, so handing it the empty list from such an archive left it with nothing to
-  style *and* nothing to discover; it is now omitted when there are no layers, and the control
-  reads the layer names out of the tiles as they arrive. Separately, a summary can arrive with its
-  header half and not its metadata half — the header is the first 127 bytes and the JSON metadata
-  sits past the root directory, so probing an archive adopted mid-download reads one and not the
-  other. `tiles.json` now re-reads the metadata through the swarm when a pbf archive has no
-  `vector_layers`, rate-limited to once a minute, so it heals as the download progresses instead of
-  being wrong until the archive is re-added.
+- **A partial vector archive now gets its `vector_layers`, so the preview is not black.** A
+  PMTiles header is the first 127 bytes, but the JSON metadata carrying the layer list goes
+  wherever the writer put it — and planetiler puts it at the *end*, after every tile: byte
+  77,139,967,368 of a 77 GB archive. Probing a file that is 10% downloaded therefore reads a
+  perfectly good header and 1528 zero bytes where the metadata should be, and every field except
+  the one vector rendering needs looks right. The header records that offset, so the range is
+  known and fetchable: `tiles.json` now reads it out of the swarm in the background, with a
+  timeout of its own (`tiles.metadataTimeoutMs`, 120s) rather than the interactive header budget,
+  which was far too short for a piece at the far end of an archive that nobody has asked for. The
+  reply is not held up, and the next request has the layers.
+- **The preview says why a vector map is blank** instead of showing a black rectangle. Related:
+  `sources` is no longer passed to maplibre-gl-inspect when there are no layers, since passing it
+  disables the control's own lookup — though that lookup only re-reads the TileJSON, so it is the
+  metadata fix above that actually makes the map draw.
 - **The Pieces tab had no pane to render into**, so it appeared, highlighted when clicked, and did
   nothing. Tabs and panes are now checked against each other in both directions.
 - **The peers tab is no longer silently empty on libtorrent.** `peer_info.utp_socket` is absent

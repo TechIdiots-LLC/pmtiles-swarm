@@ -334,8 +334,22 @@ describe('the map preview', () => {
     );
   });
 
-  it('says the layers are coming from the tiles when there are none', () => {
-    // "0 layers" beside a black map reads as a broken archive.
-    assert.match(preview, /layers read from the tiles/);
+  it('explains a blank vector map rather than showing a black rectangle', () => {
+    // "0 layers" beside a black map reads as a broken archive. It is not: the
+    // layer list lives in a metadata block that a writer may put after every
+    // tile — planetiler does — so on a partial download it is among the very
+    // last bytes to arrive.
+    assert.match(preview, /no layer list yet/);
+    assert.match(preview, /fetching it from the swarm/);
+    // And the element it writes that into has to exist.
+    assert.match(preview, /id="note"/);
+  });
+
+  it('does not claim the inspector reads layers out of the tiles', () => {
+    // It does not. maplibre-gl-inspect's "automatic detection" re-fetches the
+    // TileJSON looking for vector_layers and, failing that, falls back to the
+    // style's own layers — it never looks inside a tile. Saying otherwise sent
+    // a reader looking for a fallback that was never going to arrive.
+    assert.doesNotMatch(preview, /layers read from the tiles/);
   });
 });

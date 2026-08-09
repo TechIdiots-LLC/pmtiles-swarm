@@ -386,6 +386,17 @@ const DEFAULTS = {
     /** How long to wait for torrent metadata when opening an archive. */
     readyTimeoutMs: 60000,
     /**
+     * How long a background metadata read may take.
+     *
+     * Much longer than the header timeout, and for a different job. A PMTiles
+     * writer may put the JSON metadata anywhere, and planetiler puts it at the
+     * *end* — past every tile — so reading it out of a swarm means fetching a
+     * piece from the far end of an archive that can be hundreds of gigabytes,
+     * which nobody has asked for and no peer is prioritising. This never
+     * blocks a reply, so it can afford to wait.
+     */
+    metadataTimeoutMs: 120000,
+    /**
      * How long a TileJSON request waits for an archive's header.
      *
      * Shorter than the other timeouts on purpose: somebody is waiting on this

@@ -51,6 +51,14 @@
         background: var(--panel);
         color: var(--fg);
       }
+      #note {
+        padding: 0.7rem 1rem;
+        border-bottom: 1px solid var(--line);
+        background: #2a2410;
+        color: #e8d9a0;
+        font-size: 0.85rem;
+        line-height: 1.45;
+      }
     </style>
   </head>
   <body>
@@ -60,6 +68,7 @@
       <code id="endpoint"></code>
       <a href="/">← console</a>
     </header>
+    <div id="note" hidden></div>
     <div id="map"></div>
 
     <script type="module">
@@ -101,7 +110,7 @@
         (vector
           ? vectorLayers.length > 0
             ? ` · ${vectorLayers.length} layers`
-            : ' · layers read from the tiles'
+            : ' · no layer list yet'
           : '');
       $('endpoint').textContent = tilejson.tiles?.[0] ?? '';
 
@@ -118,6 +127,19 @@
       };
       if (!vector) {
         style.layers.push({ id: 'archive', type: 'raster', source: 'archive' });
+      }
+
+      // An archive whose metadata has not been read yet cannot be drawn: a
+      // vector style needs `source-layer` names, and nothing in a tile request
+      // supplies them. Say so, rather than presenting a black rectangle.
+      if (vector && vectorLayers.length === 0) {
+        $('note').hidden = false;
+        $('note').textContent =
+          'This archive has not reported its vector layers yet, so there is ' +
+          'nothing to style. In a PMTiles file the layer list lives in a ' +
+          'metadata block that some writers put after every tile, so on a ' +
+          'partial download it is among the last bytes to arrive. The node is ' +
+          'fetching it from the swarm in the background — reload in a minute.';
       }
 
       const map = new maplibregl.Map({

@@ -187,11 +187,53 @@ export function createApp({
    */
   const metadataRetries = new Map();
   const needsVectorLayers = (summary, infoHash) => {
-    if (summary.format !== 'pbf' || summary.vectorLayers) return false;
+    if (!summary || summary.format !== 'pbf' || summary.vectorLayers) return false;
     const last = metadataRetries.get(infoHash) ?? 0;
     if (Date.now() - last < 60000) return false;
     metadataRetries.set(infoHash, Date.now());
     return true;
+  };
+
+  /**
+   * Reads an archive's metadata out of the swarm, without holding up a reply.
+   *
+   * Given a long timeout on purpose: this is fetching a byte range from the far
+   * end of an archive that may be hundreds of gigabytes, and the piece holding
+   * it is one nobody has asked for. The interactive header timeout is far too
+   * short for that, and using it is why this looked permanently broken rather
+   * than merely slow.
+   * @param {object} entry - The catalog entry.
+   * @returns {void}
+   */
+  const startMetadataBackfill = (entry) => {
+    // A node with no tile reader is a valid arrangement — the feed and the
+    // .torrent endpoints work without one. Enriching a summary is the least
+    // important thing here and must never be what takes a reply down.
+    if (typeof tiles?.summarize !== 'function') return;
+    if (!needsVectorLayers(entry.pmtiles, entry.infoHash)) return;
+
+    const timeoutMs = config.tiles?.metadataTimeoutMs ?? 120000;
+    tiles
+      .summarize(entry.infoHash, { timeoutMs })
+      .then(async (summary) => {
+        if (!summary.vectorLayers) return;
+        await catalog.put({
+          infoHash: entry.infoHash,
+          pmtiles: { ...entry.pmtiles, ...summary },
+        });
+        console.log(
+          `[tiles] read ${summary.vectorLayers.length} vector layers for ` +
+            `${entry.name} out of the swarm`,
+        );
+      })
+      .catch((error) => {
+        // Expected while the archive is young: the piece holding the metadata
+        // may not exist anywhere reachable yet. Said once a minute at most,
+        // because it is the answer to "why is my preview blank".
+        console.warn(
+          `[tiles] no vector layers for ${entry.name} yet: ${error.message}`,
+        );
+      });
   };
 
   const isSparse = (entry) =>
@@ -1668,33 +1710,24 @@ export function createApp({
         }
       }
 
-      // A summary can arrive with its header half and not its metadata half.
+      // A summary can arrive with its header half and not its metadata half,
+      // and for a partial archive that is the normal case rather than the
+      // unlucky one.
       //
-      // The two live in different parts of the file: the header is the first
-      // 127 bytes, and the JSON metadata sits past the root directory. Probing
-      // a partial archive — one adopted mid-download, which is exactly when a
-      // torrent client hands one over — reads the first and not the second. The
-      // result looks fine everywhere except where it matters: a vector archive
-      // with no `vector_layers` gives maplibre-gl-inspect nothing to build a
-      // style from, and the preview renders black.
+      // The two are nowhere near each other. The header is the first 127
+      // bytes; the JSON metadata is wherever the writer put it, and planetiler
+      // puts it at the *end* — measured at byte 77,139,967,368 of a 77 GB
+      // archive, after every tile. So probing a file that is 10% downloaded
+      // reads a perfectly good header and 1528 zero bytes where the metadata
+      // should be. Everything looks right except the one field vector
+      // rendering needs: with no `vector_layers`, maplibre-gl-inspect has
+      // nothing to build a style from and the preview renders black.
       //
-      // Only for pbf, and only for the field that actually breaks rendering.
-      // A missing name or attribution is cosmetic and not worth a swarm read.
-      if (entry.pmtiles && needsVectorLayers(entry.pmtiles, entry.infoHash)) {
-        try {
-          const summary = await tiles.summarize(entry.infoHash);
-          if (summary.vectorLayers) {
-            entry = await catalog.put({
-              infoHash: entry.infoHash,
-              pmtiles: { ...entry.pmtiles, ...summary },
-            });
-          }
-        } catch {
-          // Still unreachable. Answer with the header half rather than
-          // refusing — the tile endpoints work regardless, and this is
-          // retried, so it heals as the download progresses.
-        }
-      }
+      // Fetched in the background rather than awaited. Reading the end of a
+      // 72 GiB archive out of a swarm is not something to hold an interactive
+      // request open for, and it does not need to be: this answers now with
+      // what it has, and the next request has the layers.
+      startMetadataBackfill(entry);
 
       // Anyone embedding a map is doing so from another origin.
       res.setHeader('access-control-allow-origin', '*');
