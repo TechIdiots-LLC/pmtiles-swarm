@@ -1,6 +1,27 @@
 # pmtiles-swarm changelog
 
 ## master
+### 🐞 Bug fixes
+- **The peers tab is no longer silently empty on libtorrent.** `peer_info.utp_socket` is absent
+  from libtorrent's 2.x Python bindings, so the sidecar raised on the first peer and returned
+  nothing — an archive downloading at 10 MiB/s from a connected seed reported having no peers at
+  all. Fixed in pmtiles-torrent; a node has to be restarted to pick up a sidecar change. Three
+  layers here had each turned that exception into an empty list, so a broken engine and an empty
+  swarm produced identical output: the route now answers `{ peers, error }` and the console shows
+  the reason, and the composite engine logs which engine failed instead of swallowing it. Peer
+  rows also now carry the engine that found them and whether each is an ordinary peer, a web seed
+  or an HTTP seed — an archive pulling at full speed from one web seed looks exactly like one
+  pulling from a swarm until that single server goes away.
+
+### 📚 Documentation
+- The topology diagram shows the **browser bridge**: browsers speak WebRTC and conventional
+  clients speak TCP and uTP, so a browser peer is only ever reached by a node running WebTorrent.
+  The deployment notes cover the **two-port split**, which decides what a load balancer may be
+  pointed at. The API table gained the four routes it was missing (`/api/adds`, `/api/session`,
+  `/archives/{hash}/archive.torrent`, `/archives/{hash}/preview`), and there are now tests that a
+  diagram's `linkStyle` indices are in range, that every relative link and anchor resolves, and
+  that no route is missing a row.
+
 ### ✨ Features and improvements
 - **An archive that is not whole yet is named so.** It downloads as
   `planet.pmtiles.incomplete` and is renamed the instant it finishes. These files get published:

@@ -43,7 +43,7 @@ graph LR
     PRI -->|"RSS<br/>torrents + magnets"| S1 & S2 & S3
 
     subgraph SEC["Serving tier — subscribed to the publisher's feed"]
-        S1["pmtiles-swarm<br/><small>mirror — reads locally, seeds fully</small>"]
+        S1["pmtiles-swarm<br/><small>mirror — reads locally, seeds fully</small><br/><small><b>libtorrent + webtorrent</b></small>"]
         S2["pmtiles-swarm<br/><small>mirror — reads locally, seeds fully</small>"]
         S3["pmtiles-swarm<br/><small>cache — reads pieces on demand</small>"]
     end
@@ -57,18 +57,20 @@ graph LR
     PRI --> LB
     S1 & S2 & S3 --> LB["Load balancer / CDN<br/>HAProxy · Cloudflare<br/><small>caches tiles — they are immutable</small>"]
 
-    LB --> C1 & C2
+    LB --> C1 & C2 & C3
 
     subgraph CL["Clients"]
         C1["<b>Torrent-aware client</b><br/>maplibre-maui-ac<br/><small>reads the torrent block,<br/>joins the swarm directly</small>"]
         C2["<b>Ordinary client</b><br/>maplibre-gl-js · Leaflet<br/><small>ignores the torrent block,<br/>fetches tiles over HTTP</small>"]
+        C3["<b>Browser peer</b><br/>WebTorrent in the page<br/><small>speaks WebRTC — cannot see<br/>the conventional swarm at all</small>"]
     end
 
     C1 <==>|"tiles from pieces"| BT
+    C3 <==>|"WebRTC · needs a WebTorrent-speaking node"| S1
 
-    %% 4-6 = RSS distribution, 7-10 and 17 = BitTorrent, rest = HTTP
+    %% 4-6 = RSS distribution, 7-10, 18-19 = BitTorrent, rest = HTTP
     linkStyle 4,5,6 stroke:#3F8F4F,stroke-width:2.5px;
-    linkStyle 7,8,9,10,17 stroke:#F5A623,stroke-width:3.5px;
+    linkStyle 7,8,9,10,18,19 stroke:#F5A623,stroke-width:3.5px;
 ```
 
 **Key points:** **orange = BitTorrent, green = RSS distribution, plain = HTTP.**
@@ -80,6 +82,15 @@ Every node is both a reader and a seeder. A mirror seeds the whole archive; a
 cache-mode node seeds whatever pieces it has pulled to answer requests. Either
 way serving load turns into swarm capacity rather than consuming it, which is the
 inversion that makes this worth building.
+
+**A browser cannot reach the swarm on its own.** Browsers speak WebRTC and
+conventional clients speak TCP and uTP, and the two cannot see each other — so a
+browser peer is only ever connected by a node running **WebTorrent**, which
+speaks both. That is what `secondaryEngines: ["webtorrent"]` beside a libtorrent
+primary buys: one node, one copy of the data, reachable from both halves of the
+swarm. Nothing else about the topology changes, which is why only one node in the
+diagram is labelled with its engines. See
+[engines](engines.md#running-two-engines-at-once).
 
 The publisher is a single point of failure for **publishing new archives only**.
 Once a torrent exists, the swarm and the serving tier keep working without it —
@@ -253,6 +264,28 @@ in documents you publish.
 Behind a TLS-terminating proxy with neither option set, the node advertises
 `http://` URLs, and a browser that loaded the map over `https` blocks every one
 as mixed content — which looks like an empty map rather than a misconfiguration.
+
+**Put the load balancer in front of the public port only.** A node can listen
+twice: `port` serves tiles, TileJSON, the `.torrent` files and the feeds, and
+`adminPort` serves the console and everything under `/api/`. With both set, the
+public listener answers **404** for admin paths — not 403, because a refusal
+confirms something is there to refuse. Routing is decided by the port the request
+arrived on and never by a header, so nothing a proxy adds can move a request
+between them.
+
+```json
+{
+  "port": 8090,
+  "adminPort": 8091,
+  "adminHost": "127.0.0.1"
+}
+```
+
+Bound to loopback like that, the thing that can rewrite configuration is
+*unreachable* rather than merely guarded, and the pool in front of the public
+port carries no route to it at all. Leave `adminPort` unset and both surfaces
+share one listener, which is fine for a single machine and wrong for anything
+behind a CDN. See [security](security.md).
 
 **Load balancing needs no session affinity.** Any node serving a given infohash
 returns byte-identical tiles, because the infohash pins the content. Round-robin

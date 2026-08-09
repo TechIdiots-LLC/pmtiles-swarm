@@ -485,6 +485,7 @@ matters there is `maxConnections`, since every peer holds a NAT table entry. See
 | `POST` | `/api/torrents/:infoHash/check` | Has the source changed since the torrent was made? |
 | `POST` | `/api/torrents/:infoHash/rebuild` | Rebuild from the current source (mints a new infohash) |
 | `POST` | `/api/check-origins` | Check every archive with a watchable source |
+| `GET` `DELETE` | `/api/adds` | Downloads still in flight, and cancelling one by URL |
 | `GET` | `/api/categories` | Every tag, with the endpoints resolving to its newest build |
 | `POST` | `/api/adopt`, `/api/adopt/candidates` | Take over what an engine or another node holds |
 | `POST` | `/api/sources/preview` | What a watched web location would take, without taking it |
@@ -494,9 +495,12 @@ matters there is `maxConnections`, since every peer holds a NAT table entry. See
 | `GET` `POST` | `/api/restart` | What a restart would do, and doing it |
 | `GET` `PATCH` | `/api/config` | Read and change settings |
 | `POST` | `/api/login`, `/api/logout` | Console sign-in |
+| `GET` | `/api/session` | Who this request is, and whether a credential is needed at all |
 | `GET` | `/api/catalog` | The whole catalogue, for a peer keeping itself in step |
 | `GET` | `/archives/:infoHash/tiles.json` | TileJSON — **public** |
 | `GET` | `/archives/:infoHash/:z/:x/:y.:ext` | One tile — **public** |
+| `GET` | `/archives/:infoHash/archive.torrent` | The `.torrent` a torrent-aware client joins with — **public** |
+| `GET` | `/archives/:infoHash/preview` | Map preview for one archive — admin, not public |
 | `GET` | `/latest/:category/tiles.json`, `/archive.torrent`, `/magnet` | The newest build in a category — **public** |
 | `GET` | `/feed.xml`, `/feed/:category.xml`, `/latest/:category.xml` | RSS — **public** |
 

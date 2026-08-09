@@ -179,10 +179,27 @@ What follows:
 | removing | both, but only the primary may delete data |
 | pause, resume, web seeds | both |
 | progress and state | the primary's — it is the only one that downloads |
-| peers, seeds, speeds | added together, since a peer is a peer whichever client found it |
+| peers, seeds, speeds | added together, since a peer is a peer whichever client found it — each row says which engine found it |
 
 A secondary that will not start is a warning, not a failure. It is an addition to what the primary
 already does, and losing the browser bridge should not take the node down.
+
+### Reading the peer list
+
+`GET /api/torrents/{infohash}/peers`, and the **Peers** tab in the console. Each row carries the
+engine that found it, and a **kind** — `peer`, `web seed` or `http seed`. That last distinction is
+the one worth having: an archive pulling at full speed from a single web seed and one pulling from
+a swarm of thirty look identical in the totals, and only the first stops dead when that one server
+goes away.
+
+An engine that cannot answer is reported rather than hidden. The route stays a 200 — an engine that
+does not hold this archive genuinely has no peers for it — but the body becomes
+`{ "peers": [], "error": … }` and the console shows the reason. A bare empty list would say
+"nothing here", which is also what a working engine says about an empty swarm, and the two are not
+the same fact.
+
+> A note on libtorrent versions: `peer_info.utp_socket` is absent from the 2.x Python bindings, so
+> the transport column reads `unknown` on builds that do not expose it rather than guessing `tcp`.
 
 Verified on Windows with libtorrent 2.0.13 and WebTorrent seeding the same archive together, and
 with a cache-mode archive correctly withheld from the secondary.
