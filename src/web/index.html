@@ -319,6 +319,7 @@
       <section id="view-settings" hidden>
         <div class="bar">
           <button id="settings-save">Save changes</button>
+          <button id="settings-restart" hidden>Save &amp; restart</button>
           <span class="status" id="settings-note"></span>
         </div>
         <div id="settings-body"></div>
@@ -2466,7 +2467,12 @@
         }
       }
 
-      $('settings-save').onclick = async () => {
+      /**
+       * Saves, applies what can be applied, and reports what cannot.
+       * @param {boolean} thenRestart - Whether to stop the node afterwards.
+       * @returns {Promise<void>} - Resolves once saved.
+       */
+      async function saveSettings(thenRestart) {
         const updates = { ...readRowEditors(rowEditorColumns), ...readHookEditor() };
         const mark = document.getElementById('cfg-mark');
         if (mark) {
@@ -2503,17 +2509,99 @@
           }
         }
 
+        let result;
         try {
-          const result = await api('/api/config', { method: 'PATCH', body: updates });
-          toast(
-            result.restartRequired.length
-              ? `saved — restart needed for: ${result.restartRequired.join(', ')}`
-              : 'saved and applied',
-          );
+          result = await api('/api/config', { method: 'PATCH', body: updates });
         } catch (error) {
           toast(error.message);
+          return;
         }
-      };
+
+        for (const failure of result.reloadFailed ?? []) {
+          toast(`could not apply ${failure}`);
+        }
+
+        const pending = result.restartRequired ?? [];
+        // Offered only when something actually needs it, rather than sitting
+        // there inviting a restart nobody needs.
+        $('settings-restart').hidden = pending.length === 0;
+
+        if (pending.length === 0) {
+          toast(
+            result.reloaded?.length
+              ? `saved · restarted ${result.reloaded.join(', ')}`
+              : 'saved and applied',
+          );
+          return;
+        }
+
+        if (!thenRestart) {
+          toast(`saved · ${pending.join(', ')} need the node to restart`);
+          return;
+        }
+
+        await restartNode();
+      }
+
+      $('settings-save').onclick = () => saveSettings(false);
+      $('settings-restart').onclick = () => saveSettings(true);
+
+      /**
+       * Stops the node and waits for it to answer again.
+       * @returns {Promise<void>} - Resolves once it is back, or gives up.
+       */
+      async function restartNode() {
+        let plan;
+        try {
+          plan = await api('/api/restart');
+        } catch (error) {
+          toast(error.message);
+          return;
+        }
+
+        if (!plan.supported) {
+          toast('this node cannot restart itself; stop and start it by hand');
+          return;
+        }
+
+        if (
+          !confirm(
+            plan.mode === 'respawn'
+              ? 'Restart the node? It will stop and start itself again. ' +
+                  'Downloads in progress are interrupted and resume afterwards.'
+              : 'Stop the node? Something is supervising it — systemd, Docker or ' +
+                  'similar — and that is what will start it again. Downloads in ' +
+                  'progress are interrupted and resume afterwards.',
+          )
+        ) {
+          return;
+        }
+
+        try {
+          await api('/api/restart', { method: 'POST' });
+        } catch {
+          // Expected: the connection goes down with the node.
+        }
+
+        $('settings-note').textContent = 'restarting…';
+        const deadline = Date.now() + 60000;
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          try {
+            await api('/api/status');
+            $('settings-note').textContent = '';
+            toast('back up');
+            await loadSettings();
+            refresh();
+            return;
+          } catch {
+            // Not yet.
+          }
+        }
+
+        $('settings-note').textContent =
+          'it has not come back — check the terminal it was started from';
+      }
 
       // ── Tabs ──────────────────────────────────────────────────────────────
       const showTab = (name) => {

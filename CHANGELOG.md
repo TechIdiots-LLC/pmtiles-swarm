@@ -51,6 +51,14 @@
   everything and reading afterwards what it did. Categories can be applied to the lot. It can also
   adopt from **a qBittorrent instance other than the configured engine**, which is what "adopt
   existing" sounded like it did.
+- **Most settings no longer need a restart, and there is a button for the ones that do.** Changing
+  the watched folders means restarting the watchers, not the node; the same goes for hooks, web
+  locations, remote nodes, seeding limits and the completion watcher. Those are applied on Save and
+  the console says which subsystem was restarted. What is left genuinely belongs to the process —
+  the listening socket, the data directory, the torrent client — and **Save & restart** appears
+  only for those. How the node comes back is detected rather than assumed: under systemd, Docker,
+  pm2 or Kubernetes it stops, because exiting is the restart there and a replacement would fight
+  over the port; started by hand it starts a replacement itself.
 - **Named access tokens, with roles.** `auth.apiKey` was one credential and one power, so letting
   another node follow this one meant handing over the key that can also delete the library. There
   are now as many tokens as you like, each named, each `peer` (reads the catalogue, feeds, tiles

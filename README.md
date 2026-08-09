@@ -221,6 +221,22 @@ joined magnet has no summary until something reads its header out of a swarm it 
 joined, and no web seeds at all, so it would be slower to a first tile and thinner in a feed than
 the archive the peer is describing.
 
+### Applying settings
+
+Most settings take effect the moment they are saved. Those that belong to one subsystem — the
+watched folders, the hooks, the web locations, the remote nodes, the seeding limits — are applied
+by restarting that subsystem, which is the whole of what a restart would have achieved. The console
+reports which was restarted.
+
+What genuinely needs the process to stop is short, and each is held by something everything else
+was built on: `port`, `host`, `dataDir`, `engine`, the per-engine blocks, `maxConnections`, and
+`allowUnauthenticated`. **Save & restart** appears only when a change touches one of those.
+
+How the node comes back depends on how it is run, and `GET /api/restart` reports which it will do
+before anything happens. Under systemd, Docker, pm2 or Kubernetes it simply stops, because exiting
+*is* the restart there and starting a replacement would leave two processes fighting over one port.
+Started by hand from a terminal it starts a replacement itself, because nothing else would.
+
 ### Access tokens
 
 `auth.apiKey` is one credential with one power: whoever holds it can do anything. That is fine

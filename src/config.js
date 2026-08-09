@@ -556,19 +556,41 @@ export async function loadConfig(configPath) {
  * worse than one that says plainly it needs a restart.
  */
 export const RESTART_REQUIRED = new Set([
+  // The listening socket.
   'port',
-  'onAdded',
-  'onComplete',
-  'allowUnauthenticated',
   'host',
+  // Where the catalogue lives, which everything above it was built from.
   'dataDir',
+  // The torrent client itself, and how it was constructed.
   'engine',
   'qbittorrent',
   'webtorrent',
   'libtorrent',
-  'cacheSavePath',
-  'watch',
   'maxConnections',
+  // Only read once, when deciding whether it is safe to listen at all.
+  'allowUnauthenticated',
+]);
+
+/**
+ * Settings applied by restarting one subsystem rather than the process.
+ *
+ * Changing the watched folders means restarting the watchers; changing a hook
+ * means restarting the hook runner. Neither has anything to do with the
+ * process, and asking someone to stop a node mid-download in order to add a
+ * folder is a poor trade. The value names which subsystem to reload.
+ */
+export const RELOADABLE = new Map([
+  ['watch', 'watchers'],
+  ['onAdded', 'hooks'],
+  ['onComplete', 'hooks'],
+  ['onCompleteCheckIntervalSeconds', 'hooks'],
+  ['sources', 'sources'],
+  ['sourceCheckIntervalHours', 'sources'],
+  ['subscriptions', 'subscriptions'],
+  ['subscriptionIntervalSeconds', 'subscriptions'],
+  ['seeding', 'seeding'],
+  ['incompleteSuffix', 'completion'],
+  ['completionCheckIntervalSeconds', 'completion'],
 ]);
 
 /**
@@ -644,6 +666,7 @@ export function redactConfig(config) {
 export async function saveConfig(config, updates, configPath) {
   const applied = [];
   const restartRequired = [];
+  const reloaded = [];
 
   for (const [key, value] of Object.entries(updates ?? {})) {
     if (!(key in DEFAULTS)) {
@@ -694,6 +717,7 @@ export async function saveConfig(config, updates, configPath) {
 
     applied.push(key);
     if (RESTART_REQUIRED.has(key)) restartRequired.push(key);
+    else if (RELOADABLE.has(key)) reloaded.push(RELOADABLE.get(key));
   }
 
   // An empty update still writes: minting a token mutates `config` directly
@@ -712,5 +736,5 @@ export async function saveConfig(config, updates, configPath) {
     );
   }
 
-  return { applied, restartRequired };
+  return { applied, restartRequired, reloaded: [...new Set(reloaded)] };
 }

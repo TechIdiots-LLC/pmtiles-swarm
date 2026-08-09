@@ -7,6 +7,7 @@ import { ROLES, createAuth, generateToken, hashToken } from './auth.js';
 import { normalizeCategories } from './catalog.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
+import { restart, restartMode } from './restart.js';
 import { parseFeed, renderFeed } from './feed.js';
 import { ScheduledSourceManager, candidateDates, expandTemplate } from './sources.js';
 import { limitFor } from './seeding.js';
@@ -45,6 +46,8 @@ export function createApp({
   tiles,
   warm,
   config,
+  reloaders = {},
+  shutdown,
 }) {
   const app = express();
   // Without this, a TLS-terminating proxy leaves req.protocol as "http", and
@@ -243,6 +246,56 @@ export function createApp({
     }),
   );
 
+  /**
+   * Stops the node so it comes back with settings that only apply at startup.
+   *
+   * A short list: the listening socket, the data directory, and the torrent
+   * client. Everything else that once said "restart" is applied in place when
+   * it is saved.
+   *
+   * How it comes back depends on how it is run, which this reports before
+   * doing anything — a node started by hand from a terminal is respawned,
+   * because nothing else would bring it back, while one under a supervisor is
+   * simply stopped, because exiting *is* the restart there and spawning a
+   * replacement would leave two processes fighting over one port.
+   */
+  app.get(
+    '/api/restart',
+    route(async (_req, res) => {
+      res.json({
+        supported: typeof shutdown === 'function',
+        mode: restartMode(),
+        restartRequired: [...RESTART_REQUIRED],
+      });
+    }),
+  );
+
+  app.post(
+    '/api/restart',
+    route(async (_req, res) => {
+      if (typeof shutdown !== 'function') {
+        return res.status(501).json({
+          error: 'this node was not started in a way that can restart itself',
+        });
+      }
+
+      const mode = restartMode();
+      // Answered before stopping, since stopping closes this connection. The
+      // console watches for the node coming back rather than waiting on a
+      // reply that cannot arrive.
+      res.json({ restarting: true, mode });
+
+      // After the response has actually gone out. Shutting down inside the
+      // handler would close the socket first and the caller would see a
+      // dropped connection rather than an answer.
+      setTimeout(() => {
+        restart({ shutdown }).catch((error) => {
+          console.error(`[restart] ${error.message}`);
+        });
+      }, 250).unref?.();
+    }),
+  );
+
   app.get(
     '/api/status',
     route(async (_req, res) => {
@@ -291,7 +344,24 @@ export function createApp({
           req.body ?? {},
           config.configPath,
         );
-        res.json({ ...result, config: redactConfig(config) });
+
+        // Applied straight away rather than reported as needing a restart.
+        // Each of these belongs to one subsystem, and restarting that
+        // subsystem is the whole of what a restart would have achieved.
+        const failed = [];
+        for (const name of result.reloaded ?? []) {
+          try {
+            await reloaders[name]?.();
+          } catch (error) {
+            failed.push(`${name}: ${error.message}`);
+          }
+        }
+
+        res.json({
+          ...result,
+          reloadFailed: failed,
+          config: redactConfig(config),
+        });
       } catch (error) {
         res.status(400).json({ error: error.message });
       }

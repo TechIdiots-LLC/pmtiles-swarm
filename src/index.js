@@ -12,7 +12,7 @@ import { CompletionWatcher } from './incomplete.js';
 import { Library } from './library.js';
 import { ProgramHooks } from './hooks.js';
 import { SeedingLimits } from './seeding.js';
-import { closeServer, installSignalHandlers } from './shutdown.js';
+import { closeServer, installSignalHandlers, runStoppers } from './shutdown.js';
 import { ScheduledSourceManager } from './sources.js';
 import { SubscriptionManager } from './subscriptions.js';
 import { TileStore } from './tiles.js';
@@ -157,6 +157,36 @@ PMTILES_SWARM_PUBLIC_URL
   library.attachTiles(tiles);
   const warm = new WarmRunner(tiles);
 
+  // Restarting one subsystem, rather than the process, for the settings that
+  // only that subsystem reads. Each stops and starts from the live config, so
+  // nothing here has to know what changed — only what to rebuild.
+  const reloaders = {
+    watchers: () => {
+      watch.stop();
+      watch.start(config.watch);
+    },
+    hooks: () => {
+      hooks.stop();
+      hooks.start();
+    },
+    sources: () => {
+      sources.stop();
+      sources.start();
+    },
+    subscriptions: () => {
+      subscriptions.stop();
+      subscriptions.start();
+    },
+    seeding: () => {
+      seeding.stop();
+      seeding.start();
+    },
+    completion: () => {
+      completion.stop();
+      completion.start();
+    },
+  };
+
   const app = createApp({
     library,
     catalog,
@@ -165,6 +195,8 @@ PMTILES_SWARM_PUBLIC_URL
     tiles,
     warm,
     config,
+    reloaders,
+    shutdown: () => runStoppers(stoppers),
   });
   const server = app.listen(config.port, config.host, () => {
     // 0.0.0.0 is a bind address, not a destination — browsers reject it with
