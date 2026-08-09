@@ -2488,3 +2488,95 @@ describe('surviving a restart', () => {
   // rejection escapes from inside the executor — so a caller's catch never
   // sees it and the process exits. Removing what is not held is now success.
 });
+
+describe('reading a joined archive on demand', () => {
+  it('reads the header when the TileJSON is asked for, and keeps it', async () => {
+    // A joined torrent has no summary when it arrives, because at that moment
+    // there is nothing to read one from. Refusing forever would leave it
+    // permanently unusable as a tile endpoint.
+    const dir = await fs.mkdtemp(path.join(workspace, 'ondemand-'));
+    const archive = entry({ savePath: dir, pmtiles: undefined });
+    await writeArchive(path.join(dir, archive.name), {
+      tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('t') }],
+      metadata: { name: 'Read On Demand' },
+      minZoom: 0,
+      maxZoom: 3,
+    });
+
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put(archive);
+
+    const tiles = new TileStore({
+      catalog,
+      engine: completeEngine,
+      config: { tiles: {} },
+    });
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog,
+      engine: { ...completeEngine, list: async () => [] },
+      subscriptions: {},
+      tiles,
+      config: { watch: [], subscriptions: [] },
+    });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const { port } = server.address();
+
+    try {
+      assert.equal(catalog.get(archive.infoHash).pmtiles, undefined);
+
+      const response = await fetch(
+        `http://127.0.0.1:${port}/archives/${archive.infoHash}/tiles.json`,
+      );
+      assert.equal(response.status, 200);
+      const doc = await response.json();
+      assert.equal(doc.name, 'Read On Demand');
+      assert.equal(doc.maxzoom, 3);
+
+      // Read once, then remembered — the swarm is not asked again.
+      assert.ok(catalog.get(archive.infoHash).pmtiles);
+    } finally {
+      await tiles.close();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('says the swarm is not ready rather than refusing outright', async () => {
+    // The distinction matters: 409 reads as "this will never work", where the
+    // truth is usually "no peers yet".
+    const dir = await fs.mkdtemp(path.join(workspace, 'notready-'));
+    const archive = entry({ savePath: dir, pmtiles: undefined });
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put(archive);
+
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog,
+      engine: { name: 'qbittorrent', list: async () => [], get: async () => ({ progress: 0.1 }) },
+      subscriptions: {},
+      tiles: new TileStore({
+        catalog,
+        engine: { name: 'qbittorrent', get: async () => ({ progress: 0.1 }) },
+        config: { tiles: {} },
+      }),
+      config: { watch: [], subscriptions: [] },
+    });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const { port } = server.address();
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${port}/archives/${archive.infoHash}/tiles.json`,
+      );
+      assert.ok(response.status >= 500 || response.status === 501);
+      const body = await response.json();
+      assert.match(body.error, /could not read this archive's header/);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});

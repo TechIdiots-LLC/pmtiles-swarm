@@ -47,47 +47,56 @@ const TILE_TYPES = {
  * @param {string} location - Local path or http(s) URL.
  * @returns {Promise<PMTilesSummary>} - The summary.
  */
+export function summarize(header, metadata = {}) {
+  const type = TILE_TYPES[header.tileType] ?? TILE_TYPES[0];
+
+  // An archive with no bounds set reports all zeroes; treat that as global
+  // rather than as a point at null island.
+  const hasBounds = !(
+    header.minLon === 0 &&
+    header.minLat === 0 &&
+    header.maxLon === 0 &&
+    header.maxLat === 0
+  );
+
+  return {
+    specVersion: header.specVersion,
+    format: type.format,
+    contentType: type.contentType,
+    minZoom: header.minZoom,
+    maxZoom: header.maxZoom,
+    bounds: hasBounds
+      ? [header.minLon, header.minLat, header.maxLon, header.maxLat]
+      : [-180, -85.051129, 180, 85.051129],
+    center: [
+      header.centerLon,
+      header.centerLat,
+      header.centerZoom || Math.round(header.maxZoom / 2),
+    ],
+    tileCount: header.numAddressedTiles,
+    clustered: header.clustered,
+    name: metadata.name,
+    description: metadata.description,
+    attribution: metadata.attribution,
+    vectorLayers: metadata.vector_layers,
+  };
+}
+
+/**
+ * Reads an archive's header and metadata.
+ * @param {string} location - Local path or http(s) URL.
+ * @returns {Promise<PMTilesSummary>} - The summary.
+ */
 export async function probePMTiles(location) {
   const isHttp = /^https?:\/\//i.test(location);
   const source = isHttp ? new FetchSource(location) : new NodeFileSource(location);
 
   try {
     const archive = new PMTiles(source);
-    const header = await archive.getHeader();
-    const metadata = (await archive.getMetadata()) ?? {};
-
-    const type = TILE_TYPES[header.tileType] ?? TILE_TYPES[0];
-
-    // An archive with no bounds set reports all zeroes; treat that as global
-    // rather than as a point at null island.
-    const hasBounds = !(
-      header.minLon === 0 &&
-      header.minLat === 0 &&
-      header.maxLon === 0 &&
-      header.maxLat === 0
+    return summarize(
+      await archive.getHeader(),
+      (await archive.getMetadata()) ?? {},
     );
-
-    return {
-      specVersion: header.specVersion,
-      format: type.format,
-      contentType: type.contentType,
-      minZoom: header.minZoom,
-      maxZoom: header.maxZoom,
-      bounds: hasBounds
-        ? [header.minLon, header.minLat, header.maxLon, header.maxLat]
-        : [-180, -85.051129, 180, 85.051129],
-      center: [
-        header.centerLon,
-        header.centerLat,
-        header.centerZoom || Math.round(header.maxZoom / 2),
-      ],
-      tileCount: header.numAddressedTiles,
-      clustered: header.clustered,
-      name: metadata.name,
-      description: metadata.description,
-      attribution: metadata.attribution,
-      vectorLayers: metadata.vector_layers,
-    };
   } finally {
     source.close?.();
   }

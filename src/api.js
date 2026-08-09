@@ -308,6 +308,33 @@ export function createApp({
     }),
   );
 
+  // Stops a torrent without forgetting it. "Not right now" is a different
+  // intention from "not any more", and remove was the only way to express
+  // either.
+  app.post(
+    '/api/torrents/:infoHash/pause',
+    route(async (req, res) => {
+      try {
+        const entry = await library.pause(req.params.infoHash);
+        res.json({ paused: true, mode: entry.mode });
+      } catch (error) {
+        res.status(error.status ?? 500).json({ error: error.message });
+      }
+    }),
+  );
+
+  app.post(
+    '/api/torrents/:infoHash/resume',
+    route(async (req, res) => {
+      try {
+        const entry = await library.resume(req.params.infoHash);
+        res.json({ paused: false, mode: entry.mode });
+      } catch (error) {
+        res.status(error.status ?? 500).json({ error: error.message });
+      }
+    }),
+  );
+
   // Joining defaults to cache, deliberately. This is how that is changed
   // afterwards, without re-adding the archive by hand.
   app.patch(
@@ -847,14 +874,30 @@ export function createApp({
   app.get(
     '/archives/:infoHash/tiles.json',
     route(async (req, res) => {
-      const entry = catalog.get(req.params.infoHash);
+      let entry = catalog.get(req.params.infoHash);
       if (!entry) return res.status(404).json({ error: 'unknown archive' });
+
+      // A joined torrent arrives with no summary, because at that moment there
+      // is nothing to read one from. Read it now rather than refusing: for a
+      // cache-mode archive that means pulling the single piece the header
+      // lives in, which is the cheapest thing the swarm can be asked for and
+      // is already prioritised by the layer below.
       if (!entry.pmtiles) {
-        return res.status(409).json({
-          error:
-            'this archive has not been probed, so its tile metadata is unknown',
-        });
+        try {
+          const summary = await tiles.summarize(entry.infoHash);
+          entry = await catalog.put({
+            infoHash: entry.infoHash,
+            pmtiles: summary,
+          });
+        } catch (error) {
+          const status = error instanceof TileReadError ? error.status : 503;
+          return res.status(status).json({
+            error: `could not read this archive's header yet: ${error.message}`,
+            hint: 'the swarm may still be finding peers; try again shortly',
+          });
+        }
       }
+
       // Anyone embedding a map is doing so from another origin.
       res.setHeader('access-control-allow-origin', '*');
       res.json(buildTileJson(entry, baseUrl(req)));

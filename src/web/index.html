@@ -483,6 +483,7 @@
       // ── Archives ──────────────────────────────────────────────────────────
       let archives = [];
       let selected = null;
+      let activeTab = 'general';
 
       async function refresh() {
         try {
@@ -496,7 +497,6 @@
             ` · <b>${status.archives}</b> archives`;
           archives = list;
           renderRows();
-          if (selected) renderDetail(selected);
         } catch (error) {
           $('status').textContent = `disconnected: ${error.message}`;
         }
@@ -530,11 +530,11 @@
             <td>${s.peers ?? 0} / ${s.seeds ?? 0}</td>
             <td>${rate(s.downloadSpeed)}</td>
             <td>${rate(s.uploadSpeed)}</td>
-            <td class="sub">${escapeHtml(s.state ?? '—')}</td>`;
+            <td class="sub">${entry.paused ? 'paused' : escapeHtml(s.state ?? '—')}</td>`;
           tr.onclick = () => {
             selected = selected === entry.infoHash ? null : entry.infoHash;
             renderRows();
-            if (selected) renderDetail(selected);
+            if (selected) renderDetail(selected, false);
             else $('detail').hidden = true;
           };
           rows.append(tr);
@@ -692,7 +692,8 @@
         }
       }
 
-      async function renderDetail(infoHash) {
+      async function renderDetail(infoHash, keepTab = true) {
+        if (!keepTab) activeTab = 'general';
         const panel = $('detail');
         panel.hidden = false;
 
@@ -785,6 +786,7 @@
             <button id="warm">Warm region</button>
             <button id="add-seed">Add web seed</button>
             <button id="clear-cache" ${mode === 'cache' ? '' : 'disabled title="only cache-mode archives have a cache to clear"'}>Clear cache</button>
+            <button id="pause">${entry.paused ? 'Resume' : 'Pause'}</button>
             <button id="remove" class="danger">Remove</button>
           </div>
 
@@ -802,22 +804,29 @@
         // Panes load when first opened. A screenful of archives should not
         // each cost four extra requests nobody looked at.
         const loaded = new Set(['general']);
-        const paneFor = (name) => panel.querySelector(`[data-pane="${name}"]`);
+
+        /** Shows one tab, loading it the first time. */
+        const showPane = (name) => {
+          activeTab = name;
+          for (const other of panel.querySelectorAll('.tabs button')) {
+            other.classList.toggle('on', other.dataset.tab === name);
+          }
+          for (const pane of panel.querySelectorAll('[data-pane]')) {
+            pane.hidden = pane.dataset.pane !== name;
+          }
+          if (!loaded.has(name)) {
+            loaded.add(name);
+            fillPane(name, infoHash, entry);
+          }
+        };
 
         for (const tab of panel.querySelectorAll('.tabs button')) {
-          tab.onclick = () => {
-            for (const other of panel.querySelectorAll('.tabs button')) {
-              other.classList.toggle('on', other === tab);
-            }
-            for (const pane of panel.querySelectorAll('[data-pane]')) {
-              pane.hidden = pane.dataset.pane !== tab.dataset.tab;
-            }
-            if (!loaded.has(tab.dataset.tab)) {
-              loaded.add(tab.dataset.tab);
-              fillPane(tab.dataset.tab, infoHash, entry);
-            }
-          };
+          tab.onclick = () => showPane(tab.dataset.tab);
         }
+
+        // An action that re-renders the panel should leave the reader where
+        // they were, not throw them back to the first tab.
+        if (activeTab !== 'general') showPane(activeTab);
 
         const setMode = async (next) => {
           try {
@@ -932,6 +941,18 @@
             });
             toast(`reclaimed ${bytes(result.cleared)}`);
             refresh();
+          } catch (error) {
+            toast(error.message);
+          }
+        };
+
+        $('pause').onclick = async () => {
+          const action = entry.paused ? 'resume' : 'pause';
+          try {
+            await api(`/api/torrents/${infoHash}/${action}`, { method: 'POST' });
+            toast(entry.paused ? 'resumed' : 'paused');
+            refresh();
+            renderDetail(infoHash);
           } catch (error) {
             toast(error.message);
           }

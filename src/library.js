@@ -673,6 +673,63 @@ export class Library {
   }
 
   /**
+   * Stops offering an archive without forgetting it.
+   *
+   * A different intention from removing: "not right now" rather than "not any
+   * more". The data stays, the catalog entry stays, and resuming picks up
+   * where it left off.
+   * @param {string} infoHash - The archive.
+   * @returns {Promise<object>} - The updated entry.
+   */
+  async pause(infoHash) {
+    const entry = this.#catalog.get(infoHash);
+    if (!entry) {
+      const error = new Error('unknown archive');
+      error.status = 404;
+      throw error;
+    }
+
+    if (this.#engine.pause) {
+      await this.#engine.pause(infoHash);
+    } else {
+      // Removing without its data is a pause an engine cannot refuse; resume
+      // adds it back and it rechecks what is already on disk.
+      await this.#engine.remove(infoHash, { deleteData: false }).catch(() => {});
+    }
+    return this.#catalog.put({ infoHash, paused: true });
+  }
+
+  /**
+   * Starts offering a paused archive again.
+   * @param {string} infoHash - The archive.
+   * @returns {Promise<object>} - The updated entry.
+   */
+  async resume(infoHash) {
+    const entry = this.#catalog.get(infoHash);
+    if (!entry) {
+      const error = new Error('unknown archive');
+      error.status = 404;
+      throw error;
+    }
+
+    if (this.#engine.resume) {
+      await this.#engine.resume(infoHash);
+    } else {
+      const torrentFile = await fs
+        .readFile(entry.torrentPath)
+        .then((buffer) => new Uint8Array(buffer))
+        .catch(() => null);
+      await this.#engine.add({
+        torrentFile: torrentFile ?? undefined,
+        magnet: torrentFile ? undefined : entry.magnet,
+        savePath: entry.savePath,
+        mode: entry.mode ?? 'mirror',
+      });
+    }
+    return this.#catalog.put({ infoHash, paused: false });
+  }
+
+  /**
    * Switches an archive between mirroring and caching.
    *
    * Joining defaults to cache, because committing a disk to a copy of

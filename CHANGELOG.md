@@ -12,6 +12,13 @@
 - **An archive can carry several categories.** A planet build can be both `basemaps` and `weekly`
   without choosing. Feeds match on *any* tag, so it appears in both. Catalogues holding the older
   single `category` string are read as a list of one and normalised on the next write.
+- **Asking for the TileJSON reads the header.** A joined torrent arrives with no summary, because
+  at that moment there is nothing to read one from — and it used to stay that way, so the archive
+  was permanently unusable as a tile endpoint. The header is now read on demand, which for a
+  cache-mode archive means pulling the one piece it lives in, and kept once read. A swarm that has
+  not found peers yet says so and suggests trying again, rather than refusing outright.
+- **Pause and resume**, in the console and at `POST /api/torrents/{infohash}/pause`. "Not right
+  now" is a different intention from "not any more", and remove was the only way to say either.
 - **Mirror or cache is now a choice you can make, and change.** The add dialog offers it when
   joining a magnet or a `.torrent`, and `PATCH /api/torrents/{infohash}/mode` switches an archive
   afterwards — with buttons in the detail panel. Nothing already downloaded is discarded in
@@ -92,6 +99,9 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- Opening a detail tab and waiting sent you back to General. The three-second poll rebuilt the
+  whole panel; it now updates the table only, and an action that does re-render the panel returns
+  to the tab you were on.
 - **A restart silently stopped seeding everything.** Nothing handed the catalogue back to the
   engine, so the catalog still listed every archive and the console still showed them while the
   engine held none. They are restored at startup now, each in the mode it was left in.

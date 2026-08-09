@@ -127,6 +127,30 @@ export class WebTorrentSeedEngine {
   }
 
   /**
+   * Stops a torrent without dropping it.
+   * @param {string} infoHash - The torrent.
+   * @returns {Promise<boolean>} - Whether it was paused.
+   */
+  async pause(infoHash) {
+    const torrent = this.#client?.get(infoHash);
+    if (!torrent?.pause) return false;
+    torrent.pause();
+    return true;
+  }
+
+  /**
+   * Starts a paused torrent again.
+   * @param {string} infoHash - The torrent.
+   * @returns {Promise<boolean>} - Whether it was resumed.
+   */
+  async resume(infoHash) {
+    const torrent = this.#client?.get(infoHash);
+    if (!torrent?.resume) return false;
+    torrent.resume();
+    return true;
+  }
+
+  /**
    * Switches a torrent between mirroring and caching.
    *
    * Cache mode is a selection, not a separate kind of torrent: the pieces are

@@ -4,6 +4,7 @@ import zlib from 'node:zlib';
 import { PMTiles, SharedPromiseCache } from 'pmtiles';
 import { TorrentSource } from 'pmtiles-torrent';
 import { NodeFileSource } from './file-source.js';
+import { summarize } from './pmtiles-probe.js';
 import { LibtorrentReadEngine } from './read-engine.js';
 
 /**
@@ -109,6 +110,32 @@ export class TileStore {
       zlib.gzip(data, (error, out) => (error ? reject(error) : resolve(out))),
     );
     return { data: gzipped, encoding: 'gzip' };
+  }
+
+  /**
+   * Reads an archive's header and metadata, through whatever source applies.
+   *
+   * A joined torrent has no summary when it arrives: at that moment there is
+   * no data to read one from. Waiting for a manual step would leave it
+   * permanently unusable as a tile endpoint, so this reads the header on
+   * demand — which for a cache-mode archive means pulling the piece it lives
+   * in out of the swarm. That is the cheapest thing the swarm can be asked
+   * for, and the layer below already prioritises it.
+   * @param {string} infoHash - Which archive.
+   * @param {object} [options] - Abort signal.
+   * @returns {Promise<object>} - The same summary shape the prober produces.
+   */
+  async summarize(infoHash, options = {}) {
+    const entry = this.#catalog.get(infoHash);
+    if (!entry) throw new TileReadError('unknown archive', 404);
+
+    const handle = await this.#acquire(entry);
+    const header = await handle.archive.getHeader();
+    // Metadata is a second read and only decorates the result, so an archive
+    // whose header arrived but whose metadata has not is still worth
+    // describing.
+    const metadata = await handle.archive.getMetadata().catch(() => ({}));
+    return summarize(header, metadata ?? {});
   }
 
   /**
