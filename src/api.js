@@ -7,7 +7,7 @@ import { ROLES, createAuth, generateToken, hashToken } from './auth.js';
 import { normalizeCategories } from './catalog.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
-import { listLocations } from './locations.js';
+import { freeSpace, listLocations } from './locations.js';
 import { restart, restartMode } from './restart.js';
 import { parseFeed, renderFeed } from './feed.js';
 import { ScheduledSourceManager, candidateDates, expandTemplate } from './sources.js';
@@ -313,8 +313,18 @@ export function createApp({
         archives: catalog.list().length,
         categories: catalog.categories(),
         watching: config.watch.map((w) => w.path),
-        locations: listLocations(config),
+        // With free space, so choosing a destination does not mean going and
+        // looking it up somewhere else first.
+        locations: await Promise.all(
+          listLocations(config).map(async (entry) => ({
+            ...entry,
+            free: await freeSpace(entry.path),
+          })),
+        ),
         defaultSavePath: config.webtorrent?.savePath,
+        defaultFree: config.webtorrent?.savePath
+          ? await freeSpace(config.webtorrent.savePath)
+          : null,
         subscriptions: (config.subscriptions ?? []).map((s) => ({
           url: s.url,
           mode: s.mode ?? 'cache',

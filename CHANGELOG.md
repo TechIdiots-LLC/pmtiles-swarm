@@ -51,6 +51,13 @@
   everything and reading afterwards what it did. Categories can be applied to the lot. It can also
   adopt from **a qBittorrent instance other than the configured engine**, which is what "adopt
   existing" sounded like it did.
+- **A move checks there is room first**, before the engine is disturbed — running out of disk
+  halfway through several hundred gigabytes means an hour spent, a partial file to clean up and an
+  archive to put back. Only when it will actually be a copy: a move within one filesystem is a
+  rename and needs no free space at all, so checking unconditionally would refuse moves that would
+  have worked. A filesystem that will not report its free space is gone ahead with rather than
+  refused. Free space is shown beside each save location in the picker, including for a directory
+  that has not been created yet.
 - **An archive's data can be moved after the fact** — **Set location…** in its detail panel, or
   `PATCH /api/torrents/{infohash}/location`. The engine is told to let go, the file is moved, and
   the torrent handed back pointed at the new path. Within one filesystem that is a rename and

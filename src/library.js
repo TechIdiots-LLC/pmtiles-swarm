@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { assertPublishable, identifyFile, identifyUrl } from './identify.js';
-import { assertWritable, resolveLocation } from './locations.js';
+import { assertRoomFor, assertWritable, resolveLocation } from './locations.js';
 import {
   alreadyComplete,
   onDiskName,
@@ -1342,14 +1342,28 @@ export class Library {
       throw error;
     }
 
+    // Before the engine is disturbed, so a move that cannot work costs
+    // nothing. Running out of disk halfway through several hundred gigabytes
+    // means an hour spent, a partial file to clean up, and an archive to put
+    // back where it was.
+    const size = await fs
+      .stat(from)
+      .then((stat) => stat.size)
+      .catch(() => entry.size ?? 0);
+    const room = await assertRoomFor({ from, to, bytes: size });
+
     const move = {
       infoHash,
       name: entry.name,
       from,
       to,
+      // A rename needs no free space and takes no time; saying which this will
+      // be is the difference between "wait a moment" and "wait an hour".
+      kind: room.sameFilesystem ? 'rename' : 'copy',
+      freeAtDestination: room.free,
       state: 'moving',
       bytes: 0,
-      total: entry.size ?? 0,
+      total: size || entry.size || 0,
       startedAt: new Date().toISOString(),
     };
     this.#moves.set(infoHash, move);

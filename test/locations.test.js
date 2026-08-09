@@ -6,7 +6,14 @@ import { after, describe, it } from 'node:test';
 import { createApp } from '../src/api.js';
 import { Catalog } from '../src/catalog.js';
 import { Library } from '../src/library.js';
-import { assertWritable, listLocations, resolveLocation } from '../src/locations.js';
+import {
+  assertRoomFor,
+  assertWritable,
+  freeSpace,
+  listLocations,
+  resolveLocation,
+  sameFilesystem,
+} from '../src/locations.js';
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-locations-'));
 after(() => fs.rm(workspace, { recursive: true, force: true }));
@@ -196,5 +203,106 @@ describe('choosing where an add lands', () => {
     } finally {
       await server.close();
     }
+  });
+});
+
+describe('room at the destination', () => {
+  const GiB = 1024 ** 3;
+
+  it('reads free space', async () => {
+    const here = await freeSpace(workspace);
+    assert.ok(typeof here === 'number' && here > 0);
+  });
+
+  it('answers for a directory that has not been created yet', async () => {
+    // A location is routinely configured before it exists, and the filesystem
+    // it will be created on is the one its nearest existing ancestor is on.
+    // Answering "unknown" for a directory that is merely not there yet would
+    // be unhelpful, and wrong.
+    assert.equal(
+      await freeSpace(path.join(workspace, 'not', 'made', 'yet')),
+      await freeSpace(workspace),
+    );
+  });
+
+  it('knows a path shares a filesystem with itself', async () => {
+    assert.equal(await sameFilesystem(workspace, workspace), true);
+  });
+
+  it('looks at the parent when the destination does not exist yet', async () => {
+    // It is the parent that decides which filesystem the directory will be
+    // created on.
+    assert.equal(
+      await sameFilesystem(workspace, path.join(workspace, 'not', 'made', 'yet')),
+      true,
+    );
+  });
+
+  it('needs no room at all for a move within one filesystem', async () => {
+    // A rename is a rename however large the archive, and refusing one for
+    // lack of space would refuse something that would have worked.
+    const result = await assertRoomFor({
+      from: '/a/planet.pmtiles',
+      to: '/a/elsewhere/planet.pmtiles',
+      bytes: 700 * GiB,
+      shared: async () => true,
+      probe: async () => {
+        throw new Error('should not have looked');
+      },
+    });
+    assert.deepEqual(result, { checked: false, sameFilesystem: true });
+  });
+
+  it('refuses a copy that plainly will not fit, saying both numbers', async () => {
+    await assert.rejects(
+      () =>
+        assertRoomFor({
+          from: '/a/planet.pmtiles',
+          to: '/b/planet.pmtiles',
+          bytes: 700 * GiB,
+          shared: async () => false,
+          probe: async () => 200 * GiB,
+        }),
+      /not enough room: 700.0 GiB to move, 200.0 GiB free/,
+    );
+  });
+
+  it('allows a copy that fits', async () => {
+    const result = await assertRoomFor({
+      from: '/a/planet.pmtiles',
+      to: '/b/planet.pmtiles',
+      bytes: 100 * GiB,
+      shared: async () => false,
+      probe: async () => 200 * GiB,
+    });
+    assert.equal(result.checked, true);
+    assert.equal(result.free, 200 * GiB);
+  });
+
+  it('leaves headroom, rather than filling a disk to the last byte', async () => {
+    await assert.rejects(
+      () =>
+        assertRoomFor({
+          from: '/a/x.pmtiles',
+          to: '/b/x.pmtiles',
+          bytes: 100 * GiB,
+          shared: async () => false,
+          probe: async () => 100 * GiB,
+        }),
+      /not enough room/,
+    );
+  });
+
+  it('goes ahead when the filesystem will not say', async () => {
+    // Refusing on a figure nobody could produce would make the feature
+    // unusable on the filesystems that do not report one.
+    const result = await assertRoomFor({
+      from: '/a/x.pmtiles',
+      to: '/b/x.pmtiles',
+      bytes: 700 * GiB,
+      shared: async () => false,
+      probe: async () => null,
+    });
+    assert.deepEqual(result, { checked: false });
   });
 });

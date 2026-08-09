@@ -1152,13 +1152,19 @@
         const custom = $(`${id}-path`);
         const note = $(`${id}-note`);
 
+        // Free space beside each one, so choosing a destination does not mean
+        // going and looking it up somewhere else first.
+        const room = (free) => (free == null ? '' : ` · ${bytes(free)} free`);
+
         select.innerHTML = [
           `<option value="">Default${
-            status.defaultSavePath ? ` — ${escapeHtml(status.defaultSavePath)}` : ''
+            status.defaultSavePath
+              ? ` — ${escapeHtml(status.defaultSavePath)}${room(status.defaultFree)}`
+              : ''
           }</option>`,
           ...(status.locations ?? []).map(
             (entry) =>
-              `<option value="name:${escapeHtml(entry.name)}">${escapeHtml(entry.name)} — ${escapeHtml(entry.path)}</option>`,
+              `<option value="name:${escapeHtml(entry.name)}">${escapeHtml(entry.name)} — ${escapeHtml(entry.path)}${room(entry.free)}</option>`,
           ),
           '<option value="custom">Somewhere else…</option>',
         ].join('');
@@ -1309,12 +1315,18 @@
             }
 
             try {
-              await api(`/api/torrents/${infoHash}/location`, {
+              const move = await api(`/api/torrents/${infoHash}/location`, {
                 method: 'PATCH',
                 body: chosen,
               });
               $('move-dialog').close();
-              toast('moving');
+              // Worth distinguishing: one of these is over already and the
+              // other is an hour of copying.
+              toast(
+                move.kind === 'rename'
+                  ? 'moved'
+                  : `copying ${bytes(move.total)} to another filesystem`,
+              );
               watchMove(infoHash);
             } catch (error) {
               $('move-error').textContent = error.message;
