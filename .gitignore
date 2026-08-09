@@ -1,6 +1,9 @@
 node_modules/
 data/
-swarm.config.json
+# Every shape of local config, not just the exact name. A config holds an API
+# key, and a backup of one made before an edit is just as much a secret.
+swarm.config*.json
+*.bak
 *.log
 .DS_Store
 __pycache__/
