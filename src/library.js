@@ -443,7 +443,7 @@ export class Library {
     const targets = url ? [url] : [...this.#running.keys()];
     const cancelled = [];
     for (const target of targets) {
-      const controller = this.#running.get(target);
+      const { controller } = this.#running.get(target) ?? {};
       if (!controller) continue;
       controller.abort();
       this.#running.delete(target);
@@ -457,7 +457,17 @@ export class Library {
    * @returns {string[]} - Their source URLs.
    */
   runningAdds() {
-    return [...this.#running.keys()];
+    // Reported with progress, not just named. An archive added from a URL has
+    // to be downloaded whole before there is anything to hash a torrent out
+    // of, so for hours there is no catalog entry and nothing in the list —
+    // which looks exactly like a source that silently did nothing.
+    return [...this.#running.entries()].map(([url, state]) => ({
+      url,
+      name: state.name,
+      received: state.received ?? 0,
+      total: state.total,
+      startedAt: state.startedAt,
+    }));
   }
 
   /**
@@ -474,7 +484,13 @@ export class Library {
     // and move hundreds of gigabytes; discovering it was a mistake should not
     // mean killing the process.
     const controller = new AbortController();
-    this.#running.set(url, controller);
+    this.#running.set(url, {
+      controller,
+      name: options.name,
+      startedAt: new Date().toISOString(),
+      received: 0,
+      total: undefined,
+    });
 
     // Probing reads only the header and directory, so this is cheap even
     // against a multi-gigabyte archive — worth doing before committing to a
@@ -528,6 +544,8 @@ export class Library {
       retainPath: retain ? savePath : undefined,
       signal: controller.signal,
       onProgress: ({ received, total, done }) => {
+        const state = this.#running.get(url);
+        if (state) Object.assign(state, { received, total });
         const pct = total ? ((received / total) * 100).toFixed(1) : '?';
         console.log(
           `[fetch] ${url} ${pct}%${done ? ' complete' : ''} (${received} bytes)`,

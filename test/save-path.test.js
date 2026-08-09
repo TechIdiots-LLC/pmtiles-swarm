@@ -89,3 +89,70 @@ describe('one save path for every engine', () => {
     assert.ok(config.savePath.endsWith(path.join('data', 'torrents-data')));
   });
 });
+
+describe('what the API will accept', () => {
+  it('knows every key a loaded config can contain', async () => {
+    // DEFAULTS is also the allow-list: an undeclared key is refused as
+    // "unknown setting", and the console posts back every key it was given.
+    // So a key the code reads but DEFAULTS never declared makes *every* save
+    // from that node fail — which is what `libtorrent` and `feedTitle` did.
+    const config = await loaded({
+      engine: 'libtorrent',
+      libtorrent: { python: 'python', listen: '0.0.0.0:6881' },
+      feedTitle: 'WifiDB map archives',
+    });
+
+    const source = await fs.readFile(
+      new URL('../src/config.js', import.meta.url),
+      'utf8',
+    );
+    const block = source.slice(
+      source.indexOf('const DEFAULTS = {'),
+      source.indexOf('\n};'),
+    );
+    const declared = new Set(
+      [...block.matchAll(/^ {2}([a-zA-Z][A-Za-z0-9]*):/gm)].map(([, key]) => key),
+    );
+
+    // Added after load rather than configured, so not settable.
+    const runtime = new Set(['configPath', 'savePathConflict']);
+    const undeclared = Object.keys(config).filter(
+      (key) => !declared.has(key) && !runtime.has(key),
+    );
+    assert.deepEqual(undeclared, []);
+  });
+
+  it('declares everything it calls restart-required', async () => {
+    // `libtorrent` was named in RESTART_REQUIRED while being rejected as
+    // unknown — known everywhere except where it was checked.
+    const source = await fs.readFile(
+      new URL('../src/config.js', import.meta.url),
+      'utf8',
+    );
+    const block = source.slice(
+      source.indexOf('const DEFAULTS = {'),
+      source.indexOf('\n};'),
+    );
+    const declared = new Set(
+      [...block.matchAll(/^ {2}([a-zA-Z][A-Za-z0-9]*):/gm)].map(([, key]) => key),
+    );
+    const { RESTART_REQUIRED, RELOADABLE } = await import('../src/config.js');
+    for (const key of [...RESTART_REQUIRED, ...RELOADABLE.keys()]) {
+      assert.ok(declared.has(key), `${key} is classified but not declared`);
+    }
+  });
+
+  it('does not let one loaded config leak into the next', async () => {
+    // merge() used to spread the defaults, so a nested object in a loaded
+    // config *was* the one in DEFAULTS. Load writes the resolved save path
+    // back into it, permanently altering the defaults for the process.
+    const first = await loaded({ savePath: './first' });
+    const second = await loaded({});
+
+    assert.equal(path.basename(first.savePath), 'first');
+    assert.ok(
+      second.savePath.endsWith(path.join('data', 'torrents-data')),
+      `the second config inherited ${second.savePath}`,
+    );
+  });
+});

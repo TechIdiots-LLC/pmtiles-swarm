@@ -176,3 +176,38 @@ describe('who may set a hook', () => {
     assert.deepEqual(config.watch, [{ path: '/mnt/maps' }]);
   });
 });
+
+describe('a save that is refused changes nothing', () => {
+  it('leaves the running config untouched when one key is bad', async () => {
+    // It used to reject inside the same loop that assigned, so every key
+    // before the bad one was applied and then the write never happened: the
+    // running node changed, the file did not. A watched location added that
+    // way started polling immediately and vanished from the console — a state
+    // impossible to debug from either side.
+    const config = { watch: [], sources: [], trackers: [['udp://a.example']] };
+
+    await assert.rejects(
+      () =>
+        saveConfig(config, {
+          sources: [{ name: 'protomaps', url: 'https://build.example/{YYYYMMDD}.pmtiles' }],
+          notARealSetting: true,
+        }),
+      /unknown setting/,
+    );
+
+    assert.deepEqual(config.sources, [], 'the good key must not have been applied');
+  });
+
+  it('applies nothing when a guarded key is genuinely changed', async () => {
+    const config = { allowHooksFromApi: false, watch: [] };
+    await assert.rejects(
+      () =>
+        saveConfig(config, {
+          watch: [{ path: '/mnt/maps' }],
+          allowHooksFromApi: true,
+        }),
+      /only be set in the config file/,
+    );
+    assert.deepEqual(config.watch, []);
+  });
+});

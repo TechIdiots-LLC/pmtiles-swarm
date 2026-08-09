@@ -2,6 +2,11 @@
 
 ## master
 ### ✨ Features and improvements
+- **Downloads that have no torrent yet are visible.** An archive added from a URL is fetched whole
+  before there is anything to hash a torrent out of, so until that finishes there is no catalog
+  entry and nothing in the table — for a planet build, hours in which a watched location looks like
+  it silently did nothing. They now appear under the archive list with progress and a cancel
+  button. `/api/adds` reports bytes and totals rather than bare URLs.
 - **A watched web location can say whether its URL is published as a web seed.** `webSeed` on a
   source, and **Use URL as web seed** on each row in the console. The behaviour was already the
   right default — the origin is a valid web seed for exactly those bytes, and publishing it is the
@@ -44,6 +49,18 @@
   at it quietly on every start. Unset keys still take libtorrent's own defaults.
 
 ### 🐞 Bug fixes
+- **`libtorrent` and `feedTitle` are settings the API knows about.** `DEFAULTS` doubles as the
+  allow-list, and neither key was in it — so a libtorrent node saving anything at all was answered
+  `unknown setting: libtorrent`, because the console posts back every key it was given.
+  `libtorrent` was even named in `RESTART_REQUIRED`: known everywhere except where it was checked.
+- **A refused save now changes nothing.** Validation happened inside the loop that assigned, so a
+  save containing one bad key applied every key before it and then threw, leaving the running node
+  changed and the file on disk not. A watched location added that way started polling immediately
+  and vanished from the console. Every key is checked before any is applied.
+- **One loaded config no longer leaks into the next.** `merge()` spread the defaults, so a nested
+  object in a loaded config *was* the one in `DEFAULTS` whenever the file did not mention it — and
+  load writes the resolved save path back into it. One process loads one config, so this only
+  surfaced in tests, but it made the defaults mutable at runtime.
 - **Settings save again.** A setting that may only be set in the config file was refused on the
   key's *presence* rather than on a change, and the console renders every setting it knows about
   and posts the lot — so `allowHooksFromApi` rode along with every save and failed all of them,

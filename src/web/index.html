@@ -328,6 +328,7 @@
           </thead>
           <tbody id="rows"></tbody>
         </table>
+        <div id="fetching"></div>
         <div class="empty" id="empty" hidden>
           Nothing yet. Add an archive above, or click <b>Adopt existing</b> to
           pull in what your torrent client already seeds.
@@ -708,6 +709,70 @@
       let speedState = null;
 
       /**
+       * Shows downloads that have no archive yet.
+       *
+       * An archive added from a URL is fetched whole before there is anything
+       * to hash a torrent out of, so for the length of that download there is
+       * no catalog entry and nothing in the table. For a planet build that is
+       * hours in which a watched location looks like it silently did nothing.
+       * @param {object[]} running - From /api/adds.
+       * @returns {void}
+       */
+      function renderFetching(running) {
+        const box = $('fetching');
+        if (!running?.length) {
+          box.innerHTML = '';
+          return;
+        }
+        box.innerHTML = `
+          <h3 style="margin:1.2rem 0 0.5rem">Downloading, before a torrent exists</h3>
+          <div class="sub" style="margin-bottom:0.6rem">
+            These have no infohash yet — an archive has to be here in full
+            before it can be hashed. They appear in the table above once that
+            finishes.
+          </div>
+          ${running
+            .map((add) => {
+              const pct = add.total ? (add.received / add.total) * 100 : null;
+              return `
+                <div class="piecerow">
+                  <span class="label" title="${escapeHtml(add.url)}">${escapeHtml(
+                    add.name ?? add.url.split('/').pop() ?? add.url,
+                  )}</span>
+                  <span class="track"><i style="width:${pct == null ? 0 : pct.toFixed(1)}%"></i></span>
+                  <span class="value">${
+                    pct == null ? bytes(add.received) : `${pct.toFixed(1)}%`
+                  }</span>
+                </div>`;
+            })
+            .join('')}
+          <div class="bar" style="margin-top:0.5rem">
+            ${running
+              .map(
+                (add) =>
+                  `<button data-cancel="${escapeHtml(add.url)}">Cancel ${escapeHtml(
+                    add.name ?? add.url.split('/').pop() ?? '',
+                  )}</button>`,
+              )
+              .join('')}
+          </div>`;
+
+        for (const button of box.querySelectorAll('[data-cancel]')) {
+          button.onclick = async () => {
+            try {
+              await api(`/api/adds?url=${encodeURIComponent(button.dataset.cancel)}`, {
+                method: 'DELETE',
+              });
+              toast('cancelled');
+              refresh();
+            } catch (error) {
+              toast(error.message);
+            }
+          };
+        }
+      }
+
+      /**
        * Draws the alternative-limits switch from the node's own answer.
        *
        * Read rather than worked out here: the schedule logic lives on the
@@ -751,12 +816,14 @@
 
       async function refresh() {
         try {
-          const [status, list, speed] = await Promise.all([
+          const [status, list, speed, adds] = await Promise.all([
             api('/api/status'),
             api('/api/torrents'),
             api('/api/speed').catch(() => null),
+            api('/api/adds').catch(() => null),
           ]);
           renderSpeed(speed);
+          renderFetching(adds?.running);
           const engine = status.engine;
           $('status').innerHTML =
             `engine <b>${engine.name}</b> ${engine.ok ? 'ready' : 'unavailable'}` +

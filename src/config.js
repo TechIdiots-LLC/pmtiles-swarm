@@ -19,6 +19,32 @@ const DEFAULTS = {
     password: undefined,
   },
   /**
+   * Settings for the libtorrent engine.
+   *
+   * Declared here even though every field is undefined, because DEFAULTS is
+   * also the list of what the API will accept: an undeclared key is refused as
+   * "unknown setting", and the console posts back every key it was given. So a
+   * libtorrent node could not save *any* setting until this existed — and the
+   * key was already named in RESTART_REQUIRED, which is to say it was known
+   * everywhere except where it was checked.
+   *
+   * `savePath` is folded into the node-level one at load; the rest are passed
+   * to the sidecar. Unset means libtorrent's own default.
+   */
+  libtorrent: {
+    savePath: undefined,
+    resumeDir: undefined,
+    python: undefined,
+    script: undefined,
+    listen: undefined,
+    dht: undefined,
+    lsd: undefined,
+    upnp: undefined,
+    natpmp: undefined,
+    uploadLimit: undefined,
+    downloadLimit: undefined,
+  },
+  /**
    * Where archive data lives.
    *
    * One path for the node, not one per engine, and that is not a
@@ -225,6 +251,8 @@ const DEFAULTS = {
    */
   torrentDropDir: undefined,
   /** Rights statement for the RSS channel. */
+  /** Title for the RSS feeds. */
+  feedTitle: undefined,
   feedCopyright: undefined,
   /**
    * Most items to include in a feed, newest first. Zero means no limit.
@@ -623,7 +651,18 @@ const DEFAULTS = {
  * @returns {object} - The merged config.
  */
 function merge(base, override) {
-  const out = { ...base };
+  // Copied a level at a time rather than spread, because a spread shares every
+  // nested object with the base — which for DEFAULTS means the loaded config's
+  // `libtorrent` *is* `DEFAULTS.libtorrent` whenever the file does not mention
+  // it. Load then writes the resolved save path back into that object, so the
+  // defaults are permanently altered and the next config loaded in the same
+  // process inherits the previous one's paths. One process loads one config,
+  // so this only ever surfaced in tests — but it is a landmine either way.
+  const out = {};
+  for (const [key, value] of Object.entries(base ?? {})) {
+    // eslint-disable-next-line security/detect-object-injection -- keys come from DEFAULTS
+    out[key] = clone(value);
+  }
   for (const [key, value] of Object.entries(override ?? {})) {
     if (value === undefined) continue;
     // eslint-disable-next-line security/detect-object-injection -- keys come from a config file the operator controls
@@ -634,6 +673,21 @@ function merge(base, override) {
         : value;
   }
   return out;
+}
+
+/**
+ * A copy nothing else holds a reference into.
+ * @param {unknown} value - What to copy.
+ * @returns {unknown} - The copy, or the value where copying is meaningless.
+ */
+function clone(value) {
+  if (Array.isArray(value)) return value.map(clone);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, inner]) => [key, clone(inner)]),
+    );
+  }
+  return value;
 }
 
 /**
@@ -896,22 +950,23 @@ export async function saveConfig(config, updates, configPath) {
   const restartRequired = [];
   const reloaded = [];
 
-  for (const [key, value] of Object.entries(updates ?? {})) {
+  // Everything is checked before anything is applied.
+  //
+  // This used to reject inside the same loop that assigned, so a save
+  // containing one bad key applied every key before it, then threw — leaving
+  // the running node changed and the file on disk not. A watched location
+  // added that way started polling immediately and vanished from the console,
+  // which is a confusing state to be in and an impossible one to debug from
+  // either side.
+  const entries = Object.entries(updates ?? {});
+  const guarded = fileOnlyFor(config);
+  const changing = entries.filter(([key, value]) => !unchanged(config[key], value));
+
+  for (const [key] of changing) {
     if (!(key in DEFAULTS)) {
       throw new Error(`unknown setting: ${key}`);
     }
-
-    if (fileOnlyFor(config).has(key)) {
-      // Sending back the value that is already there is not an attempt to
-      // change it. The console renders every setting it knows about and posts
-      // the lot, so a guarded key rides along with every save — which made
-      // *every* save fail, not just an edit to a guarded key. Worse, the error
-      // named the way out and the way out did not work: turning
-      // allowHooksFromApi on unlocks the hooks, but the flag itself is
-      // guarded for ever, so the console kept echoing it and kept being
-      // refused. Only a real change is refused now.
-      if (unchanged(config[key], value)) continue;
-
+    if (guarded.has(key)) {
       throw new Error(
         `${key} can only be set in the config file, not through the API. It ` +
           'runs a command as the service user, and an API token should not be ' +
@@ -919,7 +974,9 @@ export async function saveConfig(config, updates, configPath) {
           'config file if you want the console to edit it.',
       );
     }
+  }
 
+  for (const [key, value] of changing) {
     // Never let a redaction placeholder be written back as a real secret.
     if (value && typeof value === 'object') {
       for (const field of ['password', 'passwordHash', 'apiKey']) {
