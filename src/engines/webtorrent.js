@@ -324,6 +324,23 @@ export class WebTorrentSeedEngine {
   }
 
   /**
+   * The torrent's own metainfo, once the client has it.
+   *
+   * A magnet carries an infohash and little else; everything that describes the
+   * archive — its real name, its size, its piece geometry, its trackers, its
+   * web seeds — arrives afterwards over BEP 9. Handing it back lets the caller
+   * write it down, so the next start does not have to ask the swarm again for
+   * something it already learned.
+   * @param {string} infoHash - The torrent.
+   * @returns {Promise<Uint8Array | null>} - The .torrent bytes, or null if not known yet.
+   */
+  async metadata(infoHash) {
+    const torrent = this.#find(infoHash);
+    if (!torrent?.torrentFile) return null;
+    return new Uint8Array(torrent.torrentFile);
+  }
+
+  /**
    * Per-peer detail for a torrent.
    * @param {string} infoHash - The torrent to inspect.
    * @returns {Promise<object[]>} - One entry per connected peer.

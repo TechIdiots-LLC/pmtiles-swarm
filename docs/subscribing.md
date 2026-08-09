@@ -51,6 +51,22 @@ Poll immediately rather than waiting for the interval:
 curl -X POST localhost:8090/api/subscriptions/refresh
 ```
 
+## A magnet becomes a real torrent
+
+Joining by magnet gets you an infohash. The name, the size and the piece geometry follow over
+BEP 9, and are written to this node's torrent directory as soon as the engine has them — which for
+a magnet is the moment the add finishes, since the add does not resolve until metadata is in hand.
+
+That matters beyond tidiness. Without it every restart re-fetches the metainfo, which needs a
+peer — so a restart into a quiet swarm leaves the archive unusable — and until it arrives the
+`.torrent` endpoint has nothing to serve, the feed advertises a URL that 404s, and the recorded
+size is whatever the magnet claimed, which is usually zero.
+
+BEP 9 carries the `info` dictionary and nothing else, so **trackers and web seeds do not arrive
+with it**. They live outside `info`, which is precisely why adding a web seed leaves an infohash
+unchanged. What the magnet's own `tr=` and `ws=` parameters carried is kept; a magnet that had
+neither yields an archive with neither, and web seeds can be added afterwards.
+
 ## Checking a peer before trusting it
 
 A peer URL is the one setting where a mistake is silent. A feed that 404s and a token the

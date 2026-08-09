@@ -247,6 +247,17 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **An archive joined by magnet forgot everything the swarm told it.** A magnet carries an
+  infohash and, if you are lucky, a display name; the real name, the exact size and the piece
+  geometry arrive afterwards over BEP 9 — and arrived into nothing. Every restart asked the swarm
+  again for what the node had already been told, which needs a peer, so a restart while the swarm
+  was quiet left the archive stuck. The `.torrent` endpoint had nothing to serve and the feed
+  advertised a URL that answered 404, the Content tab was empty, and the size stayed at whatever
+  the magnet claimed — usually zero, which made the disk-space check before a move meaningless.
+  The metainfo is now written to the torrent directory as soon as the engine has it, which for a
+  magnet is the moment the add resolves. Anything joined before this is picked up by the sweep.
+  Only gaps are filled: a name chosen here is a decision about this node's copy and is not
+  overruled.
 - **Every radio and checkbox in the console sat centred on a line of its own**, with its label
   above it. `.field label` makes a label `display: block` and `.field input` stretches a control to
   the full width of its dialog, and both applied to these too. They share a `choice` class now,

@@ -490,7 +490,7 @@ export class Library {
       await fs.writeFile(storedTorrentPath, torrentFile);
     }
 
-    return this.#catalog.put({
+    const entry = await this.#catalog.put({
       infoHash: parsed.infoHash,
       name: parsed.name ?? parsed.infoHash,
       size: parsed.length ?? 0,
@@ -516,6 +516,11 @@ export class Library {
       mode,
       complete,
     });
+
+    // The engine's add resolves once metadata is in hand, so for a magnet
+    // everything the catalog was missing is available right now — no waiting,
+    // no polling, and nothing to ask the swarm for a second time.
+    return (await this.captureMetadata(parsed.infoHash)) ?? entry;
   }
 
   /**
@@ -849,7 +854,7 @@ export class Library {
         console.error(`[adopt] ${torrent.name}: ${error.message}`);
       });
 
-    return this.#catalog.put({
+    const entry = await this.#catalog.put({
       infoHash: torrent.infoHash,
       name: torrent.name,
       size: torrent.size,
@@ -874,6 +879,8 @@ export class Library {
       mode,
       complete: false,
     });
+
+    return (await this.captureMetadata(torrent.infoHash)) ?? entry;
   }
 
 
@@ -1285,6 +1292,64 @@ export class Library {
       if (stat?.isFile()) total += stat.size;
     }
     return total;
+  }
+
+  /**
+   * Writes down the metainfo of an archive that was joined by magnet.
+   *
+   * A magnet carries an infohash and, if you are lucky, a display name. The
+   * real name, the exact size and the piece geometry arrive afterwards over
+   * BEP 9 — and used to arrive into nothing: the catalog kept the magnet and
+   * forgot the rest, so every restart asked the swarm again for something this
+   * node had already been told.
+   *
+   * BEP 9 transfers the `info` dictionary and nothing else, so trackers and web
+   * seeds do not arrive that way — they live outside `info`, which is exactly
+   * why adding a web seed leaves an infohash unchanged. What the magnet's own
+   * `tr=` and `ws=` parameters carried is kept and merged with whatever the
+   * metainfo holds, which for a real `.torrent` is everything.
+   *
+   * That was not only wasteful. Re-fetching needs a peer, so a restart while
+   * the swarm was quiet left the archive stuck; the `.torrent` endpoint had
+   * nothing to serve and the feed advertised a URL that answered 404; and the
+   * size stayed at whatever the magnet claimed, which is usually zero — which
+   * in turn made the disk-space check before a move meaningless.
+   * @param {string} infoHash - The archive.
+   * @returns {Promise<object | null>} - The updated entry, or null if nothing was learned.
+   */
+  async captureMetadata(infoHash) {
+    const entry = this.#catalog.get(infoHash);
+    if (!entry || entry.torrentPath) return null;
+    if (!this.#engine.metadata) return null;
+
+    const torrentFile = await this.#engine.metadata(infoHash).catch(() => null);
+    if (!torrentFile?.length) return null;
+
+    const { default: parseTorrent } = await import('parse-torrent');
+    const parsed = await parseTorrent(torrentFile).catch(() => null);
+    if (!parsed?.infoHash || parsed.infoHash !== infoHash) return null;
+
+    await fs.mkdir(this.torrentDir, { recursive: true });
+    const torrentPath = path.join(this.torrentDir, `${infoHash}.torrent`);
+    await fs.writeFile(torrentPath, torrentFile);
+
+    // Only fills gaps. A name or a set of categories chosen here is a decision
+    // somebody made about this node's copy, and the metainfo is not entitled
+    // to overrule it.
+    const learned = {
+      infoHash,
+      torrentPath,
+      name: entry.name && entry.name !== infoHash ? entry.name : parsed.name,
+      size: entry.size || parsed.length || 0,
+      pieceLength: entry.pieceLength ?? parsed.pieceLength,
+      pieceCount: entry.pieceCount ?? parsed.pieces?.length,
+      fileCount: entry.fileCount ?? parsed.files?.length,
+      webSeeds: [...new Set([...(entry.webSeeds ?? []), ...(parsed.urlList ?? [])])],
+      kind: entry.kind ?? guessKind(parsed.name ?? ''),
+    };
+
+    console.log(`[metadata] ${learned.name}: written to ${path.basename(torrentPath)}`);
+    return this.#catalog.put(learned);
   }
 
   /**

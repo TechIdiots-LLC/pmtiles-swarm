@@ -176,6 +176,28 @@ export class QBittorrentEngine {
   }
 
   /**
+   * Exports the torrent's metainfo.
+   *
+   * qBittorrent builds this from what it holds, so it answers for a magnet
+   * once BEP 9 has completed and 404s or errors before that — which is exactly
+   * the distinction the caller wants.
+   * @param {string} infoHash - The torrent.
+   * @returns {Promise<Uint8Array | null>} - The .torrent bytes, or null if not known yet.
+   */
+  async metadata(infoHash) {
+    try {
+      const response = await this.#request(
+        `/api/v2/torrents/export?hash=${encodeURIComponent(infoHash)}`,
+      );
+      if (!response.ok) return null;
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return bytes.length > 0 ? bytes : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Removes a torrent.
    * @param {string} infoHash - The torrent to remove.
    * @param {{deleteData?: boolean}} [options] - Whether to delete the data too.

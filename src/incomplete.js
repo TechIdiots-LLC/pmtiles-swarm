@@ -141,6 +141,11 @@ export async function promote(from, to) {
 /**
  * Watches for downloads finishing and gives them their real name.
  *
+ * Also the place where an archive joined by magnet gets its metainfo written
+ * down, if that did not happen when it was added — same sweep, same reason:
+ * it is a fact about an archive that becomes true at some point after it
+ * arrives, and nothing else is watching for it.
+ *
  * Polled rather than event-driven because it has to work the same across three
  * engines, only one of which is in this process. The interval is generous: a
  * few seconds of a finished archive still wearing its marker costs nothing,
@@ -197,6 +202,16 @@ export class CompletionWatcher {
     const promoted = [];
 
     for (const entry of live) {
+      // An archive joined by magnet before this node knew how to write the
+      // metainfo down, or one whose engine only produced it later. Cheap to
+      // ask, and it stops after the first success because the entry then has a
+      // torrentPath.
+      if (!entry.torrentPath) {
+        await this.#library
+          .captureMetadata?.(entry.infoHash)
+          .catch(() => null);
+      }
+
       if (entry.complete) continue;
       if (!(entry.status?.progress >= 1)) continue;
       // Promotion removes and re-adds the torrent, which takes long enough for

@@ -55,6 +55,7 @@
  * @property {() => Promise<TorrentStatus[]>} list - Lists everything the engine holds.
  * @property {(infoHash: string) => Promise<TorrentStatus | null>} get - One torrent's state.
  * @property {(infoHash: string) => Promise<object[]>} [peers] - Per-peer detail, where the engine exposes it.
+ * @property {(infoHash: string) => Promise<Uint8Array | null>} [metadata] - The torrent's metainfo once known, so an archive joined by magnet can be written down rather than re-fetched over BEP 9 on every start.
  * @property {() => Promise<void>} destroy - Releases resources.
  */
 
