@@ -161,8 +161,25 @@ export function isDue(source, lastRun, options = {}) {
     return scheduled ? scheduled > lastRun : false;
   }
 
-  const hours = source.everyHours ?? defaultHours;
-  return now - lastRun >= hours * 3600 * 1000;
+  return now - lastRun >= intervalMs(source, defaultHours);
+}
+
+/**
+ * How long a source wants between polls, in milliseconds.
+ *
+ * `everyMinutes` exists because an hour is not always the right grain. A
+ * directory a build pipeline writes into wants checking every few minutes; a
+ * planet build published once a day does not. The tick underneath is a minute,
+ * so a minute is the floor.
+ * @param {object} source - The source definition.
+ * @param {number} defaultHours - The fallback interval.
+ * @returns {number} - Milliseconds between polls.
+ */
+export function intervalMs(source, defaultHours = 6) {
+  if (source.everyMinutes) {
+    return Math.max(1, source.everyMinutes) * 60 * 1000;
+  }
+  return (source.everyHours ?? defaultHours) * 3600 * 1000;
 }
 
 /**
@@ -183,6 +200,7 @@ function scheduleKey(source) {
 function describeSchedule(source, defaultHours) {
   const name = source.name ?? source.url ?? source.index ?? 'unnamed';
   if (source.at) return `${name} at ${[].concat(source.at).join(' and ')} UTC`;
+  if (source.everyMinutes) return `${name} every ${source.everyMinutes}m`;
   return `${name} every ${source.everyHours ?? defaultHours}h`;
 }
 

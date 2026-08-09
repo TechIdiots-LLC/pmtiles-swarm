@@ -1366,7 +1366,8 @@
        * @returns {void}
        */
       function renderRowEditor(spec) {
-        const { into, key, title, blurb, columns, rows, restart, preview, footnote } = spec;
+        const { into, key, title, blurb, columns, rows, restart, preview, peerPreview, footnote } =
+          spec;
         rowEditorColumns[key] = columns;
         const panel = document.createElement('div');
         panel.className = 'panel';
@@ -1375,13 +1376,27 @@
 
         const cell = (column, value) => `
           <td>
-            <input
-              data-field="${column.field}"
-              placeholder="${escapeHtml(column.placeholder ?? '')}"
-              style="width:${column.wide ? '17rem' : '9rem'}"
-              value="${escapeHtml(
-                Array.isArray(value) ? value.join(', ') : (value ?? ''),
-              )}" />
+            ${
+              column.options
+                ? `<select data-field="${column.field}" style="width:${column.wide ? '17rem' : '9rem'}">
+                     ${column.options
+                       .map(
+                         ([option, label]) =>
+                           `<option value="${escapeHtml(option)}"${
+                             String(value ?? '') === option ? ' selected' : ''
+                           }>${escapeHtml(label)}</option>`,
+                       )
+                       .join('')}
+                   </select>`
+                : `<input
+                     data-field="${column.field}"
+                     ${column.secret ? 'type="password" autocomplete="off"' : ''}
+                     placeholder="${escapeHtml(column.placeholder ?? '')}"
+                     style="width:${column.wide ? '17rem' : '9rem'}"
+                     value="${escapeHtml(
+                       Array.isArray(value) ? value.join(', ') : (value ?? ''),
+                     )}" />`
+            }
             ${
               column.tokens
                 ? `<div class="tags" style="margin-top:0.25rem">${column.tokens
@@ -1400,6 +1415,7 @@
             ${columns.map((column) => cell(column, row[column.field])).join('')}
             <td>
               ${preview ? '<button type="button" data-act="preview">Preview</button>' : ''}
+              ${peerPreview ? '<button type="button" data-act="test">Test</button>' : ''}
               <button type="button" data-act="drop" class="danger">Remove</button>
             </td>
           </tr>`;
@@ -1461,6 +1477,26 @@
             else row.remove();
             return;
           }
+          if (action === 'test') {
+            const body = readRow(row, columns);
+            if (!body.url) {
+              note.textContent = 'give the peer\'s URL first';
+              return;
+            }
+            note.textContent = 'asking…';
+            try {
+              const result = await api('/api/subscriptions/preview', { method: 'POST', body });
+              note.textContent =
+                `${result.protocol.toUpperCase()}, ${result.count} archive` +
+                `${result.count === 1 ? '' : 's'}` +
+                (result.names.length ? `: ${result.names.join(', ')}` : '') +
+                (result.partial ? ' (a partial view — pruning is disabled for it)' : '');
+            } catch (error) {
+              note.textContent = error.message;
+            }
+            return;
+          }
+
           if (action === 'preview') {
             const body = readRow(row, columns);
             if (!body.url && !body.index) {
@@ -1511,6 +1547,8 @@
           } else if (column.number) {
             const value = Number(raw);
             if (!Number.isNaN(value)) record[column.field] = value;
+          } else if (column.boolean) {
+            record[column.field] = raw === 'true';
           } else {
             record[column.field] = raw;
           }
@@ -1607,6 +1645,13 @@
             'HTTP only needs a web seed base; one that is not can be given a ' +
             'publish directory, and each archive is moved there before its ' +
             'torrent is built so the seed works from the first moment.',
+          footnote:
+            'Poll every is for network shares only. A local folder needs ' +
+            'nothing there — the filesystem says when something lands, and it ' +
+            'is picked up as it appears. SMB and NFS do not deliver those ' +
+            'notifications, so a watch on one can sit silent while files ' +
+            'arrive; 15 to 60 seconds suits those. Setting it on a local ' +
+            'folder only costs I/O to learn nothing.',
           restart: true,
           columns: [
             { field: 'path', label: 'Folder', placeholder: '/mnt/maps/incoming', wide: true },
@@ -1614,6 +1659,7 @@
             { field: 'savePath', label: 'Save location', placeholder: 'default' },
             { field: 'publishDir', label: 'Publish to', placeholder: '/var/www/pmtiles' },
             { field: 'webSeedBase', label: 'Web seed base', placeholder: 'https://…/files' },
+            { field: 'pollSeconds', label: 'Poll every (s)', placeholder: 'events', number: true },
           ],
           rows: config.watch ?? [],
         });
@@ -1648,6 +1694,7 @@
             { field: 'categories', label: 'Categories', placeholder: 'basemaps', list: true },
             { field: 'at', label: 'Check at (UTC)', placeholder: '03:30' },
             { field: 'everyHours', label: 'or every (h)', placeholder: '6', number: true },
+            { field: 'everyMinutes', label: 'or every (m)', placeholder: '—', number: true },
             { field: 'offsetDays', label: 'Day offset', placeholder: '0', number: true },
             { field: 'lookbackDays', label: 'Look back', placeholder: '3', number: true },
             {
@@ -1665,13 +1712,74 @@
             '{M}-{D}-{YY} gives 8-7-26, {DD.MM.YYYY} gives 07.08.2026 — and ' +
             'case does not matter, since the length is what decides padding. ' +
             'Check at is a time of day in UTC, for an upstream that publishes ' +
-            'on a schedule; leave it blank to poll on an interval instead. ' +
+            'on a schedule; leave it blank to poll on an interval instead, in ' +
+            'hours or — for a location a pipeline writes into — minutes. ' +
             'Day offset shifts which date is asked for — protomaps publishes ' +
             'yesterday, so it wants -1. Look back covers polls that were ' +
             'missed. A directory is the fallback for upstreams whose naming ' +
             'cannot be written as a template; it never takes more than the ' +
             'Newest files listed, which is one unless you raise it, because ' +
             'each one is a whole archive.',
+        });
+
+        renderRowEditor({
+          into: body,
+          key: 'subscriptions',
+          title: 'Remote nodes',
+          blurb:
+            'Peers whose archives this node follows. An RSS feed says "here ' +
+            'is what is new" and is bounded by the publisher, so a node ' +
+            'offline long enough misses things for good; a catalog URL says ' +
+            '"here is everything", which is what makes reconciling possible. ' +
+            'A token, where the peer issued one, may get you more than it ' +
+            'publishes to the world.',
+          columns: [
+            {
+              field: 'url',
+              label: 'Feed or catalog URL',
+              placeholder: 'https://peer.example.org/feed.xml',
+              wide: true,
+            },
+            {
+              field: 'protocol',
+              label: 'Protocol',
+              options: [
+                ['', 'auto'],
+                ['rss', 'RSS'],
+                ['api', 'catalog API'],
+              ],
+            },
+            {
+              field: 'mode',
+              label: 'Take as',
+              options: [
+                ['cache', 'cache — on demand'],
+                ['mirror', 'mirror — whole copy'],
+              ],
+            },
+            { field: 'category', label: 'Tag as', placeholder: 'from-peer' },
+            { field: 'filter', label: 'Name filter', placeholder: 'terrain' },
+            { field: 'token', label: 'Token', placeholder: 'if issued one', secret: true },
+            {
+              field: 'prune',
+              label: 'Drop what it stops listing',
+              options: [
+                ['', 'never'],
+                ['report', 'report only'],
+                ['true', 'forget, keep data'],
+                ['delete', 'forget and delete'],
+              ],
+            },
+          ],
+          rows: config.subscriptions ?? [],
+          peerPreview: true,
+          footnote:
+            'Take as decides the disk this costs: cache joins the swarm and ' +
+            'fetches only what is read, mirror commits to a whole copy of ' +
+            'every archive the peer lists. Dropping stays off unless chosen, ' +
+            'only ever considers archives this peer sent, and never acts on a ' +
+            'filtered or partial view — watch a new peer on "report only" ' +
+            'before trusting it with anything more.',
         });
 
         for (const [key, value] of Object.entries(config)) {

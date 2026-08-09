@@ -38,8 +38,10 @@ export class SubscriptionManager {
    */
   start() {
     const feeds = this.#config.subscriptions ?? [];
-    if (feeds.length === 0) return;
 
+    // The timer runs even with nothing to follow. Every refresh reads the list
+    // fresh, so this is what lets a peer added through the console start
+    // working without a restart; an empty pass costs nothing.
     const intervalMs = (this.#config.subscriptionIntervalSeconds ?? 900) * 1000;
     // Poll once at startup, then on the interval.
     this.refresh().catch((error) =>
@@ -52,9 +54,11 @@ export class SubscriptionManager {
     }, intervalMs);
     this.#timer.unref?.();
 
-    console.log(
-      `[feed] following ${feeds.length} feed(s) every ${intervalMs / 1000}s`,
-    );
+    if (feeds.length > 0) {
+      console.log(
+        `[feed] following ${feeds.length} feed(s) every ${intervalMs / 1000}s`,
+      );
+    }
   }
 
   /**

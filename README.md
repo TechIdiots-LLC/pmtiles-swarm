@@ -134,7 +134,8 @@ subscribers forward, and they fail differently, so publishing both is cheap insu
     }
   ],
   "subscriptions": [
-    { "url": "https://other.example.org/feed.xml", "mode": "cache", "filter": "terrain" }
+    { "url": "https://other.example.org/feed.xml", "mode": "cache", "filter": "terrain" },
+    { "url": "https://internal.example.org/api/catalog", "mode": "mirror", "token": "…" }
   ]
 }
 ```
@@ -181,8 +182,16 @@ Times are UTC to match the date tokens, since a template on one clock and a sche
 would be a confusing thing to work out at four in the morning. A source that has never run is
 always due, which is what catches up after the daemon was down over a scheduled time.
 
+For anything finer than an hour, `everyMinutes` — a location a build pipeline writes into wants
+checking every few minutes, where a planet build published once a day does not. The tick underneath
+is a minute, so that is the floor.
+
 Monitored *folders* need no schedule: they are watched for filesystem events and pick up an archive
-as it lands, once it has stopped growing for `stabilitySeconds`.
+as it lands, once it has stopped growing for `stabilitySeconds`. The exception is a **network
+share** — SMB and NFS do not deliver change notifications the way a local filesystem does, so a
+watch on one can sit silent forever while files arrive. Set `pollSeconds` (15–60 suits most) to
+scan it on an interval instead. On a local folder that is pure waste: stat-ing a directory of
+terabyte archives every few seconds costs real I/O to learn nothing.
 
 `newest` bounds how many listed files an index source considers, and defaults to `1`. That bound
 matters: a directory holding two years of daily planet builds would otherwise read as two years of
@@ -191,6 +200,27 @@ archives to fetch. Raise it only as far as the number of polls you expect to mis
 `POST /api/sources/preview` reports what a source *would* take without taking any of it — the
 **Preview** button in Settings — because a directory URL typed slightly wrong is otherwise
 discovered by watching several hundred gigabytes arrive.
+
+### Following other nodes
+
+`subscriptions` are the peers this node takes archives from, editable in Settings under **Remote
+nodes**. An RSS feed says "here is what is new" and is bounded by the publisher's `feedMaxItems`,
+so a node offline long enough misses things permanently; a `/api/catalog` URL says "here is
+everything", which is what makes reconciling — and pruning — possible.
+
+`mode` decides what following one costs: `cache` joins the swarm and fetches only what is read,
+`mirror` commits to a whole copy of every archive the peer lists. `token` is presented to the peer,
+which may then publish more than it publishes to the world. `prune` is off unless chosen, only ever
+considers archives that peer sent, and never acts on a filtered or partial view — start a new peer
+on `"report"` and watch it before trusting it with more.
+
+Peer tokens are redacted from `GET /api/config` like any other credential, and a save that echoes
+the placeholder back keeps the stored one.
+
+The **Test** button (`POST /api/subscriptions/preview`) says whether a peer is reachable, which
+protocol it speaks, and how many archives it is offering that this node could actually take. A feed
+that 404s and a token the peer rejects both otherwise fail silently — nothing arrives, which looks
+exactly like a peer with nothing new.
 
 ### Incomplete archives
 

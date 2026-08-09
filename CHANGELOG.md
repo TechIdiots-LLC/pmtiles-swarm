@@ -37,6 +37,17 @@
   URL containing `{id}` is not quietly rewritten. Every spelling that worked before still does. Day offset and look-back are columns of their own
   (protomaps publishes yesterday's build, so it wants `-1`), and Preview refuses to run on a URL
   that still has a fixed date in it, since that would ask for the same build forever.
+- **Remote nodes are editable in Settings**, alongside folders and web locations: feed or catalog
+  URL, protocol, whether to take archives as a cache or a mirror, a tag to apply, a name filter, a
+  token and the pruning policy. A **Test** button — `POST /api/subscriptions/preview` — reports
+  whether the peer is reachable, which protocol it speaks and how many archives it is offering that
+  this node could actually take. A feed that 404s and a token the peer rejects both fail silently
+  otherwise: nothing arrives, which looks exactly like a peer with nothing new.
+- **Polling can be finer than an hour.** `everyMinutes` on a watched web location, for somewhere a
+  build pipeline writes into rather than a daily planet build. And `pollSeconds` on a monitored
+  folder, for network shares: SMB and NFS do not deliver the change notifications a local
+  filesystem does, so a watch on one can sit silent forever while files arrive. Off by default,
+  because on a local folder it is pure waste.
 - **Each watched location says when to check.** `at: "03:30"` — a time of day in UTC, or a list of
   them — for an upstream that publishes on a schedule, or `everyHours` for one that publishes
   whenever it is ready. Polling every six hours from whenever the process started found a daily
@@ -154,6 +165,13 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **Peer tokens were returned in plain text by `GET /api/config`.** A token is what persuades a
+  peer to publish more than it publishes to the world — the same class of thing as the qBittorrent
+  password, which was already redacted. Now redacted too, and a save that echoes the placeholder
+  back keeps the stored token rather than overwriting it with asterisks.
+- **Adding the first peer did nothing until a restart.** The refresh timer only started when the
+  subscription list was already non-empty, so a peer added through the console was never polled.
+  The same bug as scheduled sources had; every refresh reads the list fresh.
 - **Categories set when adding an archive never appeared.** The console read `entry.category`,
   singular — the field the catalog folds into the list and deletes on write — so every archive
   showed a blank tag line. The tags were stored correctly the whole time.

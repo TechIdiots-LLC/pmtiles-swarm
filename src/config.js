@@ -554,6 +554,9 @@ const SECRET_PATHS = [
   ['auth', 'apiKey'],
 ];
 
+/** The placeholder a redacted value is replaced with. */
+const REDACTED = '********';
+
 /**
  * Copies a config with credentials blanked out.
  * @param {object} config - The resolved configuration.
@@ -567,8 +570,17 @@ export function redactConfig(config) {
       cursor = cursor?.[key];
     }
     const last = pathParts[pathParts.length - 1];
-    if (cursor && cursor[last]) cursor[last] = '********';
+    if (cursor && cursor[last]) cursor[last] = REDACTED;
   }
+
+  // A peer token is a credential like any other: it is what persuades that
+  // peer to publish more than it publishes to the world. It sat in this
+  // response in plain text, which is exactly what the list above exists to
+  // prevent.
+  for (const subscription of copy.subscriptions ?? []) {
+    if (subscription?.token) subscription.token = REDACTED;
+  }
+
   return copy;
 }
 
@@ -605,7 +617,22 @@ export async function saveConfig(config, updates, configPath) {
     // Never let a redaction placeholder be written back as a real secret.
     if (value && typeof value === 'object') {
       for (const field of ['password', 'passwordHash', 'apiKey']) {
-        if (value[field] === '********') delete value[field];
+        if (value[field] === REDACTED) delete value[field];
+      }
+    }
+
+    // A peer arriving with the placeholder for its token is one whose token
+    // was never sent to the client to begin with. Carry the stored one across
+    // rather than saving the placeholder, which would silently break that
+    // peer's access the first time anyone touched an unrelated setting.
+    if (key === 'subscriptions' && Array.isArray(value)) {
+      for (const subscription of value) {
+        if (subscription?.token !== REDACTED) continue;
+        const held = (config.subscriptions ?? []).find(
+          (existing) => existing.url === subscription.url,
+        );
+        if (held?.token) subscription.token = held.token;
+        else delete subscription.token;
       }
     }
 

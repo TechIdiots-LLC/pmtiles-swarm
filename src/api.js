@@ -5,7 +5,7 @@ import express from 'express';
 import { createAuth } from './auth.js';
 import { normalizeCategories } from './catalog.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
-import { renderFeed } from './feed.js';
+import { parseFeed, renderFeed } from './feed.js';
 import { ScheduledSourceManager, candidateDates, expandTemplate } from './sources.js';
 import { limitFor } from './seeding.js';
 import { buildTileJson, extensionMatches } from './tilejson.js';
@@ -197,6 +197,87 @@ export function createApp({
         return res.status(404).json({ error: 'nothing to cancel' });
       }
       res.json({ cancelled });
+    }),
+  );
+
+  // Whether a peer is reachable, and what it is offering.
+  //
+  // A peer URL is worth checking before it is saved for the same reason a
+  // directory URL is: the failure is otherwise silent. A feed that 404s, or a
+  // token the peer does not accept, just means nothing ever arrives — and
+  // nothing arriving looks exactly like a peer with nothing new.
+  app.post(
+    '/api/subscriptions/preview',
+    route(async (req, res) => {
+      const { url, token, protocol } = req.body ?? {};
+      if (!url) return res.status(400).json({ error: 'give a feed or catalog url' });
+
+      // The stored token, when the console is echoing back what it was shown.
+      let credential = token;
+      if (credential === '********') {
+        credential = (config.subscriptions ?? []).find((s) => s.url === url)?.token;
+      }
+
+      const kind =
+        protocol && protocol !== 'auto'
+          ? protocol
+          : /\/api\/catalog\/?$/.test(url)
+            ? 'api'
+            : 'rss';
+
+      let response;
+      try {
+        response = await fetch(url, {
+          headers: {
+            accept: kind === 'api' ? 'application/json' : 'application/rss+xml',
+            ...(credential ? { authorization: `Bearer ${credential}` } : {}),
+          },
+          signal: AbortSignal.timeout(15000),
+        });
+      } catch (error) {
+        return res.status(502).json({ error: `could not reach ${url}: ${error.message}` });
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        return res.status(response.status).json({
+          error: credential
+            ? 'the peer rejected that token'
+            : 'the peer wants a token',
+        });
+      }
+      if (!response.ok) {
+        return res.status(502).json({ error: `the peer answered ${response.status}` });
+      }
+
+      const body = await response.text();
+
+      if (kind === 'api') {
+        let parsed;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          return res.status(502).json({
+            error: 'that URL answered with something other than a catalogue',
+          });
+        }
+        const archives = parsed.archives ?? parsed ?? [];
+        return res.json({
+          protocol: 'api',
+          count: Array.isArray(archives) ? archives.length : 0,
+          names: (Array.isArray(archives) ? archives : [])
+            .slice(0, 5)
+            .map((archive) => archive.name)
+            .filter(Boolean),
+          partial: Boolean(parsed.partial),
+        });
+      }
+
+      const items = parseFeed(body);
+      res.json({
+        protocol: 'rss',
+        count: items.length,
+        names: items.slice(0, 5).map((item) => item.title).filter(Boolean),
+      });
     }),
   );
 

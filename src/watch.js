@@ -26,15 +26,34 @@ export class WatchManager {
 
   /**
    * Starts watching the configured folders.
-   * @param {object[]} folders - Entries of {path, categories, webSeedBase, publishDir, sparse, trackers, addTrackers, stabilitySeconds}.
+   * @param {object[]} folders - Entries of {path, categories, webSeedBase, publishDir, sparse, trackers, addTrackers, stabilitySeconds, pollSeconds}.
    * @returns {void}
    */
   start(folders = []) {
     for (const folder of folders) {
       const stability = (folder.stabilitySeconds ?? 30) * 1000;
+
+      // A local directory needs no interval: the filesystem says when
+      // something lands and the archive is picked up as it appears. A network
+      // share is the exception, and the reason this exists — SMB and NFS do
+      // not deliver change notifications the way a local filesystem does, so a
+      // watch on one can sit silent forever while files arrive. Polling is the
+      // only thing that works there, and it is opt-in because on a local
+      // directory it is pure waste: stat()ing a folder of terabyte archives
+      // every few seconds costs real I/O to learn nothing.
+      const pollSeconds = folder.pollSeconds ?? 0;
       const watcher = chokidar.watch(folder.path, {
         ignoreInitial: false,
         depth: folder.recursive === false ? 0 : undefined,
+        ...(pollSeconds > 0
+          ? {
+              usePolling: true,
+              interval: pollSeconds * 1000,
+              // Archives are large, and re-reading one to check whether it
+              // changed would defeat the point of polling at an interval.
+              binaryInterval: Math.max(pollSeconds, 5) * 1000,
+            }
+          : {}),
         awaitWriteFinish: {
           stabilityThreshold: stability,
           pollInterval: 1000,
@@ -53,7 +72,8 @@ export class WatchManager {
       const tags = normalizeCategories(folder);
       console.log(
         `[watch] watching ${folder.path}` +
-          (tags.length > 0 ? ` as "${tags.join('", "')}"` : ''),
+          (tags.length > 0 ? ` as "${tags.join('", "')}"` : '') +
+          (pollSeconds > 0 ? ` (polling every ${pollSeconds}s)` : ''),
       );
     }
   }
