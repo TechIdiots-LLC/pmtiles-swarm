@@ -345,6 +345,22 @@ describe('the map preview', () => {
     assert.match(preview, /id="note"/);
   });
 
+  it('actually tells the inspector to draw', () => {
+    // `showInspectMap: true` sets a flag; it does not render. The control
+    // calls render() from exactly two places — a source-change handler it
+    // subscribes to only when `sources` was NOT passed, and the toggle
+    // button's click. Passing sources closes the first, hiding the button
+    // closes the second, and this page does both. Without an explicit call
+    // the map stays on a style that is nothing but a background colour, with
+    // no error anywhere: correct TileJSON, correct tiles, black map.
+    assert.match(preview, /inspect\.render\(\)/);
+    assert.match(
+      preview,
+      /map\.on\('load',\s*\(\)\s*=>\s*inspect\.render\(\)\)/,
+      'render must wait for load, so the style it builds from has its sources',
+    );
+  });
+
   it('does not claim the inspector reads layers out of the tiles', () => {
     // It does not. maplibre-gl-inspect's "automatic detection" re-fetches the
     // TileJSON looking for vector_layers and, failing that, falls back to the

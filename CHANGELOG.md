@@ -61,6 +61,12 @@
   timeout of its own (`tiles.metadataTimeoutMs`, 120s) rather than the interactive header budget,
   which was far too short for a piece at the far end of an archive that nobody has asked for. The
   reply is not held up, and the next request has the layers.
+- **The vector preview draws.** `showInspectMap: true` sets a flag on maplibre-gl-inspect and
+  nothing else — the control renders from exactly two places, a source-change handler it
+  subscribes to only when `sources` was *not* passed, and the toggle button's click. This page
+  passed `sources` and hid the button, closing both, so nothing ever called `render()` and the map
+  stayed on a style that was a background colour and nothing else: correct TileJSON, correct tiles,
+  no console error, black map. Now rendered explicitly once the map has loaded.
 - **The preview says why a vector map is blank** instead of showing a black rectangle. Related:
   `sources` is no longer passed to maplibre-gl-inspect when there are no layers, since passing it
   disables the control's own lookup — though that lookup only re-reads the TileJSON, so it is the

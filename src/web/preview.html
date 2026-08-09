@@ -158,18 +158,19 @@
         // written here: it is maintained alongside the renderer, so it keeps
         // working across major versions without this having to notice.
         //
-        // The source layers are handed over from the TileJSON *when it has
-        // any*, because that draws the legend immediately and on an archive
-        // read out of a swarm the first tile can be seconds away.
+        // The source layers are handed over from the TileJSON when it has any,
+        // because that draws the legend immediately and on an archive read out
+        // of a swarm the first tile can be seconds away. Passing them also
+        // switches the control's own lookup off, so the empty list from an
+        // archive with no `vector_layers` is not passed at all.
         //
-        // Only when it has any, though. Passing `sources` switches the
-        // control's automatic detection off — so handing it the empty list
-        // from an archive with no `vector_layers` left it with nothing to
-        // style and nothing to discover, and the map rendered black for ever
-        // however many tiles arrived. Omitted, it reads the layer names out of
-        // the tiles as they load, which is slower to draw and always works.
-        map.addControl(
-          new MaplibreInspect({
+        // `showInspectMap: true` sets a flag and nothing else — it does not
+        // draw. The control renders from exactly two places: a source-change
+        // handler it only subscribes to when `sources` was *not* passed, and
+        // the toggle button's click. Passing sources closes the first and
+        // hiding the button closes the second, and doing both leaves nothing
+        // that ever calls render(). Hence the explicit call below.
+        const inspect = new MaplibreInspect({
             showInspectMap: true,
             showInspectButton: false,
             showInspectMapPopup: true,
@@ -185,8 +186,12 @@
               closeOnClick: false,
               maxWidth: '32rem',
             }),
-          }),
-        );
+        });
+        map.addControl(inspect);
+
+        // After load, so the control has captured the original style and the
+        // style it builds from has its sources in it.
+        map.on('load', () => inspect.render());
       }
 
       map.on('error', (event) => {
