@@ -352,6 +352,40 @@ export function createApp({
     }),
   );
 
+  // Tags, after the fact. They could only be set when an archive was added,
+  // which is the wrong moment to have to know: a build becomes "weekly" when
+  // there is a second one, and an archive is marked for sharing long after it
+  // arrives. Accepts a whole list, or add/remove for one tag at a time.
+  app.patch(
+    '/api/torrents/:infoHash/categories',
+    route(async (req, res) => {
+      const entry = catalog.get(req.params.infoHash);
+      if (!entry) return res.status(404).json({ error: 'not found' });
+
+      const body = req.body ?? {};
+      const current = new Set(normalizeCategories(entry));
+
+      if (body.categories !== undefined) {
+        current.clear();
+        for (const tag of normalizeCategories({ categories: body.categories })) {
+          current.add(tag);
+        }
+      }
+      for (const tag of normalizeCategories({ categories: [].concat(body.add ?? []) })) {
+        current.add(tag);
+      }
+      for (const tag of normalizeCategories({ categories: [].concat(body.remove ?? []) })) {
+        current.delete(tag);
+      }
+
+      const saved = await catalog.put({
+        infoHash: entry.infoHash,
+        categories: [...current],
+      });
+      res.json({ categories: saved.categories });
+    }),
+  );
+
   // Seeding limits per archive. The per-torrent override a client offers, so
   // one archive can be told to stay whatever the global policy says.
   app.patch(
@@ -546,7 +580,6 @@ export function createApp({
         comment: body.comment,
         pieceLength: body.pieceLength,
         webSeeds: body.webSeeds,
-        pieceLength: body.pieceLength,
         savePath: body.savePath,
         mode: body.mode,
         retain: body.retain,

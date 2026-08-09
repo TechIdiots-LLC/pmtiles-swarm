@@ -21,7 +21,10 @@ async function serve(entries) {
   for (const entry of entries) await catalog.put(entry);
 
   const app = createApp({
-    library: { listWithStatus: async () => [] },
+    library: {
+      listWithStatus: async () =>
+        catalog.list().map((held) => ({ ...held, status: null })),
+    },
     catalog,
     engine: { name: 'webtorrent', list: async () => [] },
     subscriptions: {},
@@ -33,7 +36,14 @@ async function serve(entries) {
   const base = `http://127.0.0.1:${server.address().port}`;
 
   return {
+    catalog,
     get: (route) => fetch(`${base}${route}`),
+    patch: (route, body) =>
+      fetch(`${base}${route}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }
@@ -122,6 +132,93 @@ describe('category endpoints', () => {
     const server = await serve([]);
     try {
       assert.deepEqual(await (await server.get('/api/categories')).json(), []);
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+describe('editing the categories on an archive', () => {
+  const infoHash = 'e'.repeat(40);
+
+  /**
+   * A server holding one tagged archive.
+   * @returns {Promise<object>} - The harness.
+   */
+  const oneArchive = () =>
+    serve([entry({ infoHash, name: 'planet.pmtiles', categories: ['basemaps'] })]);
+
+  it('adds a tag without disturbing the others', async () => {
+    // The moment an archive is added is the wrong time to have to know its
+    // tags: a build becomes "weekly" once there is a second one, and an
+    // archive is marked for sharing long after it arrives.
+    const server = await oneArchive();
+    try {
+      const response = await server.patch(
+        `/api/torrents/${infoHash}/categories`,
+        { add: 'weekly' },
+      );
+      assert.equal(response.status, 200);
+      assert.deepEqual((await response.json()).categories, ['basemaps', 'weekly']);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('removes one, replaces the whole list, and ignores blanks', async () => {
+    const server = await oneArchive();
+    try {
+      await server.patch(`/api/torrents/${infoHash}/categories`, {
+        add: ['terrain', 'dem'],
+      });
+      let body = await (
+        await server.patch(`/api/torrents/${infoHash}/categories`, { remove: 'dem' })
+      ).json();
+      assert.deepEqual(body.categories, ['basemaps', 'terrain']);
+
+      body = await (
+        await server.patch(`/api/torrents/${infoHash}/categories`, {
+          categories: ['final'],
+        })
+      ).json();
+      assert.deepEqual(body.categories, ['final']);
+
+      body = await (
+        await server.patch(`/api/torrents/${infoHash}/categories`, {
+          add: ['  ', null, 'ok'],
+        })
+      ).json();
+      assert.deepEqual(body.categories, ['final', 'ok']);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('survives the round trip to the catalog', async () => {
+    // The tags were always being stored; it was the console reading a field
+    // the catalog deletes on write that made them look lost.
+    const server = await oneArchive();
+    try {
+      await server.patch(`/api/torrents/${infoHash}/categories`, { add: 'weekly' });
+      assert.deepEqual(server.catalog.get(infoHash).categories, [
+        'basemaps',
+        'weekly',
+      ]);
+      const listed = await (await server.get('/api/torrents')).json();
+      assert.deepEqual(listed[0].categories, ['basemaps', 'weekly']);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('404s an archive it does not have', async () => {
+    const server = await serve([]);
+    try {
+      const response = await server.patch(
+        `/api/torrents/${'f'.repeat(40)}/categories`,
+        { add: 'x' },
+      );
+      assert.equal(response.status, 404);
     } finally {
       await server.close();
     }

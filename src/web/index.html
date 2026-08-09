@@ -532,7 +532,9 @@
           tr.innerHTML = `
             <td class="name">
               ${escapeHtml(entry.name)}
-              <div class="sub">${escapeHtml(entry.category ?? '')}</div>
+              <div class="sub">${(entry.categories ?? [])
+                .map((tag) => escapeHtml(tag))
+                .join(' · ')}</div>
             </td>
             <td>${bytes(entry.size)}${
               (entry.kind ?? 'pmtiles') !== 'pmtiles'
@@ -761,6 +763,17 @@
             <div><span>web seeds</span><b>${(entry.webSeeds ?? []).length}</b></div>
           </div>
 
+          <h2>Categories</h2>
+          <div id="entry-tags" class="tags" style="margin-bottom:0.4rem"></div>
+          <div style="display:flex; gap:0.4rem; margin-bottom:0.3rem">
+            <input id="entry-new-tag" placeholder="add a category" />
+            <button id="entry-add-tag">Add</button>
+          </div>
+          <div class="sub" style="margin-bottom:1rem">
+            Click a tag to remove it. Feeds and the <b>latest</b> endpoints
+            match on any tag, so an archive appears under each one it carries.
+          </div>
+
           <h2>Export</h2>
           <div class="actions">
             <a href="${torrentUrl}" download><button type="button">Download .torrent</button></a>
@@ -932,6 +945,53 @@
             toast('seeding limit saved');
           } catch (error) {
             toast(error.message);
+          }
+        };
+
+        // ── Categories ──
+        const renderEntryTags = (tags) => {
+          const box = $('entry-tags');
+          box.innerHTML = '';
+          if (tags.length === 0) {
+            box.innerHTML = '<span class="sub">No categories yet.</span>';
+            return;
+          }
+          for (const tag of tags) {
+            const chip = document.createElement('span');
+            chip.className = 'tag on';
+            chip.textContent = `${tag} ×`;
+            chip.title = `Remove ${tag}`;
+            chip.onclick = () => patchTags({ remove: tag });
+            box.append(chip);
+          }
+        };
+
+        const patchTags = async (body) => {
+          try {
+            const result = await api(`/api/torrents/${infoHash}/categories`, {
+              method: 'PATCH',
+              body,
+            });
+            entry.categories = result.categories;
+            renderEntryTags(result.categories);
+            // The row carries them too, and so does the Categories screen.
+            refresh();
+          } catch (error) {
+            toast(error.message);
+          }
+        };
+
+        renderEntryTags(entry.categories ?? []);
+        $('entry-add-tag').onclick = () => {
+          const value = $('entry-new-tag').value.trim();
+          if (!value) return;
+          $('entry-new-tag').value = '';
+          patchTags({ add: value });
+        };
+        $('entry-new-tag').onkeydown = (event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            $('entry-add-tag').click();
           }
         };
 

@@ -18,6 +18,11 @@
   newest build — TileJSON, `.torrent`, magnet, feed and latest-only feed — each copyable. Backed by
   a new `GET /api/categories`. A category whose newest archive is not PMTiles gets everything
   except the tile endpoint.
+- **Categories can be changed after an archive is added**, from its detail panel or at
+  `PATCH /api/torrents/{infohash}/categories` (whole list, or `add`/`remove` one at a time). They
+  could only be set at the moment of adding, which is the wrong time to have to know: a build
+  becomes `weekly` once there is a second one, and an archive is marked for sharing long after it
+  arrives.
 - Settings now presents the download options the way a torrent client does: a checkbox for the
   marker, and the separate cache directory as an option that ships off.
 - New `sparse` setting, global with a per-archive override, matching tileserver-gl.
@@ -118,6 +123,9 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **Categories set when adding an archive never appeared.** The console read `entry.category`,
+  singular — the field the catalog folds into the list and deletes on write — so every archive
+  showed a blank tag line. The tags were stored correctly the whole time.
 - **Pausing, resuming and switching mode silently did nothing on the WebTorrent engine.**
   `client.get()` is async — it parses whatever identifier it is handed before matching — so the
   promise it returned read as a perfectly good torrent whose every property was `undefined`. Every
