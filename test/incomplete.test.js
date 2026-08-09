@@ -298,3 +298,79 @@ describe('two files for one archive', () => {
     assert.equal(again.infoHash, infoHash);
   });
 });
+
+describe('a directory per archive', () => {
+  /**
+   * A library with a chosen layout.
+   * @param {string} savePathLayout - 'flat' or 'infohash'.
+   * @returns {Promise<object>} - Library and the root save path.
+   */
+  async function withLayout(savePathLayout) {
+    const dir = await fs.mkdtemp(path.join(workspace, 'layout-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    return {
+      dir,
+      catalog,
+      library: new Library({
+        catalog,
+        engine: {
+          name: 'webtorrent',
+          list: async () => [],
+          get: async () => null,
+          add: async () => {},
+          remove: async () => {},
+        },
+        config: {
+          dataDir: dir,
+          webtorrent: { savePath: dir },
+          trackers: [],
+          savePathLayout,
+        },
+      }),
+    };
+  }
+
+  const join = (library, letter) =>
+    library.addExistingTorrent(
+      { magnet: `magnet:?xt=urn:btih:${letter.repeat(40)}&dn=planet.pmtiles` },
+      { mode: 'mirror' },
+    );
+
+  it('keeps everything in one place by default', async () => {
+    const node = await withLayout('flat');
+    const entry = await join(node.library, 'a');
+    assert.equal(entry.savePath, node.dir);
+  });
+
+  it('gives each joined archive its own directory when asked', async () => {
+    // The only arrangement in which two builds of the same map, both called
+    // planet.pmtiles, can never matter.
+    const node = await withLayout('infohash');
+    const first = await join(node.library, 'a');
+    const second = await join(node.library, 'b');
+
+    assert.equal(first.savePath, path.join(node.dir, 'a'.repeat(40)));
+    assert.equal(second.savePath, path.join(node.dir, 'b'.repeat(40)));
+    assert.notEqual(first.savePath, second.savePath);
+  });
+
+  it('lets two same-named archives coexist under that layout', async () => {
+    // Flat refuses the second one, which is the right answer there. This is
+    // the arrangement where it does not arise.
+    const node = await withLayout('infohash');
+    await join(node.library, 'a');
+    await assert.doesNotReject(() => join(node.library, 'b'));
+  });
+
+  it('still honours an explicit save path', async () => {
+    const node = await withLayout('infohash');
+    const elsewhere = path.join(node.dir, 'chosen');
+    const entry = await node.library.addExistingTorrent(
+      { magnet: `magnet:?xt=urn:btih:${'c'.repeat(40)}&dn=planet.pmtiles` },
+      { mode: 'mirror', savePath: elsewhere },
+    );
+    // Under it, not instead of it: the choice is where the root is.
+    assert.equal(entry.savePath, path.join(elsewhere, 'c'.repeat(40)));
+  });
+});

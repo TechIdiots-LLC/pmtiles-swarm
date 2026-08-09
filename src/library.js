@@ -203,12 +203,21 @@ export class Library {
    * @param {string} [explicit] - An explicit override.
    * @returns {string} - The save path.
    */
-  #savePathFor(mode, explicit) {
-    if (explicit) return explicit;
-    if (mode === 'cache' && this.#config.cacheSavePath) {
-      return this.#config.cacheSavePath;
+  #savePathFor(mode, explicit, infoHash) {
+    const root =
+      explicit ??
+      (mode === 'cache' && this.#config.cacheSavePath
+        ? this.#config.cacheSavePath
+        : this.#config.webtorrent.savePath);
+
+    // A directory per archive, where that has been asked for. Only joined
+    // archives get one: an archive created here keeps the file it was made
+    // from, and web seed URLs are built from the published location rather
+    // than from the save path, so neither changes shape because of this.
+    if (infoHash && this.#config.savePathLayout === 'infohash') {
+      return path.join(root, infoHash);
     }
-    return this.#config.webtorrent.savePath;
+    return root;
   }
 
   /**
@@ -532,7 +541,7 @@ export class Library {
     // to a full copy of something that may be hundreds of gigabytes. Mirroring
     // is opt-in.
     const mode = options.mode ?? 'cache';
-    const savePath = this.#savePathFor(mode, options.savePath);
+    const savePath = this.#savePathFor(mode, options.savePath, parsed.infoHash);
 
     // Re-joining something already held is normal — you seeded it before, or
     // built it and are adding it back — and in that case it is whole from the
@@ -950,7 +959,7 @@ export class Library {
    */
   async #adoptByMagnet(torrent, magnet, engine, options) {
     const mode = options.mode ?? 'cache';
-    const savePath = this.#savePathFor(mode, options.savePath);
+    const savePath = this.#savePathFor(mode, options.savePath, torrent.infoHash);
 
     // Ask the client we are adopting from for the real thing first. It has the
     // metainfo — it is seeding the archive — and that carries the trackers, the

@@ -89,6 +89,28 @@ const DEFAULTS = {
   /** Interface for the admin listener. Defaults to `host`. */
   adminHost: undefined,
   /**
+   * Whether a joined archive gets a directory of its own.
+   *
+   *   'flat'      everything in one save path. The filename is the filename,
+   *               which is what makes dropping a finished archive in before
+   *               adding its torrent work, and what keeps a web seed URL
+   *               readable.
+   *   'infohash'  each archive under `<savePath>/<infohash>/`. Two builds of
+   *               the same map are both `planet.pmtiles`, and this is the only
+   *               arrangement in which that can never matter.
+   *
+   * Flat by default, because the collision it avoids is now refused outright
+   * when the second archive is added — so the cost of flat is an error message
+   * at the moment you can still choose somewhere else, rather than two clients
+   * quietly writing into one file.
+   *
+   * Only joined archives are placed. One created here keeps the file it was
+   * made from, wherever that already is, and web seed URLs are built from the
+   * published location rather than from the save path — so neither is affected
+   * by this.
+   */
+  savePathLayout: 'flat',
+  /**
    * Named places for archive data to land.
    *
    * `[{ name, path }]`. A torrent client usually hangs the save path off the

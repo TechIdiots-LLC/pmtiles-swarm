@@ -100,6 +100,13 @@
   progress rather than holding a request open for an hour, and the original is removed only after
   the copy has been checked. An unfinished archive moves under the name it actually has, marker
   and all.
+- **`savePathLayout: "infohash"`**, giving each joined archive `<savePath>/<infohash>/` to itself.
+  Filenames are not unique — two builds of the same map are both `planet.pmtiles` — and this is the
+  only arrangement in which that can never matter. Flat stays the default, because the collision is
+  now refused outright when the second archive is added, and flat is what makes dropping a finished
+  archive in before adding its torrent work. Works from a bare magnet, since the infohash is the
+  one thing a magnet always carries. Archives created here are unaffected, and web seed URLs are
+  built from the published location rather than the save path, so they keep their shape.
 - **Named save locations.** Everything used to land in one place. Name the others under
   `locations` in Settings and they are offered wherever something is added — the add dialog, the
   adopt dialog, each monitored folder and each watched web location — alongside the default and a

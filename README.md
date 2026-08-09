@@ -175,6 +175,21 @@ carry several categories on purpose — a planet build is both `basemaps` and `w
 categories naming two disks is a question with no right answer. So the location is chosen rather
 than derived, and naming them is what makes choosing bearable.
 
+Two archives cannot share a file, and filenames are not unique — two builds of the same map are
+both `planet.pmtiles`, and a rebuild keeps the name while minting a new infohash. Adding the second
+one at the same path is refused with a 409 naming the first. Where that comes up often, set
+`"savePathLayout": "infohash"` and each **joined** archive gets `<savePath>/<infohash>/` to itself:
+
+```
+data/torrents-data/7fae2931a9269684a7d4ed6e5fdd7d0014e6bcd1/planet.pmtiles
+```
+
+It works from a bare magnet, since the infohash is the one thing a magnet always carries. Flat
+stays the default: it is what makes dropping a finished archive into the save path before adding
+its torrent work, and it keeps a served filename readable. Archives *created* here are unaffected
+either way — they keep the file they were made from — and web seed URLs are built from the
+published location rather than the save path, so they do not change shape.
+
 Only new data is placed by a location: an archive records where it was put and keeps it, so
 repointing a location never moves anything that already exists. To move one, use **Set location…**
 in its detail panel or `PATCH /api/torrents/{infohash}/location`.
