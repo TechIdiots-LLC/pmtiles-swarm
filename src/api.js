@@ -801,6 +801,23 @@ export function createApp({
   app.post(
     '/api/adopt/candidates',
     route(async (req, res) => {
+      // Another swarm node is not an engine — it is a catalogue, and a richer
+      // one than any torrent client can offer, since it already knows each
+      // archive's summary, categories, web seeds and checksum.
+      if (req.body?.swarm?.url) {
+        try {
+          return res.json({
+            engine: 'pmtiles-swarm',
+            candidates: await library.nodeCandidates(
+              req.body.swarm.url,
+              req.body.swarm,
+            ),
+          });
+        } catch (error) {
+          return res.status(502).json({ error: error.message });
+        }
+      }
+
       let engine;
       try {
         engine = await adoptFrom(req.body);
@@ -825,6 +842,25 @@ export function createApp({
     '/api/adopt',
     route(async (req, res) => {
       const body = req.body ?? {};
+
+      if (body.swarm?.url) {
+        try {
+          const wanted = new Set(body.infoHashes ?? []);
+          const all = await library.nodeCandidates(body.swarm.url, body.swarm);
+          const added = await library.adoptFromNode(
+            all.filter((archive) => wanted.size === 0 || wanted.has(archive.infoHash)),
+            {
+              mode: body.mode === 'mirror' ? 'mirror' : 'cache',
+              categories: normalizeCategories({ categories: body.categories }),
+              url: body.swarm.url,
+            },
+          );
+          return res.json({ added: added.length, entries: added });
+        } catch (error) {
+          return res.status(502).json({ error: error.message });
+        }
+      }
+
       let engine;
       try {
         engine = await adoptFrom(body);

@@ -499,6 +499,140 @@ export class Library {
   }
 
   /**
+   * Reads another pmtiles-swarm node's catalogue.
+   *
+   * Different from following it, which is what a subscription does: this is
+   * one look, to choose from. A peer's catalogue is also richer than a torrent
+   * client's list — it carries the archive summary, its categories, its web
+   * seeds and its checksum — so nothing has to be re-derived from bytes that
+   * are not here yet.
+   * @param {string} url - The node's base URL or /api/catalog URL.
+   * @param {object} [options] - Bearer token, if it issued one.
+   * @returns {Promise<object[]>} - One record per archive not already held.
+   */
+  async nodeCandidates(url, options = {}) {
+    // A bare node URL gets the catalogue path appended; anything with a path
+    // of its own is taken as given, so both "https://peer.example.org" and the
+    // exact endpoint work — and a URL that is neither is fetched as written
+    // and rejected on what it answers, rather than having a path glued onto
+    // the end of it and reported as a 404.
+    let endpoint;
+    try {
+      const parsed = new URL(url);
+      endpoint =
+        parsed.pathname === '/' || parsed.pathname === ''
+          ? `${parsed.origin}/api/catalog`
+          : parsed.href;
+    } catch {
+      throw new Error(`${url} is not a URL`);
+    }
+
+    const response = await fetch(endpoint, {
+      headers: {
+        accept: 'application/json',
+        ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+      },
+      signal: AbortSignal.timeout(options.timeoutMs ?? 15000),
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      throw new Error(
+        options.token
+          ? 'that node rejected the token'
+          : 'that node wants a token',
+      );
+    }
+    if (!response.ok) throw new Error(`that node answered ${response.status}`);
+
+    const body = await response.json().catch(() => null);
+    if (!body?.format?.startsWith?.('pmtiles-swarm-catalog/')) {
+      throw new Error(
+        'that URL did not answer with a pmtiles-swarm catalogue — check it is ' +
+          'a swarm node and not a plain feed',
+      );
+    }
+
+    return (body.archives ?? [])
+      .filter((archive) => archive.magnet && !this.#catalog.get(archive.infoHash))
+      .map((archive) => ({
+        infoHash: archive.infoHash,
+        name: archive.name,
+        size: archive.size,
+        progress: 0,
+        state: 'remote',
+        savePath: null,
+        category: (archive.categories ?? [])[0],
+        categories: archive.categories ?? [],
+        kind: archive.kind ?? guessKind(archive.name ?? ''),
+        magnet: archive.magnet,
+        pmtiles: archive.pmtiles,
+        webSeeds: archive.webSeeds ?? [],
+        md5: archive.md5,
+        sparse: archive.sparse,
+        // Its data is on another node by definition, so it arrives the way any
+        // archive does: from the swarm.
+        readable: false,
+      }));
+  }
+
+  /**
+   * Takes archives from another pmtiles-swarm node.
+   *
+   * Each is joined as a magnet like any other, then given the facts the peer
+   * already knew — its summary, its web seeds, its checksum. That last part is
+   * what makes this worth having over pasting magnets by hand: a joined magnet
+   * has no summary until something reads its header out of the swarm, and no
+   * web seeds at all, so it would be slower to first tile and less useful in a
+   * feed than the archive the peer is describing.
+   * @param {object[]} candidates - Records from {@link nodeCandidates}.
+   * @param {object} [options] - Mode and categories to apply.
+   * @returns {Promise<object[]>} - The entries that were added.
+   */
+  async adoptFromNode(candidates, options = {}) {
+    const mode = options.mode ?? 'cache';
+    const added = [];
+
+    for (const candidate of candidates) {
+      try {
+        const entry = await this.addExistingTorrent(
+          { magnet: candidate.magnet },
+          {
+            mode,
+            categories:
+              options.categories?.length > 0
+                ? options.categories
+                : candidate.categories,
+          },
+        );
+
+        added.push(
+          await this.#catalog.put({
+            infoHash: entry.infoHash,
+            // Everything the peer already knew, so this node does not have to
+            // read it back out of a swarm it has only just joined.
+            pmtiles: candidate.pmtiles ?? entry.pmtiles,
+            webSeeds: candidate.webSeeds?.length
+              ? [...new Set([...(entry.webSeeds ?? []), ...candidate.webSeeds])]
+              : entry.webSeeds,
+            md5: candidate.md5 ?? entry.md5,
+            sparse: candidate.sparse ?? entry.sparse,
+            kind: candidate.kind ?? entry.kind,
+            source: {
+              type: 'adopted',
+              location: options.url ?? candidate.magnet,
+              engine: 'pmtiles-swarm',
+            },
+          }),
+        );
+      } catch (error) {
+        console.error(`[adopt] ${candidate.name}: ${error.message}`);
+      }
+    }
+
+    return added;
+  }
+
+  /**
    * What an engine is holding that the catalog does not know about.
    *
    * Listed before anything is imported so the choice can be made against what

@@ -51,6 +51,12 @@
   everything and reading afterwards what it did. Categories can be applied to the lot. It can also
   adopt from **a qBittorrent instance other than the configured engine**, which is what "adopt
   existing" sounded like it did.
+- **Adopt can pull from another pmtiles-swarm node**, reading its `/api/catalog` once and letting
+  you pick — which is not the same as following it, and is the right shape for "give me that one
+  build" rather than "take everything it ever publishes". What the peer already knew comes across
+  with it: the archive summary, categories, web seeds and checksum. That is what makes it better
+  than pasting the magnet, since a joined magnet has no summary until something reads its header
+  out of a swarm it has only just joined, and no web seeds at all.
 - **Adopting across machines joins the swarm instead.** An archive whose data this node cannot read
   — a client on another host, or a path that is not mounted here — used to be unusable, since a
   catalog entry pointing at a file that is not there can never serve a tile. But its infohash is

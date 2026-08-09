@@ -344,6 +344,10 @@
             <input type="radio" name="adopt-source" value="qbittorrent" />
             <span>A qBittorrent instance</span>
           </label>
+          <label class="choice">
+            <input type="radio" name="adopt-source" value="swarm" />
+            <span>Another pmtiles-swarm node</span>
+          </label>
         </div>
 
         <fieldset id="adopt-qbt" hidden>
@@ -360,6 +364,24 @@
             Its save paths have to be readable from this node — the same
             machine, or the same mount. Anything that is not is marked below.
             Nothing about that instance is changed by looking at it.
+          </div>
+        </fieldset>
+
+        <fieldset id="adopt-swarm" hidden>
+          <legend>pmtiles-swarm node</legend>
+          <div class="field">
+            <label for="adopt-node-url">Node URL</label>
+            <input id="adopt-node-url" placeholder="https://peer.example.org" />
+          </div>
+          <div class="field">
+            <label for="adopt-node-token">Token</label>
+            <input id="adopt-node-token" type="password" autocomplete="off"
+              placeholder="if it issued one" />
+          </div>
+          <div class="sub">
+            Reads that node's catalogue once and lets you pick from it — which
+            is not the same as following it. To keep taking what it publishes,
+            add it under <b>Remote nodes</b> in Settings instead.
           </div>
         </fieldset>
 
@@ -1401,6 +1423,14 @@
        * @returns {object} - Request body.
        */
       function adoptBody() {
+        if (adoptSource() === 'swarm') {
+          return {
+            swarm: {
+              url: $('adopt-node-url').value.trim(),
+              token: $('adopt-node-token').value || undefined,
+            },
+          };
+        }
         if (adoptSource() !== 'qbittorrent') return {};
         return {
           qbittorrent: {
@@ -1474,10 +1504,24 @@
                         candidate.readable
                           ? `<div class="sub">adopted where it lies —
                                <code>${escapeHtml(candidate.savePath ?? '')}</code></div>`
-                          : `<div class="sub">its data is at
-                               <code>${escapeHtml(candidate.savePath ?? 'an unknown path')}</code>,
-                               which this node cannot read — it will join the swarm by
-                               magnet instead</div>`
+                          : candidate.savePath
+                            ? `<div class="sub">its data is at
+                                 <code>${escapeHtml(candidate.savePath)}</code>,
+                                 which this node cannot read — it will join the swarm by
+                                 magnet instead</div>`
+                            : `<div class="sub">joins the swarm by magnet${
+                                candidate.pmtiles
+                                  ? `, with the summary the node already has (${escapeHtml(
+                                      candidate.pmtiles.format ?? 'tiles',
+                                    )}, z${candidate.pmtiles.minZoom}–${candidate.pmtiles.maxZoom})`
+                                  : ''
+                              }${
+                                candidate.webSeeds?.length
+                                  ? ` and ${candidate.webSeeds.length} web seed${
+                                      candidate.webSeeds.length === 1 ? '' : 's'
+                                    }`
+                                  : ''
+                              }</div>`
                       }
                     </td>
                   </tr>`,
@@ -1516,6 +1560,8 @@
         adoptChosen = new Set();
         adoptTags = new Set();
         $('adopt-list').hidden = true;
+        $('adopt-qbt').hidden = true;
+        $('adopt-swarm').hidden = true;
         $('adopt-status').textContent = '';
         $('adopt-error').textContent = '';
         $('adopt-go').disabled = true;
@@ -1533,6 +1579,7 @@
       for (const radio of document.querySelectorAll('[name="adopt-source"]')) {
         radio.onchange = () => {
           $('adopt-qbt').hidden = adoptSource() !== 'qbittorrent';
+          $('adopt-swarm').hidden = adoptSource() !== 'swarm';
         };
       }
 
@@ -1564,6 +1611,12 @@
           $('adopt-status').textContent =
             `${adoptCandidates.length} not yet catalogued` +
             (remote ? `, ${remote} of them to be joined by magnet` : '');
+          if (adoptCandidates.length > 0 && adoptSource() === 'swarm') {
+            const seeded = adoptCandidates.filter((c) => c.webSeeds?.length).length;
+            if (seeded > 0) {
+              $('adopt-status').textContent += ` · ${seeded} carry a web seed`;
+            }
+          }
           renderAdoptList();
         } catch (error) {
           $('adopt-status').textContent = '';

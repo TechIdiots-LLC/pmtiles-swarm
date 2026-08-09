@@ -201,6 +201,26 @@ archives to fetch. Raise it only as far as the number of polls you expect to mis
 **Preview** button in Settings — because a directory URL typed slightly wrong is otherwise
 discovered by watching several hundred gigabytes arrive.
 
+### Taking archives from somewhere else
+
+**Adopt existing** takes over archives something else already holds, from three places:
+
+- **This node's own engine** — the migration path for a library already seeded here.
+- **A qBittorrent instance**, named in the dialog rather than configured as the engine. That
+  connection is read-only: nothing about that instance is changed by being looked at.
+- **Another pmtiles-swarm node**, read once from its `/api/catalog`. Different from following it —
+  for that, add it under **Remote nodes** below.
+
+Anything whose data this node can read is adopted where it lies, neither re-hashed nor
+re-downloaded. Anything else is joined by magnet, as cache or mirror, since the infohash is all it
+takes to join the swarm the other client is already seeding into.
+
+Adopting from a swarm node carries across what that node already knew — the archive summary, its
+categories, its web seeds and its checksum. That is the difference from pasting a magnet by hand: a
+joined magnet has no summary until something reads its header out of a swarm it has only just
+joined, and no web seeds at all, so it would be slower to a first tile and thinner in a feed than
+the archive the peer is describing.
+
 ### Following other nodes
 
 `subscriptions` are the peers this node takes archives from, editable in Settings under **Remote
