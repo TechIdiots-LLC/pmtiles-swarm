@@ -54,6 +54,19 @@ const DEFAULTS = {
    */
   cacheSavePath: undefined,
   /**
+   * Named places for archive data to land.
+   *
+   * `[{ name, path }]`. A torrent client usually hangs the save path off the
+   * category; that does not work here, because an archive can carry several
+   * categories on purpose and two of them naming two disks is a question with
+   * no right answer. So a location is chosen when something is added, and
+   * naming them is what makes choosing bearable.
+   *
+   * Only new data is placed. An archive records where it was put and keeps it,
+   * so repointing a location never moves anything that already exists.
+   */
+  locations: [],
+  /**
    * Piece length for torrents we create. 4 MiB is a deliberate compromise:
    * tools default much higher for large files, which is fine for whole-file
    * downloads but terrible for the random access a tile server does, since
@@ -580,6 +593,9 @@ export const RESTART_REQUIRED = new Set([
  * folder is a poor trade. The value names which subsystem to reload.
  */
 export const RELOADABLE = new Map([
+  // Read when something is added rather than held open, so a change applies to
+  // the next add with nothing to restart.
+  ['locations', 'none'],
   ['watch', 'watchers'],
   ['onAdded', 'hooks'],
   ['onComplete', 'hooks'],

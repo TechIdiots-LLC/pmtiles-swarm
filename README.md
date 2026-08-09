@@ -140,6 +140,33 @@ subscribers forward, and they fail differently, so publishing both is cheap insu
 }
 ```
 
+### Where the data lands
+
+By default everything goes to `webtorrent.savePath`. Name the other places you use under
+`locations`, and they are offered wherever something is added — the add dialog, the adopt dialog,
+each monitored folder and each watched web location:
+
+```json
+"locations": [
+  { "name": "bulk storage", "path": "M:\_NZB_Finished_Unsorted" },
+  { "name": "fast", "path": "/mnt/nvme/tiles" }
+]
+```
+
+Each add takes `location` (a name) or `savePath` (a path outright), or neither for the default. A
+name that this node does not know is a 400 naming the ones it does — falling back quietly would put
+several hundred gigabytes somewhere other than where it was asked for and say nothing. The
+directory is created and checked for writability when it is chosen, rather than when the first byte
+arrives, since a disconnected share otherwise looks like a stalled torrent.
+
+qBittorrent hangs the save path off the category instead. That does not work here: an archive can
+carry several categories on purpose — a planet build is both `basemaps` and `weekly` — and two
+categories naming two disks is a question with no right answer. So the location is chosen rather
+than derived, and naming them is what makes choosing bearable.
+
+Only new data is placed. An archive records where it was put and keeps it, so repointing a location
+never moves anything that already exists.
+
 ### Watching for new archives
 
 Three ways in, all editable from the Settings screen:

@@ -51,6 +51,15 @@
   everything and reading afterwards what it did. Categories can be applied to the lot. It can also
   adopt from **a qBittorrent instance other than the configured engine**, which is what "adopt
   existing" sounded like it did.
+- **Named save locations.** Everything used to land in one place. Name the others under
+  `locations` in Settings and they are offered wherever something is added — the add dialog, the
+  adopt dialog, each monitored folder and each watched web location — alongside the default and a
+  path given outright. qBittorrent hangs the save path off the category, which cannot work here:
+  an archive can carry several categories on purpose, and two of them naming two disks is a
+  question with no right answer. So the location is chosen rather than derived. The directory is
+  created and checked when it is chosen rather than when the first byte arrives, and a name this
+  node does not know is refused with the ones it does, since falling back quietly would put
+  several hundred gigabytes somewhere other than where it was asked for.
 - **Most settings no longer need a restart, and there is a button for the ones that do.** Changing
   the watched folders means restarting the watchers, not the node; the same goes for hooks, web
   locations, remote nodes, seeding limits and the completion watcher. Those are applied on Save and

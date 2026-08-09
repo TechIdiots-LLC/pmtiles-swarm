@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { assertPublishable, identifyFile, identifyUrl } from './identify.js';
+import { assertWritable, resolveLocation } from './locations.js';
 import {
   alreadyComplete,
   onDiskName,
@@ -168,6 +169,23 @@ export class Library {
       webSeeds: [...new Set(webSeeds)],
       seedOnly: true,
     });
+  }
+
+  /**
+   * Turns a caller's choice of location into a directory, and checks it.
+   *
+   * Checked when it is chosen rather than when the first byte arrives: a save
+   * path that turns out to be unwritable partway through a 700 GiB download is
+   * a discovery worth making earlier, and on a disconnected share — the case
+   * this mostly guards against — the failure otherwise looks like a stalled
+   * torrent.
+   * @param {object} options - `location` name and/or literal `savePath`.
+   * @returns {Promise<string | undefined>} - The path, or undefined for the default.
+   */
+  async resolveSavePath(options = {}) {
+    const explicit = resolveLocation(this.#config, options);
+    if (explicit) await assertWritable(explicit);
+    return explicit;
   }
 
   /**
@@ -598,6 +616,7 @@ export class Library {
           { magnet: candidate.magnet },
           {
             mode,
+            savePath: options.savePath,
             categories:
               options.categories?.length > 0
                 ? options.categories

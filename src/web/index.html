@@ -397,6 +397,8 @@
 
         <div id="adopt-list" class="panel" hidden style="max-height:22rem; overflow:auto"></div>
 
+        <div id="adopt-location"></div>
+
         <div class="field">
           <label>Categories</label>
           <div id="adopt-picker" class="tags"></div>
@@ -448,6 +450,8 @@
           />
           <div class="sub" id="source-kind">A local path, a URL, a magnet, or a .torrent URL.</div>
         </div>
+
+        <div id="add-location"></div>
 
         <div class="field">
           <label>Categories</label>
@@ -1088,7 +1092,80 @@
           }
         };
 
-        // ── Categories ──
+        /**
+       * A save-location choice: the default, a named location, or a path.
+       *
+       * Rendered rather than written out by hand in each dialog, since there
+       * are three of them and the list has to be fetched.
+       * @param {string} id - Prefix for the control ids.
+       * @returns {string} - The markup.
+       */
+      function locationPicker(id) {
+        return `
+          <div class="field">
+            <label for="${id}-select">Save location</label>
+            <select id="${id}-select"></select>
+            <input id="${id}-path" hidden placeholder="M:\\archives" style="margin-top:0.4rem" />
+            <div class="sub" id="${id}-note"></div>
+          </div>`;
+      }
+
+      /**
+       * Fills a picker from the node's configured locations.
+       * @param {string} id - The prefix used above.
+       * @returns {Promise<void>} - Resolves once filled.
+       */
+      async function fillLocations(id) {
+        let status = {};
+        try {
+          status = await api('/api/status');
+        } catch {
+          // A picker offering only the default is still usable.
+        }
+
+        const select = $(`${id}-select`);
+        const custom = $(`${id}-path`);
+        const note = $(`${id}-note`);
+
+        select.innerHTML = [
+          `<option value="">Default${
+            status.defaultSavePath ? ` — ${escapeHtml(status.defaultSavePath)}` : ''
+          }</option>`,
+          ...(status.locations ?? []).map(
+            (entry) =>
+              `<option value="name:${escapeHtml(entry.name)}">${escapeHtml(entry.name)} — ${escapeHtml(entry.path)}</option>`,
+          ),
+          '<option value="custom">Somewhere else…</option>',
+        ].join('');
+
+        note.textContent =
+          (status.locations ?? []).length > 0
+            ? ''
+            : 'Name the places you use often under Settings → Save locations.';
+
+        select.onchange = () => {
+          custom.hidden = select.value !== 'custom';
+          if (!custom.hidden) custom.focus();
+        };
+        custom.hidden = true;
+      }
+
+      /**
+       * What a picker chose, as the API expects it.
+       * @param {string} id - The prefix used above.
+       * @returns {object} - `{}`, `{location}` or `{savePath}`.
+       */
+      function chosenLocation(id) {
+        const value = $(`${id}-select`)?.value ?? '';
+        if (value === 'custom') {
+          const custom = $(`${id}-path`).value.trim();
+          return custom ? { savePath: custom } : {};
+        }
+        if (value.startsWith('name:')) return { location: value.slice(5) };
+        return {};
+      }
+
+      // ── Categories ──
         const renderEntryTags = (tags) => {
           const box = $('entry-tags');
           box.innerHTML = '';
@@ -1317,6 +1394,8 @@
       }
 
       $('open-add').onclick = async () => {
+        $('add-location').innerHTML = locationPicker('add-loc');
+        await fillLocations('add-loc');
         chosenCategories = new Set();
         $('source').value = '';
         $('new-category').value = '';
@@ -1401,7 +1480,10 @@
         }
 
         try {
-          await api('/api/torrents', { method: 'POST', body });
+          await api('/api/torrents', {
+            method: 'POST',
+            body: { ...body, ...chosenLocation('add-loc') },
+          });
           $('add-dialog').close();
           toast(kind === 'url' ? 'fetching — watch the log' : 'added');
           refresh();
@@ -1559,6 +1641,8 @@
         adoptCandidates = [];
         adoptChosen = new Set();
         adoptTags = new Set();
+        $('adopt-location').innerHTML = locationPicker('adopt-loc');
+        await fillLocations('adopt-loc');
         $('adopt-list').hidden = true;
         $('adopt-qbt').hidden = true;
         $('adopt-swarm').hidden = true;
@@ -1640,6 +1724,7 @@
               infoHashes: [...adoptChosen],
               categories: [...adoptTags],
               mode: document.querySelector('[name="adopt-mode"]:checked').value,
+              ...chosenLocation('adopt-loc'),
             },
           });
           $('adopt-dialog').close();
@@ -2299,6 +2384,29 @@
 
         renderRowEditor({
           into: body,
+          key: 'locations',
+          title: 'Save locations',
+          blurb:
+            'Named places for archive data to land, so a path like ' +
+            'M:\\_NZB_Finished_Unsorted is typed once rather than every time. ' +
+            'Offered wherever something is added, alongside the default and a ' +
+            'path given outright.',
+          columns: [
+            { field: 'name', label: 'Name', placeholder: 'bulk storage' },
+            { field: 'path', label: 'Path', placeholder: 'M:\\archives', wide: true },
+          ],
+          rows: config.locations ?? [],
+          footnote:
+            'A location is chosen when something is added, not derived from ' +
+            'its categories — an archive can carry several on purpose, and two ' +
+            'of them naming two disks is a question with no right answer. Only ' +
+            'new data is placed: an archive records where it was put and keeps ' +
+            'it, so repointing a location never moves anything that already ' +
+            'exists.',
+        });
+
+        renderRowEditor({
+          into: body,
           key: 'watch',
           title: 'Monitored folders',
           blurb:
@@ -2317,7 +2425,14 @@
           columns: [
             { field: 'path', label: 'Folder', placeholder: '/mnt/maps/incoming', wide: true },
             { field: 'categories', label: 'Categories', placeholder: 'basemaps, weekly', list: true },
-            { field: 'savePath', label: 'Save location', placeholder: 'default' },
+            {
+              field: 'savePath',
+              label: 'Save location',
+              options: [
+                ['', 'default'],
+                ...(config.locations ?? []).map((entry) => [entry.path, entry.name]),
+              ],
+            },
             { field: 'publishDir', label: 'Publish to', placeholder: '/var/www/pmtiles' },
             { field: 'webSeedBase', label: 'Web seed base', placeholder: 'https://…/files' },
             { field: 'pollSeconds', label: 'Poll every (s)', placeholder: 'events', number: true },
@@ -2365,6 +2480,14 @@
               wide: true,
             },
             { field: 'newest', label: 'Newest', placeholder: '1', number: true },
+            {
+              field: 'savePath',
+              label: 'Save location',
+              options: [
+                ['', 'default'],
+                ...(config.locations ?? []).map((entry) => [entry.path, entry.name]),
+              ],
+            },
           ],
           rows: config.sources ?? [],
           preview: true,

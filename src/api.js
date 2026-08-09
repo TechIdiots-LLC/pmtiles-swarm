@@ -7,6 +7,7 @@ import { ROLES, createAuth, generateToken, hashToken } from './auth.js';
 import { normalizeCategories } from './catalog.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
+import { listLocations } from './locations.js';
 import { restart, restartMode } from './restart.js';
 import { parseFeed, renderFeed } from './feed.js';
 import { ScheduledSourceManager, candidateDates, expandTemplate } from './sources.js';
@@ -312,6 +313,8 @@ export function createApp({
         archives: catalog.list().length,
         categories: catalog.categories(),
         watching: config.watch.map((w) => w.path),
+        locations: listLocations(config),
+        defaultSavePath: config.webtorrent?.savePath,
         subscriptions: (config.subscriptions ?? []).map((s) => ({
           url: s.url,
           mode: s.mode ?? 'cache',
@@ -891,7 +894,10 @@ export function createApp({
           { torrentFile: req.body },
           {
             categories: req.query.categories?.split(',') ?? req.query.category,
-            savePath: req.query.savePath,
+            savePath: await library.resolveSavePath({
+              location: req.query.location,
+              savePath: req.query.savePath,
+            }),
             mode: req.query.mode,
           },
         );
@@ -906,7 +912,9 @@ export function createApp({
         comment: body.comment,
         pieceLength: body.pieceLength,
         webSeeds: body.webSeeds,
-        savePath: body.savePath,
+        // A named location, a path given outright, or neither — which means
+        // wherever this node puts things by default.
+        savePath: await library.resolveSavePath(body),
         mode: body.mode,
         retain: body.retain,
         sparse: body.sparse,
@@ -1038,6 +1046,7 @@ export function createApp({
             {
               mode: body.mode === 'mirror' ? 'mirror' : 'cache',
               categories: normalizeCategories({ categories: body.categories }),
+              savePath: await library.resolveSavePath(body),
               url: body.swarm.url,
             },
           );
@@ -1062,6 +1071,7 @@ export function createApp({
         // Only reaches anything whose data is not readable from here: those
         // join their swarm rather than pointing at a file that is not there.
         mode: body.mode === 'mirror' ? 'mirror' : 'cache',
+        savePath: await library.resolveSavePath(body),
       });
       res.json({ added: added.length, entries: added });
     }),
