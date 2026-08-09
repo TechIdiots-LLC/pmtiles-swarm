@@ -912,18 +912,39 @@ export function createApp({
       if (!entry) return res.status(404).json({ error: 'not found' });
 
       const parsed = await readTorrent(entry);
+      const pieceLength = parsed?.pieceLength ?? entry.pieceLength;
+      // Which pieces a file occupies, derived rather than asked of the engine:
+      // a torrent is one contiguous byte stream cut into equal pieces, so a
+      // file's offset and length already say. It also means this works for an
+      // archive no engine currently holds.
+      const pieceRange = (offset, length) => {
+        if (!pieceLength || !(length > 0)) return {};
+        const first = Math.floor(offset / pieceLength);
+        const last = Math.floor((offset + length - 1) / pieceLength);
+        return { firstPiece: first, pieceCount: last - first + 1 };
+      };
+
       const files = (parsed?.files ?? []).map((file) => ({
         name: file.name,
         path: file.path,
         length: file.length,
         offset: file.offset,
+        ...pieceRange(file.offset ?? 0, file.length ?? 0),
       }));
 
       res.json({
         files:
           files.length > 0
             ? files
-            : [{ name: entry.name, path: entry.name, length: entry.size, offset: 0 }],
+            : [
+                {
+                  name: entry.name,
+                  path: entry.name,
+                  length: entry.size,
+                  offset: 0,
+                  ...pieceRange(0, entry.size ?? 0),
+                },
+              ],
         pieceLength: parsed?.pieceLength ?? entry.pieceLength,
         pieceCount: parsed?.pieces?.length ?? entry.pieceCount,
         comment: parsed?.comment,
@@ -956,6 +977,38 @@ export function createApp({
         });
       }
       res.json(await speed.setOverride(mode));
+    }),
+  );
+
+  // The piece maps behind the console's Pieces tab.
+  //
+  // Reduced to `buckets` columns before it is sent, because full resolution
+  // does not survive the trip: a 698 GiB archive at 4 MiB pieces is 178,000
+  // pieces, and one byte each is a quarter-megabyte per poll for a bar that is
+  // a thousand pixels wide.
+  app.get(
+    '/api/torrents/:infoHash/pieces',
+    route(async (req, res) => {
+      const owner = engine.primary ?? engine;
+      if (!owner.pieces) {
+        return res
+          .status(501)
+          .json({ error: `${owner.name} cannot report piece detail` });
+      }
+      try {
+        const buckets = Math.min(4096, Math.max(0, Number(req.query.buckets) || 0));
+        res.json(
+          await engine.pieces(req.params.infoHash, {
+            buckets,
+            peers: req.query.peers === 'true',
+          }),
+        );
+      } catch (error) {
+        // Metadata not in yet, or the archive is not held here. Both are facts
+        // about this archive rather than faults, and both are worth saying:
+        // an empty bar with no explanation looks like a broken tab.
+        res.status(200).json({ error: error.message });
+      }
     }),
   );
 

@@ -55,6 +55,7 @@
  * @property {() => Promise<TorrentStatus[]>} list - Lists everything the engine holds.
  * @property {(infoHash: string) => Promise<TorrentStatus | null>} get - One torrent's state.
  * @property {(infoHash: string) => Promise<object[]>} [peers] - Per-peer detail, where the engine exposes it.
+ * @property {(infoHash: string, options?: object) => Promise<object>} [pieces] - Which pieces are held, how rare each is, and what peers hold. libtorrent and WebTorrent both have it; qBittorrent's API reports piece states but neither availability nor per-peer maps, so it does not.
  * @property {(limits: {download: number, upload: number}) => Promise<unknown>} [setRateLimits] - Sets global rates in bytes/second, -1 for unlimited. Absent where the engine cannot throttle.
  * @property {(filePath: string, options?: object) => Promise<object>} [createTorrent] - Builds a torrent from a local file, where the engine can do it better than the default — libtorrent produces hybrid v1+v2, which create-torrent cannot.
  * @property {(infoHash: string) => Promise<object[]>} [trackerStatus] - Per-tracker announce results, where the engine keeps them.

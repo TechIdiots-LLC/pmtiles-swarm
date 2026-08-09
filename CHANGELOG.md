@@ -2,6 +2,18 @@
 
 ## master
 ### ✨ Features and improvements
+- **Piece maps.** A **Pieces** tab showing what this node holds, how rare each piece is across the
+  swarm, and what each connected peer has — plus `firstPiece` and `pieceCount` per file on
+  `/content`, which need no engine at all, since a torrent is one byte stream cut into equal pieces
+  and a file's offset already says which it occupies. Worth more here than in an ordinary client: a
+  cache-mode archive holds a scatter of pieces on purpose, so the bar is a picture of what has been
+  *viewed* rather than a progress indicator. Maps arrive bucketed to the width they will be drawn
+  at, each reduced for the question its bar answers — held counts only when every piece in a column
+  is (or a 60%-complete archive paints as almost solid), availability takes the *rarest* (one piece
+  nobody has is the answer to "can this be completed"), and a peer's map takes *any* (a peer
+  holding part of a column can still serve it). Supported by libtorrent **and WebTorrent**, whose
+  `torrent.bitfield` and per-wire `peerPieces` carry the same information; qBittorrent's API has
+  piece states but neither availability nor per-peer maps, so it is refused rather than half-drawn.
 - **Speed limits, with a schedule.** Two sets of global limits and a window that swaps them,
   modelled on qBittorrent: `speed.uploadLimit` / `downloadLimit`, `speed.alternative`, and
   `speed.schedule` taking `from`, `to` and `days` (`everyday`, `weekdays`, `weekends`, or weekday

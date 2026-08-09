@@ -284,6 +284,20 @@ export class LibtorrentEngine {
   }
 
   /**
+   * Which pieces are held, how rare each is, and what peers hold.
+   *
+   * `buckets` is the width the answer will be drawn at. The reduction happens
+   * in the sidecar because full resolution does not survive the trip — a
+   * 698 GiB archive at 4 MiB pieces is 178,000 of them.
+   * @param {string} infoHash - The archive.
+   * @param {object} [options] - `buckets`, and `peers` to include per-peer maps.
+   * @returns {Promise<object>} - Bitfields, base64-encoded one byte per bucket.
+   */
+  async pieces(infoHash, { buckets, peers } = {}) {
+    return this.#call('pieces', { infoHash, buckets, peers: Boolean(peers) });
+  }
+
+  /**
    * Sets the session's global rate limits, in bytes per second.
    *
    * Applied live. A schedule that only took effect on restart could not do the

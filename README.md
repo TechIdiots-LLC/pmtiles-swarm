@@ -314,6 +314,42 @@ The clock starts when a complete copy is first seen, not when the archive was ad
 long download would count as time served. A limit never applies to a cache-mode archive, which
 holds a few pieces on purpose and has not been sharing in the sense a ratio measures.
 
+### Piece maps
+
+`GET /api/torrents/{infohash}/pieces`, and the **Pieces** tab in the console: what this node
+holds, how rare each piece is across the swarm, and what each connected peer has.
+
+It earns its place here more than in an ordinary client. A **cache-mode** archive holds a scatter
+of pieces on purpose — the ones some tile request happened to touch — so the bar is a picture of
+what has actually been *viewed*, not a progress indicator.
+
+```
+GET /api/torrents/{infohash}/pieces?buckets=1000&peers=true
+```
+
+Maps come back **bucketed** to `buckets` columns, base64 with one byte per column, because full
+resolution does not survive the trip: a 698 GiB archive at 4 MiB pieces is 178,000 pieces, and a
+byte each is a quarter-megabyte per poll for a bar a thousand pixels wide. Three reductions, each
+chosen for the question its bar answers:
+
+| Bar | A column counts when | Why |
+| --- | --- | --- |
+| Downloaded | **every** piece in it is held | Otherwise a 60%-complete archive paints as almost solid |
+| Availability | the **rarest** piece in it | "Can this still be completed" — one piece nobody has is the answer, however well supplied its neighbours |
+| Each peer | **any** piece in it is held | "Where could I get this from" — a peer holding part of a column can still serve it |
+
+`distributedCopies` is qBittorrent's *Availability: 1.603* — how many whole copies the swarm holds
+between it. Below 1.0 means no complete copy is reachable from the peers currently connected.
+
+Per-file piece ranges are on `/content` instead, as `firstPiece` and `pieceCount`. They need no
+engine at all: a torrent is one byte stream cut into equal pieces, so a file's offset and length
+already say which it occupies — which means they work for an archive nothing currently holds.
+
+Supported by **libtorrent** and **WebTorrent**. qBittorrent's API reports piece *states* but
+neither availability nor per-peer maps, so the tab is refused there rather than half-drawn. On
+WebTorrent, availability is counted from connected wires rather than read from a field, so it sees
+a smaller sample than libtorrent's — the same shape over fewer peers.
+
 ### Speed limits
 
 Two sets of limits for the whole node, and a window that swaps them — the same shape
@@ -513,6 +549,7 @@ matters there is `maxConnections`, since every peer holds a NAT table entry. See
 | `GET` | `/api/torrents/:infoHash` | One archive, with disk usage and how it is being read |
 | `GET` | `/api/torrents/:infoHash/file`, `/magnet` | Download the `.torrent`, or its magnet URI |
 | `GET` | `/api/torrents/:infoHash/peers`, `/trackers`, `/content` | Per-peer, per-tracker and per-file detail |
+| `GET` | `/api/torrents/:infoHash/pieces` | Which pieces are held, how rare each is, and what peers hold |
 | `PATCH` | `/api/torrents/:infoHash/mode` | Switch between mirror and cache |
 | `PATCH` | `/api/torrents/:infoHash/categories` | Set, add or remove tags |
 | `PATCH` | `/api/torrents/:infoHash/seeding` | Per-archive seeding limit, or "use the global one" |

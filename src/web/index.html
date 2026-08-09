@@ -267,6 +267,22 @@
       /* The alternative-limits switch, in the header where its state is
          visible without opening anything — qBittorrent puts its turtle in the
          status bar for the same reason. */
+      /* Piece maps. A canvas rather than a thousand divs: at 4096 columns the
+         DOM version costs more to lay out than the data cost to fetch. */
+      .piecebar {
+        display: block;
+        width: 100%;
+        height: 26px;
+        border: 1px solid var(--line);
+        border-radius: 4px;
+        image-rendering: pixelated;
+        background: var(--bg);
+      }
+      .piecebar.thin { height: 14px; }
+      .piecerow { display: grid; grid-template-columns: 7rem 1fr 4rem; gap: 0.6rem; align-items: center; margin-bottom: 0.5rem; }
+      .piecerow > .label { font-size: 0.8rem; color: var(--muted); }
+      .piecerow > .value { font-size: 0.8rem; color: var(--muted); text-align: right; }
+
       button.speed { border-color: var(--line); color: var(--muted); }
       button.speed.on { border-color: var(--warn); color: var(--warn); }
     </style>
@@ -1019,6 +1035,66 @@
             return;
           }
 
+          if (name === 'pieces') {
+            const width = Math.max(256, Math.min(2048, pane.clientWidth || 1000));
+            const info = await api(
+              `/api/torrents/${infoHash}/pieces?buckets=${width}&peers=true`,
+            );
+            if (info.error) {
+              pane.innerHTML = `<div class="sub">${escapeHtml(info.error)}</div>`;
+              return;
+            }
+
+            const held = info.haveCount ?? 0;
+            const pctHeld = info.numPieces ? (held / info.numPieces) * 100 : 0;
+            pane.innerHTML = `
+              <div class="piecerow">
+                <span class="label">Downloaded</span>
+                <canvas class="piecebar" data-bar="have"></canvas>
+                <span class="value">${pctHeld.toFixed(1)}%</span>
+              </div>
+              <div class="piecerow">
+                <span class="label">Availability</span>
+                <canvas class="piecebar" data-bar="availability"></canvas>
+                <span class="value">${(info.distributedCopies ?? 0).toFixed(3)}</span>
+              </div>
+              <div class="sub" style="margin:0.6rem 0 1rem">
+                ${info.numPieces} pieces of ${bytes(info.pieceLength)}, drawn in
+                ${info.buckets} columns — so one column is
+                ${Math.ceil(info.numPieces / info.buckets)} piece(s), and is only
+                shown as held when <i>all</i> of them are. Availability is the
+                <i>rarest</i> piece in each column: one piece nobody has is the
+                answer to "can this still be completed", however well supplied
+                its neighbours are.
+              </div>
+              ${
+                (info.peers ?? []).length > 0
+                  ? `<h3 style="margin:0 0 0.5rem">What each peer has</h3>` +
+                    (info.peers ?? [])
+                      .map(
+                        (peer, index) => `
+                          <div class="piecerow">
+                            <span class="label" title="${escapeHtml(peer.client ?? '')}">${escapeHtml(peer.address ?? '?')}</span>
+                            <canvas class="piecebar thin" data-bar="peer-${index}"></canvas>
+                            <span class="value">${peer.progress != null ? pct(peer.progress) : ''}</span>
+                          </div>`,
+                      )
+                      .join('')
+                  : '<div class="sub">No connected peer is reporting what it holds.</div>'
+              }`;
+
+            drawPieceBar(pane.querySelector('[data-bar="have"]'), info.have, 'have');
+            drawPieceBar(
+              pane.querySelector('[data-bar="availability"]'),
+              info.availability,
+              'availability',
+            );
+            (info.peers ?? []).forEach((peer, index) =>
+              drawPieceBar(pane.querySelector(`[data-bar="peer-${index}"]`), peer.have, 'peer'),
+            );
+            return;
+          }
+
           if (name === 'sources') {
             const seeds = entry.webSeeds ?? [];
             pane.innerHTML =
@@ -1035,10 +1111,12 @@
             const info = await api(`/api/torrents/${infoHash}/content`);
             pane.innerHTML =
               table(
-                ['File', 'Size'],
+                ['File', 'Size', 'First piece', '# Pieces'],
                 info.files.map((file) => [
                   escapeHtml(file.path ?? file.name),
                   bytes(file.length),
+                  file.firstPiece ?? '—',
+                  file.pieceCount ?? '—',
                 ]),
               ) +
               `<div class="grid" style="margin-top:1rem">
@@ -1085,6 +1163,7 @@
             <button data-tab="general" class="on">General</button>
             <button data-tab="trackers">Trackers</button>
             <button data-tab="peers">Peers</button>
+            <button data-tab="pieces">Pieces</button>
             <button data-tab="sources">HTTP sources</button>
             <button data-tab="content">Content</button>
           </div>
@@ -2407,6 +2486,56 @@
        * Reads the hook panel back, when it is editable.
        * @returns {object} - Updates, empty when read-only.
        */
+      /**
+       * Paints one piece map onto a canvas.
+       *
+       * The canvas is sized to its own bucket count rather than to its pixel
+       * width, and stretched by CSS with `image-rendering: pixelated`. That way
+       * one bucket is exactly one source pixel and nothing is resampled — the
+       * single missing column in an otherwise complete archive stays visible
+       * instead of being blended into its neighbours.
+       * @param {HTMLCanvasElement|null} canvas - Where to draw.
+       * @param {string} packed - Base64, one byte per bucket.
+       * @param {string} kind - 'have', 'availability' or 'peer'.
+       * @returns {void}
+       */
+      function drawPieceBar(canvas, packed, kind) {
+        if (!canvas || !packed) return;
+        const bytesIn = Uint8Array.from(atob(packed), (char) => char.charCodeAt(0));
+        canvas.width = bytesIn.length;
+        canvas.height = 1;
+        const context = canvas.getContext('2d');
+        const image = context.createImageData(bytesIn.length, 1);
+
+        const style = getComputedStyle(document.documentElement);
+        const accent = style.getPropertyValue('--accent').trim() || '#5b8dee';
+        const rgb = (value) => {
+          const hex = value.replace('#', '');
+          const full = hex.length === 3 ? [...hex].map((c) => c + c).join('') : hex;
+          return [0, 2, 4].map((offset) => parseInt(full.slice(offset, offset + 2), 16));
+        };
+        const [r, g, b] = rgb(accent);
+
+        // Availability is a count, so it shades: the rarer the piece, the
+        // fainter the column. The other two are yes or no.
+        const ceiling = kind === 'availability' ? Math.max(1, ...bytesIn) : 1;
+
+        for (let index = 0; index < bytesIn.length; index += 1) {
+          const value = bytesIn[index];
+          const at = index * 4;
+          if (value === 0) {
+            image.data[at + 3] = 0;
+            continue;
+          }
+          const strength = kind === 'availability' ? 0.35 + 0.65 * (value / ceiling) : 1;
+          image.data[at] = r;
+          image.data[at + 1] = g;
+          image.data[at + 2] = b;
+          image.data[at + 3] = Math.round(255 * strength);
+        }
+        context.putImageData(image, 0, 0);
+      }
+
       // Speed limits are in bytes/second in the config and KiB/s in the boxes,
       // because KiB/s is the unit anyone setting one thinks in — and it is what
       // qBittorrent's own boxes take, which is where the expectation comes from.

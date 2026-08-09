@@ -263,6 +263,21 @@ export class CompositeEngine {
   }
 
   /**
+   * The piece map, from whichever engine actually holds the data.
+   *
+   * The primary, always — it is the only one that downloads, so it is the only
+   * one whose bitfield describes what this node has. A secondary is handed
+   * complete archives only, and would answer "all of it" for every one of them.
+   * @param {string} infoHash - The archive.
+   * @param {object} [options] - Passed through.
+   * @returns {Promise<object>} - The piece map.
+   */
+  async pieces(infoHash, options) {
+    if (!this.#primary.pieces) throw new Error(`${this.#primary.name} cannot report pieces`);
+    return this.#primary.pieces(infoHash, options);
+  }
+
+  /**
    * Applies the limits to every engine.
    *
    * Not divided between them: they share one uplink, and halving a cap would
