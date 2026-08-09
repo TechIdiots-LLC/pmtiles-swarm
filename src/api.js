@@ -171,6 +171,29 @@ export function createApp({
    * @param {object} entry - Catalog entry.
    * @returns {boolean} - True to answer 404.
    */
+  /**
+   * When a vector archive is worth re-reading the metadata for.
+   *
+   * Rate-limited rather than given up on. An archive at 10% may genuinely have
+   * nothing to read yet and the same archive at 100% will, so a permanent
+   * "unavailable" flag would be wrong within the hour — but retrying on every
+   * request would put a swarm read behind each one.
+   *
+   * In memory on purpose: a restart is a reasonable moment to try again, and
+   * this is not worth writing to the catalog for.
+   * @param {object} summary - The stored PMTiles summary.
+   * @param {string} infoHash - Which archive.
+   * @returns {boolean} - True to attempt a read now.
+   */
+  const metadataRetries = new Map();
+  const needsVectorLayers = (summary, infoHash) => {
+    if (summary.format !== 'pbf' || summary.vectorLayers) return false;
+    const last = metadataRetries.get(infoHash) ?? 0;
+    if (Date.now() - last < 60000) return false;
+    metadataRetries.set(infoHash, Date.now());
+    return true;
+  };
+
   const isSparse = (entry) =>
     entry.sparse ?? config.tiles?.sparse ?? entry.pmtiles?.format !== 'pbf';
 
@@ -1642,6 +1665,34 @@ export function createApp({
             error: `could not read this archive's header yet: ${error.message}`,
             hint: 'the swarm may still be finding peers; try again shortly',
           });
+        }
+      }
+
+      // A summary can arrive with its header half and not its metadata half.
+      //
+      // The two live in different parts of the file: the header is the first
+      // 127 bytes, and the JSON metadata sits past the root directory. Probing
+      // a partial archive — one adopted mid-download, which is exactly when a
+      // torrent client hands one over — reads the first and not the second. The
+      // result looks fine everywhere except where it matters: a vector archive
+      // with no `vector_layers` gives maplibre-gl-inspect nothing to build a
+      // style from, and the preview renders black.
+      //
+      // Only for pbf, and only for the field that actually breaks rendering.
+      // A missing name or attribution is cosmetic and not worth a swarm read.
+      if (entry.pmtiles && needsVectorLayers(entry.pmtiles, entry.infoHash)) {
+        try {
+          const summary = await tiles.summarize(entry.infoHash);
+          if (summary.vectorLayers) {
+            entry = await catalog.put({
+              infoHash: entry.infoHash,
+              pmtiles: { ...entry.pmtiles, ...summary },
+            });
+          }
+        } catch {
+          // Still unreachable. Answer with the header half rather than
+          // refusing — the tile endpoints work regardless, and this is
+          // retried, so it heals as the download progresses.
         }
       }
 

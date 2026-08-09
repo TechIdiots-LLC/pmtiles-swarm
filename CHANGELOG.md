@@ -35,6 +35,18 @@
   at it quietly on every start. Unset keys still take libtorrent's own defaults.
 
 ### 🐞 Bug fixes
+- **A vector preview no longer renders black when the archive has no `vector_layers`.** Two
+  independent causes, both silent. Passing `sources` to maplibre-gl-inspect switches its automatic
+  layer detection off, so handing it the empty list from such an archive left it with nothing to
+  style *and* nothing to discover; it is now omitted when there are no layers, and the control
+  reads the layer names out of the tiles as they arrive. Separately, a summary can arrive with its
+  header half and not its metadata half — the header is the first 127 bytes and the JSON metadata
+  sits past the root directory, so probing an archive adopted mid-download reads one and not the
+  other. `tiles.json` now re-reads the metadata through the swarm when a pbf archive has no
+  `vector_layers`, rate-limited to once a minute, so it heals as the download progresses instead of
+  being wrong until the archive is re-added.
+- **The Pieces tab had no pane to render into**, so it appeared, highlighted when clicked, and did
+  nothing. Tabs and panes are now checked against each other in both directions.
 - **The peers tab is no longer silently empty on libtorrent.** `peer_info.utp_socket` is absent
   from libtorrent's 2.x Python bindings, so the sidecar raised on the first peer and returned
   nothing — an archive downloading at 10 MiB/s from a connected seed reported having no peers at

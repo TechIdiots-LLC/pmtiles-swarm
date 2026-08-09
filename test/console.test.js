@@ -314,3 +314,28 @@ describe('the detail tabs', () => {
     }
   });
 });
+
+describe('the map preview', () => {
+  const preview = fsSync.readFileSync(
+    path.join(here, '..', 'src', 'web', 'preview.html'),
+    'utf8',
+  );
+
+  it('does not hand the inspector an empty layer list', () => {
+    // Passing `sources` switches maplibre-gl-inspect's automatic detection
+    // off. An archive whose TileJSON carries no vector_layers — a partial one
+    // adopted mid-download, whose metadata block was not on disk when it was
+    // probed — was therefore given an empty list AND denied the fallback, and
+    // rendered black for ever however many tiles arrived.
+    assert.match(
+      preview,
+      /vectorLayers\.length > 0\s*\?\s*\{\s*sources:/,
+      'sources must only be passed when there are layers to pass',
+    );
+  });
+
+  it('says the layers are coming from the tiles when there are none', () => {
+    // "0 layers" beside a black map reads as a broken archive.
+    assert.match(preview, /layers read from the tiles/);
+  });
+});

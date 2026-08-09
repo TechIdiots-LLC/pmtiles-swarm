@@ -98,7 +98,11 @@
       $('name').textContent = tilejson.name ?? infoHash;
       $('summary').textContent =
         `${vector ? 'vector' : 'raster'} · z${tilejson.minzoom ?? 0}–${tilejson.maxzoom ?? 14}` +
-        (vector ? ` · ${vectorLayers.length} layers` : '');
+        (vector
+          ? vectorLayers.length > 0
+            ? ` · ${vectorLayers.length} layers`
+            : ' · layers read from the tiles'
+          : '');
       $('endpoint').textContent = tilejson.tiles?.[0] ?? '';
 
       // One source, described entirely by the archive's own TileJSON. That
@@ -132,10 +136,16 @@
         // written here: it is maintained alongside the renderer, so it keeps
         // working across major versions without this having to notice.
         //
-        // The source layers are handed over explicitly from the TileJSON
-        // instead of being detected once the source loads. Both work, but this
-        // one draws the legend immediately, and on an archive being read out of
-        // a swarm the first tile can be seconds away.
+        // The source layers are handed over from the TileJSON *when it has
+        // any*, because that draws the legend immediately and on an archive
+        // read out of a swarm the first tile can be seconds away.
+        //
+        // Only when it has any, though. Passing `sources` switches the
+        // control's automatic detection off — so handing it the empty list
+        // from an archive with no `vector_layers` left it with nothing to
+        // style and nothing to discover, and the map rendered black for ever
+        // however many tiles arrived. Omitted, it reads the layer names out of
+        // the tiles as they load, which is slower to draw and always works.
         map.addControl(
           new MaplibreInspect({
             showInspectMap: true,
@@ -143,7 +153,9 @@
             showInspectMapPopup: true,
             blockHoverPopupOnClick: true,
             backgroundColor: '#12141a',
-            sources: { archive: vectorLayers.map((layer) => layer.id) },
+            ...(vectorLayers.length > 0
+              ? { sources: { archive: vectorLayers.map((layer) => layer.id) } }
+              : {}),
             // Passed in rather than left to a default: the control does not
             // import maplibre-gl at runtime, so it cannot make one itself.
             popup: new maplibregl.Popup({
