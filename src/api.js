@@ -944,10 +944,13 @@ export function createApp({
       try {
         res.json(await engine.peers(req.params.infoHash));
       } catch (error) {
-        // The engine has the method but could not answer — the torrent may not
-        // be loaded there. That is a fact about this archive, not a fault.
-        res.status(200).json([]);
+        // An engine that does not hold this archive cannot list its peers, and
+        // that is a fact about the archive rather than a fault — so this stays
+        // a 200 with an empty list. But it carries the reason now: answering a
+        // broken engine with a bare `[]` made a sidecar that raised on every
+        // peer indistinguishable from a swarm that genuinely had none.
         console.warn(`[api] peers for ${req.params.infoHash}: ${error.message}`);
+        res.status(200).json({ peers: [], error: error.message });
       }
     }),
   );

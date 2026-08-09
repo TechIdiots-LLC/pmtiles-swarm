@@ -928,17 +928,30 @@
           }
 
           if (name === 'peers') {
-            const peers = await api(`/api/torrents/${infoHash}/peers`);
-            pane.innerHTML = table(
-              ['Address', 'Client', 'Progress', 'Down', 'Up'],
-              (Array.isArray(peers) ? peers : []).map((peer) => [
-                escapeHtml(peer.address ?? peer.ip ?? '—'),
-                escapeHtml(peer.client ?? '—'),
-                peer.progress != null ? pct(peer.progress) : '—',
-                rate(peer.downloadSpeed ?? peer.dlSpeed),
-                rate(peer.uploadSpeed ?? peer.upSpeed),
-              ]),
-            );
+            const answer = await api(`/api/torrents/${infoHash}/peers`);
+            // Either a bare array, or `{ peers, error }` when an engine could
+            // not answer. "Nothing to show" is the right thing to say about an
+            // empty swarm and the wrong thing to say about a broken engine.
+            const peers = Array.isArray(answer) ? answer : (answer?.peers ?? []);
+            const failed = Array.isArray(answer) ? null : answer?.error;
+            pane.innerHTML =
+              table(
+                ['Address', 'Client', 'Kind', 'Conn', 'Progress', 'Down', 'Up'],
+                peers.map((peer) => [
+                  escapeHtml(peer.address ?? peer.ip ?? '—'),
+                  escapeHtml(peer.client ?? '—'),
+                  escapeHtml(peer.kind ?? 'peer'),
+                  escapeHtml(peer.connection ?? '—'),
+                  peer.progress != null ? pct(peer.progress) : '—',
+                  rate(peer.downloadSpeed ?? peer.dlSpeed),
+                  rate(peer.uploadSpeed ?? peer.upSpeed),
+                ]),
+              ) +
+              (failed
+                ? `<div class="sub" style="margin-top:0.5rem">
+                     The engine could not list peers: ${escapeHtml(failed)}
+                   </div>`
+                : '');
             return;
           }
 

@@ -271,7 +271,19 @@ export class CompositeEngine {
     const all = [];
     for (const engine of [this.#primary, ...this.#secondaries]) {
       if (!engine.peers) continue;
-      const found = await engine.peers(infoHash).catch(() => []);
+      let found;
+      try {
+        found = await engine.peers(infoHash);
+      } catch (error) {
+        // An engine that does not hold this archive is ordinary and says so
+        // with an error; one that broke while answering is not. Both were
+        // silently swallowed here, which is how a sidecar raising on every
+        // single peer looked exactly like a swarm with no peers in it.
+        console.warn(
+          `[composite] ${engine.name} could not report peers for ${infoHash}: ${error.message}`,
+        );
+        continue;
+      }
       for (const peer of found) all.push({ ...peer, engine: engine.name });
     }
     return all;
