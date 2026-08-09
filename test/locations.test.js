@@ -219,9 +219,14 @@ describe('room at the destination', () => {
     // it will be created on is the one its nearest existing ancestor is on.
     // Answering "unknown" for a directory that is merely not there yet would
     // be unhelpful, and wrong.
-    assert.equal(
-      await freeSpace(path.join(workspace, 'not', 'made', 'yet')),
-      await freeSpace(workspace),
+    // Within a tolerance, not exactly: the two readings are a moment apart and
+    // the disk is being written to by everything else running at the time.
+    const future = await freeSpace(path.join(workspace, 'not', 'made', 'yet'));
+    const here = await freeSpace(workspace);
+    assert.ok(future > 0);
+    assert.ok(
+      Math.abs(future - here) < 512 * 1024 * 1024,
+      `${future} and ${here} should be the same filesystem`,
     );
   });
 

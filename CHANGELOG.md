@@ -265,6 +265,14 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **Running two engines silently disabled on-demand tile reading.** The tile reader chose how to
+  fetch pieces by switching on the engine's name, and a composite calls itself
+  `libtorrent+webtorrent` — which matched neither case, so it fell through to "cannot read pieces
+  on demand". A half-downloaded archive that pmtiles-torrent could have served a header and tiles
+  from answered a 501 instead, and the preview showed an empty map. The reader now asks the
+  primary, which is the only engine that downloads and therefore the only one that holds a partial
+  archive at all. Verified end to end: header, metadata and a tile read out of a swarm from an
+  archive this node held none of, with 16 KiB on disk afterwards — one piece.
 - **The map preview showed nothing but "Loading…".** It imported MapLibre as a default export, and
   MapLibre's ESM build has only named ones — which is a `SyntaxError` raised before a line of the
   module runs, so there was no failed request and no clue in the page, only a line in the browser

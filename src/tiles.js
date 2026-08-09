@@ -306,15 +306,25 @@ export class TileStore {
    * @returns {Promise<object>} - A pmtiles-torrent TorrentEngine.
    */
   async #readEngine(entry) {
-    switch (this.#engine.name) {
+    // The engine that owns the data, which is not always the one configured.
+    // Running two clients at once wraps them in a composite whose name is
+    // neither of theirs — and this used to be a switch on that name, so
+    // turning on a second engine silently fell through to "cannot read pieces
+    // on demand" and disabled on-demand reading altogether.
+    //
+    // The primary is the right one to ask: it is the only engine that
+    // downloads, so it is the only one that holds a partial archive at all.
+    const owner = this.#engine.primary ?? this.#engine;
+
+    switch (owner.name) {
       case 'libtorrent':
-        return new LibtorrentReadEngine(this.#engine, entry.infoHash, {
+        return new LibtorrentReadEngine(owner, entry.infoHash, {
           pieceTimeoutMs: this.#config.tiles?.pieceTimeoutMs,
         });
 
       case 'webtorrent': {
         const { WebTorrentEngine } = await import('pmtiles-torrent/webtorrent');
-        const client = this.#engine.client;
+        const client = owner.client;
         if (!client) {
           throw new TileReadError(
             'the webtorrent engine is not connected yet',
@@ -336,7 +346,7 @@ export class TileStore {
         // no way to read one back, so there is no honest way to serve a tile
         // from an archive it holds only part of.
         throw new TileReadError(
-          `the ${this.#engine.name} engine cannot read pieces on demand, and this ` +
+          `the ${owner.name} engine cannot read pieces on demand, and this ` +
             'node does not hold a complete copy of the archive. Mirror it, or ' +
             'run the libtorrent or webtorrent engine.',
           501,

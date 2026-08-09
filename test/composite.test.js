@@ -1,6 +1,11 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { Catalog } from '../src/catalog.js';
 import { CompositeEngine } from '../src/engines/composite.js';
+import { TileStore } from '../src/tiles.js';
 
 /**
  * An engine that records what it was asked to do.
@@ -267,5 +272,72 @@ describe('when a secondary is not there', () => {
       primary.calls.find(([kind]) => kind === 'remove')[2],
       { deleteData: true },
     );
+  });
+});
+
+describe('reading tiles while two engines are running', () => {
+  /**
+   * A tile store over a composite engine that holds a partial archive.
+   * @param {string} primaryName - What the primary calls itself.
+   * @returns {Promise<object>} - The store and the catalog entry.
+   */
+  async function partial(primaryName) {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'compo-tiles-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+
+    const infoHash = 'a'.repeat(40);
+    await catalog.put({
+      infoHash,
+      name: 'planet.pmtiles',
+      size: 4096,
+      savePath: dir,
+      magnet: `magnet:?xt=urn:btih:${infoHash}`,
+      mode: 'mirror',
+      complete: false,
+    });
+
+    const primary = recording(primaryName, [
+      { infoHash, name: 'planet.pmtiles', progress: 0.5, state: 'downloading' },
+    ]);
+    const engine = new CompositeEngine({
+      primary,
+      secondaries: [recording('webtorrent')],
+    });
+
+    return {
+      infoHash,
+      store: new TileStore({ catalog, engine, config: { tiles: {} } }),
+    };
+  }
+
+  it('still reads through the primary, rather than refusing', async () => {
+    // The composite calls itself "libtorrent+webtorrent", which matched
+    // neither case of a switch on the engine name — so turning on a second
+    // engine silently disabled on-demand reading, and a half-downloaded
+    // archive that pmtiles-torrent could have served a header from answered
+    // "cannot read pieces on demand" instead.
+    const { store, infoHash } = await partial('libtorrent');
+
+    // It gets as far as building a reader over the primary. Without the fix it
+    // refused before that, with a 501.
+    const failure = await store.summarize(infoHash).catch((error) => error);
+    assert.notEqual(
+      failure?.status,
+      501,
+      'a libtorrent primary can read pieces on demand',
+    );
+  });
+
+  it('says so plainly when the primary genuinely cannot', async () => {
+    // qBittorrent's WebUI has per-file priorities but nothing per piece, so
+    // there is no honest way to serve a tile from a partial archive.
+    const { store, infoHash } = await partial('qbittorrent');
+
+    const failure = await store.summarize(infoHash).catch((error) => error);
+    assert.equal(failure.status, 501);
+    assert.match(failure.message, /qbittorrent engine cannot read pieces on demand/);
+    // Named for the engine that actually cannot, not for the composite.
+    assert.doesNotMatch(failure.message, /\+/);
   });
 });
