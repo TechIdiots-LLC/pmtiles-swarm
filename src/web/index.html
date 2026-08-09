@@ -785,6 +785,7 @@
             </td>
             <td>${s.peers ?? 0} / ${s.seeds ?? 0}</td>
             <td>${rate(s.downloadSpeed)}</td>
+            <td>${rate(s.uploadSpeed)}</td>
             <td>${ratioCell(entry, s)}</td>
             <td class="sub">${expiryCell(entry)}</td>
             <td class="sub">${entry.paused ? 'paused' : escapeHtml(s.state ?? '—')}</td>`;

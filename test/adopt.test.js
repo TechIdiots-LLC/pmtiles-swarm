@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
+import createTorrent from 'create-torrent';
 import { createApp } from '../src/api.js';
 import { Catalog } from '../src/catalog.js';
 import { Library } from '../src/library.js';
@@ -229,6 +230,38 @@ describe('adopting from another swarm node', () => {
 });
 
 describe('adopting from a torrent client', () => {
+  it('never restarts a download for something its own engine already holds', async () => {
+    // Adopting from the engine this node runs is a catalog operation: that
+    // engine is holding the data, wherever it keeps it. Re-adding it as a
+    // magnet would point a second copy at a different directory and start a
+    // multi-gigabyte download for something already on the disk.
+    const mine = await node(
+      [],
+      [
+        {
+          infoHash: '2'.repeat(40),
+          name: 'held-elsewhere.pmtiles',
+          size: 999,
+          progress: 1,
+          savePath: '/a/path/this/process/cannot/read',
+        },
+      ],
+    );
+
+    try {
+      const result = await (
+        await mine.post('/api/adopt', { infoHashes: ['2'.repeat(40)] })
+      ).json();
+
+      const [entry] = result.entries;
+      assert.equal(entry.complete, true, 'the engine says it is whole');
+      assert.equal(entry.savePath, '/a/path/this/process/cannot/read');
+      assert.equal(entry.source.remote, undefined, 'not a remote adoption');
+    } finally {
+      await mine.close();
+    }
+  });
+
   it('adopts readable data where it lies, and joins the rest by magnet', async () => {
     const dir = await fs.mkdtemp(path.join(workspace, 'client-'));
     await fs.writeFile(path.join(dir, 'here.pmtiles'), Buffer.alloc(64, 1));
@@ -279,11 +312,9 @@ describe('adopting from a torrent client', () => {
       assert.equal(byName['here.pmtiles'].complete, true);
       assert.equal(byName['here.pmtiles'].mode, 'mirror');
 
-      // Where they are not: joined, and never claiming to be complete.
-      assert.equal(byName['faraway.pmtiles'].complete, false);
-      assert.equal(byName['faraway.pmtiles'].mode, 'cache');
-      assert.notEqual(byName['faraway.pmtiles'].savePath, '/on/another/machine');
-      assert.equal(byName['faraway.pmtiles'].source.remote, '/on/another/machine');
+      // Its own engine holds this one too, so it is catalogued where it lies
+      // rather than fetched again — see the test above.
+      assert.equal(byName['faraway.pmtiles'].savePath, '/on/another/machine');
     } finally {
       await mine.close();
     }
@@ -299,5 +330,129 @@ describe('adopting from a torrent client', () => {
     } finally {
       await mine.close();
     }
+  });
+});
+
+describe('adopting from a client on another machine', () => {
+  /**
+   * A node, plus a stand-in for a remote client holding one archive.
+   * @param {Uint8Array | null} metainfo - What the remote client will export.
+   * @returns {Promise<object>} - The node, the remote engine and the adds made.
+   */
+  async function facing(metainfo) {
+    const dir = await fs.mkdtemp(path.join(workspace, 'remote-'));
+    const data = path.join(dir, 'data');
+    await fs.mkdir(data, { recursive: true });
+
+    const catalog = new Catalog(dir);
+    await catalog.load();
+
+    const adds = [];
+    const local = {
+      name: 'libtorrent',
+      list: async () => [],
+      get: async () => null,
+      add: async (request) => {
+        adds.push(request);
+      },
+      remove: async () => {},
+    };
+
+    const remote = {
+      name: 'qbittorrent',
+      list: async () => [
+        {
+          infoHash: '3'.repeat(40),
+          name: 'GEBCO.pmtiles',
+          size: 5_800_000_000,
+          progress: 1,
+          state: 'seeding',
+          savePath: '/mnt/other-server/maps',
+        },
+      ],
+      get: async () => null,
+      add: async () => {},
+      remove: async () => {},
+      metadata: async () => metainfo,
+    };
+
+    const library = new Library({
+      catalog,
+      engine: local,
+      config: {
+        dataDir: dir,
+        webtorrent: { savePath: data },
+        trackers: ['udp://tracker.example:6969'],
+      },
+    });
+
+    return { catalog, library, remote, adds };
+  }
+
+  /**
+   * A real .torrent carrying a tracker, as a seeding client would export.
+   * @returns {Promise<Uint8Array>} - Its bytes.
+   */
+  async function exported() {
+    const dir = await fs.mkdtemp(path.join(workspace, 'export-'));
+    const file = path.join(dir, 'GEBCO.pmtiles');
+    await fs.writeFile(file, Buffer.alloc(64 * 1024, 8));
+    return new Promise((resolve, reject) =>
+      createTorrent(
+        file,
+        { name: 'GEBCO.pmtiles', announceList: [['udp://real-tracker.example:6969']] },
+        (error, result) => (error ? reject(error) : resolve(new Uint8Array(result))),
+      ),
+    );
+  }
+
+  it('takes the real torrent from the client it is adopting from', async () => {
+    // That client is seeding the archive, so it has the metainfo — and the
+    // metainfo carries the trackers. A bare infohash carries none, so a magnet
+    // built from one has nowhere to look for peers but the DHT, and the
+    // archive sits at 0% reporting "downloading" and meaning nothing of the
+    // kind.
+    const metainfo = await exported();
+    const node = await facing(metainfo);
+
+    await node.library.adoptFromEngine({
+      engine: node.remote,
+      infoHashes: ['3'.repeat(40)],
+      mode: 'mirror',
+    });
+
+    assert.equal(node.adds.length, 1);
+    assert.ok(node.adds[0].torrentFile, 'should add the .torrent, not a magnet');
+    assert.equal(node.adds[0].magnet, undefined);
+  });
+
+  it('falls back to a magnet carrying the trackers this node knows', async () => {
+    // A client that cannot export one still leaves somewhere to look.
+    const node = await facing(null);
+
+    await node.library.adoptFromEngine({
+      engine: node.remote,
+      infoHashes: ['3'.repeat(40)],
+      mode: 'mirror',
+    });
+
+    assert.equal(node.adds.length, 1);
+    assert.match(node.adds[0].magnet, /tr=udp%3A%2F%2Ftracker.example%3A6969/);
+  });
+
+  it('keeps the .torrent, so a restart does not need the swarm', async () => {
+    const node = await facing(await exported());
+    await node.library.adoptFromEngine({
+      engine: node.remote,
+      infoHashes: ['3'.repeat(40)],
+      mode: 'mirror',
+    });
+
+    const entry = node.catalog.get('3'.repeat(40));
+    assert.ok(entry.torrentPath);
+    assert.ok((await fs.stat(entry.torrentPath)).size > 0);
+    // And it is honestly recorded as not held here yet.
+    assert.equal(entry.complete, false);
+    assert.equal(entry.source.remote, '/mnt/other-server/maps');
   });
 });

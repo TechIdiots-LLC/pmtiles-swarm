@@ -255,6 +255,23 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **An archive adopted from a client on another machine never started.** The magnet built for it
+  carried the infohash and nothing else — no trackers — so there was nowhere to look for peers but
+  the DHT, and it sat at 0% reporting "downloading" and meaning nothing of the kind. The client
+  being adopted from is seeding the archive and therefore *has* the metainfo, so that is fetched
+  and used instead: trackers, web seeds and piece geometry included, and kept on disk so a restart
+  does not need the swarm. Where a client cannot export one, the magnet at least carries this
+  node's own trackers now.
+- **Adopting from this node's own engine restarted the download.** Whether the data could be read
+  from this process was being used to decide whether the engine held it, which are different
+  questions — so an archive under a path this process could not open was re-added as a magnet,
+  pointed at a different directory, and downloaded again from nothing. Adopting from the configured
+  engine is a catalog operation now; readability only decides whether tiles can be served straight
+  off the file.
+- **The archives table lost a column.** Adding *Ratio* replaced the *Up* cell instead of following
+  it, so every value from there rightwards sat under the wrong heading — the upload speed appeared
+  as the ratio, and *State* was blank. A test now asserts the row builds exactly as many cells as
+  the table has headings.
 - **"Add archive…" threw `locationPicker is not defined`.** The save-location helpers were declared
   inside the detail panel's renderer, so the add and adopt dialogs — which are not — could not see
   them. `node --check` accepts that happily: it is a syntax-clean script and a `ReferenceError` at

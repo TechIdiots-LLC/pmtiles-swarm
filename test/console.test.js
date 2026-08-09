@@ -172,3 +172,45 @@ describe('console script structure', () => {
     }
   });
 });
+
+describe('the archives table', () => {
+  // The archives table is the first one on the page; the rest belong to
+  // settings and would otherwise be counted too.
+  const head = page.slice(page.indexOf('<thead>'), page.indexOf('</thead>'));
+  const headings = [...head.matchAll(/<th>([^<]*)<\/th>/g)].map((match) =>
+    match[1].trim(),
+  );
+
+  it('gives every row as many cells as there are headings', () => {
+    // Adding a column by replacing the cell beside it rather than following it
+    // shifts every value after it one place left — and the table still looks
+    // like a table, it just says the upload speed is the ratio.
+    const row = page.slice(
+      page.indexOf('tr.innerHTML = `'),
+      page.indexOf('tr.onclick'),
+    );
+    const cells = [...row.matchAll(/<td[\s>]/g)].length;
+
+    assert.equal(
+      cells,
+      headings.length,
+      `header has ${headings.join(', ')} but the row builds ${cells} cells`,
+    );
+  });
+
+  it('still has the columns it is meant to have', () => {
+    assert.deepEqual(headings, [
+      'Archive',
+      'Size',
+      'Mode',
+      'Origin',
+      'Progress',
+      'Peers',
+      'Down',
+      'Up',
+      'Ratio',
+      'Expires',
+      'State',
+    ]);
+  });
+});

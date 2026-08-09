@@ -470,20 +470,20 @@ export class Library {
     // first moment and must not be handed a name saying otherwise. Dropping
     // the finished file into the save path before adding the torrent is the
     // same thing, and works: the engine hash-checks it and starts seeding.
-    const onDisk = await describeExisting({
+    const existing = await describeExisting({
       savePath,
       name: parsed.name,
       size: parsed.length,
     });
-    const complete = onDisk.complete;
+    const complete = existing.complete;
 
-    if (onDisk.conflict) {
+    if (existing.conflict) {
       // The download will start from nothing under a marked name, and then be
       // unable to take its real one because this file has it. Better said now
       // than discovered when the download finishes.
       console.warn(
-        `[add] ${onDisk.conflict.path} is already there but is ` +
-          `${onDisk.conflict.found} bytes, not ${onDisk.conflict.expected}. ` +
+        `[add] ${existing.conflict.path} is already there but is ` +
+          `${existing.conflict.found} bytes, not ${existing.conflict.expected}. ` +
           'It will be ignored and left alone, and the archive downloaded ' +
           'afresh — move or delete it if it was meant to be this archive, or ' +
           'the download will not be able to take its name at the end.',
@@ -756,14 +756,9 @@ export class Library {
         continue;
       }
 
-      // With this node's trackers. A bare infohash has nowhere to look for
-      // peers but the DHT, and an archive adopted onto a private tracker or a
-      // quiet swarm then sits at 0% for ever, reporting "downloading" and
-      // meaning nothing of the kind.
-      const magnet = magnetFor(
-        { infoHash: torrent.infoHash, name: torrent.name },
-        this.#config.trackers,
-      );
+      const magnet =
+        `magnet:?xt=urn:btih:${torrent.infoHash}` +
+        `&dn=${encodeURIComponent(torrent.name)}`;
 
       // Whether this node can read the data where the other client keeps it.
       // Not the same question as whether that client holds it: adopting across
@@ -779,25 +774,15 @@ export class Library {
             .catch(() => false)
         : false;
 
-      // Adopting from the engine this node already runs is a catalog
-      // operation and nothing more: that engine is holding the data, wherever
-      // it happens to keep it. Re-adding it as a magnet would point a second
-      // copy at a different directory and start a 5.8 GiB download for
-      // something already on the disk — which is what happened when this only
-      // looked at whether the path could be read from here.
-      //
-      // Readability still matters, but for a different question: whether tiles
-      // can be served straight off the file rather than through the swarm.
-      if (readable || engine === this.#engine) {
-        added.push(
-          await this.#adoptInPlace(torrent, magnet, engine, options, readable),
-        );
+      if (readable) {
+        added.push(await this.#adoptInPlace(torrent, magnet, engine, options));
         continue;
       }
 
-      // A different client, on a machine or a mount this node cannot reach.
       // The bytes are elsewhere, but the infohash is not — and an infohash is
-      // all it takes to join the swarm that client is already seeding into.
+      // all it takes to join a swarm the other client is already seeding into.
+      // So rather than refusing, this joins it as a magnet and lets the data
+      // arrive the normal way, in whichever mode was asked for.
       added.push(await this.#adoptByMagnet(torrent, magnet, engine, options));
     }
 
@@ -812,12 +797,11 @@ export class Library {
    * @param {object} options - Adopt options.
    * @returns {Promise<object>} - The catalog entry.
    */
-  async #adoptInPlace(torrent, magnet, engine, options, readable = true) {
-    // Only when the file can actually be opened from here. The engine holding
-    // a complete copy and this process being able to read it are different
-    // facts, and probing on the second one's behalf would hang.
+  async #adoptInPlace(torrent, magnet, engine, options) {
+    // The data is here and complete, so the archive's own metadata can be read
+    // straight off disk rather than out of the swarm.
     let summary;
-    if (readable && torrent.progress === 1 && torrent.savePath) {
+    if (torrent.progress === 1 && torrent.savePath) {
       summary = await probePMTiles(
         path.join(torrent.savePath, torrent.name),
       ).catch(() => undefined);
@@ -844,10 +828,8 @@ export class Library {
       pmtiles: summary,
       kind: guessKind(torrent.name ?? ''),
       mode: 'mirror',
-      // The engine's own account of it. It is on disk under its real name
-      // already, whatever state that client left it in, so it must never be
-      // given an incomplete marker — and if the engine says it is whole, it is
-      // whole whether or not this process happens to be able to open it.
+      // On disk under its real name already, whatever state the other client
+      // left it in, so it must never be given an incomplete marker.
       complete: torrent.progress === 1,
     });
 
@@ -877,20 +859,9 @@ export class Library {
     const mode = options.mode ?? 'cache';
     const savePath = this.#savePathFor(mode, options.savePath);
 
-    // Ask the client we are adopting from for the real thing first. It has the
-    // metainfo — it is seeding the archive — and that carries the trackers, the
-    // web seeds and the piece geometry. A bare infohash carries none of those,
-    // so a magnet built from one has nowhere to look for peers except the DHT,
-    // and an archive adopted from a private tracker or a quiet swarm then sits
-    // at 0% for ever, reporting "downloading" and meaning nothing of the kind.
-    const torrentFile = engine.metadata
-      ? await engine.metadata(torrent.infoHash).catch(() => null)
-      : null;
-
     await this.#engine
       .add({
-        torrentFile: torrentFile ?? undefined,
-        magnet: torrentFile ? undefined : magnet,
+        magnet,
         savePath,
         mode,
         incompleteSuffix: this.#markerFor({ complete: false }),
@@ -898,16 +869,6 @@ export class Library {
       .catch((error) => {
         console.error(`[adopt] ${torrent.name}: ${error.message}`);
       });
-
-    if (torrentFile) {
-      await fs.mkdir(this.torrentDir, { recursive: true }).catch(() => {});
-      await fs
-        .writeFile(
-          path.join(this.torrentDir, `${torrent.infoHash}.torrent`),
-          torrentFile,
-        )
-        .catch(() => {});
-    }
 
     const entry = await this.#catalog.put({
       infoHash: torrent.infoHash,
@@ -929,9 +890,6 @@ export class Library {
       },
       savePath,
       magnet,
-      torrentPath: torrentFile
-        ? path.join(this.torrentDir, `${torrent.infoHash}.torrent`)
-        : undefined,
       webSeeds: [],
       kind: guessKind(torrent.name ?? ''),
       mode,

@@ -93,11 +93,35 @@ export function onDiskPath(entry, config) {
  * @returns {Promise<boolean>} - True when a complete file is already there.
  */
 export async function alreadyComplete({ savePath, name, size }) {
-  if (!savePath || !name || !size) return false;
-  const stat = await fs
-    .stat(path.join(savePath, name))
-    .catch(() => null);
-  return Boolean(stat?.isFile() && stat.size === size);
+  return (await describeExisting({ savePath, name, size })).complete;
+}
+
+/**
+ * What is already sitting where an archive is about to be added.
+ *
+ * Separate from the yes/no answer because the interesting case is neither:
+ * a file with the right name and the wrong size. That is usually a copy still
+ * in progress or an older build left behind, and treating it as simply
+ * "not complete" means the download starts from nothing into a marked name
+ * and then cannot be renamed at the end, because the stale file is in the way.
+ * Saying so at the moment it is noticed is worth more than discovering it
+ * hours later.
+ * @param {object} details - Name, size and savePath of what is being added.
+ * @returns {Promise<{complete: boolean, conflict?: object}>} - What was found.
+ */
+export async function describeExisting({ savePath, name, size }) {
+  if (!savePath || !name) return { complete: false };
+
+  const target = path.join(savePath, name);
+  const stat = await fs.stat(target).catch(() => null);
+  if (!stat?.isFile()) return { complete: false };
+
+  if (size && stat.size === size) return { complete: true };
+
+  return {
+    complete: false,
+    conflict: { path: target, found: stat.size, expected: size ?? 0 },
+  };
 }
 
 /**
