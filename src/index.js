@@ -108,6 +108,19 @@ PMTILES_SWARM_PUBLIC_URL
   const seeding = new SeedingLimits(library, config);
   const hooks = new CompletionHooks(library, config);
 
+  // Hand the catalogue back to the engine before anything else runs. Until
+  // this existed a restart quietly stopped seeding the entire library: the
+  // catalog still listed it, the console still showed it, and the engine held
+  // nothing at all.
+  const catalogued = catalog.list().length;
+  if (catalogued > 0) {
+    const { restored, failed } = await library.restore();
+    console.log(
+      `[restore] ${restored} of ${catalogued} archives handed back to the engine` +
+        (failed > 0 ? ` (${failed} could not be)` : ''),
+    );
+  }
+
   const tiles = new TileStore({ catalog, engine, config });
   const warm = new WarmRunner(tiles);
 

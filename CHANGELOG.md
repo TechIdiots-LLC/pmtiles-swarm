@@ -92,6 +92,13 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **A restart silently stopped seeding everything.** Nothing handed the catalogue back to the
+  engine, so the catalog still listed every archive and the console still showed them while the
+  engine held none. They are restored at startup now, each in the mode it was left in.
+- **Switching mode after a restart crashed the process.** WebTorrent throws for an unknown
+  infohash, and because its `remove()` is async the rejection escaped from inside the executor
+  where a caller's `catch` could not see it. Removing something the engine does not hold is now
+  treated as already done, which is what was wanted.
 - `webtorrent` is a plain dependency rather than an optional one. It is the *default* engine, so
   calling it optional was wrong, and npm repeatedly dropped it from the lockfile while leaving the
   declaration — after which `npm install webtorrent` reported "up to date" and changed nothing,

@@ -625,6 +625,54 @@ export class Library {
   }
 
   /**
+   * Hands every catalogued archive back to the engine.
+   *
+   * Without this a restart is silent and total: the catalog still lists
+   * everything, the console still shows it, and the engine holds nothing — so
+   * the node has stopped seeding its entire library and nothing says so. An
+   * engine that keeps its own state, like qBittorrent, already has them and
+   * treats this as a duplicate, which is harmless.
+   * @returns {Promise<{restored: number, failed: number}>} - What happened.
+   */
+  async restore() {
+    const entries = this.#catalog.list();
+    let restored = 0;
+    let failed = 0;
+
+    for (const entry of entries) {
+      try {
+        const torrentFile = entry.torrentPath
+          ? await fs
+              .readFile(entry.torrentPath)
+              .then((buffer) => new Uint8Array(buffer))
+              .catch(() => null)
+          : null;
+
+        if (!torrentFile && !entry.magnet) {
+          failed++;
+          continue;
+        }
+
+        await this.#engine.add({
+          torrentFile: torrentFile ?? undefined,
+          magnet: torrentFile ? undefined : entry.magnet,
+          savePath: entry.savePath,
+          category: (entry.categories ?? [])[0],
+          mode: entry.mode ?? 'mirror',
+          // The data is already there; this is about resuming, not fetching.
+          seedOnly: entry.mode !== 'cache',
+        });
+        restored++;
+      } catch (error) {
+        failed++;
+        console.error(`[restore] ${entry.name}: ${error.message}`);
+      }
+    }
+
+    return { restored, failed };
+  }
+
+  /**
    * Switches an archive between mirroring and caching.
    *
    * Joining defaults to cache, because committing a disk to a copy of

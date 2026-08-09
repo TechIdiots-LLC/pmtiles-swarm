@@ -176,12 +176,35 @@ export class WebTorrentSeedEngine {
    */
   async remove(infoHash, options = {}) {
     if (!this.#client) return;
-    await new Promise((resolve) => {
-      this.#client.remove(
-        infoHash,
-        { destroyStore: Boolean(options.deleteData) },
-        () => resolve(),
-      );
+
+    // Removing what is not held is success, not failure: the desired state is
+    // "this client is not seeding that", and it already is not. WebTorrent
+    // disagrees and throws, and because its remove() is async the rejection
+    // escapes from inside this executor rather than through the promise being
+    // awaited — so a caller's catch never sees it and the process exits.
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (error) => {
+        if (settled) return;
+        settled = true;
+        if (error && !/no torrent with id/i.test(error.message ?? '')) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      };
+
+      try {
+        const pending = this.#client.remove(
+          infoHash,
+          { destroyStore: Boolean(options.deleteData) },
+          (error) => finish(error),
+        );
+        // remove() is async, so it also reports failure this way.
+        pending?.then?.(() => finish(), finish);
+      } catch (error) {
+        finish(error);
+      }
     });
   }
 

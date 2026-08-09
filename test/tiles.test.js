@@ -2432,3 +2432,59 @@ describe('switching between mirror and cache', () => {
     });
   });
 });
+
+describe('surviving a restart', () => {
+  it('hands every catalogued archive back to the engine', async () => {
+    // Without this a restart is silent and total: the catalog still lists
+    // everything and the console still shows it, while the engine holds
+    // nothing and the node has stopped seeding its whole library.
+    const dir = await fs.mkdtemp(path.join(workspace, 'restore-'));
+    const torrentPath = path.join(dir, 'a.torrent');
+    await fs.writeFile(torrentPath, Buffer.from('d8:announce0:e'));
+
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put(entry({ infoHash: 'a'.repeat(40), torrentPath, mode: 'mirror' }));
+    await catalog.put(entry({ infoHash: 'b'.repeat(40), torrentPath, mode: 'cache' }));
+
+    const added = [];
+    const library = new Library({
+      catalog,
+      engine: { name: 'x', add: async (r) => added.push(r) },
+      config: { dataDir: dir, webtorrent: { savePath: dir } },
+    });
+
+    const result = await library.restore();
+    assert.equal(result.restored, 2);
+    assert.equal(result.failed, 0);
+    // Each comes back in the mode it was left in, not a default.
+    assert.deepEqual(added.map((r) => r.mode).sort(), ['cache', 'mirror']);
+  });
+
+  it('carries on when one archive cannot be restored', async () => {
+    const dir = await fs.mkdtemp(path.join(workspace, 'restore2-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    // Neither a stored .torrent nor a magnet: nothing to hand over.
+    await catalog.put(entry({ infoHash: 'c'.repeat(40), torrentPath: undefined, magnet: undefined }));
+    await catalog.put(entry({ infoHash: 'd'.repeat(40), magnet: 'magnet:?xt=urn:btih:dddd' }));
+
+    const library = new Library({
+      catalog,
+      engine: { name: 'x', add: async () => {} },
+      config: { dataDir: dir, webtorrent: { savePath: dir } },
+    });
+
+    const result = await library.restore();
+    assert.equal(result.restored, 1, 'the one that could be, was');
+    assert.equal(result.failed, 1);
+  });
+
+  // Removing an absent torrent is covered by the live reproduction rather than
+  // a unit test: the engine holds its client privately, and adding an
+  // injection seam only so a test can reach it would be shaping the code
+  // around the test rather than the other way round. The behaviour is that
+  // WebTorrent throws for an unknown id, and because its remove() is async the
+  // rejection escapes from inside the executor — so a caller's catch never
+  // sees it and the process exits. Removing what is not held is now success.
+});
