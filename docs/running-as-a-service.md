@@ -17,15 +17,8 @@ sudo useradd --system --gid pmtiles-swarm \
   --comment "pmtiles-swarm service" pmtiles-swarm
 ```
 
-Named for the service rather than for the format: `pmtiles` alone would sit
-next to a file extension and another project of the same name in every `ps`
-output and every log line. `systemd-network` and `systemd-resolve` are named
-the same way, and hyphens are fine in a system account.
-
-`--system` keeps it out of the human UID range and off login screens.
-`--home-dir` is where the archives live, which is also where npm and Python
-look for per-user state, so pointing it at the data directory keeps everything
-the service owns in one place.
+`--system` keeps it out of the human UID range. Home is the data directory, so
+npm and Python per-user state land with the archives.
 
 Then the two directories it needs:
 
@@ -34,12 +27,9 @@ sudo install -d -o pmtiles-swarm -g pmtiles-swarm -m 0750 /var/lib/pmtiles-swarm
 sudo install -d -o pmtiles-swarm -g pmtiles-swarm -m 0750 /etc/pmtiles-swarm
 ```
 
-**Both have to be writable by the service, including the one under `/etc`.**
-That is unusual and it is deliberate: minting an access token or pressing Save
-in the console rewrites `swarm.config.json`, because a token typed into a file
-by hand would not survive being issued through the API. A root-owned
-configuration that the service can only read means tokens vanish on restart and
-the console reports a write it did not manage.
+**Both have to be writable by the service, including the one under `/etc`** —
+minting a token or pressing Save in the console rewrites `swarm.config.json`.
+Root-owned, tokens vanish on restart.
 
 The file itself holds an API key, so nobody else needs to read it:
 
@@ -150,29 +140,20 @@ WantedBy=multi-user.target
 
 ## The two lines that matter
 
-**`Restart=always`, not `on-failure`.** The console has a *Save & Restart*
-button for the settings that cannot be applied to a running process — the
-listening port, the data directory, the torrent client. Started from a
-terminal, the node relaunches itself. Under a supervisor it does not, because
-two processes would then fight over one port: it detects systemd through
-`INVOCATION_ID`, shuts down cleanly, and **exits 0**, expecting to be brought
-back.
+**`Restart=always`, not `on-failure`.** The console's *Save & Restart* applies
+settings a running process cannot take — the port, the data directory, the
+torrent client. Under a supervisor the node does not relaunch itself: it shuts
+down and **exits 0**, expecting to be brought back.
 
-`Restart=on-failure` does not restart a process that exited 0. So with it, the
-first use of Save & Restart stops the node and leaves it stopped, with a unit
-that reports success.
+`Restart=on-failure` ignores an exit 0, so the first use of that button would
+stop the node and leave the unit reporting success.
 
-**No `ExecStop=`.** systemd already sends `SIGTERM` to the main process, and
-the node installs its signal handlers before it starts doing any work —
-deliberately, because handing a large catalogue back to a torrent client takes
-minutes and a Ctrl-C during that window used to kill the process outright and
-leave the port held. Adding `ExecStop=/bin/kill -15 $MAINPID` is at best
-redundant. It is also a second way to be wrong: if the unit is ever changed to
-`Type=forking` or `KillMode=process`, that line stops the parent while the
-Python sidecar keeps running and keeps the data directory locked.
+**No `ExecStop=`.** systemd already sends `SIGTERM`, and the node handles it
+from the moment it starts. `ExecStop=/bin/kill -15 $MAINPID` is redundant, and
+becomes wrong if the unit ever uses `KillMode=process` — it would stop the node
+while the Python sidecar kept running and kept the data directory locked.
 
-The default `KillMode=control-group` is what you want. The libtorrent sidecar
-is a child process, and it should go when its parent does.
+Leave `KillMode` at its default, so the sidecar goes with its parent.
 
 ## Paths
 
