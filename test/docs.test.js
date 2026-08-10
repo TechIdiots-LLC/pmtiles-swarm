@@ -126,3 +126,39 @@ describe('documentation links', () => {
     assert.deepEqual(undocumented, [], 'these routes have no row in the README table');
   });
 });
+
+describe('the README configuration example', () => {
+  it('is valid JSON and names only real settings', async () => {
+    // It drifted: it still showed qbittorrent as the engine, the singular
+    // `category` that watch folders stopped using, and no `adminPort` at all —
+    // which is what made the split ports look undocumented, since the only
+    // mention was four hundred lines further down.
+    const readme = await fs.readFile(path.join(root, 'README.md'), 'utf8');
+    const after = readme.slice(readme.indexOf('## Configuration'));
+    const snippet = after.slice(after.indexOf('```json') + 7);
+    const example = JSON.parse(snippet.slice(0, snippet.indexOf('```')));
+
+    const source = await fs.readFile(path.join(root, 'src/config.js'), 'utf8');
+    const block = source.slice(
+      source.indexOf('const DEFAULTS = {'),
+      source.indexOf('\n};'),
+    );
+    const known = new Set(
+      [...block.matchAll(/^ {2}([a-zA-Z][A-Za-z0-9]*):/gm)].map(([, key]) => key),
+    );
+
+    const unknown = Object.keys(example).filter((key) => !known.has(key));
+    assert.deepEqual(unknown, [], 'the example names settings that do not exist');
+  });
+
+  it('says what the admin port does where it first appears', async () => {
+    // Being unset by default is the part worth stating: without it, one
+    // listener serves the console and the public tiles alike.
+    const readme = await fs.readFile(path.join(root, 'README.md'), 'utf8');
+    const intro = readme.slice(
+      readme.indexOf('## Configuration'),
+      readme.indexOf('### Where the data lands'),
+    );
+    assert.match(intro, /adminPort` is unset by default/);
+  });
+});

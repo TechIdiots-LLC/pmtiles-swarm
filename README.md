@@ -131,12 +131,22 @@ poll a stranger's server before you have read it.
 `swarm.config.json` itself is gitignored — along with every other
 `swarm.config*.json` and `*.bak` — because it holds an API key.
 
+**`adminPort` is unset by default**, and one listener then serves everything.
+Setting it splits the surface in two: `port` keeps the tiles, TileJSON,
+`.torrent` files and feeds — everything a stranger or a peer is meant to reach
+— while `adminPort` takes the console and the rest of `/api/`. Bind that to
+`127.0.0.1` and the part that can rewrite this file is unreachable rather than
+merely guarded. See [Two ports](#two-ports).
+
 ```json
 {
   "port": 8090,
+  "adminPort": 8091,
+  "adminHost": "127.0.0.1",
   "dataDir": "./data",
-  "engine": "qbittorrent",
-  "qbittorrent": { "url": "http://127.0.0.1:8080", "username": "admin", "password": "…" },
+  "engine": "libtorrent",
+  "secondaryEngines": ["webtorrent"],
+  "libtorrent": { "python": "python3", "listen": "0.0.0.0:6881" },
   "savePath": "./data/torrents-data",
   "incompleteSuffix": ".incomplete",
   "pieceLength": 4194304,
@@ -147,7 +157,7 @@ poll a stranger's server before you have read it.
   "watch": [
     {
       "path": "/mnt/maps/incoming",
-      "category": "basemaps",
+      "categories": ["basemaps"],
       "publishDir": "/var/www/pmtiles",
       "webSeedBase": "https://maps.example.org/files"
     }

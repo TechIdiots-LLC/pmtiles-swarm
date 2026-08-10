@@ -87,6 +87,19 @@ describe('the GitHub workflows', () => {
     assert.doesNotMatch(text.replace(/^\s*#.*$/gm, ''), /NODE_AUTH_TOKEN/);
   });
 
+  it('gives a release the changelog for its version', async () => {
+    // A release whose notes say only "published to npm" tells a reader
+    // nothing they could not see from the version number. The section for
+    // this version is extracted from CHANGELOG.md and used as the body, the
+    // same way tileserver-gl-wdb and maplibre-maui-ac do it.
+    const text = await fs.readFile(path.join(dir, 'release.yml'), 'utf8');
+    assert.match(text, /awk -v ver="## \$VERSION"/);
+    assert.match(text, /--notes-file release-notes\.md/);
+    // And a version with no section still produces a release, rather than
+    // failing after the package is already published.
+    assert.match(text, /No changelog section for/);
+  });
+
   it('only runs scripts that exist', async () => {
     // The release workflow ran `npm run tsc` and `npm run build` for months.
     // Neither exists here — it was adapted from a TypeScript package — and
