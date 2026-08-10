@@ -7,6 +7,14 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.4.3
+### 🐞 Bug fixes
+- **Requires the `pmtiles-torrent` that the resume fix actually needs.** The dependency said
+  `^0.3.0`, which an existing install already satisfies — so updating pmtiles-swarm left the
+  sidecar where it was, and half of a fix that lives in both halves does nothing. npm was right
+  and the declaration was wrong: 0.4.2's resume save reaches a sidecar that only writes resume
+  data from 0.3.2 onwards, so that is what it now asks for.
+
 ## 0.4.2
 ### 🐞 Bug fixes
 - **Resume data is saved on a node running more than one engine.** The periodic save is only
