@@ -377,6 +377,16 @@ A new `.pmtiles` appearing in a watched folder is imported automatically.
 
 Editable in **Settings → Monitored folders** as a table, rather than by hand.
 
+`comment` goes into every torrent this folder produces, and is where the attribution and
+licence belong — it is the one field a torrent carries that says what the thing is, and
+it reaches anyone who opens the file in any client:
+
+```json
+{
+  "comment": "Planetiler OpenMapTiles export. OpenStreetMap contributors, under ODbL 1.0. OpenMapTiles under BSD 3-Clause / CC-BY 4.0"
+}
+```
+
 `stabilitySeconds` is the important one. A map build writes its output over minutes or
 hours, and hashing a half-written archive produces a torrent for bytes that no longer
 exist. Nothing is imported until the file has stopped changing for that long. Raise it if

@@ -2,7 +2,10 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **A watched folder can set the torrent comment**, which is where attribution and licence belong —
+  it is the one field a torrent carries that says what the thing is, and it reaches anyone who
+  opens the file in any client. The setting was passed through from the start and offered nowhere,
+  so it could only be reached by editing the config by hand.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._

@@ -1017,3 +1017,51 @@ describe('what "newest" means, and when it is safe to retire', () => {
     assert.deepEqual(removed, [], 'the newer build must survive');
   });
 });
+
+describe('a watched folder can describe what it produces', () => {
+  it('puts the folder comment into the torrent', async () => {
+    // The comment is the one field a torrent carries that says what the thing
+    // is — attribution and licence reach anyone who opens the file, in any
+    // client. It was passed through from the start and exposed nowhere, so
+    // there was no way to set it short of editing the config by hand.
+    const bencode = (await import('bencode')).default;
+    const { Library } = await import('../src/library.js');
+    const { writeArchive } = await import('./pmtiles-fixture.js');
+
+    const dir = await fs.mkdtemp(path.join(workspace, 'comment-'));
+    const file = path.join(dir, 'planet-260810.pmtiles');
+    await writeArchive(file, {
+      tiles: [{ z: 0, x: 0, y: 0, data: Buffer.alloc(64, 3) }],
+      metadata: { name: 'planet' },
+    });
+
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    const library = new Library({
+      catalog,
+      engine: {
+        name: 'test',
+        list: async () => [],
+        get: async () => null,
+        add: async () => {},
+        remove: async () => {},
+      },
+      config: { dataDir: dir, savePath: dir, trackers: [], pieceLength: 16384 },
+    });
+
+    const comment = 'OpenStreetMap contributors, ODbL 1.0';
+    const entry = await library.addLocalArchive(file, { comment });
+
+    const decoded = bencode.decode(await fs.readFile(entry.torrentPath));
+    assert.equal(Buffer.from(decoded.comment).toString('utf8'), comment);
+  });
+
+  it('is offered in the console, not only in the config file', async () => {
+    const page = await fs.readFile(
+      path.join(path.dirname(new URL(import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, '$1'), '..', 'src', 'web', 'index.html'),
+      'utf8',
+    );
+    const watch = page.slice(page.indexOf("key: 'watch'"), page.indexOf("key: 'sources'"));
+    assert.match(watch, /field: 'comment'/);
+  });
+});
