@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { assertPublishable, identifyFile, identifyUrl } from './identify.js';
@@ -31,6 +32,37 @@ import {
  * The last two are the common cases in practice: publishers create torrents,
  * everyone else joins them.
  */
+/**
+ * Where an archive is downloaded before it has an infohash to be filed under.
+ *
+ * A dot-prefixed name so it sorts away from the archives and reads as
+ * machinery rather than content.
+ */
+export const INCOMING = '.incoming';
+
+/**
+ * Moves a finished archive out of staging and into its final directory.
+ *
+ * A rename within one filesystem, so it costs nothing however large the
+ * archive is — staging lives under the same save path for exactly that reason.
+ * The directory is removed afterwards whether or not it is empty by then.
+ * @param {object} details - staging, savePath and name.
+ * @returns {Promise<string>} - Where the archive ended up.
+ */
+export async function settleFromStaging({ staging, savePath, name }) {
+  const from = path.join(staging, name);
+  const to = path.join(savePath, name);
+
+  if (path.resolve(from) === path.resolve(to)) return to;
+
+  await fs.mkdir(savePath, { recursive: true });
+  await fs.rename(from, to);
+  // Only the directory this download made, and only once it is empty — never
+  // a recursive delete near a path that holds archives.
+  await fs.rmdir(staging).catch(() => {});
+  return to;
+}
+
 export class Library {
   #catalog;
   #engine;
@@ -507,10 +539,27 @@ export class Library {
     // Retaining leaves a seedable copy behind. Discarding is explicit, because
     // the result is a torrent this node cannot serve.
     const retain = options.retain !== false;
-    const savePath = this.#savePathFor(
+    const root = this.#savePathFor(
       retain ? 'mirror' : 'cache',
       options.savePath,
     );
+
+    // Downloaded into a directory of its own, then moved once the infohash
+    // exists.
+    //
+    // An archive fetched from a URL has no infohash while it is being fetched
+    // — that is computed from the bytes, which is the thing still arriving —
+    // so it cannot be put where it belongs until it is finished. Landing it in
+    // the root instead reintroduces exactly the collision the infohash layout
+    // exists to prevent: two sources publishing `planet.pmtiles`, or the same
+    // build fetched twice, writing into one file.
+    //
+    // A random staging directory has no such clash, and the move at the end is
+    // a rename within one filesystem, so it is atomic and instant whatever the
+    // archive weighs.
+    const staging = retain
+      ? path.join(root, INCOMING, crypto.randomBytes(8).toString('hex'))
+      : undefined;
 
     // The origin is a valid web seed for exactly these bytes, so it is used as
     // one by default — that is what makes a new archive usable before it has
@@ -531,7 +580,9 @@ export class Library {
       );
     }
 
-    const created = await createTorrentFromUrl(url, {
+    let created;
+    try {
+      created = await createTorrentFromUrl(url, {
       includeSourceAsWebSeed: useSourceAsWebSeed,
       // Upstreams often publish under a bare dated name; a source can rename it
       // to something self-describing locally.
@@ -541,7 +592,7 @@ export class Library {
       webSeeds: options.webSeeds ?? [],
       comment: options.comment,
       md5: options.md5 ?? this.#config.md5,
-      retainPath: retain ? savePath : undefined,
+      retainPath: staging,
       // A dropped connection partway through a planet archive is normal, not
       // exceptional. Resumed rather than restarted, so hours of transfer are
       // not thrown away by a few seconds of network trouble.
@@ -555,10 +606,32 @@ export class Library {
         console.log(
           `[fetch] ${url} ${pct}%${done ? ' complete' : ''} (${received} bytes)`,
         );
-      },
-    });
+        },
+      });
+    } catch (error) {
+      // A cancelled or failed fetch leaves a partial file in a directory
+      // nothing will ever look in again. Left alone it is invisible waste —
+      // and for a planet archive, invisible waste measured in gigabytes.
+      this.#running.delete(url);
+      if (staging) await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+      throw error;
+    }
 
     this.#running.delete(url);
+
+    // Now the infohash exists, so the archive can go where the layout says.
+    const savePath = this.#savePathFor(
+      retain ? 'mirror' : 'cache',
+      options.savePath,
+      created.infoHash,
+    );
+    if (staging) {
+      created.retainedAt = await settleFromStaging({
+        staging,
+        savePath,
+        name: created.name,
+      });
+    }
 
     return this.#register(created, {
       categories: options.categories ?? options.category,
@@ -1897,6 +1970,35 @@ export class Library {
       .catch(() => {});
     await this.#catalog.remove(infoHash);
     return true;
+  }
+
+  /**
+   * Clears out staging directories left by downloads that never finished.
+   *
+   * The failure path removes its own, but a process killed outright cannot.
+   * What it leaves is a partial archive in a directory nothing will ever look
+   * in again — invisible, and for a planet build measured in gigabytes.
+   *
+   * Safe to run at startup precisely because nothing else may be writing here:
+   * the data directory lock means one node owns it, and this node has not
+   * started a download yet.
+   * @returns {Promise<number>} - How many were removed.
+   */
+  async sweepIncoming() {
+    const root = path.join(this.#config.savePath ?? '', INCOMING);
+    const stale = await fs.readdir(root).catch(() => []);
+
+    let removed = 0;
+    for (const name of stale) {
+      await fs.rm(path.join(root, name), { recursive: true, force: true });
+      removed += 1;
+    }
+    if (removed > 0) {
+      console.log(
+        `[library] cleared ${removed} unfinished download(s) from ${INCOMING}`,
+      );
+    }
+    return removed;
   }
 
   /**

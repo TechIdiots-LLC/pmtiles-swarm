@@ -2,6 +2,15 @@
 
 ## master
 ### ✨ Features and improvements
+- **An archive fetched from a URL is filed under its infohash like every other.** It could not be
+  before: the infohash is computed from the bytes, which are the thing still arriving, so a
+  scheduled download landed in the root of the save path while everything else sat under its own
+  directory — reintroducing exactly the collision that layout exists to prevent, since two sources
+  publishing `planet.pmtiles` would write into one file. It now downloads into a randomly named
+  directory under `<savePath>/.incoming/` and is moved into place once the torrent has been hashed.
+  The move is a rename within one filesystem, so it is instant whatever the archive weighs, and the
+  random name keeps two in-flight downloads of the same filename apart. A download interrupted by a
+  kill leaves its directory behind and the next start clears it.
 - **A watched location can keep only the newest few builds.** `keep` on a source, and **Builds to
   keep** in the console. Each build is a whole archive, so a daily 137 GB planet build kept for
   ever fills any disk within the week. It deletes the data of what it retires, so it is off unless

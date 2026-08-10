@@ -197,6 +197,12 @@ PMTILES_SWARM_PUBLIC_URL
     ms: 1000,
   });
 
+  // Before anything else touches the save path: a download interrupted by a
+  // kill leaves a partial archive somewhere nothing will look again.
+  await library.sweepIncoming().catch((error) =>
+    console.warn(`[library] could not clear unfinished downloads: ${error.message}`),
+  );
+
   const catalogued = catalog.list().length;
   if (catalogued > 0) {
     const { restored, failed } = await library.restore();

@@ -180,7 +180,7 @@ than derived, and naming them is what makes choosing bearable.
 Two archives cannot share a file, and filenames are not unique — two builds of the same map are
 both `planet.pmtiles`, and a rebuild keeps the name while minting a new infohash. Adding the second
 one at the same path is refused with a 409 naming the first. Where that comes up often, set
-`"savePathLayout": "infohash"` and each **joined** archive gets `<savePath>/<infohash>/` to itself:
+`"savePathLayout": "infohash"` and each joined archive gets `<savePath>/<infohash>/` to itself:
 
 ```
 data/torrents-data/7fae2931a9269684a7d4ed6e5fdd7d0014e6bcd1/planet.pmtiles
@@ -188,9 +188,17 @@ data/torrents-data/7fae2931a9269684a7d4ed6e5fdd7d0014e6bcd1/planet.pmtiles
 
 It works from a bare magnet, since the infohash is the one thing a magnet always carries. Flat
 stays the default: it is what makes dropping a finished archive into the save path before adding
-its torrent work, and it keeps a served filename readable. Archives *created* here are unaffected
-either way — they keep the file they were made from — and web seed URLs are built from the
-published location rather than the save path, so they do not change shape.
+its torrent work, and it keeps a served filename readable. Archives *created* from a local file
+are unaffected either way — they keep the file they were made from — and web seed URLs are built
+from the published location rather than the save path, so they do not change shape.
+
+An archive **fetched from a URL** has no infohash while it is being fetched: that is computed from
+the bytes, which are the thing still arriving. It is downloaded into a randomly named directory
+under `<savePath>/.incoming/` and moved into place once the torrent has been hashed. The move is a
+rename within one filesystem, so it is instant whatever the archive weighs, and the random name
+means two downloads of the same filename — two sources both publishing `planet.pmtiles`, or the
+same build fetched twice — cannot write into one file while in flight. A download interrupted by a
+kill leaves its directory behind; the next start clears it.
 
 Only new data is placed by a location: an archive records where it was put and keeps it, so
 repointing a location never moves anything that already exists. To move one, use **Set location…**
