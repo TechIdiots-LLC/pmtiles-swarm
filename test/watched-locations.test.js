@@ -541,3 +541,86 @@ describe('a long import does not come back due the moment it ends', () => {
     }
   });
 });
+
+describe('a poll that takes nothing says why', () => {
+  it('names the URLs that are not there yet', async () => {
+    // The state this exists for: a source asking only for today's date against
+    // an upstream that publishes at 09:00 does nothing at all between midnight
+    // and then, and looks identical to a broken template, a dead server, or a
+    // daemon that is not running.
+    const said = [];
+    const log = console.log;
+    console.log = (...parts) => said.push(parts.join(' '));
+
+    const server = http.createServer((_req, res) => res.writeHead(404).end());
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    const dir = await fs.mkdtemp(path.join(workspace, 'quiet-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+
+    const manager = new ScheduledSourceManager(
+      { addRemoteArchive: async () => assert.fail('nothing should import') },
+      catalog,
+      {
+        sources: [
+          {
+            name: 'protomaps',
+            url: `http://127.0.0.1:${server.address().port}/{YYYYMMDD}.pmtiles`,
+            lookbackDays: 0,
+          },
+        ],
+      },
+    );
+
+    try {
+      await manager.sweep(new Date());
+    } finally {
+      console.log = log;
+      await new Promise((resolve) => server.close(resolve));
+    }
+
+    const line = said.find((text) => text.includes('nothing to take'));
+    assert.ok(line, `no explanation was logged; saw: ${said.join(' | ')}`);
+    assert.match(line, /not published yet/);
+    // And the specific trap: one candidate date, for ever.
+    assert.match(line, /lookbackDays is 0/);
+  });
+
+  it('says nothing when there was nothing to say', async () => {
+    // A source that imported, or one whose candidates are all already held,
+    // must not add a line to every poll for the rest of time.
+    const said = [];
+    const log = console.log;
+    console.log = (...parts) => said.push(parts.join(' '));
+
+    const dir = await fs.mkdtemp(path.join(workspace, 'held-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+
+    const manager = new ScheduledSourceManager(
+      { addRemoteArchive: async () => assert.fail('nothing should import') },
+      { findBySource: () => ({ infoHash: 'a'.repeat(40) }) },
+      {
+        sources: [
+          {
+            name: 'protomaps',
+            url: 'https://build.example/{YYYYMMDD}.pmtiles',
+            lookbackDays: 0,
+          },
+        ],
+      },
+    );
+
+    try {
+      await manager.sweep(new Date());
+    } finally {
+      console.log = log;
+    }
+
+    assert.ok(
+      !said.some((text) => text.includes('nothing to take')),
+      'an archive already held is not a problem worth reporting',
+    );
+  });
+});

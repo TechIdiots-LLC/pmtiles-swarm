@@ -401,14 +401,27 @@ export class ScheduledSourceManager {
     }
 
     const imported = [];
+    // Kept so a poll that does nothing can say why. "Nothing happened" is the
+    // hardest state to debug from outside: a source asking only for today's
+    // date against an upstream that publishes at 09:00 looks identical to a
+    // broken template, a dead server, or a daemon that is not running at all.
+    const missing = [];
+    let held = 0;
+
     for (const date of candidateDates(source)) {
       const url = expandTemplate(source.url, date);
 
       // Already have it: this is the common case on every poll after the first.
-      if (this.#catalog.findBySource(url)) continue;
+      if (this.#catalog.findBySource(url)) {
+        held += 1;
+        continue;
+      }
 
       const exists = await this.#exists(url);
-      if (!exists) continue;
+      if (!exists) {
+        missing.push(url);
+        continue;
+      }
 
       const filename = source.filename
         ? expandTemplate(source.filename, date)
@@ -447,6 +460,21 @@ export class ScheduledSourceManager {
         console.error(`[source] ${url}: ${error.message}`);
       }
     }
+
+    if (imported.length === 0 && missing.length > 0) {
+      const label = source.name ?? source.url;
+      console.log(
+        `[source] ${label}: nothing to take — ${missing.length} URL(s) not ` +
+          `published yet (${missing[0]}${missing.length > 1 ? ', …' : ''})` +
+          (held > 0 ? `, ${held} already held` : '') +
+          (source.lookbackDays
+            ? ''
+            : '. lookbackDays is 0, so only that one date is ever asked for — ' +
+              'set offsetDays or lookbackDays if this upstream publishes later ' +
+              'in the day.'),
+      );
+    }
+
     return imported;
   }
 

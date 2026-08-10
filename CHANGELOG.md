@@ -60,6 +60,13 @@
   at it quietly on every start. Unset keys still take libtorrent's own defaults.
 
 ### 🐞 Bug fixes
+- **A poll that takes nothing says why.** A source asking only for today's date against an upstream
+  that publishes at 09:00 does nothing at all between midnight and then — and silence there is
+  indistinguishable from a broken template, a dead server, or a daemon that is not running. It now
+  names how many candidate URLs were not published yet and the first of them, and points at
+  `lookbackDays: 0` where that is the reason only one date is ever asked for. Nothing is logged
+  when the candidates are simply already held, since that is the normal state of every poll after
+  the first.
 - **A watched location no longer restarts its download the moment one finishes.** The last-run time
   was recorded when a poll *began* and never again, so by the time a planet build had been fetched
   the stamp was hours old, `now - lastRun` was far past any interval, and the next tick started the
