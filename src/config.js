@@ -558,6 +558,21 @@ const DEFAULTS = {
     minutes: undefined,
     then: 'stop',
   },
+  /**
+   * How many times to resume a download that stops before it is finished.
+   *
+   * A planet archive is hours of transfer, and a connection that drops partway
+   * is ordinary rather than exceptional. Each attempt continues from the bytes
+   * already on disk with an HTTP range request, so the cost of a drop is the
+   * retry delay rather than everything transferred so far — provided the
+   * server honours ranges and offers an ETag or Last-Modified to prove the
+   * file has not changed underneath. Where it does not, the download restarts,
+   * because splicing two builds together produces a torrent for bytes that
+   * never existed.
+   */
+  fetchAttempts: 10,
+  /** How long to wait before resuming a download that stopped. */
+  fetchRetrySeconds: 5,
   /** How often to check seeding limits, in seconds. Zero disables it. */
   seedingCheckIntervalSeconds: 3600,
   /**

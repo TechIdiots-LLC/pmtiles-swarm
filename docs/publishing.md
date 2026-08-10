@@ -224,6 +224,38 @@ a poor default, because a torrent nobody seeds is HTTP with extra steps.
 Either way, expect this to take as long as transferring the archive once. Progress is
 logged as `[fetch] <url> NN%`.
 
+### A download that stops is resumed, not restarted
+
+A planet archive is hours of transfer, and a connection that drops partway is ordinary
+rather than exceptional. Each attempt continues from the bytes already on disk with an
+HTTP range request, so a drop costs the retry delay instead of everything transferred so
+far.
+
+```json
+{
+  "fetchAttempts": 10,
+  "fetchRetrySeconds": 5
+}
+```
+
+**Only when it is provably safe.** Three things are checked before a single byte is
+appended, and any of them failing restarts the download instead:
+
+| Check | Why |
+| --- | --- |
+| The response is **206**, not 200 | A server that ignores `Range` answers with the whole file; appending that gives a file that is part duplicate |
+| The **ETag** or **Last-Modified** is unchanged | Resuming across a new build splices the head of one onto the tail of another |
+| **Content-Range** begins where it was asked to | It is the server's own account of what it sent; believing the request instead drops bytes |
+
+A server offering neither validator is treated as unable to prove anything, so the
+download restarts. That is deliberate: fetching a planet archive twice is expensive, and
+publishing a torrent for bytes that never existed anywhere is worse — it hashes perfectly
+well here and fails for every peer that ever tries it.
+
+Range support is not exotic for this kind of source. It is what PMTiles itself needs to
+be read over HTTP at all, so any server hosting PMTiles already has it — `build.protomaps.com`
+answers 206 with an ETag and a `Content-Range`.
+
 ## Piece size
 
 Read amplification is `pieceLength ÷ bytesWanted`. Creation tools size pieces for

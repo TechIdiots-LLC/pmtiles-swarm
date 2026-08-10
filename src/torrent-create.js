@@ -112,7 +112,10 @@ export async function createTorrentFromUrl(url, options = {}) {
     // verify. The marker means the URL 404s until the moment it is real.
     const target = path.join(options.retainPath, name);
     const marker = options.incompleteSuffix ?? DEFAULT_SUFFIX;
-    await downloadTo(url, `${target}${marker}`, options.onProgress, options.signal);
+    await downloadTo(url, `${target}${marker}`, options.onProgress, options.signal, {
+      attempts: options.fetchAttempts,
+      retryDelayMs: options.fetchRetryDelayMs,
+    });
     if (marker) await fs.rename(`${target}${marker}`, target);
     const created = await createTorrentFromFile(target, {
       ...options,
@@ -165,48 +168,227 @@ export async function createTorrentFromUrl(url, options = {}) {
 }
 
 /**
- * Streams a URL to a file, reporting progress.
+ * How many bytes are already at `target`, or zero if there is nothing there.
+ * @param {string} target - The partial file.
+ * @returns {Promise<number>} - Bytes on disk.
+ */
+async function bytesOnDisk(target) {
+  const stat = await fs.stat(target).catch(() => null);
+  return stat?.isFile() ? stat.size : 0;
+}
+
+/**
+ * Whether a partial download may be continued rather than started again.
+ *
+ * The dangerous case is a file that changed underneath: resuming then splices
+ * the head of one build onto the tail of another, and the result is a torrent
+ * for bytes that never existed anywhere — which hashes perfectly well here and
+ * fails for every peer that ever tries it.
+ *
+ * So the validator is compared, not just the length. `ETag` first, since it is
+ * exactly this question; `Last-Modified` second, which is weaker but is what
+ * most static file servers actually send. With neither, resuming is refused:
+ * fetching a planet archive twice is expensive, and publishing a corrupt one
+ * is worse.
+ * @param {Headers} before - Headers seen when the download began.
+ * @param {Headers} after - Headers from the resume attempt.
+ * @returns {{ok: boolean, why?: string}} - Whether it is safe to continue.
+ */
+function stillTheSameFile(before, after) {
+  const etagBefore = before?.get('etag');
+  const etagAfter = after?.get('etag');
+  if (etagBefore && etagAfter) {
+    return etagBefore === etagAfter
+      ? { ok: true }
+      : { ok: false, why: 'the ETag changed' };
+  }
+
+  const modifiedBefore = before?.get('last-modified');
+  const modifiedAfter = after?.get('last-modified');
+  if (modifiedBefore && modifiedAfter) {
+    return modifiedBefore === modifiedAfter
+      ? { ok: true }
+      : { ok: false, why: 'Last-Modified changed' };
+  }
+
+  return { ok: false, why: 'the server offers no ETag or Last-Modified' };
+}
+
+/**
+ * Where a 206 says its body actually starts, or null if it did not say.
+ * @param {string | null} contentRange - The Content-Range header.
+ * @returns {number | null} - The first byte offset.
+ */
+function rangeStart(contentRange) {
+  const match = /bytes\s+(\d+)-/i.exec(contentRange ?? '');
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * Streams a URL to a file, resuming where a previous attempt stopped.
+ *
+ * A planet archive is hours of transfer, and a connection that dropped at 35%
+ * used to mean starting from nothing — repeatedly, since the next attempt is
+ * just as likely to drop. HTTP has had the answer since 1999: ask for
+ * `Range: bytes=N-` and append.
+ *
+ * Three things must hold before appending is safe, and each is checked rather
+ * than assumed. The server has to honour the range — one that ignores it
+ * answers 200 with the whole file, and appending that to a partial one gives
+ * a file that is part duplicate and wholly wrong. The file must not have
+ * changed, which is what the validator comparison is for. And the range that
+ * came back must begin where it was asked to, because `Content-Range` is the
+ * server's own account of what it sent. Any of those failing restarts the
+ * download instead of guessing.
  * @param {string} url - Source URL.
  * @param {string} target - Destination path.
  * @param {Function} [onProgress] - Called with {received, total}.
  * @param {AbortSignal} [signal] - Cancels the download.
+ * @param {object} [options] - `attempts` and `retryDelayMs`.
  * @returns {Promise<number>} - Bytes written.
  */
-async function downloadTo(url, target, onProgress, signal) {
+async function downloadTo(url, target, onProgress, signal, options = {}) {
   const { createWriteStream } = await import('node:fs');
   const { pipeline } = await import('node:stream/promises');
-
-  // Without a signal here, a 700 GiB download cannot be stopped short of
-  // killing the process — which is exactly what it took before this existed.
-  const response = await fetch(url, { signal });
-  if (!response.ok || !response.body) {
-    throw new Error(
-      `could not read ${url}: ${response.status} ${response.statusText}`,
-    );
-  }
-  const total = Number(response.headers.get('content-length') ?? 0);
+  const attempts = Math.max(1, options.attempts ?? 10);
+  const retryDelayMs = options.retryDelayMs ?? 5000;
 
   await fs.mkdir(path.dirname(target), { recursive: true });
 
+  let firstHeaders = null;
+  let total = 0;
   let received = 0;
   let lastReport = 0;
-  const source = Readable.fromWeb(response.body);
-  source.on('data', (chunk) => {
-    received += chunk.length;
-    // Report at most once a second; a multi-hour download should not produce
-    // millions of log lines.
-    const now = Date.now();
-    if (onProgress && now - lastReport > 1000) {
-      lastReport = now;
-      onProgress({ received, total });
-    }
-  });
+  let lastError;
 
-  // Passing the signal to pipeline as well is what tears the write down
-  // mid-stream rather than only stopping the next read.
-  await pipeline(source, createWriteStream(target), { signal });
-  onProgress?.({ received, total, done: true });
-  return received;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const from = await bytesOnDisk(target);
+    // A file already at full length is one a previous attempt finished, and
+    // that the caller died before renaming. Re-fetching it buys nothing.
+    if (total && from >= total) return from;
+
+    let response;
+    try {
+      // Without a signal here, a 700 GiB download cannot be stopped short of
+      // killing the process — which is exactly what it took before this
+      // existed.
+      response = await fetch(url, {
+        signal,
+        headers: from > 0 ? { range: `bytes=${from}-` } : {},
+      });
+    } catch (error) {
+      // A cancelled download is a decision, not a failure to retry past.
+      if (signal?.aborted) throw error;
+      lastError = error;
+      if (attempt === attempts) break;
+      await delay(retryDelayMs, signal);
+      continue;
+    }
+
+    if (!response.ok || !response.body) {
+      throw new Error(
+        `could not read ${url}: ${response.status} ${response.statusText}`,
+      );
+    }
+
+    let appending = false;
+    if (from > 0) {
+      const same = stillTheSameFile(firstHeaders, response.headers);
+      const start = rangeStart(response.headers.get('content-range'));
+      if (response.status === 206 && same.ok && start === from) {
+        appending = true;
+      } else {
+        const why =
+          response.status !== 206
+            ? `it answered ${response.status} rather than 206`
+            : !same.ok
+              ? same.why
+              : 'the range returned does not begin where it was asked to';
+        console.warn(
+          `[fetch] cannot resume ${url} at ${from} bytes: ${why}. Starting again.`,
+        );
+        // Discard the partial file *and* this response, then go round again.
+        //
+        // This body was requested with a Range header, so on a 206 it is the
+        // tail of the file and nothing else. Writing it over a deleted partial
+        // would produce a file that is the end of the archive with the
+        // beginning missing — which is worse than the splice being avoided,
+        // because it looks like a complete download. The next attempt sees an
+        // empty target, sends no Range, and gets the whole file.
+        await response.body.cancel().catch(() => {});
+        await fs.rm(target, { force: true });
+        total = 0;
+        firstHeaders = null;
+        continue;
+      }
+    }
+
+    if (!firstHeaders) firstHeaders = response.headers;
+    const length = Number(response.headers.get('content-length') ?? 0);
+    // On a 206 the length is what remains, not the size of the whole file.
+    if (length) total = appending ? from + length : length;
+
+    received = appending ? from : 0;
+    const source = Readable.fromWeb(response.body);
+    source.on('data', (chunk) => {
+      received += chunk.length;
+      // Report at most once a second; a multi-hour download should not produce
+      // millions of log lines.
+      const now = Date.now();
+      if (onProgress && now - lastReport > 1000) {
+        lastReport = now;
+        onProgress({ received, total });
+      }
+    });
+
+    try {
+      // Passing the signal to pipeline as well is what tears the write down
+      // mid-stream rather than only stopping the next read.
+      await pipeline(
+        source,
+        createWriteStream(target, appending ? { flags: 'a' } : {}),
+        { signal },
+      );
+      onProgress?.({ received, total, done: true });
+      return received;
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      lastError = error;
+      const reached = await bytesOnDisk(target);
+      console.warn(
+        `[fetch] ${url} stopped at ${reached} bytes ` +
+          `(attempt ${attempt}/${attempts}): ${error.message}`,
+      );
+      if (attempt === attempts) break;
+      await delay(retryDelayMs, signal);
+    }
+  }
+
+  throw new Error(
+    `could not finish downloading ${url} after ${attempts} attempts: ` +
+      `${lastError?.message ?? 'unknown error'}`,
+  );
+}
+
+/**
+ * Waits, unless the download is cancelled first.
+ * @param {number} ms - How long to wait.
+ * @param {AbortSignal} [signal] - Cancels the wait.
+ * @returns {Promise<void>} - Resolves after the delay.
+ */
+function delay(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason ?? new Error('aborted'));
+      },
+      { once: true },
+    );
+  });
 }
 
 /**

@@ -542,6 +542,11 @@ export class Library {
       comment: options.comment,
       md5: options.md5 ?? this.#config.md5,
       retainPath: retain ? savePath : undefined,
+      // A dropped connection partway through a planet archive is normal, not
+      // exceptional. Resumed rather than restarted, so hours of transfer are
+      // not thrown away by a few seconds of network trouble.
+      fetchAttempts: this.#config.fetchAttempts,
+      fetchRetryDelayMs: (this.#config.fetchRetrySeconds ?? 5) * 1000,
       signal: controller.signal,
       onProgress: ({ received, total, done }) => {
         const state = this.#running.get(url);

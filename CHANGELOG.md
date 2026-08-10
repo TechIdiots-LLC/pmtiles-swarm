@@ -2,6 +2,17 @@
 
 ## master
 ### ✨ Features and improvements
+- **A download that stops is resumed, not restarted.** A planet archive is hours of transfer and a
+  connection that drops partway is ordinary; until now that threw away everything transferred and
+  began again, repeatedly. Each attempt now continues from the bytes already on disk with an HTTP
+  range request — `fetchAttempts` and `fetchRetrySeconds` — so a drop costs the retry delay rather
+  than 49 GB. Appending only happens when it is provably safe: the response must be a 206 (a server
+  that ignores `Range` answers 200 with the whole file, and appending that gives a file that is
+  part duplicate), the ETag or Last-Modified must be unchanged (resuming across a new build splices
+  the head of one onto the tail of another), and `Content-Range` must begin where it was asked to.
+  Any of those failing restarts the download, as does a server offering no validator at all —
+  fetching an archive twice is expensive, but publishing a torrent for bytes that never existed
+  anywhere hashes perfectly well here and fails for every peer that tries it.
 - **Downloads that have no torrent yet are visible.** An archive added from a URL is fetched whole
   before there is anything to hash a torrent out of, so until that finishes there is no catalog
   entry and nothing in the table — for a planet build, hours in which a watched location looks like
