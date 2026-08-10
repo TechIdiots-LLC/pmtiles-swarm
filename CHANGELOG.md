@@ -2,7 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
-- **Running as a systemd service is documented**, with a unit file. Two things in it are not
+- **The sample configuration ships with the package**, so an installed copy has one to copy from
+  rather than only the repository — which is the one place someone installing from npm has not got.
+- **Running as a systemd service is documented**, with a unit file, and now with the account setup:
+  creating a dedicated `pmtiles-swarm` system user and group, the two directories, and where Node
+  and the package go. Both directories have to be writable by the service, including the one under
+  `/etc` — minting a token or pressing Save rewrites the configuration, so a root-owned file the
+  service can only read loses tokens on restart. Two things in it are not
   preferences: `Restart=always` is required rather than optional, because the console's *Save &
   Restart* detects the supervisor and exits 0 expecting to be brought back — under
   `Restart=on-failure` the first use of it stops the node and leaves a unit reporting success. And

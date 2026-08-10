@@ -142,3 +142,29 @@ describe('the sample is safe to copy unedited', () => {
     }
   });
 });
+
+describe('the sample ships with the package', () => {
+  it('is listed in files, so an installed copy has one', async () => {
+    // The service documentation tells a reader to copy it out of the installed
+    // package. Without this it names a path that does not exist there — the
+    // sample would only be in the repository, which is the one place someone
+    // installing from npm has not got.
+    const pkg = JSON.parse(
+      await fs.readFile(path.join(here, '..', 'package.json'), 'utf8'),
+    );
+    assert.ok(
+      (pkg.files ?? []).includes('swarm.config.json.sample'),
+      'swarm.config.json.sample is not in package.json files',
+    );
+  });
+
+  it('is where the service documentation says it is', async () => {
+    // Both halves have to agree: the docs name a path under the installed
+    // package, and `files` is what decides whether anything is there.
+    const doc = await fs.readFile(
+      path.join(here, '..', 'docs', 'running-as-a-service.md'),
+      'utf8',
+    );
+    assert.match(doc, /node_modules\/pmtiles-swarm\/swarm\.config\.json\.sample/);
+  });
+});
