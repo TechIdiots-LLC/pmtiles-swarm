@@ -79,11 +79,13 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit
 
-      - name: Typecheck, test and build
-        run: |
-          npm run tsc
-          npm test
-          npm run build
+      # No typecheck or build step: this package is plain ESM and ships its
+      # source. The workflow was adapted from pmtiles-torrent, which is
+      # TypeScript and has both — running them here failed with
+      # `Missing script: "tsc"`, which would have taken down the first real
+      # release.
+      - name: Test
+        run: npm test
 
       - name: Ensure npm supports trusted publishing
         run: |
@@ -91,8 +93,18 @@ jobs:
           # short-lived credentials, and needs npm 11.5.1 or newer. Older npm
           # ignores the token and then fails on missing auth, which is a
           # confusing way to discover the version is wrong.
-          echo "npm $(npm --version)"
-          node -e "process.exit(require('semver').gte(process.argv[1],'11.5.1')?0:1)" "$(npm --version)" 2>/dev/null || npm install -g npm@latest
+          #
+          # Compared without semver, which is not a dependency here: reading it
+          # through require() always threw, so the fallback always ran and this
+          # step reinstalled npm on every release whatever version it had.
+          NPM_VERSION="$(npm --version)"
+          echo "npm $NPM_VERSION"
+          if [ "$(printf '11.5.1
+%s
+' "$NPM_VERSION" | sort -V | head -n1)" != "11.5.1" ]; then
+            echo "npm $NPM_VERSION is older than 11.5.1; upgrading"
+            npm install -g npm@latest
+          fi
 
       - name: Choose dist-tag
         id: disttag

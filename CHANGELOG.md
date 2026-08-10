@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.3.0
+### ✨ Features and improvements
 - **The peers column distinguishes who is connected from what the swarm holds.** `0 / 2` on a
   complete, seeding archive is correct — the counts are remote clients only, and a client is never
   its own peer — but it reads like a fault. The tracker's own totals now follow in parentheses, in
@@ -89,129 +96,6 @@
   could not decline UPnP however the config was written. That is the wrong default on a network
   where port forwards are made by hand: the router has UPnP off deliberately and the client fails
   at it quietly on every start. Unset keys still take libtorrent's own defaults.
-
-### 🐞 Bug fixes
-- **A second request for a URL already being fetched joins the first.** The catalog cannot answer
-  that question — an entry exists only once the download has finished and the torrent has been
-  hashed, so for the hours in between `findBySource` says no and every caller starts its own copy.
-  The scheduler was safe by accident, since a poll holds a flag for its whole run, but nothing
-  protected `POST /api/torrents {url}` for something a schedule was already fetching: two
-  downloads of the same hundred gigabytes, both producing the same infohash, both trying to move
-  into the same directory. A failed download is not retained, so one network error does not become
-  permanent.
-- **One poll takes one build.** A date-based source imported *every* candidate in its lookback
-  window, where a directory-listing source has always capped at `newest` (default 1) for the stated
-  reason that each candidate is a whole archive. With a daily 137 GB planet build, `lookbackDays: 3`
-  therefore meant 411 GB from a single poll. The same cap now applies, and a candidate that is
-  already held stops the scan — candidates run newest first, so anything past one on disk is older
-  than it, and without stopping lookback walks backwards through history one archive per poll.
-- **`latestLink` works without elevation.** Windows refuses symlinks with EPERM unless the process
-  is elevated or the machine is in developer mode, so `latest` was left pointing at nothing. It
-  falls back to a hard link, which needs neither and costs no extra space — another name for the
-  same bytes rather than a copy, which for a 137 GB archive is the point.
-- **A poll that takes nothing says why.** A source asking only for today's date against an upstream
-  that publishes at 09:00 does nothing at all between midnight and then — and silence there is
-  indistinguishable from a broken template, a dead server, or a daemon that is not running. It now
-  names how many candidate URLs were not published yet and the first of them, and points at
-  `lookbackDays: 0` where that is the reason only one date is ever asked for. Nothing is logged
-  when the candidates are simply already held, since that is the normal state of every poll after
-  the first.
-- **A watched location no longer restarts its download the moment one finishes.** The last-run time
-  was recorded when a poll *began* and never again, so by the time a planet build had been fetched
-  the stamp was hours old, `now - lastRun` was far past any interval, and the next tick started the
-  whole thing again — for ever, on a 72 GB archive. A failed fetch behaved the same way: one that
-  died at 35% was retried from zero immediately. The time is now recorded on the way in *and* on
-  the way out, so overlap is still prevented and the interval is measured from when the work
-  actually ended. The comment there had described this exact behaviour as the thing it was
-  avoiding.
-- **`libtorrent` and `feedTitle` are settings the API knows about.** `DEFAULTS` doubles as the
-  allow-list, and neither key was in it — so a libtorrent node saving anything at all was answered
-  `unknown setting: libtorrent`, because the console posts back every key it was given.
-  `libtorrent` was even named in `RESTART_REQUIRED`: known everywhere except where it was checked.
-- **A refused save now changes nothing.** Validation happened inside the loop that assigned, so a
-  save containing one bad key applied every key before it and then threw, leaving the running node
-  changed and the file on disk not. A watched location added that way started polling immediately
-  and vanished from the console. Every key is checked before any is applied.
-- **One loaded config no longer leaks into the next.** `merge()` spread the defaults, so a nested
-  object in a loaded config *was* the one in `DEFAULTS` whenever the file did not mention it — and
-  load writes the resolved save path back into it. One process loads one config, so this only
-  surfaced in tests, but it made the defaults mutable at runtime.
-- **Settings save again.** A setting that may only be set in the config file was refused on the
-  key's *presence* rather than on a change, and the console renders every setting it knows about
-  and posts the lot — so `allowHooksFromApi` rode along with every save and failed all of them,
-  including saves that touched nothing but a watch folder. The error even named a way out that
-  could not work: setting `allowHooksFromApi: true` unlocks the hooks, but the flag itself stays
-  guarded for ever, so the console kept echoing it and kept being refused. Echoing back the value
-  already in force is now a no-op; only a real change is refused, which is what the guard was
-  always for.
-- **A preallocated file is no longer mistaken for a finished one.** A torrent client allocates the
-  whole file up front — libtorrent creates a 77 GB sparse file the moment a download starts — so an
-  archive 0% downloaded already measures exactly its final size. The completion sweep checked the
-  disk *first*, called that complete, and recorded it. On the next restart the composite then
-  handed a 10%-downloaded archive to a secondary as a finished seed, which is the one thing "only
-  the primary writes" exists to prevent. The engine's own progress now wins whenever it has an
-  opinion; the size check remains for the case it was written for, an archive the engine is not
-  holding at all.
-- **A secondary is given long enough to hash what it was handed.** It is not waiting for metadata —
-  the `.torrent` carries that — it is verifying every byte against it, which is minutes for tens of
-  gigabytes. Against a default measured in seconds this appeared as `timed out after 60000ms
-  waiting for torrent metadata`, blaming the one thing that was never missing. Now
-  `secondaryShareTimeoutSeconds`, an hour by default.
-- **The composite asks the primary before handing anything over**, rather than trusting the
-  caller's `seedOnly`. That flag is read from the catalog on restore, and a wrong `complete` there
-  was all that stood between one incomplete file and two clients writing to it.
-- **A partial vector archive now gets its `vector_layers`, so the preview is not black.** A
-  PMTiles header is the first 127 bytes, but the JSON metadata carrying the layer list goes
-  wherever the writer put it — and planetiler puts it at the *end*, after every tile: byte
-  77,139,967,368 of a 77 GB archive. Probing a file that is 10% downloaded therefore reads a
-  perfectly good header and 1528 zero bytes where the metadata should be, and every field except
-  the one vector rendering needs looks right. The header records that offset, so the range is
-  known and fetchable: `tiles.json` now reads it out of the swarm in the background, with a
-  timeout of its own (`tiles.metadataTimeoutMs`, 120s) rather than the interactive header budget,
-  which was far too short for a piece at the far end of an archive that nobody has asked for. The
-  reply is not held up, and the next request has the layers.
-- **The vector preview draws.** `showInspectMap: true` sets a flag on maplibre-gl-inspect and
-  nothing else — the control renders from exactly two places, a source-change handler it
-  subscribes to only when `sources` was *not* passed, and the toggle button's click. This page
-  passed `sources` and hid the button, closing both, so nothing ever called `render()` and the map
-  stayed on a style that was a background colour and nothing else: correct TileJSON, correct tiles,
-  no console error, black map. Now rendered explicitly once the map has loaded.
-- **The preview says why a vector map is blank** instead of showing a black rectangle. Related:
-  `sources` is no longer passed to maplibre-gl-inspect when there are no layers, since passing it
-  disables the control's own lookup — though that lookup only re-reads the TileJSON, so it is the
-  metadata fix above that actually makes the map draw.
-- **The Pieces tab had no pane to render into**, so it appeared, highlighted when clicked, and did
-  nothing. Tabs and panes are now checked against each other in both directions.
-- **The peers tab is no longer silently empty on libtorrent.** `peer_info.utp_socket` is absent
-  from libtorrent's 2.x Python bindings, so the sidecar raised on the first peer and returned
-  nothing — an archive downloading at 10 MiB/s from a connected seed reported having no peers at
-  all. Fixed in pmtiles-torrent; a node has to be restarted to pick up a sidecar change. Three
-  layers here had each turned that exception into an empty list, so a broken engine and an empty
-  swarm produced identical output: the route now answers `{ peers, error }` and the console shows
-  the reason, and the composite engine logs which engine failed instead of swallowing it. Peer
-  rows also now carry the engine that found them and whether each is an ordinary peer, a web seed
-  or an HTTP seed — an archive pulling at full speed from one web seed looks exactly like one
-  pulling from a swarm until that single server goes away.
-
-### 📚 Documentation
-- **Ports and reachability**, which nothing covered before: which of the four listeners wants a
-  forwarding rule (the peer port, exactly as in qBittorrent), why WebRTC wants none of them — it
-  is signalled over a `wss://` tracker and carried over ICE with STUN, so it needs outbound UDP
-  rather than an inbound rule — and why peer traffic never touches the load balancer. Also that
-  two engines need two peer ports, since WebTorrent picks a random one unless told otherwise, and
-  that **browser peers need a `wss://` tracker in the announce list**: the defaults are UDP-only,
-  a browser has no UDP socket and no DHT, and WebTorrent's own WebSocket trackers ship only in its
-  browser bundle. Without one, the browser half of the swarm cannot find a peer however many nodes
-  are seeding.
-- The topology diagram shows the **browser bridge**: browsers speak WebRTC and conventional
-  clients speak TCP and uTP, so a browser peer is only ever reached by a node running WebTorrent.
-  The deployment notes cover the **two-port split**, which decides what a load balancer may be
-  pointed at. The API table gained the four routes it was missing (`/api/adds`, `/api/session`,
-  `/archives/{hash}/archive.torrent`, `/archives/{hash}/preview`), and there are now tests that a
-  diagram's `linkStyle` indices are in range, that every relative link and anchor resolves, and
-  that no route is missing a row.
-
-### ✨ Features and improvements
 - **An archive that is not whole yet is named so.** It downloads as
   `planet.pmtiles.incomplete` and is renamed the instant it finishes. These files get published:
   a web seed URL is predictable and goes out before the file exists, so an unmarked partial in a
@@ -396,7 +280,6 @@
 - Settings now presents the download options the way a torrent client does: a checkbox for the
   marker, and the separate cache directory as an option that ships off.
 - New `sparse` setting, global with a per-archive override, matching tileserver-gl.
-
 - Watch folders can move each archive into the directory a web server serves (`publishDir`) and
   advertise that URL as a web seed, rather than assuming the watched folder is already the web
   root.
@@ -493,6 +376,107 @@
   Nothing else bounded that disk usage.
 
 ### 🐞 Bug fixes
+- **A second request for a URL already being fetched joins the first.** The catalog cannot answer
+  that question — an entry exists only once the download has finished and the torrent has been
+  hashed, so for the hours in between `findBySource` says no and every caller starts its own copy.
+  The scheduler was safe by accident, since a poll holds a flag for its whole run, but nothing
+  protected `POST /api/torrents {url}` for something a schedule was already fetching: two
+  downloads of the same hundred gigabytes, both producing the same infohash, both trying to move
+  into the same directory. A failed download is not retained, so one network error does not become
+  permanent.
+- **One poll takes one build.** A date-based source imported *every* candidate in its lookback
+  window, where a directory-listing source has always capped at `newest` (default 1) for the stated
+  reason that each candidate is a whole archive. With a daily 137 GB planet build, `lookbackDays: 3`
+  therefore meant 411 GB from a single poll. The same cap now applies, and a candidate that is
+  already held stops the scan — candidates run newest first, so anything past one on disk is older
+  than it, and without stopping lookback walks backwards through history one archive per poll.
+- **`latestLink` works without elevation.** Windows refuses symlinks with EPERM unless the process
+  is elevated or the machine is in developer mode, so `latest` was left pointing at nothing. It
+  falls back to a hard link, which needs neither and costs no extra space — another name for the
+  same bytes rather than a copy, which for a 137 GB archive is the point.
+- **A poll that takes nothing says why.** A source asking only for today's date against an upstream
+  that publishes at 09:00 does nothing at all between midnight and then — and silence there is
+  indistinguishable from a broken template, a dead server, or a daemon that is not running. It now
+  names how many candidate URLs were not published yet and the first of them, and points at
+  `lookbackDays: 0` where that is the reason only one date is ever asked for. Nothing is logged
+  when the candidates are simply already held, since that is the normal state of every poll after
+  the first.
+- **A watched location no longer restarts its download the moment one finishes.** The last-run time
+  was recorded when a poll *began* and never again, so by the time a planet build had been fetched
+  the stamp was hours old, `now - lastRun` was far past any interval, and the next tick started the
+  whole thing again — for ever, on a 72 GB archive. A failed fetch behaved the same way: one that
+  died at 35% was retried from zero immediately. The time is now recorded on the way in *and* on
+  the way out, so overlap is still prevented and the interval is measured from when the work
+  actually ended. The comment there had described this exact behaviour as the thing it was
+  avoiding.
+- **`libtorrent` and `feedTitle` are settings the API knows about.** `DEFAULTS` doubles as the
+  allow-list, and neither key was in it — so a libtorrent node saving anything at all was answered
+  `unknown setting: libtorrent`, because the console posts back every key it was given.
+  `libtorrent` was even named in `RESTART_REQUIRED`: known everywhere except where it was checked.
+- **A refused save now changes nothing.** Validation happened inside the loop that assigned, so a
+  save containing one bad key applied every key before it and then threw, leaving the running node
+  changed and the file on disk not. A watched location added that way started polling immediately
+  and vanished from the console. Every key is checked before any is applied.
+- **One loaded config no longer leaks into the next.** `merge()` spread the defaults, so a nested
+  object in a loaded config *was* the one in `DEFAULTS` whenever the file did not mention it — and
+  load writes the resolved save path back into it. One process loads one config, so this only
+  surfaced in tests, but it made the defaults mutable at runtime.
+- **Settings save again.** A setting that may only be set in the config file was refused on the
+  key's *presence* rather than on a change, and the console renders every setting it knows about
+  and posts the lot — so `allowHooksFromApi` rode along with every save and failed all of them,
+  including saves that touched nothing but a watch folder. The error even named a way out that
+  could not work: setting `allowHooksFromApi: true` unlocks the hooks, but the flag itself stays
+  guarded for ever, so the console kept echoing it and kept being refused. Echoing back the value
+  already in force is now a no-op; only a real change is refused, which is what the guard was
+  always for.
+- **A preallocated file is no longer mistaken for a finished one.** A torrent client allocates the
+  whole file up front — libtorrent creates a 77 GB sparse file the moment a download starts — so an
+  archive 0% downloaded already measures exactly its final size. The completion sweep checked the
+  disk *first*, called that complete, and recorded it. On the next restart the composite then
+  handed a 10%-downloaded archive to a secondary as a finished seed, which is the one thing "only
+  the primary writes" exists to prevent. The engine's own progress now wins whenever it has an
+  opinion; the size check remains for the case it was written for, an archive the engine is not
+  holding at all.
+- **A secondary is given long enough to hash what it was handed.** It is not waiting for metadata —
+  the `.torrent` carries that — it is verifying every byte against it, which is minutes for tens of
+  gigabytes. Against a default measured in seconds this appeared as `timed out after 60000ms
+  waiting for torrent metadata`, blaming the one thing that was never missing. Now
+  `secondaryShareTimeoutSeconds`, an hour by default.
+- **The composite asks the primary before handing anything over**, rather than trusting the
+  caller's `seedOnly`. That flag is read from the catalog on restore, and a wrong `complete` there
+  was all that stood between one incomplete file and two clients writing to it.
+- **A partial vector archive now gets its `vector_layers`, so the preview is not black.** A
+  PMTiles header is the first 127 bytes, but the JSON metadata carrying the layer list goes
+  wherever the writer put it — and planetiler puts it at the *end*, after every tile: byte
+  77,139,967,368 of a 77 GB archive. Probing a file that is 10% downloaded therefore reads a
+  perfectly good header and 1528 zero bytes where the metadata should be, and every field except
+  the one vector rendering needs looks right. The header records that offset, so the range is
+  known and fetchable: `tiles.json` now reads it out of the swarm in the background, with a
+  timeout of its own (`tiles.metadataTimeoutMs`, 120s) rather than the interactive header budget,
+  which was far too short for a piece at the far end of an archive that nobody has asked for. The
+  reply is not held up, and the next request has the layers.
+- **The vector preview draws.** `showInspectMap: true` sets a flag on maplibre-gl-inspect and
+  nothing else — the control renders from exactly two places, a source-change handler it
+  subscribes to only when `sources` was *not* passed, and the toggle button's click. This page
+  passed `sources` and hid the button, closing both, so nothing ever called `render()` and the map
+  stayed on a style that was a background colour and nothing else: correct TileJSON, correct tiles,
+  no console error, black map. Now rendered explicitly once the map has loaded.
+- **The preview says why a vector map is blank** instead of showing a black rectangle. Related:
+  `sources` is no longer passed to maplibre-gl-inspect when there are no layers, since passing it
+  disables the control's own lookup — though that lookup only re-reads the TileJSON, so it is the
+  metadata fix above that actually makes the map draw.
+- **The Pieces tab had no pane to render into**, so it appeared, highlighted when clicked, and did
+  nothing. Tabs and panes are now checked against each other in both directions.
+- **The peers tab is no longer silently empty on libtorrent.** `peer_info.utp_socket` is absent
+  from libtorrent's 2.x Python bindings, so the sidecar raised on the first peer and returned
+  nothing — an archive downloading at 10 MiB/s from a connected seed reported having no peers at
+  all. Fixed in pmtiles-torrent; a node has to be restarted to pick up a sidecar change. Three
+  layers here had each turned that exception into an empty list, so a broken engine and an empty
+  swarm produced identical output: the route now answers `{ peers, error }` and the console shows
+  the reason, and the composite engine logs which engine failed instead of swallowing it. Peer
+  rows also now carry the engine that found them and whether each is an ordinary peer, a web seed
+  or an HTTP seed — an archive pulling at full speed from one web seed looks exactly like one
+  pulling from a swarm until that single server goes away.
 - **Restoring skipped the tracker repair**, which is the one moment somebody expects a fix to take
   effect. It built its own add rather than going through the shared one, so an archive stored
   without trackers stayed unable to find a peer across every restart. It now takes the same path as
@@ -682,6 +666,24 @@
   overzooms a parent tile when the child 404s, so a sparse raster-dem — Mapterhorn, or any
   terrain built only where there is land — rendered as holes wherever data was never built.
   Raster now answers 404 and vector keeps 204.
+
+### 📚 Documentation
+- **Ports and reachability**, which nothing covered before: which of the four listeners wants a
+  forwarding rule (the peer port, exactly as in qBittorrent), why WebRTC wants none of them — it
+  is signalled over a `wss://` tracker and carried over ICE with STUN, so it needs outbound UDP
+  rather than an inbound rule — and why peer traffic never touches the load balancer. Also that
+  two engines need two peer ports, since WebTorrent picks a random one unless told otherwise, and
+  that **browser peers need a `wss://` tracker in the announce list**: the defaults are UDP-only,
+  a browser has no UDP socket and no DHT, and WebTorrent's own WebSocket trackers ship only in its
+  browser bundle. Without one, the browser half of the swarm cannot find a peer however many nodes
+  are seeding.
+- The topology diagram shows the **browser bridge**: browsers speak WebRTC and conventional
+  clients speak TCP and uTP, so a browser peer is only ever reached by a node running WebTorrent.
+  The deployment notes cover the **two-port split**, which decides what a load balancer may be
+  pointed at. The API table gained the four routes it was missing (`/api/adds`, `/api/session`,
+  `/archives/{hash}/archive.torrent`, `/archives/{hash}/preview`), and there are now tests that a
+  diagram's `linkStyle` indices are in range, that every relative link and anchor resolves, and
+  that no route is missing a row.
 
 ## 0.2.0
 ### ✨ Features and improvements
