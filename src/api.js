@@ -408,6 +408,14 @@ export function createApp({
       }
       res.json({
         version: VERSION,
+        // What an unfinished archive is actually called on disk, or null when
+        // nothing renames it. Both halves matter: the setting can be empty,
+        // and an engine can ignore it entirely. The console showed the marker
+        // for every unfinished archive regardless, which on libtorrent was a
+        // filename that did not exist.
+        incompleteMarker: engine.marksIncomplete
+          ? config.incompleteSuffix || null
+          : null,
         engine: { name: engine.name, ok: engineOk, error: engineError },
         archives: catalog.list().length,
         categories: catalog.categories(),

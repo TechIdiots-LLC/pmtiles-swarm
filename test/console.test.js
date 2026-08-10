@@ -454,3 +454,28 @@ describe('the footer', () => {
     assert.match(api, /version: VERSION/);
   });
 });
+
+describe('the incomplete marker in the archive table', () => {
+  it('is shown only when something actually renames the file', async () => {
+    // The bug this exists for: the marker was hardcoded and drawn for every
+    // unfinished archive, with a tooltip naming a file on disk. On libtorrent
+    // — which does not rename anything — that named a file that did not exist,
+    // beside one sitting under its final name at 25% downloaded.
+    const html = page;
+
+    assert.ok(
+      !/>\.incomplete<\/div>/.test(html),
+      'the marker must come from the node, not from a literal in the page',
+    );
+    assert.match(
+      html,
+      /progress < 1 && incompleteMarker/,
+      'nothing is drawn unless the node reported a marker',
+    );
+    assert.match(
+      html,
+      /incompleteMarker = status\.incompleteMarker/,
+      'and it comes from /api/status',
+    );
+  });
+});

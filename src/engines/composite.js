@@ -58,6 +58,9 @@ export class CompositeEngine {
     this.shareIntervalMs = Math.max(5, shareIntervalSeconds) * 1000;
     this.shareTimeoutMs = Math.max(60, shareTimeoutSeconds) * 1000;
     this.name = [primary.name, ...this.#secondaries.map((e) => e.name)].join('+');
+    // The primary is the one that writes the file. A secondary only ever
+    // receives an archive that is already whole, so it never marks anything.
+    this.marksIncomplete = primary.marksIncomplete ?? false;
   }
 
   /** The engine that owns the data. @returns {object} - The primary. */

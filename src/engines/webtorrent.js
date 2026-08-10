@@ -54,6 +54,9 @@ export class WebTorrentSeedEngine {
       throw new Error('WebTorrent engine requires a savePath');
     }
     this.name = 'webtorrent';
+    // Honoured, by replacing the store — the only thing that decides where
+    // bytes land.
+    this.marksIncomplete = true;
     this.#options = { readyTimeoutMs: 300000, ...options };
   }
 

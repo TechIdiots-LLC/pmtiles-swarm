@@ -7,6 +7,17 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.4.4
+### 🐞 Bug fixes
+- **The console no longer claims an `.incomplete` file that is not there.** The marker was a
+  literal in the page, drawn beside every unfinished archive, with a tooltip naming the file it
+  was supposedly on disk as. libtorrent renames nothing — the rename would have to happen in the
+  sidecar — so on the engine most people run, that named a file which did not exist, next to one
+  sitting under its final name at 25% downloaded. Each engine now says whether it marks
+  incomplete files, the composite answers for its primary since that is the engine writing the
+  bytes, and `/api/status` combines that with `incompleteSuffix` — which can also be empty — to
+  report the marker actually in use, or none. The console draws only what it is told.
+
 ## 0.4.3
 ### 🐞 Bug fixes
 - **The lock file keeps the optional native builds `ws` asks for.** `bufferutil` and

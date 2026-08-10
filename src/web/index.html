@@ -725,6 +725,9 @@
       // ── Archives ──────────────────────────────────────────────────────────
       let archives = [];
       let selected = null;
+      // Null until /api/status says otherwise, so nothing claims a marker
+      // before the node has said whether its engine applies one.
+      let incompleteMarker = null;
       let activeTab = 'general';
 
       // What the header switch shows, so a click knows what it is toggling to.
@@ -882,6 +885,9 @@
           renderSpeed(speed);
           renderFetching(adds?.running);
           if (status.version) $('version').textContent = `v${status.version}`;
+          // What an unfinished archive is really called on disk, or null when
+          // nothing renames it. The engine decides, not the setting alone.
+          incompleteMarker = status.incompleteMarker ?? null;
           const engine = status.engine;
           $('status').innerHTML =
             `engine <b>${engine.name}</b> ${engine.ok ? 'ready' : 'unavailable'}` +
@@ -994,8 +1000,8 @@
             <td class="sub">${
               entry.paused ? 'paused' : escapeHtml(s.state ?? '—')
             }${
-              entry.complete === false && progress < 1
-                ? `<div class="sub" title="on disk as ${escapeHtml(entry.name)}.incomplete until it is whole">.incomplete</div>`
+              entry.complete === false && progress < 1 && incompleteMarker
+                ? `<div class="sub" title="on disk as ${escapeHtml(entry.name)}${escapeHtml(incompleteMarker)} until it is whole">${escapeHtml(incompleteMarker)}</div>`
                 : ''
             }</td>`;
           tr.onclick = () => {

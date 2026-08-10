@@ -78,6 +78,12 @@ export class LibtorrentEngine {
       throw new Error('libtorrent engine requires a savePath');
     }
     this.name = 'libtorrent';
+    // Whether `incompleteSuffix` means anything here: it does not. The rename
+    // would have to happen in the sidecar, so a partial archive sits under its
+    // final name from the first byte — which is why a web server must never be
+    // pointed at this engine's save path, and why the console must not claim
+    // a marker that is not there.
+    this.marksIncomplete = false;
     if (options.listen !== undefined && typeof options.listen !== 'string') {
       // Caught here because the alternative is a C++ converter error four
       // frames into a Python traceback, which says nothing about which setting
