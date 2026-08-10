@@ -60,6 +60,16 @@
   at it quietly on every start. Unset keys still take libtorrent's own defaults.
 
 ### 🐞 Bug fixes
+- **One poll takes one build.** A date-based source imported *every* candidate in its lookback
+  window, where a directory-listing source has always capped at `newest` (default 1) for the stated
+  reason that each candidate is a whole archive. With a daily 137 GB planet build, `lookbackDays: 3`
+  therefore meant 411 GB from a single poll. The same cap now applies, and a candidate that is
+  already held stops the scan — candidates run newest first, so anything past one on disk is older
+  than it, and without stopping lookback walks backwards through history one archive per poll.
+- **`latestLink` works without elevation.** Windows refuses symlinks with EPERM unless the process
+  is elevated or the machine is in developer mode, so `latest` was left pointing at nothing. It
+  falls back to a hard link, which needs neither and costs no extra space — another name for the
+  same bytes rather than a copy, which for a 137 GB archive is the point.
 - **A poll that takes nothing says why.** A source asking only for today's date against an upstream
   that publishes at 09:00 does nothing at all between midnight and then — and silence there is
   indistinguishable from a broken template, a dead server, or a daemon that is not running. It now

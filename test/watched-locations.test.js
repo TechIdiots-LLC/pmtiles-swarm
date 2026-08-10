@@ -584,7 +584,7 @@ describe('a poll that takes nothing says why', () => {
     assert.ok(line, `no explanation was logged; saw: ${said.join(' | ')}`);
     assert.match(line, /not published yet/);
     // And the specific trap: one candidate date, for ever.
-    assert.match(line, /lookbackDays is 0/);
+    assert.match(line, /Neither offsetDays nor lookbackDays/);
   });
 
   it('says nothing when there was nothing to say', async () => {
@@ -622,5 +622,187 @@ describe('a poll that takes nothing says why', () => {
       !said.some((text) => text.includes('nothing to take')),
       'an archive already held is not a problem worth reporting',
     );
+  });
+});
+
+describe('how many builds one poll may take', () => {
+  /**
+   * A source whose every dated URL exists, against a recording library.
+   * @param {object} extra - Extra source fields.
+   * @param {Set<string>} held - URLs the catalog already knows.
+   * @returns {Promise<object>} - imported URLs and close().
+   */
+  async function pollAll(extra = {}, held = new Set()) {
+    const server = http.createServer((req, res) => {
+      res.writeHead(req.url.endsWith('.pmtiles') ? 200 : 404).end('x');
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+
+    const taken = [];
+    const manager = new ScheduledSourceManager(
+      {
+        addRemoteArchive: async (url) => {
+          taken.push(url);
+          return { infoHash: 'a'.repeat(40), name: url.split('/').pop() };
+        },
+      },
+      {
+        findBySource: (url) =>
+          held.has(url.split('/').pop()) ? { infoHash: 'b'.repeat(40) } : null,
+      },
+      {
+        sources: [
+          {
+            name: 'protomaps',
+            url: `${base}/{YYYYMMDD}.pmtiles`,
+            lookbackDays: 3,
+            ...extra,
+          },
+        ],
+      },
+    );
+
+    await manager.sweep(new Date());
+    await new Promise((resolve) => server.close(resolve));
+    return { taken, base };
+  }
+
+  it('takes one build, not every day in the lookback window', async () => {
+    // lookbackDays widens the search for *the* build that was missed. Read as
+    // "fetch every day in the window" it is 3 x 137 GB from a single poll,
+    // which is what happened.
+    const { taken } = await pollAll();
+    assert.equal(taken.length, 1, `took ${taken.length}: ${taken.join(', ')}`);
+  });
+
+  it('takes the newest of them', async () => {
+    const { taken } = await pollAll();
+    const day = (url) => url.match(/(\d{8})/)[1];
+    const { taken: all } = await pollAll({ newest: 9 });
+    assert.equal(day(taken[0]), day(all[0]), 'the one taken is the newest');
+  });
+
+  it('honours an explicit newest, for a smaller archive', async () => {
+    const { taken } = await pollAll({ newest: 3 });
+    assert.equal(taken.length, 3);
+  });
+
+  it('stops at the first build it already holds', async () => {
+    // Candidates run newest first, so reaching one that is held means
+    // everything left is older than something on disk. Without stopping,
+    // lookback walks backwards through history one archive per poll for ever.
+    const probe = await pollAll({ newest: 9 });
+    const newest = probe.taken[0].split('/').pop();
+
+    const { taken } = await pollAll({ newest: 9 }, new Set([newest]));
+    assert.deepEqual(taken, [], 'nothing older should be fetched');
+  });
+});
+
+describe('pointing "latest" at the newest build', () => {
+  it('creates the link even where symlinks are refused', async () => {
+    // Windows refuses symlinks with EPERM unless elevated or in developer
+    // mode, which is not a reasonable thing to require of a daemon — and it
+    // left `latest` pointing at nothing at all. A hard link needs neither and
+    // costs no extra space, being another name for the same bytes rather than
+    // a copy, which for a 137 GB archive is the whole point.
+    //
+    // Driven through a poll rather than by calling the private method, and
+    // asserting the outcome rather than which of the two kinds was used: on
+    // the machine where this failed, the fallback is the path taken.
+    const dir = await fs.mkdtemp(path.join(workspace, 'latest-'));
+    const server = http.createServer((req, res) => {
+      res.writeHead(req.url.endsWith('.pmtiles') ? 200 : 404).end('x');
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    const manager = new ScheduledSourceManager(
+      {
+        addRemoteArchive: async (url) => {
+          const name = url.split('/').pop();
+          const real = path.join(dir, name);
+          await fs.writeFile(real, 'archive bytes');
+          return { infoHash: 'a'.repeat(40), name, savePath: dir, retainedAt: real };
+        },
+      },
+      { findBySource: () => null },
+      {
+        sources: [
+          {
+            name: 'protomaps',
+            url: `http://127.0.0.1:${server.address().port}/{YYYYMMDD}.pmtiles`,
+            lookbackDays: 0,
+            latestLink: 'protomaps-latest.pmtiles',
+          },
+        ],
+      },
+    );
+
+    try {
+      await manager.sweep(new Date());
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+
+    const linked = path.join(dir, 'protomaps-latest.pmtiles');
+    assert.equal(
+      await fs.readFile(linked, 'utf8'),
+      'archive bytes',
+      'latest must resolve to the build it names',
+    );
+  });
+});
+
+describe('the hint about candidate dates', () => {
+  /** Captures what a poll logs against a server with nothing on it. */
+  async function saidWhenEmpty(source) {
+    const said = [];
+    const log = console.log;
+    console.log = (...parts) => said.push(parts.join(' '));
+
+    const server = http.createServer((_req, res) => res.writeHead(404).end());
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    const manager = new ScheduledSourceManager(
+      { addRemoteArchive: async () => assert.fail('nothing exists') },
+      { findBySource: () => null },
+      {
+        sources: [
+          {
+            name: 'protomaps',
+            url: `http://127.0.0.1:${server.address().port}/{YYYYMMDD}.pmtiles`,
+            ...source,
+          },
+        ],
+      },
+    );
+
+    try {
+      await manager.sweep(new Date());
+    } finally {
+      console.log = log;
+      await new Promise((resolve) => server.close(resolve));
+    }
+    return said.find((text) => text.includes('nothing to take')) ?? '';
+  }
+
+  it('offers it when neither knob is set', async () => {
+    assert.match(await saidWhenEmpty({}), /Neither offsetDays nor lookbackDays/);
+  });
+
+  it('stays quiet when offsetDays says which day to ask for', async () => {
+    // `offsetDays: -1` with `lookbackDays: 0` is the correct configuration for
+    // an upstream that dates its build yesterday, and takes exactly one build
+    // on purpose. Advising its owner to set offsetDays would be noise, and
+    // would be advising something already done.
+    const line = await saidWhenEmpty({ offsetDays: -1, lookbackDays: 0 });
+    assert.ok(line, 'it should still say nothing was found');
+    assert.doesNotMatch(line, /Neither offsetDays nor lookbackDays/);
+  });
+
+  it('stays quiet when lookbackDays widens the search', async () => {
+    const line = await saidWhenEmpty({ lookbackDays: 3 });
+    assert.doesNotMatch(line, /Neither offsetDays nor lookbackDays/);
   });
 });

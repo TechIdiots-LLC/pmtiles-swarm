@@ -401,6 +401,13 @@ export class ScheduledSourceManager {
     }
 
     const imported = [];
+    // At most one build per poll, as with a directory listing, and for the
+    // same reason: each candidate is a whole archive. `lookbackDays` widens
+    // the search for *the* build that was missed — it is not an instruction to
+    // fetch every day in the window, which for a daily 137 GB planet build
+    // would be 411 GB from a single poll.
+    const limit = Math.max(1, source.newest ?? 1);
+
     // Kept so a poll that does nothing can say why. "Nothing happened" is the
     // hardest state to debug from outside: a source asking only for today's
     // date against an upstream that publishes at 09:00 looks identical to a
@@ -412,9 +419,14 @@ export class ScheduledSourceManager {
       const url = expandTemplate(source.url, date);
 
       // Already have it: this is the common case on every poll after the first.
+      //
+      // Candidates run newest first, so reaching one that is already held
+      // means everything left is older than something on disk. Stopping here
+      // is what keeps lookback from slowly walking backwards through history,
+      // one archive per poll, for ever.
       if (this.#catalog.findBySource(url)) {
         held += 1;
-        continue;
+        break;
       }
 
       const exists = await this.#exists(url);
@@ -456,6 +468,7 @@ export class ScheduledSourceManager {
         if (source.latestLink) {
           await this.#linkLatest(source, entry);
         }
+        if (imported.length >= limit) break;
       } catch (error) {
         console.error(`[source] ${url}: ${error.message}`);
       }
@@ -467,11 +480,15 @@ export class ScheduledSourceManager {
         `[source] ${label}: nothing to take — ${missing.length} URL(s) not ` +
           `published yet (${missing[0]}${missing.length > 1 ? ', …' : ''})` +
           (held > 0 ? `, ${held} already held` : '') +
-          (source.lookbackDays
+          // Only worth saying where neither knob is set. `offsetDays: -1` with
+          // `lookbackDays: 0` is the right configuration for an upstream that
+          // publishes yesterday's date, deliberately taking exactly one build
+          // — telling its owner to set offsetDays would be noise, and wrong.
+          (source.lookbackDays || source.offsetDays
             ? ''
-            : '. lookbackDays is 0, so only that one date is ever asked for — ' +
-              'set offsetDays or lookbackDays if this upstream publishes later ' +
-              'in the day.'),
+            : '. Neither offsetDays nor lookbackDays is set, so only today is ' +
+              'ever asked for — an upstream that publishes later in the day, or ' +
+              'dates its build yesterday, will never be found.'),
       );
     }
 
@@ -593,8 +610,16 @@ export class ScheduledSourceManager {
   /**
    * Points a stable "latest" name at the newest build.
    *
-   * A symlink keeps the dated file as the real one, so it stays seedable under
-   * its own torrent while consumers can still reference a fixed path.
+   * The dated file stays the real one either way, so it remains seedable under
+   * its own torrent while consumers reference a fixed path.
+   *
+   * A symlink first, then a hard link. Windows refuses symlinks with EPERM
+   * unless the process is elevated or the machine is in developer mode, which
+   * is not a reasonable thing to require of a daemon — and a hard link needs
+   * neither. It costs no extra space, since it is another name for the same
+   * bytes rather than a copy, and for a 137 GB archive that distinction is the
+   * whole point. It only works within one filesystem, which is where a link
+   * beside the file it names always is.
    * @param {object} source - The source definition.
    * @param {object} entry - The freshly imported entry.
    * @returns {Promise<void>} - Resolves once linked, or logs and continues.
@@ -605,13 +630,30 @@ export class ScheduledSourceManager {
       ? source.latestLink
       : path.join(path.dirname(target), source.latestLink);
 
-    try {
-      await fs.rm(link, { force: true });
-      await fs.symlink(target, link);
-      console.log(`[source] latest -> ${path.basename(target)}`);
-    } catch (error) {
-      // Windows needs elevation or developer mode for symlinks; not fatal.
-      console.warn(`[source] could not update ${link}: ${error.message}`);
+    const attempts = [
+      ['symlink', () => fs.symlink(target, link)],
+      ['hard link', () => fs.link(target, link)],
+    ];
+
+    for (const [kind, make] of attempts) {
+      try {
+        await fs.rm(link, { force: true });
+        await make();
+        console.log(
+          `[source] latest -> ${path.basename(target)}` +
+            (kind === 'symlink' ? '' : ` (${kind})`),
+        );
+        return;
+      } catch (error) {
+        // Try the next kind rather than giving up on the first refusal; only
+        // the last one is worth reporting.
+        if (make === attempts.at(-1)[1]) {
+          console.warn(
+            `[source] could not point ${path.basename(link)} at ` +
+              `${path.basename(target)}: ${error.message}`,
+          );
+        }
+      }
     }
   }
 
