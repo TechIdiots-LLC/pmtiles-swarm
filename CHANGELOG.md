@@ -2,10 +2,23 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **The console has a footer naming the version it is running**, beside `© <year> TechIdiots LLC`
+  and a link to the source. The version comes from `package.json` through `/api/status` rather than
+  being written into the page, since the number on screen is the one somebody quotes when reporting
+  a problem.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
+
+### 📚 Documentation
+- **How to update an installed service**, which was missing: reinstall into the same prefix and
+  restart. The restart is not optional — the Python sidecar is started with the process and lives
+  as long as it does, so a new one sits on disk doing nothing until then, and most of what changes
+  between releases is in there.
+- The WebRTC check given in two places imported a directory path, which ESM refuses whatever the
+  state of the install — so it reported a failure that was never about WebRTC. It now imports
+  `node-datachannel` by name from the install directory, which is the binary the install script
+  fetches.
 
 ## 0.3.1
 

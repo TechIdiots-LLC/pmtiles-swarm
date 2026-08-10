@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -23,6 +24,17 @@ import { buildTileJson, extensionMatches } from './tilejson.js';
 import { TileReadError } from './tiles.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+
+/**
+ * This package's version, for the console to show.
+ *
+ * Read from package.json rather than repeated in a constant: a version in two
+ * places is a version that disagrees with itself, and the one on screen is the
+ * one somebody will quote when reporting a problem.
+ */
+const VERSION = JSON.parse(
+  fsSync.readFileSync(path.join(here, '..', 'package.json'), 'utf8'),
+).version;
 
 /**
  * Wraps an async route so a rejection becomes a 500 rather than an unhandled
@@ -395,6 +407,7 @@ export function createApp({
         engineError = error.message;
       }
       res.json({
+        version: VERSION,
         engine: { name: engine.name, ok: engineOk, error: engineError },
         archives: catalog.list().length,
         categories: catalog.categories(),

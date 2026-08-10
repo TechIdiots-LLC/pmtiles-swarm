@@ -104,8 +104,8 @@ the prebuilt binary WebTorrent needs for WebRTC, and it is not in the published
 tarball. Check it landed:
 
 ```sh
-sudo -u pmtiles-swarm -H node -e \
-  "import('/var/lib/pmtiles-swarm/node_modules/webtorrent').then(() => console.log('ok'))"
+cd /var/lib/pmtiles-swarm && sudo -u pmtiles-swarm -H node -e \
+  "import('node-datachannel').then(() => console.log('webrtc ok'))"
 ```
 
 `npm approve-scripts node-datachannel` records the approval in `package.json`
@@ -242,6 +242,43 @@ Four listeners, and only the peer ports want a firewall rule. See
 | `webtorrent.clientOptions.torrentPort` — pin it, or it changes every start | forward it |
 | `port` — 8090 | your proxy or CDN |
 | `adminPort` — 8091, bound to `127.0.0.1` | nothing; that is the point |
+
+## Updating
+
+```sh
+sudo -u pmtiles-swarm -H npm install --prefix /var/lib/pmtiles-swarm pmtiles-swarm@latest
+sudo systemctl restart pmtiles-swarm
+```
+
+**The restart is not optional.** The Python sidecar is started with the process
+and lives as long as it does, so a new sidecar sits on disk doing nothing until
+the service is restarted. Most of what changes between releases is in there.
+
+Nothing under `/etc/pmtiles-swarm` is touched, and restarting does not re-check
+the archives: a clean stop writes resume data, and `TimeoutStopSec` above
+leaves room for it.
+
+Confirm both halves moved, since the sidecar has its own version:
+
+```sh
+sudo -u pmtiles-swarm -H npm ls --prefix /var/lib/pmtiles-swarm --depth 1 \
+  pmtiles-swarm pmtiles-torrent
+```
+
+An install runs the dependency install scripts again, so check WebRTC survived
+it — see [the allowScripts warning](#the-allowscripts-warning):
+
+```sh
+cd /var/lib/pmtiles-swarm && sudo -u pmtiles-swarm -H node -e \
+  "import('node-datachannel').then(() => console.log('webrtc ok'))"
+```
+
+To pin a version, or to go back to one:
+
+```sh
+sudo -u pmtiles-swarm -H npm install --prefix /var/lib/pmtiles-swarm pmtiles-swarm@0.3.0
+sudo systemctl restart pmtiles-swarm
+```
 
 ## Checking it
 

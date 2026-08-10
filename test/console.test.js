@@ -430,3 +430,27 @@ describe('the peers column', () => {
     assert.match(page, /never its own peer|not its own peer/);
   });
 });
+
+describe('the footer', () => {
+  it('names the year and the version', () => {
+    // The version on screen is the one somebody quotes when reporting a
+    // problem, so it has to be the one actually running rather than a number
+    // written into the page.
+    assert.match(page, /<footer>/);
+    assert.match(page, /TechIdiots LLC/);
+    assert.match(page, /id="version"/);
+    assert.match(page, /id="year"/);
+  });
+
+  it('fills both in rather than leaving the slots empty', () => {
+    assert.match(page, /\$\('year'\)\.textContent = String\(new Date\(\)\.getFullYear\(\)\)/);
+    assert.match(page, /\$\('version'\)\.textContent = `v\$\{status\.version\}`/);
+  });
+
+  it('takes the version from the package, not from a copy of it', async () => {
+    // Two places to write a version down is one place for them to disagree.
+    const api = await fs.readFile(path.join(here, '..', 'src', 'api.js'), 'utf8');
+    assert.match(api, /readFileSync\(path\.join\(here, '\.\.', 'package\.json'\)/);
+    assert.match(api, /version: VERSION/);
+  });
+});

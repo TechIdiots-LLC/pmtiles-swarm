@@ -254,6 +254,20 @@
       }
       .choice > span { flex: 1; }
 
+      footer {
+        margin-top: 2.5rem;
+        padding: 1rem 0 0.5rem;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 0.8rem;
+        display: flex;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+        align-items: baseline;
+      }
+      footer a { color: var(--muted); }
+      footer .version { font-variant-numeric: tabular-nums; }
+
       /* Speed limits. Declared after .field on purpose: `.field input` is
          width:100%, which would push the unit label onto its own line. */
       .rates { display: flex; gap: 1rem; flex-wrap: wrap; }
@@ -361,6 +375,14 @@
         <div id="settings-body"></div>
       </section>
     </main>
+
+    <footer>
+      <span>&copy; <span id="year"></span> TechIdiots LLC</span>
+      <span>·</span>
+      <span>pmtiles-swarm <span class="version" id="version">…</span></span>
+      <span>·</span>
+      <a href="https://github.com/TechIdiots-LLC/pmtiles-swarm" rel="noreferrer">source</a>
+    </footer>
 
     <dialog id="move-dialog">
       <form method="dialog" id="move-form">
@@ -859,6 +881,7 @@
           ]);
           renderSpeed(speed);
           renderFetching(adds?.running);
+          if (status.version) $('version').textContent = `v${status.version}`;
           const engine = status.engine;
           $('status').innerHTML =
             `engine <b>${engine.name}</b> ${engine.ok ? 'ready' : 'unavailable'}` +
@@ -3436,6 +3459,11 @@
         if (name === 'settings') loadSettings().catch((e) => toast(e.message));
         if (name === 'categories') loadCategories().catch((e) => toast(e.message));
       };
+      // The footer's year, set from the clock rather than typed into a file
+      // nobody will remember to edit. The version beside it arrives with the
+      // first status, and reads "…" until then.
+      $('year').textContent = String(new Date().getFullYear());
+
       $('tab-archives').onclick = () => showTab('archives');
       $('tab-categories').onclick = () => showTab('categories');
       $('tab-settings').onclick = () => showTab('settings');
