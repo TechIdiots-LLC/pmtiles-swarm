@@ -177,7 +177,9 @@ describe('the archives table', () => {
   // The archives table is the first one on the page; the rest belong to
   // settings and would otherwise be counted too.
   const head = page.slice(page.indexOf('<thead>'), page.indexOf('</thead>'));
-  const headings = [...head.matchAll(/<th>([^<]*)<\/th>/g)].map((match) =>
+  // Attributes allowed: a heading may carry a title explaining what its
+  // numbers mean, and the column list should not care.
+  const headings = [...head.matchAll(/<th[^>]*>([^<]*)<\/th>/g)].map((match) =>
     match[1].trim(),
   );
 
@@ -399,5 +401,32 @@ describe('the seeding limit in settings', () => {
 
   it('is collected when settings are saved', () => {
     assert.match(page, /\.\.\.readSeedingEditor\(\)/);
+  });
+});
+
+describe('the peers column', () => {
+  it('separates connected clients from the whole swarm', () => {
+    // "0 / 2" on a complete, seeding archive is correct and reads as a fault:
+    // the counts are remote clients only, since a client is never its own
+    // peer. The swarm totals are what tell "nobody wants this" apart from
+    // "nobody knows about it".
+    assert.match(page, /function swarmSuffix/);
+    assert.match(page, /swarmSeeds/);
+    assert.match(page, /swarmPeers/);
+  });
+
+  it('says nothing about the swarm before a tracker has answered', () => {
+    // libtorrent reports -1 until a scrape comes back. Rendering that as 0
+    // would claim an empty swarm on the strength of no information.
+    const suffix = page.slice(
+      page.indexOf('function swarmSuffix'),
+      page.indexOf('function peersTitle'),
+    );
+    assert.match(suffix, /seeds < 0 && peers < 0/);
+    assert.match(suffix, /return ''/);
+  });
+
+  it('explains in the cell why this node is not in the count', () => {
+    assert.match(page, /never its own peer|not its own peer/);
   });
 });

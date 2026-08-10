@@ -318,7 +318,7 @@
               <th>Mode</th>
               <th>Origin</th>
               <th>Progress</th>
-              <th>Peers</th>
+              <th title="Connected downloading / seeding, and in parentheses what the tracker says the whole swarm holds. This node is never counted among the connected — a client is not its own peer.">Peers</th>
               <th>Down</th>
               <th>Up</th>
               <th>Ratio</th>
@@ -709,6 +709,41 @@
       let speedState = null;
 
       /**
+       * What the tracker says the whole swarm holds, where it has said.
+       *
+       * The connected counts are remote clients only — this node is never its
+       * own peer — so a fully seeded archive that nobody is downloading reads
+       * "0 / 2", which is correct and easily read as a fault. The swarm totals
+       * are what separate "nobody wants this" from "nobody knows about it".
+       * @param {object} status - Live status for one archive.
+       * @returns {string} - A suffix, or nothing when no tracker has answered.
+       */
+      function swarmSuffix(status) {
+        const seeds = status?.swarmSeeds ?? -1;
+        const peers = status?.swarmPeers ?? -1;
+        if (seeds < 0 && peers < 0) return '';
+        // Parentheses for the swarm totals, as qBittorrent writes them.
+        return ` <span class="sub">(${Math.max(0, peers)} / ${Math.max(0, seeds)})</span>`;
+      }
+
+      /**
+       * The explanation behind the peers cell.
+       * @param {object} status - Live status for one archive.
+       * @returns {string} - Tooltip text.
+       */
+      function peersTitle(status) {
+        const connected =
+          `Connected: ${status?.peers ?? 0} downloading, ${status?.seeds ?? 0} seeding. ` +
+          'This node is not counted — a client is never its own peer.';
+        const seeds = status?.swarmSeeds ?? -1;
+        if (seeds < 0) return `${connected} No tracker has reported the swarm yet.`;
+        return (
+          `${connected} The tracker reports ${Math.max(0, status?.swarmPeers ?? 0)} ` +
+          `downloading and ${seeds} seeding in the whole swarm, this node included.`
+        );
+      }
+
+      /**
        * Shows downloads that have no archive yet.
        *
        * An archive added from a URL is fetched whole before there is anything
@@ -928,7 +963,7 @@
               </div>
               <div class="sub">${pct(progress)}</div>
             </td>
-            <td>${s.peers ?? 0} / ${s.seeds ?? 0}</td>
+            <td title="${peersTitle(s)}">${s.peers ?? 0} / ${s.seeds ?? 0}${swarmSuffix(s)}</td>
             <td>${rate(s.downloadSpeed)}</td>
             <td>${rate(s.uploadSpeed)}</td>
             <td>${ratioCell(entry, s)}</td>

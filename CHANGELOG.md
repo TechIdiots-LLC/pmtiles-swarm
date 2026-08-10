@@ -2,6 +2,12 @@
 
 ## master
 ### ✨ Features and improvements
+- **The peers column distinguishes who is connected from what the swarm holds.** `0 / 2` on a
+  complete, seeding archive is correct — the counts are remote clients only, and a client is never
+  its own peer — but it reads like a fault. The tracker's own totals now follow in parentheses, in
+  qBittorrent's notation, and the cell explains itself on hover. Nothing is shown until a tracker
+  has actually answered, since claiming an empty swarm on no information is worse than saying
+  nothing.
 - **An archive fetched from a URL is filed under its infohash like every other.** It could not be
   before: the infohash is computed from the bytes, which are the thing still arriving, so a
   scheduled download landed in the root of the save path while everything else sat under its own
