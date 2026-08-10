@@ -9,6 +9,13 @@
 
 ## 0.4.3
 ### 🐞 Bug fixes
+- **The lock file keeps the optional native builds `ws` asks for.** `bufferutil` and
+  `utf-8-validate` have now been stripped from it twice by a local `npm install` on a machine
+  that had already decided not to build them, and both times the release failed on `npm ci` —
+  which reproduces a lock exactly and will not improvise. Nothing local ever notices, because
+  they are optional and their absence costs only speed; the only thing that notices is a clean
+  install, which is what every release is. There is a test for it now, and it fails against the
+  lock that broke this release.
 - **Requires the `pmtiles-torrent` that the resume fix actually needs.** The dependency said
   `^0.3.0`, which an existing install already satisfies — so updating pmtiles-swarm left the
   sidecar where it was, and half of a fix that lives in both halves does nothing. npm was right
