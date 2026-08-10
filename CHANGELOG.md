@@ -2,13 +2,17 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.3.2
+### ✨ Features and improvements
 - **The console has a footer naming the version it is running**, beside `© <year> TechIdiots LLC`
   and a link to the source. The version comes from `package.json` through `/api/status` rather than
   being written into the page, since the number on screen is the one somebody quotes when reporting
   a problem.
-
-### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ### 📚 Documentation
 - **How to update an installed service**, which was missing: reinstall into the same prefix and
