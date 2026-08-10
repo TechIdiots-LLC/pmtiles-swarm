@@ -115,6 +115,22 @@ subscribers forward, and they fail differently, so publishing both is cheap insu
 
 ## Configuration
 
+Start from the sample, which is a working file rather than a fragment:
+
+```sh
+cp swarm.config.json.sample swarm.config.json
+```
+
+It shows the settings worth knowing about in one place — both engines, save
+locations, speed and seeding limits, a watched folder, a scheduled upstream, a
+peer, and the auth block. Everything in it that reaches outside the machine
+points at `example.org`, and the paths that need choosing say `EDIT-ME`, so
+copying it and starting the node cannot begin a hundred-gigabyte download or
+poll a stranger's server before you have read it.
+
+`swarm.config.json` itself is gitignored — along with every other
+`swarm.config*.json` and `*.bak` — because it holds an API key.
+
 ```json
 {
   "port": 8090,
