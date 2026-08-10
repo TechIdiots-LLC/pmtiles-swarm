@@ -99,9 +99,8 @@ jobs:
           # step reinstalled npm on every release whatever version it had.
           NPM_VERSION="$(npm --version)"
           echo "npm $NPM_VERSION"
-          if [ "$(printf '11.5.1
-%s
-' "$NPM_VERSION" | sort -V | head -n1)" != "11.5.1" ]; then
+          OLDEST="$({ echo 11.5.1; echo "$NPM_VERSION"; } | sort -V | head -n1)"
+          if [ "$OLDEST" != "11.5.1" ]; then
             echo "npm $NPM_VERSION is older than 11.5.1; upgrading"
             npm install -g npm@latest
           fi
