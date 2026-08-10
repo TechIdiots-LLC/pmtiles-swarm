@@ -325,7 +325,10 @@ describe('when a source is looked at', () => {
     const before = manager.lastRunFor('daily');
     await manager.sweep(later);
 
-    assert.equal(manager.lastRunFor('hourly').getTime(), later.getTime());
+    // The hourly one ran, so its stamp moved to when that run finished — not
+    // to the `now` it was offered, which is when the run began. The daily one
+    // did not run, so its stamp is untouched.
+    assert.ok(manager.lastRunFor('hourly').getTime() >= later.getTime());
     assert.equal(manager.lastRunFor('daily').getTime(), before.getTime());
   });
 });
@@ -409,5 +412,132 @@ describe('publishing a watched location as a web seed', () => {
   it('carries a separate public URL where one is given', async () => {
     const options = await importWith({ webSeeds: ['https://cdn.example/a.pmtiles'] });
     assert.deepEqual(options.webSeeds, ['https://cdn.example/a.pmtiles']);
+  });
+});
+
+describe('a long import does not come back due the moment it ends', () => {
+  /**
+   * A manager whose one source takes a controllable amount of time to import.
+   * @param {number} importMs - How long the import appears to take.
+   * @returns {Promise<object>} - The manager, the clock, and the attempt log.
+   */
+  async function slowSource(importMs) {
+    const dir = await fs.mkdtemp(path.join(workspace, 'slow-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+
+    const attempts = [];
+    let clock = new Date('2026-08-09T12:00:00Z');
+
+    const server = http.createServer((req, res) => {
+      if (req.url.endsWith('.pmtiles')) {
+        res.writeHead(200, { 'content-type': 'application/octet-stream' });
+        res.end('x');
+        return;
+      }
+      res.writeHead(404).end();
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    const manager = new ScheduledSourceManager(
+      {
+        addRemoteArchive: async (url) => {
+          attempts.push(url);
+          // The import takes time; the clock moves while it runs.
+          clock = new Date(clock.getTime() + importMs);
+          return { infoHash: 'a'.repeat(40), name: 'planet.pmtiles' };
+        },
+      },
+      catalog,
+      {
+        sources: [
+          {
+            name: 'protomaps',
+            url: `http://127.0.0.1:${server.address().port}/{YYYYMMDD}.pmtiles`,
+            everyMinutes: 15,
+            lookbackDays: 0,
+          },
+        ],
+      },
+      { now: () => clock },
+    );
+
+    return {
+      manager,
+      attempts,
+      now: () => clock,
+      close: () => new Promise((resolve) => server.close(resolve)),
+    };
+  }
+
+  it('waits the full interval after a long import, not from when it began', async () => {
+    // A planet build takes hours to fetch. With the run time recorded only at
+    // the start, `now - lastRun` was hours by the time it finished, so the very
+    // next tick started the whole download again — for ever.
+    const node = await slowSource(4 * 60 * 60 * 1000); // four hours
+    try {
+      await node.manager.sweep(node.now());
+      assert.equal(node.attempts.length, 1);
+
+      // A tick immediately after it finished. Under the old bookkeeping this
+      // was already four hours overdue.
+      await node.manager.sweep(node.now());
+      assert.equal(node.attempts.length, 1, 'it must not restart straight away');
+
+      // And it does come back, once the interval has really passed.
+      const later = new Date(node.now().getTime() + 16 * 60 * 1000);
+      await node.manager.sweep(later);
+      assert.equal(node.attempts.length, 2);
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('does the same after a failure, rather than retrying from zero', async () => {
+    // A fetch that dies partway is the same shape: without this it was retried
+    // immediately, from the beginning, on every tick.
+    const dir = await fs.mkdtemp(path.join(workspace, 'fail-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+
+    const server = http.createServer((req, res) => {
+      if (req.url.endsWith('.pmtiles')) {
+        res.writeHead(200).end('x');
+        return;
+      }
+      res.writeHead(404).end();
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    let clock = new Date('2026-08-09T12:00:00Z');
+    const attempts = [];
+    const manager = new ScheduledSourceManager(
+      {
+        addRemoteArchive: async () => {
+          attempts.push(clock);
+          clock = new Date(clock.getTime() + 60 * 60 * 1000);
+          throw new Error('terminated');
+        },
+      },
+      catalog,
+      {
+        sources: [
+          {
+            name: 'protomaps',
+            url: `http://127.0.0.1:${server.address().port}/{YYYYMMDD}.pmtiles`,
+            everyMinutes: 15,
+            lookbackDays: 0,
+          },
+        ],
+      },
+    );
+
+    try {
+      await manager.sweep(clock);
+      await manager.sweep(clock);
+      assert.equal(attempts.length, 1, 'a failure must not be retried instantly');
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
   });
 });

@@ -268,10 +268,14 @@ export class ScheduledSourceManager {
    * @param {import('./catalog.js').Catalog} catalog - Used to skip what we already have.
    * @param {object} config - Resolved configuration.
    */
-  constructor(library, catalog, config) {
+  /** Reads the clock. Injectable so a long import can be simulated. */
+  #now;
+
+  constructor(library, catalog, config, { now = () => new Date() } = {}) {
     this.#library = library;
     this.#catalog = catalog;
     this.#config = config;
+    this.#now = now;
   }
 
   /**
@@ -322,11 +326,22 @@ export class ScheduledSourceManager {
         if (!isDue(source, this.#lastRun.get(key), { defaultHours, now })) {
           continue;
         }
-        // Recorded before the work, not after. A source that spends an hour
-        // importing a planet archive must not come back due the moment it
-        // finishes, and one that throws must not be retried every minute.
+        // Recorded twice, and both matter.
+        //
+        // Before, so a tick landing while this one is still working does not
+        // start it again. After, so the interval is measured from when the
+        // work *finished* — which is the half that was missing. A planet
+        // build takes hours to fetch, so by the time it ends the start time
+        // is hours old, `now - lastRun` is far past any interval, and the very
+        // next tick starts the whole download again. Failure is the same
+        // shape: a fetch that dies at 35% was immediately retried from zero,
+        // for ever, which is how 49 GB got downloaded twice.
         this.#lastRun.set(key, now);
-        imported.push(...(await this.#pollSource(source)));
+        try {
+          imported.push(...(await this.#pollSource(source)));
+        } finally {
+          this.#lastRun.set(key, this.#now());
+        }
       }
 
       return imported;

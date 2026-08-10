@@ -49,6 +49,14 @@
   at it quietly on every start. Unset keys still take libtorrent's own defaults.
 
 ### 🐞 Bug fixes
+- **A watched location no longer restarts its download the moment one finishes.** The last-run time
+  was recorded when a poll *began* and never again, so by the time a planet build had been fetched
+  the stamp was hours old, `now - lastRun` was far past any interval, and the next tick started the
+  whole thing again — for ever, on a 72 GB archive. A failed fetch behaved the same way: one that
+  died at 35% was retried from zero immediately. The time is now recorded on the way in *and* on
+  the way out, so overlap is still prevented and the interval is measured from when the work
+  actually ended. The comment there had described this exact behaviour as the thing it was
+  avoiding.
 - **`libtorrent` and `feedTitle` are settings the API knows about.** `DEFAULTS` doubles as the
   allow-list, and neither key was in it — so a libtorrent node saving anything at all was answered
   `unknown setting: libtorrent`, because the console posts back every key it was given.
