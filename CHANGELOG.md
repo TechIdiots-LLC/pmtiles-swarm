@@ -9,6 +9,12 @@
   adopted from a client, or taken from a peer is never considered. Sources can also carry their own
   `seeding` limit, since a daily build that has done its share deserves different treatment from
   the only copy of something.
+- **"Newest" now means the newest build, not the most recently added archive.** The two disagree
+  and can be opposite: a poll takes candidates newest first, so importing several at once gives the
+  newest build the *earliest* arrival time. `/latest/<category>` and the category feeds ordered by
+  arrival, which would have served the oldest of a batch, and a retention policy ordered the same
+  way would have deleted the newest. Entries record the date of the build they are, and one
+  comparison in the catalog answers it for both.
 - **The global seeding limit has real fields.** It was editable only as a raw JSON textarea among
   every other object setting, which is not a way to ask someone for a ratio. It now has the same
   shape as the per-archive dialog that already existed.

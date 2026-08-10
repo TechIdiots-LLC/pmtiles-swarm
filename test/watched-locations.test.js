@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { createApp } from '../src/api.js';
-import { Catalog } from '../src/catalog.js';
+import { Catalog, newerFirst } from '../src/catalog.js';
 import {
   ScheduledSourceManager,
   expandTemplate,
@@ -820,8 +820,11 @@ describe('retiring older builds from a source', () => {
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 
+    // A catalog that behaves like the real one: the imported entry is in it by
+    // the time retention runs, and list() is ordered newest first.
+    const held = [...existing];
     const catalog = {
-      list: () => existing,
+      list: () => [...held].sort((a, b) => newerFirst(a, b)),
       findBySource: () => null,
     };
     const removed = [];
@@ -831,14 +834,20 @@ describe('retiring older builds from a source', () => {
       {
         addRemoteArchive: async (url, options) => {
           optionsUsed.push(options);
-          return {
+          const entry = {
             infoHash: 'new'.padEnd(40, '0'),
             name: url.split('/').pop(),
             createdAt: '2026-08-10T00:00:00.000Z',
+            buildDate: options.buildDate,
+            source: { type: 'http', name: options.sourceName },
           };
+          held.push(entry);
+          return entry;
         },
         remove: async (infoHash, options) => {
           removed.push({ infoHash, ...options });
+          const at = held.findIndex((candidate) => candidate.infoHash === infoHash);
+          if (at >= 0) held.splice(at, 1);
           return true;
         },
       },
@@ -868,6 +877,7 @@ describe('retiring older builds from a source', () => {
     infoHash: `old${days}`.padEnd(40, '0'),
     name: `protomaps-${days}.pmtiles`,
     createdAt: new Date(Date.UTC(2026, 7, 10 - days)).toISOString(),
+    buildDate: new Date(Date.UTC(2026, 7, 10 - days)).toISOString(),
     source: { type: 'http', name: 'protomaps' },
   });
 
@@ -917,5 +927,93 @@ describe('retiring older builds from a source', () => {
     });
     assert.equal(optionsUsed[0].sourceName, 'protomaps');
     assert.deepEqual(optionsUsed[0].seeding, { ratio: 2, then: 'stop' });
+  });
+});
+
+describe('what "newest" means, and when it is safe to retire', () => {
+  it('orders by the build, not by when it arrived', () => {
+    // These disagree, and can be opposite. A poll takes candidates newest
+    // first, so importing three at once gives the newest build the earliest
+    // arrival time. `/latest` and the retention policy both follow this
+    // ordering, so getting it wrong serves the oldest build and deletes the
+    // newest — the same mistake in two places.
+    const older = {
+      buildDate: '2026-08-08T00:00:00.000Z',
+      createdAt: '2026-08-10T00:00:02.000Z', // imported last
+    };
+    const newer = {
+      buildDate: '2026-08-09T00:00:00.000Z',
+      createdAt: '2026-08-10T00:00:01.000Z', // imported first
+    };
+    assert.ok(newerFirst(newer, older) < 0, 'the newer build sorts first');
+  });
+
+  it('falls back to arrival where there is no build date', () => {
+    const first = { createdAt: '2026-08-09T00:00:00.000Z' };
+    const second = { createdAt: '2026-08-10T00:00:00.000Z' };
+    assert.ok(newerFirst(second, first) < 0);
+  });
+
+  it('retires nothing when an older build was the one imported', async () => {
+    // The rule: a build that has superseded nothing retires nothing. Until
+    // the feed and /latest resolve to it, the archives it would delete are
+    // still where consumers are being sent.
+    const server = http.createServer((req, res) => {
+      res.writeHead(req.url.endsWith('.pmtiles') ? 200 : 404).end('x');
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    // Already holding a build newer than the one about to be imported.
+    const newerBuild = {
+      infoHash: 'aaa'.padEnd(40, '0'),
+      name: 'protomaps-newer.pmtiles',
+      buildDate: '2999-01-01T00:00:00.000Z',
+      createdAt: '2026-08-01T00:00:00.000Z',
+      source: { type: 'http', name: 'protomaps' },
+    };
+    const held = [newerBuild];
+    const removed = [];
+
+    const manager = new ScheduledSourceManager(
+      {
+        addRemoteArchive: async (url, options) => {
+          const entry = {
+            infoHash: 'bbb'.padEnd(40, '0'),
+            name: url.split('/').pop(),
+            buildDate: options.buildDate,
+            createdAt: '2026-08-10T00:00:00.000Z',
+            source: { type: 'http', name: options.sourceName },
+          };
+          held.push(entry);
+          return entry;
+        },
+        remove: async (infoHash) => {
+          removed.push(infoHash);
+          return true;
+        },
+      },
+      {
+        list: () => [...held].sort((a, b) => newerFirst(a, b)),
+        findBySource: () => null,
+      },
+      {
+        sources: [
+          {
+            name: 'protomaps',
+            url: `http://127.0.0.1:${server.address().port}/{YYYYMMDD}.pmtiles`,
+            lookbackDays: 0,
+            keep: 1,
+          },
+        ],
+      },
+    );
+
+    try {
+      await manager.sweep(new Date());
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+
+    assert.deepEqual(removed, [], 'the newer build must survive');
   });
 });

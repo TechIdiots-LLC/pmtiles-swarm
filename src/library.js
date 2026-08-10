@@ -571,6 +571,9 @@ export class Library {
         name: options.sourceName,
       },
       seeding: options.seeding,
+      // Which build this is, as distinct from when it was fetched. `/latest`
+      // and the retention policy both mean this by "newest".
+      buildDate: options.buildDate,
       savePath,
       pmtiles: summary,
       kind: identified.kind,
@@ -1971,6 +1974,7 @@ export class Library {
       pieceLength: created.pieceLength,
       pieceCount: created.pieceCount,
       complete: true,
+      buildDate: details.buildDate,
       pmtiles: details.pmtiles,
       kind: details.kind,
       md5: details.md5,

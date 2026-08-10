@@ -460,6 +460,11 @@ export class ScheduledSourceManager {
           // found later. Their URLs differ by date, so nothing else relates
           // them to each other.
           sourceName: source.name,
+          // Which build this is, as opposed to when it happened to be
+          // imported. `keep` ranks by it, and the two disagree: a poll takes
+          // candidates newest first, so importing several at once gives the
+          // *newest* build the *earliest* import time.
+          buildDate: date.toISOString(),
           seeding: source.seeding,
           comment: source.comment
             ? `${source.comment} ${expandTemplate('{YYYY-MM-DD}', date)}`
@@ -645,18 +650,32 @@ export class ScheduledSourceManager {
     if (!Number.isFinite(keep) || keep < 1) return [];
     if (!source.name) return [];
 
-    const siblings = this.#catalog
+    // The catalog's own order, which is exactly what `/latest` follows.
+    const family = this.#catalog
       .list()
-      .filter(
-        (candidate) =>
-          candidate.source?.name === source.name &&
-          candidate.infoHash !== entry.infoHash,
-      )
-      // Newest first, so what falls off the end is the oldest.
-      .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
+      .filter((candidate) => candidate.source?.name === source.name);
 
-    // The one just imported occupies the first slot.
-    const doomed = siblings.slice(Math.max(0, keep - 1));
+    // Nothing is deleted until the new build is the one being served.
+    //
+    // A category's feed and its `/latest/<category>/tiles.json` resolve to the
+    // newest archive in it, and that is what consumers point at. Once they
+    // resolve to this build, the ones it replaced are no longer where anyone
+    // is being sent, and retiring them costs nobody a fetch they were about to
+    // make. Before that — while an older build is still the answer — deleting
+    // it would break the very URL the feed is advertising.
+    //
+    // It also covers the case that makes this necessary at all: a poll taking
+    // several builds takes them newest first, so an *older* one can be the
+    // most recent import. It has superseded nothing and must retire nothing.
+    if (family[0]?.infoHash !== entry.infoHash) {
+      console.log(
+        `[source] ${source.name}: ${entry.name} is not the newest build here, ` +
+          'so nothing is retired',
+      );
+      return [];
+    }
+
+    const doomed = family.slice(keep);
     const removed = [];
 
     for (const old of doomed) {

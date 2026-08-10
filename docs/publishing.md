@@ -495,6 +495,18 @@ today's URL and see whether it exists yet:
     torrent client, or taken from a peer is never considered, however alike it looks or
     wherever it sits.
 
+    **Nothing is retired until the new build is the one being served.** Retirement runs
+    only after the download has finished, the torrent has been hashed from the completed
+    file, and the engine has accepted it — if any of those fails, nothing is deleted. On
+    top of that, the new build must be the one `/latest/<category>/tiles.json` and the
+    category feed resolve to. That is the URL consumers point at, so once it has moved on,
+    the builds it replaced are no longer where anyone is being sent; before it moves, a
+    deletion would break the very URL the feed is advertising.
+
+    A build that has superseded nothing therefore retires nothing — which matters when
+    `newest` is above 1, because a poll takes candidates newest first and the *last* build
+    imported is then the oldest of them.
+
 `seeding`
     A seeding limit for this source's builds, in the same shape as the global one:
     `{ "ratio": 2, "minutes": 4320, "then": "stop" }`. Useful where one source's archives

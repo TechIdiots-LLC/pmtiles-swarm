@@ -50,6 +50,23 @@ export function normalizeCategories(source) {
   return [...new Set(clean)].sort();
 }
 
+/**
+ * Orders two entries newest first.
+ *
+ * The build's own date decides it where both have one, since that is what a
+ * reader means by "the latest planet build". Arrival time is the fallback, and
+ * the tie-break for archives that have no build date at all.
+ * @param {object} a - One entry.
+ * @param {object} b - The other.
+ * @returns {number} - Negative when `a` is newer.
+ */
+export function newerFirst(a, b) {
+  if (a.buildDate && b.buildDate && a.buildDate !== b.buildDate) {
+    return String(b.buildDate).localeCompare(String(a.buildDate));
+  }
+  return String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''));
+}
+
 export class Catalog {
   #file;
   #entries = new Map();
@@ -80,12 +97,18 @@ export class Catalog {
 
   /**
    * Every entry, newest first.
+   *
+   * "Newest" is the build's own date where it has one, and otherwise when it
+   * was added. The two can be opposite: a scheduled source takes candidates
+   * newest first, so importing three builds at once gives the *newest* build
+   * the *earliest* `createdAt`. Ordering by arrival then makes `/latest`
+   * serve the oldest of the three, and makes a retention policy delete the
+   * wrong ones — the same mistake in two places, which is why there is one
+   * answer here rather than one at each call site.
    * @returns {CatalogEntry[]} - The catalog contents.
    */
   list() {
-    return [...this.#entries.values()].sort((a, b) =>
-      b.createdAt.localeCompare(a.createdAt),
-    );
+    return [...this.#entries.values()].sort((a, b) => newerFirst(a, b));
   }
 
   /**
