@@ -2602,7 +2602,11 @@
                      token that manages maps — it would be one that runs code.
                      Edit them in the config file, or set
                      <code>"allowHooksFromApi": true</code> there to take that
-                     trade deliberately and unlock this panel.
+                     trade deliberately and unlock this panel —
+                     <b>then restart</b>, since the config file is read once at
+                     startup and nothing re-reads it. This panel is still
+                     read-only because the running node has not seen that
+                     setting, whatever the file now says.
                    </p>`
             }
           </div>`;

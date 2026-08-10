@@ -214,6 +214,74 @@ anything that holds data:
 `ReadWritePaths` names, so every one of those has to be listed. An archive
 directory on another mount needs its own entry.
 
+## Sharing a folder with another service
+
+A folder produced by something else — a generation script, or a directory a
+torrent client already owns — needs three things, and group membership is only
+the first of them.
+
+```sh
+# 1. Put the service account in the owning group.
+sudo usermod -aG qbittorrent-nox pmtiles-swarm
+
+# 2. Give that group write, and setgid so new entries inherit it.
+sudo find /mnt/hd-16TB/store/generated -type d -exec chmod 2775 {} +
+sudo find /mnt/hd-16TB/store/generated -type f -exec chmod 664 {} +
+
+# 3. Make what the service creates group-writable too.
+sudo systemctl edit pmtiles-swarm
+sudo systemctl restart pmtiles-swarm
+```
+
+Step 3 opens an override; the two lines to put in it are:
+
+```ini
+[Service]
+UMask=0002
+```
+
+**A folder at 0755 gives the group `r-x`.** Membership alone buys read access
+and nothing else, which is enough to hash and seed an archive and not enough to
+do anything else with the folder — so this looks like it worked until the first
+thing that writes.
+
+Three features want write, and it is worth knowing which, because a read-only
+folder is a perfectly reasonable way to run:
+
+| | |
+| --- | --- |
+| `latestLink` | Creates and replaces a name in the folder |
+| `keep`, `keepDays` | Deletes retired builds |
+| `onComplete` | Whatever the script does, since it runs as this account |
+
+Renaming and deleting need write on the **directory**, not on the file, which is
+why the directory bits are the ones that matter. `UMask=0002` matters for the
+other direction: without it a file the service creates is `0644`, and the other
+service can delete it but not modify it.
+
+**Group membership is read when a process starts**, so the restart is not
+optional. Neither is `ReadWritePaths`: `ProtectSystem=strict` presents the rest
+of the filesystem as read-only inside the unit's namespace, and the write is
+refused there before the permission bits are consulted. Every folder outside
+`/var/lib/pmtiles-swarm` has to be named, in a drop-in from
+`systemctl edit pmtiles-swarm`:
+
+```ini
+[Service]
+ReadWritePaths=/mnt/store/generated /mnt/work/planetiler
+UMask=0002
+```
+
+`ReadWritePaths=` accumulates, so a drop-in adds to what the unit already lists
+rather than replacing it.
+
+Two things that look like checks and are not. `id pmtiles-swarm` reads
+`/etc/group` and shows the new group the instant `usermod` returns, whether or
+not the running process has it — read `/proc/$(systemctl show -p MainPID --value
+pmtiles-swarm)/status` instead. And `sudo -u pmtiles-swarm touch …` runs outside
+the unit's namespace, so it succeeds on permissions alone while the service is
+still being refused.
+
 ## The sidecar
 
 The libtorrent engine runs Python as a child process, so the service user needs

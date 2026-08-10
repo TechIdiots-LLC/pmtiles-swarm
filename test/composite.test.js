@@ -428,3 +428,47 @@ describe('what a secondary is allowed to be handed', () => {
     assert.equal(secondary.added.length, 1);
   });
 });
+
+describe('persisting resume data across engines', () => {
+  it('asks every engine that keeps any', async () => {
+    // The bug this exists for: the composite had no saveResume at all, and the
+    // caller checks for the method before setting its timer. So on any node
+    // with a secondary engine the periodic save was never scheduled, and an
+    // archive seeding since it was added re-hashed its whole store on every
+    // start.
+    const primary = recording('libtorrent');
+    primary.saveResume = async (infoHash) => primary.calls.push(['saveResume', infoHash]);
+    const secondary = recording('webtorrent');       // keeps none, offers none
+
+    const engine = new CompositeEngine({
+      primary,
+      secondaries: [secondary],
+      config: {},
+    });
+
+    assert.equal(typeof engine.saveResume, 'function', 'the timer checks for this');
+    await engine.saveResume();
+    assert.deepEqual(primary.calls, [['saveResume', undefined]]);
+    assert.deepEqual(secondary.calls, [], 'an engine without one is skipped, not called');
+  });
+
+  it('carries on when one engine refuses', async () => {
+    // Losing every other engine's resume data because one of them failed would
+    // turn a saved half-hour into a lost one.
+    const primary = recording('libtorrent');
+    primary.saveResume = async () => {
+      throw new Error('sidecar is not answering');
+    };
+    const other = recording('second');
+    other.saveResume = async () => other.calls.push(['saveResume']);
+
+    const engine = new CompositeEngine({
+      primary,
+      secondaries: [other],
+      config: {},
+    });
+
+    await engine.saveResume();
+    assert.deepEqual(other.calls, [['saveResume']]);
+  });
+});

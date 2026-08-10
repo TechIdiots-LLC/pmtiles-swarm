@@ -1,4 +1,7 @@
 import assert from 'node:assert';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it } from 'node:test';
 import { saveConfig } from '../src/config.js';
 import { ProgramHooks, substitute } from '../src/hooks.js';
@@ -209,5 +212,82 @@ describe('a save that is refused changes nothing', () => {
       /only be set in the config file/,
     );
     assert.deepEqual(config.watch, []);
+  });
+});
+
+describe('a hook that says a great deal', () => {
+  it('is not killed for it, and its last words are kept', async () => {
+    // The bug this exists for: output was collected whole into a buffer, and
+    // past that buffer's size the child is killed. A planetiler run says far
+    // more than any buffer worth holding, so a build could die hours in for
+    // being talkative — and the output that would have explained it was the
+    // thing that overflowed.
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-chatty-'));
+    const script = path.join(dir, 'chatty.cjs');
+    await fs.writeFile(
+      script,
+      [
+        // Comfortably past the 4 MiB this used to allow.
+        "for (var i = 0; i < 200000; i += 1) {",
+        "  process.stdout.write('tile batch ' + i + String.fromCharCode(10));",
+        "}",
+        "process.stdout.write('WROTE planet.pmtiles' + String.fromCharCode(10));",
+      ].join(String.fromCharCode(10)),
+    );
+
+    const entry = {
+      infoHash: 'd'.repeat(40),
+      name: 'planet-260810.osm.pbf',
+      savePath: dir,
+      status: { progress: 0.5 },
+    };
+    const hooks = new ProgramHooks(libraryOf([entry]), {
+      onComplete: { command: process.execPath, args: [script] },
+    });
+
+    const said = [];
+    const realLog = console.log;
+    const realError = console.error;
+    let settle;
+    const finished = new Promise((resolve) => {
+      settle = resolve;
+    });
+    // Scoped to this archive. console.log is process-global and the other
+    // tests in this file run alongside it, so an unqualified "finished"
+    // resolves this the moment any of them does.
+    const mine = (line) => line.includes(entry.name) || line.startsWith('[onComplete]   ');
+    console.log = (...parts) => {
+      const line = parts.join(' ');
+      if (mine(line)) said.push(line);
+      if (line.includes(`${entry.name}: finished`)) settle();
+    };
+    console.error = (...parts) => {
+      const line = `ERROR ${parts.join(' ')}`;
+      if (mine(line)) {
+        said.push(line);
+        settle();
+      }
+    };
+
+    try {
+      await hooks.sweep();
+      entry.status.progress = 1;
+      await hooks.sweep();
+      await finished;
+    } finally {
+      console.log = realLog;
+      console.error = realError;
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+
+    assert.deepEqual(
+      said.filter((line) => /ERROR|killed|exited with code/.test(line)),
+      [],
+      'a talkative hook is still a successful one',
+    );
+    assert.ok(
+      said.some((line) => line.includes('WROTE planet.pmtiles')),
+      `the last thing it said is what matters: ${said.slice(-3).join(' | ')}`,
+    );
   });
 });

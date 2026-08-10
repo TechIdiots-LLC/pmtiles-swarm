@@ -7,6 +7,31 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.4.2
+### 🐞 Bug fixes
+- **Resume data is saved on a node running more than one engine.** The periodic save is only
+  scheduled if the engine offers `saveResume`, and the composite engine — the one in use
+  whenever `secondaryEngines` is set — did not, so it was never scheduled at all. The only
+  writes left were at shutdown, and those hit the second half of this: the sidecar asked
+  `need_save_resume_data()` first, which answers "has anything changed since the last save"
+  rather than "does a resume file exist". An archive that had been seeding since it was added
+  answers no, so nothing was written for it and it re-hashed its whole store on every start —
+  half an hour of disk, for 800 GB, before it serves anything. Both halves are fixed; the
+  sidecar half ships in `pmtiles-torrent`.
+- **A hook is no longer killed for being talkative.** Its output was collected whole into a
+  buffer, and past that buffer's size the child is killed — so a hook that generates a planet
+  could die hours in for the offence of saying too much, and the output that would have
+  explained it was the thing that overflowed. Output is streamed now and only the last twenty
+  lines are kept, so how much a hook says cannot decide whether it survives.
+
+### 📚 Documentation
+- **Sharing a folder with another service**, in the service guide: group membership is only the
+  first of three steps, and a folder at 0755 gives that group `r-x` — enough to hash and seed an
+  archive and not enough for `latestLink`, retention or a hook, so it looks like it worked until
+  the first thing that writes.
+- **The read-only hooks panel says to restart.** Setting `allowHooksFromApi` in the config file
+  unlocks nothing until the node reads it, which it does once, at startup.
+
 ## 0.4.1
 ### 🐞 Bug fixes
 - **A feed no longer walks backwards through its own history.** An item already taken was

@@ -341,6 +341,32 @@ export class CompositeEngine {
   }
 
   /**
+   * Persists resume data on every engine that keeps any.
+   *
+   * Missing entirely until now, and the caller checks for it before setting
+   * its timer — so on any node with a secondary engine the periodic save was
+   * never scheduled, and the only resume data ever written was whatever the
+   * shutdown path managed. An archive that had been seeding since it was added
+   * therefore re-hashed its whole store on every start, which for 800 GB is
+   * half an hour of disk before it serves anything.
+   * @param {string} [infoHash] - One archive, or all of them when omitted.
+   * @returns {Promise<void>} - Resolves once every engine has been asked.
+   */
+  async saveResume(infoHash) {
+    for (const engine of [this.#primary, ...this.#secondaries]) {
+      // WebTorrent keeps none, and says so by not offering the method.
+      if (!engine.saveResume) continue;
+      try {
+        await engine.saveResume(infoHash);
+      } catch (error) {
+        console.warn(
+          `[composite] ${engine.name} could not save resume data: ${error.message}`,
+        );
+      }
+    }
+  }
+
+  /**
    * Peers from every engine, labelled with which one found them.
    * @param {string} infoHash - The archive.
    * @returns {Promise<object[]>} - Peers.

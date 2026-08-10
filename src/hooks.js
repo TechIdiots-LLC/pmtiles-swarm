@@ -1,5 +1,8 @@
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import path from 'node:path';
+
+/** How much of a hook's output to repeat into this node's own log. */
+const TAIL_LINES = 20;
 
 /**
  * Running something when an archive arrives, and when it finishes.
@@ -200,32 +203,61 @@ export class ProgramHooks {
     console.log(`[${label}] ${entry.name}: ${command} ${filled.join(' ')}`);
 
     return new Promise((resolve) => {
-      execFile(
-        command,
-        filled,
-        {
-          // A tile build runs for hours. Nothing here should assume otherwise,
-          // so the default is no timeout at all.
-          timeout: (timeoutSeconds ?? 0) * 1000,
-          maxBuffer: 4 * 1024 * 1024,
-          cwd: hook.cwd,
-          env: { ...process.env, ...(hook.env ?? {}) },
-        },
-        (error, stdout, stderr) => {
-          if (error) {
-            console.error(`[${label}] ${entry.name}: ${error.message}`);
-          } else {
-            console.log(`[${label}] ${entry.name}: finished`);
-          }
-          const output = `${stdout ?? ''}${stderr ?? ''}`.trim();
-          if (output) {
-            for (const line of output.split('\n').slice(-20)) {
-              console.log(`[${label}]   ${line}`);
-            }
-          }
-          resolve();
-        },
-      );
+      const timeout = (timeoutSeconds ?? 0) * 1000;
+      const child = spawn(command, filled, {
+        // A tile build runs for hours. Nothing here should assume otherwise,
+        // so the default is no timeout at all.
+        ...(timeout > 0 ? { timeout } : {}),
+        cwd: hook.cwd,
+        env: { ...process.env, ...(hook.env ?? {}) },
+      });
+
+      // Streamed, and only the tail is kept.
+      //
+      // This used to collect the whole of stdout and stderr into a buffer, and
+      // a buffer has a size: past it, execFile kills the child. A hook that
+      // generates a planet says far more than any buffer worth holding, so a
+      // build could be killed hours in for the offence of being talkative —
+      // and the output that would have explained it was the thing that
+      // overflowed. Nothing is held now but the last few lines, so how much a
+      // hook says cannot decide whether it survives.
+      const tail = [];
+      let partial = '';
+      const collect = (chunk) => {
+        partial += chunk;
+        const lines = partial.split('\n');
+        partial = lines.pop() ?? '';
+        for (const line of lines) {
+          tail.push(line);
+          if (tail.length > TAIL_LINES) tail.shift();
+        }
+      };
+      for (const stream of [child.stdout, child.stderr]) {
+        stream?.setEncoding('utf8');
+        stream?.on('data', collect);
+      }
+
+      const report = (problem) => {
+        if (problem) {
+          console.error(`[${label}] ${entry.name}: ${problem}`);
+        } else {
+          console.log(`[${label}] ${entry.name}: finished`);
+        }
+        // A last line with no newline after it is still a line.
+        if (partial) collect('\n');
+        for (const line of tail) {
+          if (line.trim()) console.log(`[${label}]   ${line}`);
+        }
+        resolve();
+      };
+
+      // A command that could not be started at all — no such file, not
+      // executable — never reaches 'close'.
+      child.on('error', (error) => report(error.message));
+      child.on('close', (code, signal) => {
+        if (signal) return report(`killed by ${signal}`);
+        report(code === 0 ? undefined : `exited with code ${code}`);
+      });
     });
   }
 }
