@@ -7,6 +7,25 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.4.1
+### 🐞 Bug fixes
+- **A feed no longer walks backwards through its own history.** An item already taken was
+  skipped and the loop carried on to the older one below it, and the cap counts what was
+  *added* — so every poll took exactly one archive and every poll took a different one, until
+  the whole backlog was on disk. Against planet.openstreetmap.org that is five 88 GiB dumps
+  arriving a quarter of an hour apart from a subscription asking for one. Items run newest
+  first, so reaching one already held now stops the pass: everything after it is older than
+  something already on disk. A build that could not be fetched stops it too — one bad fetch is
+  a reason to retry shortly, not to take last week's instead.
+- **A subscription's `mode` had no effect.** It reached the add as `paused`, which nothing
+  reads — not the library and not the engine — so every item a feed brought in arrived as a
+  cache whatever the subscription said, and a `"mode": "mirror"` feed quietly fetched nothing.
+  A cache subscription only looked correct because cache is the default. It is now passed as
+  `mode`, the name the library actually reads.
+- **The console says what an empty availability bar means.** It counts connected peers and not
+  this node, so an archive only this node holds shows nothing — the truth about the swarm rather
+  than about the file, but worth saying beside a Downloaded bar that is full.
+
 ## 0.4.0
 ### ✨ Features and improvements
 - **A watched folder can set the torrent comment**, which is where attribution and licence belong —

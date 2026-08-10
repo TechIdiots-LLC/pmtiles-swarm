@@ -126,10 +126,103 @@ describe('following an ordinary RSS feed', () => {
     assert.deepEqual(await poll({ enabled: false }), []);
   });
 
+  it('takes them the way the feed was told to', async () => {
+    // This reached the add as `paused`, which nothing reads — so a feed asking
+    // for a mirror got a cache, and the only reason a cache subscription
+    // looked right was that cache is the default.
+    assert.equal((await poll({ mode: 'mirror' }))[0].options.mode, 'mirror');
+    assert.equal((await poll({ mode: 'cache' }))[0].options.mode, 'cache');
+    assert.equal(
+      (await poll())[0].options.mode,
+      'cache',
+      'joining a torrent must not silently commit the disk to a whole copy',
+    );
+  });
+
   it('files them where the feed says', async () => {
     const asked = await poll({ categories: ['osm-planet'], savePath: '/mnt/pbf' });
     assert.deepEqual(asked[0].options.categories, ['osm-planet']);
     assert.equal(asked[0].options.savePath, '/mnt/pbf');
+  });
+});
+
+describe('polling the same feed again', () => {
+  /**
+   * Polls one feed several times through a single manager.
+   * @param {number} times - How many polls.
+   * @param {object} [options] - `failing` makes every add throw.
+   * @returns {Promise<object>} - What each poll fetched.
+   */
+  async function pollTwice(times, options = {}) {
+    const torrent = await makeTorrent();
+    let base = '';
+    const fetched = [];
+    const server = http.createServer((req, res) => {
+      if (req.url.endsWith('.xml')) {
+        res.writeHead(200, { 'content-type': 'application/rss+xml' }).end(planetFeed(base));
+        return;
+      }
+      fetched.push(req.url);
+      res.writeHead(200, { 'content-type': 'application/x-bittorrent' }).end(torrent);
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    base = `http://127.0.0.1:${server.address().port}`;
+
+    const asked = [];
+    const manager = new SubscriptionManager(
+      {
+        addExistingTorrent: async () => {
+          if (options.failing) throw new Error('the torrent is briefly a 404');
+          asked.push(fetched.at(-1));
+          return { infoHash: `${asked.length}`.padStart(40, 'a'), name: 'planet' };
+        },
+      },
+      {
+        subscriptions: [{ url: `${base}/planet-pbf-rss.xml`, protocol: 'rss' }],
+      },
+    );
+
+    const perPoll = [];
+    try {
+      for (let poll = 0; poll < times; poll += 1) {
+        const before = asked.length;
+        await manager.refresh();
+        perPoll.push(asked.slice(before));
+      }
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+    return { perPoll, asked, fetched };
+  }
+
+  it('takes nothing the second time, rather than the next one down', async () => {
+    // The bug this exists for: an item already held was skipped and the loop
+    // carried on to the older one below it. The cap counts what was added, so
+    // it did not stop that — each poll added exactly one, and each poll added
+    // a different one, until all five 88 GiB planet dumps were on disk.
+    const { perPoll } = await pollTwice(3);
+    assert.equal(perPoll[0].length, 1, 'the first poll takes the newest');
+    assert.deepEqual(perPoll[1], [], 'the second takes nothing');
+    assert.deepEqual(perPoll[2], [], 'and so does the third');
+  });
+
+  it('keeps taking the same one, not a tour of the archive', async () => {
+    const { perPoll, asked } = await pollTwice(4);
+    assert.equal(asked.length, 1);
+    assert.match(asked[0], /260803/, 'and it is the newest');
+    assert.deepEqual(perPoll.slice(1).flat(), []);
+  });
+
+  it('retries a build it could not fetch rather than passing it over', async () => {
+    // One bad fetch is not a reason to give up on the newest build for good —
+    // nor to fetch last week's instead, which is the same backwards walk by
+    // another route.
+    const { fetched } = await pollTwice(2, { failing: true });
+    assert.equal(fetched.length, 2, `tried twice: ${fetched.join(', ')}`);
+    assert.ok(
+      fetched.every((url) => /260803/.test(url)),
+      `both attempts are the newest: ${fetched.join(', ')}`,
+    );
   });
 });
 

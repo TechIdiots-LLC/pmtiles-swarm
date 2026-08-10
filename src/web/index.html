@@ -1190,7 +1190,9 @@
                 shown as held when <i>all</i> of them are. Availability is the
                 <i>rarest</i> piece in each column: one piece nobody has is the
                 answer to "can this still be completed", however well supplied
-                its neighbours are.
+                its neighbours are. It counts <i>connected peers</i> and not
+                this node, so an archive only this node holds shows an empty
+                bar — which is the truth about the swarm, not about the file.
               </div>
               ${
                 (info.peers ?? []).length > 0

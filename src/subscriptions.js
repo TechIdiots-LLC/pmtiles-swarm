@@ -141,12 +141,26 @@ export class SubscriptionManager {
         continue;
       }
       const marker = item.infoHash ?? item.magnet ?? item.torrentUrl;
-      if (this.#seen.has(marker)) continue;
-      this.#seen.add(marker);
+
+      // Stop, rather than skip past it to the next one.
+      //
+      // Items run newest first, so reaching one already taken means
+      // everything after it is older than something on disk. Skipping to the
+      // next instead takes one more archive every poll and walks backwards
+      // through the feed until the whole backlog is held — which for the
+      // planet feed is five 88 GiB dumps nobody asked for, arriving one a
+      // quarter of an hour apart. The cap counts what was added, so it does
+      // not stop this: each poll adds exactly one, and each poll adds a
+      // different one.
+      if (this.#seen.has(marker)) break;
 
       try {
         const entry = await this.#add(item, subscription);
         if (entry) {
+          // Marked only once it worked. A .torrent that 404s for an hour
+          // should be retried on the next poll rather than passed over for
+          // good on the strength of one bad fetch.
+          this.#seen.add(marker);
           added.push(entry);
           console.log(
             `[feed] ${subscription.mode ?? 'cache'} ${entry.name} from ${subscription.url}`,
@@ -154,6 +168,10 @@ export class SubscriptionManager {
         }
       } catch (error) {
         console.error(`[feed] could not add "${item.title}": ${error.message}`);
+        // And stop here too. The newest build being briefly unreachable is a
+        // reason to try again shortly, not a reason to fetch last week's
+        // instead — which is the same backwards walk by another route.
+        break;
       }
     }
     return added;
@@ -340,8 +358,15 @@ export class SubscriptionManager {
       // from one built here or added by hand, and would happily delete both.
       subscriptionUrl: subscription.url,
       // Cache mode joins the swarm without pulling the whole archive; the
-      // pieces it does hold are still served to other peers.
-      paused: (subscription.mode ?? 'cache') === 'cache',
+      // pieces it does hold are still served to other peers. Mirror commits to
+      // a whole copy.
+      //
+      // Passed as `mode`, which is the name the library reads. It had been
+      // passed as `paused`, which nothing reads — so a feed's mode did not
+      // reach the add at all, and every item arrived as cache whatever the
+      // subscription said. Defaulted here as well as there, so the two cannot
+      // drift apart into disagreeing about what an unset mode means.
+      mode: subscription.mode ?? 'cache',
     };
 
     // The .torrent is preferred where there is one: it carries the trackers
