@@ -166,5 +166,8 @@ describe('the sample ships with the package', () => {
       'utf8',
     );
     assert.match(doc, /node_modules\/pmtiles-swarm\/swarm\.config\.json\.sample/);
+    // And the unit must start the binary from the same installed tree, or the
+    // two halves of the instructions describe different installations.
+    assert.match(doc, /node_modules\/\.bin\/pmtiles-swarm/);
   });
 });

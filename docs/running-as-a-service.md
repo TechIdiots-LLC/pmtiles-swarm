@@ -34,7 +34,7 @@ Root-owned, tokens vanish on restart.
 The file itself holds an API key, so nobody else needs to read it:
 
 ```sh
-SAMPLE=/usr/lib/node_modules/pmtiles-swarm/swarm.config.json.sample
+SAMPLE=/var/lib/pmtiles-swarm/node_modules/pmtiles-swarm/swarm.config.json.sample
 sudo install -o pmtiles-swarm -g pmtiles-swarm -m 0600 "$SAMPLE" \
   /etc/pmtiles-swarm/swarm.config.json
 sudoedit /etc/pmtiles-swarm/swarm.config.json
@@ -48,44 +48,44 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 
 ## Node, and the package
 
-Two arrangements work. The first is tidier for a service; the second is what
-you already do for tileserver-gl, and there is nothing wrong with it.
-
-**System-wide node.** The service account never needs a shell, which is why
-`nologin` above is safe:
+Node from your distribution or NodeSource — the package needs `^22.13.0 || 24`:
 
 ```sh
-# Debian/Ubuntu, from NodeSource
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs
-sudo npm install -g pmtiles-swarm
-which pmtiles-swarm            # /usr/bin/pmtiles-swarm
 ```
 
-**nvm in the service account's home.** nvm is installed by a shell, so the
-account needs one — give it `/bin/bash` above instead of `nologin`, and accept
-that it is then an account someone could log into:
+Then install into the service account's own directory, as that account:
 
 ```sh
-sudo -u pmtiles-swarm -H bash -lc '
-  curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-  . "$HOME/.nvm/nvm.sh"
-  nvm install 24
-  npm install -g pmtiles-swarm
-  command -v pmtiles-swarm
-'
+sudo -u pmtiles-swarm -H npm install --prefix /var/lib/pmtiles-swarm pmtiles-swarm
+sudo -u pmtiles-swarm -H /var/lib/pmtiles-swarm/node_modules/.bin/pmtiles-swarm --help
 ```
 
-Whichever you choose, `ExecStart` must give an absolute path. systemd reads no
-shell profile, so nothing puts nvm — or anything else — on `PATH`. Find it once
-and put that in the unit:
+That path is what goes in `ExecStart`. Upgrading is the same command again.
 
-```sh
-sudo -u pmtiles-swarm -H bash -lc 'command -v pmtiles-swarm'
+**Not `sudo npm install -g`.** A dependency of WebTorrent runs `npx only-allow
+pnpm` as a preinstall step, and under `sudo` that npx cannot write root's cache:
+
+```
+npm error command sh -c npx only-allow pnpm
+npm error enoent Could not read package.json: ENOENT:
+  open '/root/.npm/_npx/0b83cd9ca5e1325c/package.json'
 ```
 
-The package requires Node `^22.13.0 || 24`; the libtorrent engine additionally
-needs `python3` with the libtorrent bindings, checked as the service user:
+Installing as the service account avoids root's cache entirely. Do not reach
+for `--ignore-scripts` instead: `node-datachannel` fetches its prebuilt binary
+in an install script, and without it WebTorrent cannot do WebRTC, which is the
+only reason to run it alongside libtorrent.
+
+**nvm does not affect this.** `sudo` resets `PATH` to `secure_path`, so
+`sudo npm` is `/usr/bin/npm` whatever `nvm use` last selected — which is why
+switching to `nvm use system` changed nothing. An existing nvm install for root
+or for you is unrelated to the service; only the absolute path in `ExecStart`
+decides what runs.
+
+The libtorrent engine also needs `python3` with the bindings, checked as the
+service account:
 
 ```sh
 sudo apt-get install -y python3-libtorrent
@@ -108,10 +108,9 @@ Group=pmtiles-swarm
 
 WorkingDirectory=/var/lib/pmtiles-swarm
 
-# Absolute, because systemd reads no profile and nvm is not on PATH. With a
-# system-wide install this is /usr/bin/pmtiles-swarm; under nvm it is
-# /var/lib/pmtiles-swarm/.nvm/versions/node/v24.16.0/bin/pmtiles-swarm.
-ExecStart=/usr/bin/pmtiles-swarm --config /etc/pmtiles-swarm/swarm.config.json
+# Absolute: systemd reads no shell profile.
+ExecStart=/var/lib/pmtiles-swarm/node_modules/.bin/pmtiles-swarm \
+  --config /etc/pmtiles-swarm/swarm.config.json
 
 # Required. The console's Save & Restart exits and expects to be brought back;
 # see below.

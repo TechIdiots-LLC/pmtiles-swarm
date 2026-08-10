@@ -4,6 +4,13 @@
 ### ✨ Features and improvements
 - **The sample configuration ships with the package**, so an installed copy has one to copy from
   rather than only the repository — which is the one place someone installing from npm has not got.
+- **The service documentation installs into the account's own directory, not globally.**
+  `sudo npm install -g` fails on some machines: a WebTorrent dependency runs `npx only-allow pnpm`
+  as a preinstall step, and under `sudo` that npx cannot write root's cache. Installing as the
+  service account avoids root's cache entirely, keeps the version pinned per service, and makes
+  upgrading one command. `--ignore-scripts` is explicitly not the answer — `node-datachannel`
+  fetches its prebuilt binary in an install script, and without it WebTorrent cannot do WebRTC,
+  which is the only reason to run it alongside libtorrent.
 - **Running as a systemd service is documented**, with a unit file, and now with the account setup:
   creating a dedicated `pmtiles-swarm` system user and group, the two directories, and where Node
   and the package go. Both directories have to be writable by the service, including the one under
