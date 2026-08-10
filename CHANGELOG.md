@@ -2,10 +2,21 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **Running as a systemd service is documented**, with a unit file. Two things in it are not
+  preferences: `Restart=always` is required rather than optional, because the console's *Save &
+  Restart* detects the supervisor and exits 0 expecting to be brought back — under
+  `Restart=on-failure` the first use of it stops the node and leaves a unit reporting success. And
+  the `ExecStop=/bin/kill -15 $MAINPID` line commonly copied between units should be omitted, since
+  systemd already sends SIGTERM and the node installs its handlers before it begins work.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **Every path in the configuration resolves against the configuration file.** `dataDir`,
+  `savePath`, `cacheSavePath` and watched folders already did; `locations[].path` and
+  `libtorrent.resumeDir` were left relative, which means relative to the working directory. Started
+  by hand from the repository the two agree, so it never showed — but a service does not run from
+  the directory its config lives in, and under systemd the working directory defaults to `/`, so
+  `./data/resume` became `/data/resume`: somewhere the unit almost certainly cannot write, for a
+  reason nothing in the config hints at.
 
 ## 0.3.0
 ### ✨ Features and improvements

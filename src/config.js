@@ -779,6 +779,22 @@ export async function loadConfig(configPath) {
     path: path.resolve(base, entry.path),
   }));
 
+  // Every remaining path, resolved the same way as the rest.
+  //
+  // These two were left relative, which means relative to the working
+  // directory rather than to the file they are written in. Started by hand
+  // from the repository those agree, so it never showed; under systemd the
+  // working directory defaults to `/`, so `./data/resume` becomes
+  // `/data/resume` — somewhere the service almost certainly cannot write, for
+  // a reason nothing in the config hints at.
+  config.locations = (config.locations ?? []).map((entry) => ({
+    ...entry,
+    path: entry.path ? path.resolve(base, entry.path) : entry.path,
+  }));
+  if (config.libtorrent?.resumeDir) {
+    config.libtorrent.resumeDir = path.resolve(base, config.libtorrent.resumeDir);
+  }
+
   return config;
 }
 

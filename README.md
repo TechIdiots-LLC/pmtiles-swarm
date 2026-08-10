@@ -31,6 +31,8 @@ node src/index.js --config swarm.config.json
 - **[docs/security.md](docs/security.md)** — what is public, what is guarded, named tokens with
   roles, console sign-in, and why an unauthenticated node refuses to listen on a reachable
   address.
+- **[docs/running-as-a-service.md](docs/running-as-a-service.md)** — a systemd unit, why
+  `Restart=always` is required rather than optional, and which ports want a firewall rule.
 - **[docs/architecture-diagram.md](docs/architecture-diagram.md)** — how a publishing node, a
   serving tier, the swarm and both kinds of client fit together.
 

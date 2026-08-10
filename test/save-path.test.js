@@ -156,3 +156,58 @@ describe('what the API will accept', () => {
     );
   });
 });
+
+describe('paths resolve against the config file, not the working directory', () => {
+  it('resolves every path-bearing setting the same way', async () => {
+    // A service does not run from the directory its config lives in — under
+    // systemd the working directory defaults to `/`, so a relative
+    // `./data/resume` becomes `/data/resume`: somewhere the unit almost
+    // certainly cannot write, for a reason nothing in the config hints at.
+    // dataDir, savePath and watch paths already resolved against the file;
+    // locations and resumeDir did not.
+    const dir = await fs.mkdtemp(path.join(workspace, 'elsewhere-'));
+    const file = path.join(dir, 'swarm.config.json');
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        dataDir: './data',
+        savePath: './data/torrents-data',
+        cacheSavePath: './data/cache',
+        libtorrent: { resumeDir: './data/resume' },
+        locations: [{ name: 'bulk', path: './bulk' }],
+        watch: [{ path: './incoming' }],
+      }),
+    );
+
+    const previous = process.cwd();
+    process.chdir(os.tmpdir());
+    let config;
+    try {
+      config = await loadConfig(file);
+    } finally {
+      process.chdir(previous);
+    }
+
+    for (const [label, value] of [
+      ['dataDir', config.dataDir],
+      ['savePath', config.savePath],
+      ['cacheSavePath', config.cacheSavePath],
+      ['watch[0].path', config.watch[0].path],
+      ['locations[0].path', config.locations[0].path],
+      ['libtorrent.resumeDir', config.libtorrent.resumeDir],
+    ]) {
+      assert.ok(path.isAbsolute(value), `${label} is not absolute: ${value}`);
+      assert.ok(
+        value.startsWith(dir),
+        `${label} resolved against the working directory, not the config: ${value}`,
+      );
+    }
+  });
+
+  it('leaves an absolute path exactly as written', async () => {
+    // Resolving must not rewrite a path somebody chose deliberately.
+    const absolute = path.join(path.parse(process.cwd()).root, 'mnt', 'bulk');
+    const config = await loaded({ locations: [{ name: 'bulk', path: absolute }] });
+    assert.equal(config.locations[0].path, absolute);
+  });
+});
