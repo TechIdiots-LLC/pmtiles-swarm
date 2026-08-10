@@ -475,6 +475,18 @@ const DEFAULTS = {
    *
    * `webSeedBase` on its own assumes the watched folder is already the web
    * root, since nothing is moved.
+   *
+   * `latestLink` gives the newest build a stable second name — a symlink, or
+   * a hard link where the platform refuses one. The watcher ignores that name
+   * so the link is never imported as an archive of its own.
+   *
+   * `keep` and `keepDays` retire what the folder has outgrown — the newest N
+   * builds, or a window in days. A folder receiving a daily 137 GB planet
+   * build fills any disk within the week, and this is the `find -mtime +35`
+   * sweep that would otherwise have to sit in the generation script, except
+   * that it takes the torrent with the data. Both are off unless set, only
+   * ever touch archives this same folder imported, and never remove the
+   * newest build however old it gets.
    */
   watch: [],
   /**
@@ -661,7 +673,15 @@ const DEFAULTS = {
   allowHooksFromApi: false,
   /** How often to look for finished downloads, in seconds. */
   onCompleteCheckIntervalSeconds: 60,
-  /** How often to poll subscribed feeds, in seconds. */
+  /**
+   * Whether to follow feeds at all.
+   *
+   * The master switch, separate from the per-feed one: turning it off stops
+   * every feed without editing any of them, which is what you want when a
+   * disk is filling or a run has gone wrong.
+   */
+  subscriptionsEnabled: true,
+  /** How often to poll subscribed feeds, in seconds. Zero or less is off. */
   subscriptionIntervalSeconds: 900,
   /** Republish interval for BEP 46 records, in seconds. DHT items expire. */
   republishIntervalSeconds: 3600,
@@ -886,6 +906,7 @@ export const RELOADABLE = new Map([
   ['sourceCheckIntervalHours', 'sources'],
   ['subscriptions', 'subscriptions'],
   ['subscriptionIntervalSeconds', 'subscriptions'],
+  ['subscriptionsEnabled', 'subscriptions'],
   ['seeding', 'seeding'],
   // Applied to a running session, so a schedule can be corrected at the moment
   // it turns out to be wrong rather than at the next convenient restart.

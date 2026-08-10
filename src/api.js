@@ -1597,15 +1597,28 @@ export function createApp({
 
   // Redirects rather than serving, so what arrives is the immutable URL and a
   // client that keeps it keeps a specific build rather than a moving target.
-  app.get('/latest/:category/archive.torrent', (req, res) => {
+  // The name in the path is yours to choose: `/latest/openmaptiles/
+  // planetiler-openmaptiles-latest.torrent` is the same route as
+  // `.../archive.torrent`, and reads as what it is where it matters most —
+  // in an href on a page. It does not name the download. That is decided at
+  // the immutable URL this redirects to, which calls the file after the build
+  // it actually is, and a URL that could choose it would be a link on this
+  // domain that saves a file called anything at all.
+  app.get('/latest/:category/:name.torrent', (req, res) => {
     const entry = newestIn(req.params.category, req);
     if (!entry) return res.status(404).json({ error: 'no such category' });
+    // Short, and said explicitly. A 302 is not cacheable unless a response
+    // says so, but "unless it says so" is a thing intermediaries have been
+    // known to disagree about — and this one moves on every build, which is
+    // the whole point of it.
+    res.setHeader('cache-control', 'public, max-age=300');
     res.redirect(302, `${baseUrl(req)}/archives/${entry.infoHash}/archive.torrent`);
   });
 
   app.get('/latest/:category/magnet', (req, res) => {
     const entry = newestIn(req.params.category, req);
     if (!entry) return res.status(404).json({ error: 'no such category' });
+    res.setHeader('cache-control', 'public, max-age=300');
     res.type('text/plain').send(entry.magnet ?? '');
   });
 
@@ -1769,6 +1782,12 @@ export function createApp({
       if (!body) return res.status(404).json({ error: 'torrent file missing' });
       res.setHeader('access-control-allow-origin', '*');
       res.type('application/x-bittorrent');
+      // An infohash names these bytes and no others, so this URL can never
+      // answer differently — the same reason the tile routes say it. Worth
+      // saying out loud where a link to it is published: a cache or a reverse
+      // proxy in front of this then serves the download without touching the
+      // node at all.
+      res.setHeader('cache-control', 'public, max-age=31536000, immutable');
       res.setHeader(
         'content-disposition',
         `attachment; filename="${entry.name}.torrent"`,

@@ -614,7 +614,7 @@ matters there is `maxConnections`, since every peer holds a NAT table entry. See
 | `GET` | `/archives/:infoHash/:z/:x/:y.:ext` | One tile — **public** |
 | `GET` | `/archives/:infoHash/archive.torrent` | The `.torrent` a torrent-aware client joins with — **public** |
 | `GET` | `/archives/:infoHash/preview` | Map preview for one archive — admin, not public |
-| `GET` | `/latest/:category/tiles.json`, `/archive.torrent`, `/magnet` | The newest build in a category — **public** |
+| `GET` | `/latest/:category/tiles.json`, `/:name.torrent`, `/magnet` | The newest build in a category — **public**. The torrent name is yours to choose, so a link can read `planetiler-openmaptiles-latest.torrent`; it redirects to the immutable URL, which names the download after the build it actually is |
 | `GET` | `/feed.xml`, `/feed/:category.xml`, `/latest/:category.xml` | RSS — **public** |
 
 Everything under `/api/` is guarded once a credential is configured; tiles, TileJSON and the feeds

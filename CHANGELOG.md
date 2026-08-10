@@ -2,13 +2,66 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.4.0
+### ✨ Features and improvements
 - **A watched folder can set the torrent comment**, which is where attribution and licence belong —
   it is the one field a torrent carries that says what the thing is, and it reaches anyone who
   opens the file in any client. The setting was passed through from the start and offered nowhere,
   so it could only be reached by editing the config by hand.
+- **Feeds can be followed with the controls a torrent client gives them.** A subscription takes
+  one item per check by default, counting from the newest — `newest` raises the cap and `0` lifts
+  it — because a feed like the one OpenStreetMap publishes for the planet dumps lists five of them,
+  and taking the lot is four hundred gigabytes nobody asked for. `enabled: false` switches one feed
+  off without deleting it, `subscriptionsEnabled` switches off all of them at once, and both are in
+  the console alongside the check interval.
+- **Watched folders can retire what they have outgrown**, with the `keep` and `keepDays` that
+  until now existed only on scheduled sources. A folder receiving a daily 137 GB planet build
+  fills any disk within the week, and the alternative was a `find -mtime +35` sweep in the
+  generation script — which deletes the file but leaves this node advertising a torrent for it,
+  so every peer that asks fails. Retirement takes the two together.
+- **`keepDays` retires by age rather than by count**, on both watched folders and scheduled
+  sources, which is what a `find -mtime` sweep actually said. Set alongside `keep` the two are a
+  union: whichever rule says a build has to go, it goes. Neither removes the newest build however
+  old it is — a source that stops publishing would otherwise erase itself, and a last build going
+  stale is a thing to notice rather than a thing to fix by deleting it.
+- **A watched folder can give the newest build a stable name**, with the `latestLink` that
+  until now existed only on scheduled sources — `planetiler-openmaptiles-latest.pmtiles`, the
+  `ln -sfn latest` a generation script used to run. Off unless set. The dated file stays the
+  real one and keeps its own torrent, and the link costs no extra space: a symlink where the
+  platform allows one, a hard link where it does not, since Windows refuses symlinks without
+  elevation or developer mode. The watcher ignores that one name — a hard link is
+  indistinguishable from the file it names, so without that it would be imported as a second
+  archive of bytes already being seeded.
+- **The torrent link for a category can be named whatever reads best.**
+  `/latest/openmaptiles/planetiler-openmaptiles-latest.torrent` is the same route as
+  `/latest/openmaptiles/archive.torrent` — fine in an API, poor in an href on a page. The name
+  is cosmetic: the redirect still ends at the immutable URL, which names the download after the
+  build it actually is, because a URL that could choose that would be a link on your own domain
+  that saves a file called anything at all.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **`/archives/<infohash>/archive.torrent` says it can be cached.** An infohash names those
+  bytes and no others, so the URL can never answer differently — the tile routes have always
+  said so and this one did not, which meant a cache or reverse proxy in front of a node had to
+  re-fetch every download from it. `/latest/<category>/archive.torrent` gets a short one, since
+  it moves on every build.
+- **A `subscriptionIntervalSeconds` of zero no longer polls as fast as the event loop allows.**
+  Zero reads as off everywhere else in the configuration; here it reached `setInterval` unchanged,
+  which is not a stopped timer.
+
+### 📚 Documentation
+- **Following someone else's RSS feed**, using the one OpenStreetMap publishes for the planet
+  dumps as the worked example, including handing what lands to a generation script with
+  `onComplete`.
+- **Piece size and network equipment.** Larger pieces are widely assumed to be gentler on a
+  router and mostly are not: peers request 16 KiB blocks whatever the piece size, so packet
+  volume for the same bytes is identical. Simultaneous connections are what exhaust a NAT table,
+  and `maxConnections` is the setting for that.
 
 ## 0.3.2
 ### ✨ Features and improvements

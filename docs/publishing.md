@@ -463,8 +463,23 @@ today's URL and see whether it exists yet:
     loses that build permanently.
 
 `latestLink`
-    A symlink pointing at the newest build. The dated file stays the real one, so it
-    remains seedable under its own torrent while consumers can reference a fixed path.
+    A stable name pointing at the newest build — `planetiler-protomaps-latest.pmtiles`.
+    The dated file stays the real one, so it remains seedable under its own torrent while
+    a page links to a name that does not change. **Off unless set.**
+
+    A symlink where the platform allows one, and a hard link where it does not: Windows
+    refuses symlinks with `EPERM` unless the process is elevated or the machine is in
+    developer mode, which is not a reasonable thing to require of a daemon. Neither costs
+    extra space — both are another name for the same bytes rather than a copy, which for a
+    137 GB archive is the whole point — and both need the name and the build to be on one
+    filesystem, which a link beside the file it names always is.
+
+    Available on watched folders too, where a generation script writes the builds. There
+    the link lands in the folder being watched, so the watcher is taught to ignore that one
+    name — a hard link is indistinguishable from the file it names, and without that it
+    would be imported as a second archive of bytes already being seeded. It follows that
+    **the name must not collide with a real build's**, and that changing it leaves the old
+    one behind as a file the watcher will then import.
 
 `at`, `everyHours`, `everyMinutes`
     When to look. `at` is a time of day in UTC — `"03:30"`, or a list of them — for an
@@ -517,6 +532,23 @@ today's URL and see whether it exists yet:
     `newest` is above 1, because a poll takes candidates newest first and the *last* build
     imported is then the oldest of them.
 
+`keepDays`
+    The same thing said as a window rather than a count: how many days old a build may
+    get. `keepDays: 35` is the `find -mtime +35` sweep such a script would otherwise run
+    itself, except that this takes the torrent with the data instead of leaving the node
+    advertising an archive that is gone.
+
+    Age is read from the date in the build's name where there is one, and from when this
+    node took it otherwise. A build that can be dated neither way is never removed — a
+    guess is not good enough to delete several hundred gigabytes on.
+
+    **The newest build is never removed, however old it is.** A source that stops
+    publishing would otherwise erase itself, and a last build going stale is a thing to
+    notice rather than a thing to fix by deleting it.
+
+    Set alongside `keep` the two are a union: whichever rule says a build has to go, it
+    goes. `keep: 10, keepDays: 35` holds at most ten builds and at most five weeks.
+
 `seeding`
     A seeding limit for this source's builds, in the same shape as the global one:
     `{ "ratio": 2, "minutes": 4320, "then": "stop" }`. Useful where one source's archives
@@ -529,6 +561,27 @@ what you want — old builds stay seedable for as long as anyone still wants the
 
 Every candidate URL is checked with a HEAD, so a build that has not been published yet
 costs one request.
+
+### Retention on a watched folder
+
+`keep` and `keepDays` work the same way on a watched folder, where builds arrive from a
+generation script rather than from a URL:
+
+```json
+{
+  "watch": [
+    {
+      "path": "/mnt/store/generated/openmaptiles/pmtiles",
+      "categories": ["openmaptiles", "planet"],
+      "keepDays": 35
+    }
+  ]
+}
+```
+
+The family there is the folder rather than a named source: only archives this same folder
+imported are ever considered, so one dropped into the same directory by hand — or moved
+elsewhere by `publishDir` and belonging to a different folder — is not caught up in it.
 
 ### Watching a directory instead
 

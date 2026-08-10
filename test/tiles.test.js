@@ -1997,10 +1997,13 @@ describe('a stable handle for the current build', () => {
     await catalog.put(older);
     // put() stamps createdAt itself, so order is what matters, not the clock.
     await new Promise((resolve) => setTimeout(resolve, 10));
+    const torrentPath = path.join(dir, 'planet-202406.pmtiles.torrent');
+    await fs.writeFile(torrentPath, 'd1:ee');
     const newer = entry({
       infoHash: 'b'.repeat(40),
       name: 'planet-202406.pmtiles',
       categories: ['basemaps'],
+      torrentPath,
     });
     await catalog.put(newer);
     await catalog.put(entry({
@@ -2075,6 +2078,71 @@ describe('a stable handle for the current build', () => {
       const response = await s.get('/latest/basemaps/archive.torrent');
       assert.equal(response.status, 302);
       assert.ok(response.headers.get('location').includes('b'.repeat(40)));
+      // It moves on every build, which is the point of it — so it must not be
+      // cached the way the URL it points at is.
+      assert.match(response.headers.get('cache-control'), /max-age=300/);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('names the download after the build, not after the route', async () => {
+    // The path says archive.torrent for every archive on the node, which would
+    // be a folder full of identical names if it were what landed on disk. It
+    // is not: the redirect ends at the immutable URL, and that one says what
+    // the file is called.
+    const s = await serve();
+    try {
+      const redirect = await s.get('/latest/basemaps/archive.torrent');
+      const response = await fetch(redirect.headers.get('location'));
+      assert.equal(
+        response.headers.get('content-disposition'),
+        'attachment; filename="planet-202406.pmtiles.torrent"',
+      );
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('lets the link say what it is', async () => {
+    // archive.torrent is fine in an API and poor in an href. Any name works,
+    // so a page can link something a reader recognises.
+    const s = await serve();
+    try {
+      const response = await s.get(
+        '/latest/basemaps/planetiler-openmaptiles-latest.torrent',
+      );
+      assert.equal(response.status, 302);
+      assert.ok(response.headers.get('location').includes('b'.repeat(40)));
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('does not let the URL choose what the download is called', async () => {
+    // Otherwise this is a link on your own domain that saves a file named
+    // whatever the person who wrote the link wanted.
+    const s = await serve();
+    try {
+      const redirect = await s.get('/latest/basemaps/anything-at-all.torrent');
+      const response = await fetch(redirect.headers.get('location'));
+      assert.match(
+        response.headers.get('content-disposition'),
+        /planet-202406\.pmtiles\.torrent/,
+      );
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('lets the build it points at be cached for ever', async () => {
+    // An infohash names those bytes and no others, so a cache or a reverse
+    // proxy in front of this can serve the download without touching the node.
+    const s = await serve();
+    try {
+      const response = await s.get(`/archives/${'b'.repeat(40)}/archive.torrent`);
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get('cache-control'), /immutable/);
     } finally {
       await s.close();
     }

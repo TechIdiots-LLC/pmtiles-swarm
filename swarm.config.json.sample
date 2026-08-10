@@ -71,8 +71,18 @@
     }
   ],
 
+  "subscriptionsEnabled": true,
+  "subscriptionIntervalSeconds": 900,
   "subscriptions": [
-    { "url": "https://peer.example.org/api/catalog", "protocol": "api", "mode": "cache" }
+    { "url": "https://peer.example.org/api/catalog", "protocol": "api", "mode": "cache" },
+    {
+      "url": "https://feed.example.org/pbf/planet-pbf-rss.xml",
+      "protocol": "rss",
+      "mode": "mirror",
+      "newest": 1,
+      "categories": ["osm-planet"],
+      "enabled": false
+    }
   ],
 
   "tiles": { "sparse": null },

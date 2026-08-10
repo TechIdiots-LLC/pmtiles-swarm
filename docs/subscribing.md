@@ -41,11 +41,14 @@ Its feed is then at `https://maps.example.org/feed.xml`, with per-category feeds
   "subscriptions": [
     { "url": "https://maps.example.org/feed.xml", "mode": "cache" }
   ],
+  "subscriptionsEnabled": true,
   "subscriptionIntervalSeconds": 900
 }
 ```
 
-Poll immediately rather than waiting for the interval:
+`subscriptionsEnabled` is the master switch and `subscriptionIntervalSeconds`
+is how often each feed is checked; zero or less turns polling off. Poll
+immediately rather than waiting for the interval:
 
 ```sh
 curl -X POST localhost:8090/api/subscriptions/refresh
@@ -260,6 +263,61 @@ One feed can serve subscribers with different appetites:
 ```
 
 `filter` is a case-insensitive regular expression matched against the item title.
+
+## Following someone else's RSS feed
+
+A subscription does not have to be another swarm node. Any RSS feed with
+`application/x-bittorrent` enclosures works, which includes the one
+OpenStreetMap publishes for the planet dumps:
+
+```json
+{
+  "subscriptions": [
+    {
+      "url": "https://planet.openstreetmap.org/pbf/planet-pbf-rss.xml",
+      "protocol": "rss",
+      "mode": "mirror",
+      "newest": 1,
+      "categories": ["osm-planet"],
+      "savePath": "/mnt/raid0/work/planet"
+    }
+  ]
+}
+```
+
+`newest` is how many items one check may take, counting from the newest, and
+it is **1 by default**. That feed lists five planet dumps, so without a cap the
+first poll is roughly four hundred gigabytes. `0` takes everything it lists.
+
+The items are `.osm.pbf`, not map archives, and that is fine: joining an
+existing torrent does not require the content to be anything in particular —
+only *creating* one does. The archive simply is not servable as tiles, and
+nothing tries.
+
+`enabled: false` switches one feed off without deleting it, and
+`subscriptionsEnabled: false` switches off all of them at once, for when a disk
+is filling or a build has gone wrong.
+
+Nothing is downloaded twice: an item already in the catalog is skipped, so a
+feed that keeps listing last week's dump costs one comparison per check.
+
+### Feeding a generation script
+
+The point of taking a `.osm.pbf` is usually to build something from it. That is
+what `onComplete` is for — it runs when a download finishes, so a planet dump
+landing can start the render that turns it into archives this node publishes:
+
+```json
+{
+  "onComplete": {
+    "command": "/usr/local/bin/planetilerdump-swarm.sh",
+    "args": ["%N", "%F", "%I"]
+  }
+}
+```
+
+Which is the same handover qBittorrent's "run external program on torrent
+finished" provided, with the feed replacing its RSS auto-downloader.
 
 ## Subscribing with plain qBittorrent
 

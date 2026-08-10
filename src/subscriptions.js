@@ -39,10 +39,23 @@ export class SubscriptionManager {
   start() {
     const feeds = this.#config.subscriptions ?? [];
 
+    if (this.#config.subscriptionsEnabled === false) {
+      console.log('[feed] following is switched off');
+      return;
+    }
+
     // The timer runs even with nothing to follow. Every refresh reads the list
     // fresh, so this is what lets a peer added through the console start
     // working without a restart; an empty pass costs nothing.
-    const intervalMs = (this.#config.subscriptionIntervalSeconds ?? 900) * 1000;
+    const seconds = this.#config.subscriptionIntervalSeconds ?? 900;
+    // Zero reads as off everywhere else in the configuration, and it has to
+    // read as off here too: setInterval(fn, 0) is not a stopped timer, it is
+    // one that fires as fast as the loop will let it.
+    if (seconds <= 0) {
+      console.log('[feed] interval is zero; not polling');
+      return;
+    }
+    const intervalMs = seconds * 1000;
     // Poll once at startup, then on the interval.
     this.refresh().catch((error) =>
       console.error(`[feed] initial refresh failed: ${error.message}`),
@@ -67,7 +80,12 @@ export class SubscriptionManager {
    */
   async refresh() {
     const added = [];
+    // Checked here as well as in start(), so the switch means the same thing
+    // to a refresh asked for through the API as it does to the timer.
+    if (this.#config.subscriptionsEnabled === false) return added;
     for (const subscription of this.#config.subscriptions ?? []) {
+      // Off, but kept — what qBittorrent's per-feed checkbox does.
+      if (subscription.enabled === false) continue;
       try {
         added.push(...(await this.#poll(subscription)));
       } catch (error) {
@@ -103,7 +121,20 @@ export class SubscriptionManager {
     const items = parseFeed(await response.text());
     const added = [];
 
+    // How many items one poll may take.
+    //
+    // One by default, because a feed's items are whole files and some of them
+    // are enormous: planet.openstreetmap.org lists five planet dumps, and
+    // taking the lot on the first poll is four hundred gigabytes nobody asked
+    // for. `newest: 0` lifts the cap for feeds where that is what you want.
+    //
+    // Items arrive newest first, so the cap keeps the newest.
+    const limit = subscription.newest === 0
+      ? Number.POSITIVE_INFINITY
+      : Math.max(1, subscription.newest ?? 1);
+
     for (const item of items) {
+      if (added.length >= limit) break;
       // A regex filter lets one feed serve several consumers with different
       // appetites, e.g. only taking Europe extracts.
       if (subscription.filter && !new RegExp(subscription.filter, 'i').test(item.title)) {

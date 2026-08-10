@@ -28,6 +28,8 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { linkLatest } from './latest-link.js';
+import { retains, retire } from './retention.js';
 
 /**
  * Expands date placeholders in a template.
@@ -622,79 +624,37 @@ export class ScheduledSourceManager {
   }
 
   /**
-   * Removes older builds from the same source, where `keep` says to.
+   * Removes older builds from the same source, where retention says to.
    *
    * A daily planet build is 137 GB. Kept for ever, a source like that fills
    * any disk within the week — and the older ones are rarely what anyone
    * wants, because the whole point of a dated build is that a newer one
-   * replaces it. `keep: 1` means only the newest is held.
+   * replaces it. `keep: 1` holds only the newest; `keepDays: 35` holds five
+   * weeks of them.
    *
-   * Deliberately narrow, because this deletes data:
-   *
-   *   * Only archives this same named source imported. An archive added by
-   *     hand, adopted from a client, or taken from a peer is never touched,
-   *     even if it sits in the same directory.
-   *   * Never the one just imported, and never more than the count allows.
-   *   * Off unless `keep` is set. Silence has to mean "keep everything",
-   *     since the alternative is deleting archives nobody asked to lose.
-   *
-   * The torrent goes with the data. Leaving a catalog entry whose file is
-   * gone would leave the node advertising an archive it cannot serve, and
-   * every peer that asked would fail.
+   * The family is the archives this same *named* source imported, and nothing
+   * else — one added by hand, adopted from a client, or taken from a peer is
+   * never touched, even in the same directory. See `retire` for the rest of
+   * what this will not do.
    * @param {object} source - The source definition.
    * @param {object} entry - The build just imported.
    * @returns {Promise<string[]>} - The infohashes removed.
    */
   async #retire(source, entry) {
-    const keep = Number(source.keep);
-    if (!Number.isFinite(keep) || keep < 1) return [];
     if (!source.name) return [];
+    if (!retains(source)) return [];
 
-    // The catalog's own order, which is exactly what `/latest` follows.
-    const family = this.#catalog
-      .list()
-      .filter((candidate) => candidate.source?.name === source.name);
-
-    // Nothing is deleted until the new build is the one being served.
-    //
-    // A category's feed and its `/latest/<category>/tiles.json` resolve to the
-    // newest archive in it, and that is what consumers point at. Once they
-    // resolve to this build, the ones it replaced are no longer where anyone
-    // is being sent, and retiring them costs nobody a fetch they were about to
-    // make. Before that — while an older build is still the answer — deleting
-    // it would break the very URL the feed is advertising.
-    //
-    // It also covers the case that makes this necessary at all: a poll taking
-    // several builds takes them newest first, so an *older* one can be the
-    // most recent import. It has superseded nothing and must retire nothing.
-    if (family[0]?.infoHash !== entry.infoHash) {
-      console.log(
-        `[source] ${source.name}: ${entry.name} is not the newest build here, ` +
-          'so nothing is retired',
-      );
-      return [];
-    }
-
-    const doomed = family.slice(keep);
-    const removed = [];
-
-    for (const old of doomed) {
-      try {
-        await this.#library.remove(old.infoHash, { deleteData: true });
-        removed.push(old.infoHash);
-        console.log(
-          `[source] ${source.name}: retired ${old.name} — keeping the newest ` +
-            `${keep}`,
-        );
-      } catch (error) {
-        // Worth saying rather than swallowing: the disk this exists to protect
-        // is now not being protected.
-        console.error(
-          `[source] ${source.name}: could not retire ${old.name}: ${error.message}`,
-        );
-      }
-    }
-    return removed;
+    return retire({
+      library: this.#library,
+      // The catalog's own order, which is exactly what `/latest` follows.
+      family: this.#catalog
+        .list()
+        .filter((candidate) => candidate.source?.name === source.name),
+      entry,
+      keep: source.keep,
+      keepDays: source.keepDays,
+      label: `[source] ${source.name}`,
+    });
   }
 
   /**
@@ -703,48 +663,16 @@ export class ScheduledSourceManager {
    * The dated file stays the real one either way, so it remains seedable under
    * its own torrent while consumers reference a fixed path.
    *
-   * A symlink first, then a hard link. Windows refuses symlinks with EPERM
-   * unless the process is elevated or the machine is in developer mode, which
-   * is not a reasonable thing to require of a daemon — and a hard link needs
-   * neither. It costs no extra space, since it is another name for the same
-   * bytes rather than a copy, and for a 137 GB archive that distinction is the
-   * whole point. It only works within one filesystem, which is where a link
-   * beside the file it names always is.
    * @param {object} source - The source definition.
    * @param {object} entry - The freshly imported entry.
    * @returns {Promise<void>} - Resolves once linked, or logs and continues.
    */
   async #linkLatest(source, entry) {
-    const target = entry.retainedAt ?? path.join(entry.savePath, entry.name);
-    const link = path.isAbsolute(source.latestLink)
-      ? source.latestLink
-      : path.join(path.dirname(target), source.latestLink);
-
-    const attempts = [
-      ['symlink', () => fs.symlink(target, link)],
-      ['hard link', () => fs.link(target, link)],
-    ];
-
-    for (const [kind, make] of attempts) {
-      try {
-        await fs.rm(link, { force: true });
-        await make();
-        console.log(
-          `[source] latest -> ${path.basename(target)}` +
-            (kind === 'symlink' ? '' : ` (${kind})`),
-        );
-        return;
-      } catch (error) {
-        // Try the next kind rather than giving up on the first refusal; only
-        // the last one is worth reporting.
-        if (make === attempts.at(-1)[1]) {
-          console.warn(
-            `[source] could not point ${path.basename(link)} at ` +
-              `${path.basename(target)}: ${error.message}`,
-          );
-        }
-      }
-    }
+    await linkLatest({
+      target: entry.retainedAt ?? path.join(entry.savePath, entry.name),
+      name: source.latestLink,
+      label: '[source]',
+    });
   }
 
   /**

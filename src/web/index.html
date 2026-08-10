@@ -3131,8 +3131,39 @@
               wide: true,
             },
             { field: 'pollSeconds', label: 'Poll every (s)', placeholder: 'events', number: true },
+            {
+              field: 'latestLink',
+              label: 'Stable name',
+              placeholder: 'off',
+            },
+            {
+              field: 'keep',
+              label: 'Builds to keep',
+              placeholder: 'all',
+              number: true,
+            },
+            {
+              field: 'keepDays',
+              label: 'Keep for (days)',
+              placeholder: 'for ever',
+              number: true,
+            },
           ],
           rows: config.watch ?? [],
+          footnote:
+            'Stable name gives the newest build a second name that does not ' +
+            'change — planet-latest.pmtiles — so a page can link to it. The ' +
+            'dated file stays the real one and keeps its own torrent; the ' +
+            'link costs no extra space, and is a symlink or a hard link ' +
+            'depending on what the platform allows. Do not give it a name a ' +
+            'real build could have. ' +
+            'Builds to keep and Keep for are both off unless set, and both ' +
+            'delete the archive as well as forgetting it — a catalog entry ' +
+            'whose file is gone leaves this node advertising something it ' +
+            'cannot serve. They only ever touch archives this same folder ' +
+            'imported, never the newest one however old it is, and nothing at ' +
+            'all until the new build is the one the feed resolves to. Set ' +
+            'both and whichever says a build has to go wins.',
         });
 
         renderRowEditor({
@@ -3199,6 +3230,12 @@
               placeholder: 'all',
               number: true,
             },
+            {
+              field: 'keepDays',
+              label: 'Keep for (days)',
+              placeholder: 'for ever',
+              number: true,
+            },
           ],
           rows: config.sources ?? [],
           preview: true,
@@ -3229,17 +3266,50 @@
             'archives this same source imported.',
         });
 
+        const feedGlobals = document.createElement('div');
+        feedGlobals.className = 'panel';
+        feedGlobals.style.marginBottom = '1rem';
+        feedGlobals.innerHTML = `
+          <h2 style="margin-top:0">Feeds</h2>
+          <div class="sub" style="margin-bottom:0.7rem">
+            Applies to every feed below.
+          </div>
+          <div class="field">
+            <label for="cfg-subscriptionsEnabled">Follow feeds</label>
+            <select id="cfg-subscriptionsEnabled" data-key="subscriptionsEnabled" data-scalar="1">
+              <option value="true"${config.subscriptionsEnabled === false ? '' : ' selected'}>on</option>
+              <option value="false"${config.subscriptionsEnabled === false ? ' selected' : ''}>off</option>
+            </select>
+            <div class="sub">
+              Off stops all of them without editing any, for when a disk is
+              filling or a build has gone wrong.
+            </div>
+          </div>
+          <div class="field">
+            <label for="cfg-subscriptionIntervalSeconds">Check every (seconds)</label>
+            <input id="cfg-subscriptionIntervalSeconds" data-key="subscriptionIntervalSeconds"
+                   data-scalar="1" style="width:9rem"
+                   value="${escapeHtml(config.subscriptionIntervalSeconds ?? 900)}" />
+            <div class="sub">
+              A poll is one request per feed. Publishers post on their own
+              schedule, so checking faster than they publish finds nothing.
+            </div>
+          </div>`;
+        body.append(feedGlobals);
+
         renderRowEditor({
           into: body,
           key: 'subscriptions',
           title: 'Remote nodes',
           blurb:
-            'Peers whose archives this node follows. An RSS feed says "here ' +
-            'is what is new" and is bounded by the publisher, so a node ' +
-            'offline long enough misses things for good; a catalog URL says ' +
-            '"here is everything", which is what makes reconciling possible. ' +
-            'A token, where the peer issued one, may get you more than it ' +
-            'publishes to the world.',
+            'Feeds this node follows: another swarm node, or any RSS feed ' +
+            'that carries torrents — planet.openstreetmap.org publishes one ' +
+            'for the planet dumps. An RSS feed says "here is what is new" ' +
+            'and is bounded by the publisher, so a node offline long enough ' +
+            'misses things for good; a catalog URL says "here is ' +
+            'everything", which is what makes reconciling possible. A token, ' +
+            'where the peer issued one, may get you more than it publishes ' +
+            'to the world.',
           columns: [
             {
               field: 'url',
@@ -3264,6 +3334,12 @@
                 ['mirror', 'mirror — whole copy'],
               ],
             },
+            {
+              field: 'newest',
+              label: 'Items per check',
+              placeholder: '1',
+              number: true,
+            },
             { field: 'category', label: 'Tag as', placeholder: 'from-peer' },
             { field: 'filter', label: 'Name filter', placeholder: 'terrain' },
             { field: 'token', label: 'Token', placeholder: 'if issued one', secret: true },
@@ -3277,6 +3353,15 @@
                 ['delete', 'forget and delete'],
               ],
             },
+            {
+              field: 'enabled',
+              label: 'On',
+              boolean: true,
+              options: [
+                ['', 'yes'],
+                ['false', 'no'],
+              ],
+            },
           ],
           rows: config.subscriptions ?? [],
           peerPreview: true,
@@ -3286,7 +3371,10 @@
             'every archive the peer lists. Dropping stays off unless chosen, ' +
             'only ever considers archives this peer sent, and never acts on a ' +
             'filtered or partial view — watch a new peer on "report only" ' +
-            'before trusting it with anything more.',
+            'before trusting it with anything more. Items per check is 1 by ' +
+            'default and counts from the newest, because a feed listing five ' +
+            'planet dumps is four hundred gigabytes if you take the lot; 0 ' +
+            'takes everything it lists.',
         });
 
         for (const [key, value] of Object.entries(config)) {
@@ -3295,6 +3383,8 @@
           // Shown as real fields above rather than as raw JSON.
           if (key === 'seeding' || key === 'speed') continue;
           if (key === 'watch' || key === 'sources' || key === 'subscriptions') continue;
+          if (key === 'subscriptionsEnabled') continue;
+          if (key === 'subscriptionIntervalSeconds') continue;
           if (key === 'onAdded' || key === 'onComplete') continue;
           const needsRestart = restartKeys.has(key);
           const field = document.createElement('div');

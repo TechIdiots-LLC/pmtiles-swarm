@@ -1,5 +1,8 @@
+import path from 'node:path';
 import chokidar from 'chokidar';
 import { normalizeCategories } from './catalog.js';
+import { linkLatest, linkPathFor } from './latest-link.js';
+import { retains, retire } from './retention.js';
 
 /**
  * Watches folders for new PMTiles archives and imports them automatically.
@@ -26,7 +29,7 @@ export class WatchManager {
 
   /**
    * Starts watching the configured folders.
-   * @param {object[]} folders - Entries of {path, categories, webSeedBase, publishDir, sparse, trackers, addTrackers, stabilitySeconds, pollSeconds}.
+   * @param {object[]} folders - Entries of {path, categories, webSeedBase, publishDir, sparse, trackers, addTrackers, stabilitySeconds, pollSeconds, keep, keepDays, latestLink}.
    * @returns {void}
    */
   start(folders = []) {
@@ -62,6 +65,12 @@ export class WatchManager {
 
       watcher.on('add', (file) => {
         if (!/\.pmtiles$/i.test(file)) return;
+        // The folder's own `latestLink`, which is a .pmtiles in a watched
+        // folder like any other and would otherwise be imported as a second
+        // archive — a whole extra torrent for the same bytes under a name that
+        // changes every build. A hard link is indistinguishable from the file
+        // it names, so the name is the only thing that can tell them apart.
+        if (this.#isLatestLink(file, folder)) return;
         this.#import(file, folder);
       });
       watcher.on('error', (error) => {
@@ -76,6 +85,21 @@ export class WatchManager {
           (pollSeconds > 0 ? ` (polling every ${pollSeconds}s)` : ''),
       );
     }
+  }
+
+  /**
+   * Whether a file is this folder's own "latest" name.
+   * @param {string} file - The file that appeared.
+   * @param {object} folder - The watch-folder configuration.
+   * @returns {boolean} - True when it is the link, not a build.
+   */
+  #isLatestLink(file, folder) {
+    if (!folder.latestLink) return false;
+    // Compared as a path rather than a basename, so an absolute latestLink
+    // pointing somewhere else entirely does not silently exclude a real build
+    // that happens to share its name.
+    const target = path.join(folder.path, 'any.pmtiles');
+    return path.resolve(file) === path.resolve(linkPathFor(target, folder.latestLink));
   }
 
   /**
@@ -110,8 +134,37 @@ export class WatchManager {
         // not on the node.
         pieceLength: folder.pieceLength,
         comment: folder.comment,
+        // Marks this as the folder's, so retention below has a family to work
+        // within and nothing outside it can be caught up in one.
+        watch: folder.path,
       });
       console.log(`[watch] imported ${entry.name} (${entry.infoHash})`);
+
+      // Before retirement, so the stable name is already pointing at the new
+      // build by the time anything older is considered for removal.
+      if (folder.latestLink) {
+        await linkLatest({
+          target: entry.retainedAt ?? path.join(entry.savePath, entry.name),
+          name: folder.latestLink,
+          label: `[watch] ${folder.path}`,
+        });
+      }
+
+      // A folder receiving a daily planet build fills any disk within the
+      // week. This is the `find -mtime +35` sweep that used to sit in the
+      // generation script, except that it takes the torrent with the data
+      // rather than leaving the node advertising an archive that is gone.
+      if (!retains(folder)) return;
+      await retire({
+        library: this.#library,
+        family: this.#library.catalog
+          .list()
+          .filter((candidate) => candidate.source?.watch === folder.path),
+        entry,
+        keep: folder.keep,
+        keepDays: folder.keepDays,
+        label: `[watch] ${folder.path}`,
+      });
     } catch (error) {
       console.error(`[watch] failed to import ${file}: ${error.message}`);
     } finally {
