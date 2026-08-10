@@ -64,8 +64,10 @@ sudo -u pmtiles-swarm -H /var/lib/pmtiles-swarm/node_modules/.bin/pmtiles-swarm 
 
 That path is what goes in `ExecStart`. Upgrading is the same command again.
 
-**Not `sudo npm install -g`.** A dependency of WebTorrent runs `npx only-allow
-pnpm` as a preinstall step, and under `sudo` that npx cannot write root's cache:
+Installing as the account rather than into a root-owned tree also sidesteps a
+failure `sudo npm install -g` can hit: `ip-set`, a dependency of WebTorrent,
+runs `npx only-allow pnpm` before installing, and under `sudo` that npx may not
+be able to write root's cache.
 
 ```
 npm error command sh -c npx only-allow pnpm
@@ -73,16 +75,49 @@ npm error enoent Could not read package.json: ENOENT:
   open '/root/.npm/_npx/0b83cd9ca5e1325c/package.json'
 ```
 
-Installing as the service account avoids root's cache entirely. Do not reach
-for `--ignore-scripts` instead: `node-datachannel` fetches its prebuilt binary
-in an install script, and without it WebTorrent cannot do WebRTC, which is the
-only reason to run it alongside libtorrent.
+If you would rather install as root and hand the tree over — the usual pattern
+— give npm a cache it can write and chown afterwards:
 
-**nvm does not affect this.** `sudo` resets `PATH` to `secure_path`, so
-`sudo npm` is `/usr/bin/npm` whatever `nvm use` last selected — which is why
-switching to `nvm use system` changed nothing. An existing nvm install for root
-or for you is unrelated to the service; only the absolute path in `ExecStart`
-decides what runs.
+```sh
+sudo env npm_config_cache=/var/cache/npm \
+  npm install --prefix /var/lib/pmtiles-swarm pmtiles-swarm
+sudo chown -R pmtiles-swarm:pmtiles-swarm /var/lib/pmtiles-swarm
+```
+
+**nvm does not affect either.** `sudo` resets `PATH` to `secure_path`, so
+`sudo npm` is `/usr/bin/npm` whatever `nvm use` last selected. Only the
+absolute path in `ExecStart` decides what the service runs.
+
+### The allowScripts warning
+
+npm 11.17 and newer print this, and it is not an error:
+
+```
+npm warn allow-scripts 5 packages have install scripts not yet covered by allowScripts:
+npm warn allow-scripts   node-datachannel@0.32.3 (install: prebuild-install -r napi || …)
+npm warn allow-scripts   ip-set@3.0.0 (preinstall: npx only-allow pnpm)
+```
+
+npm is moving dependency install scripts behind an allowlist. Today it warns
+and still runs them. One of those scripts matters: `node-datachannel` downloads
+the prebuilt binary WebTorrent needs for WebRTC, and it is not in the published
+tarball. Check it landed:
+
+```sh
+sudo -u pmtiles-swarm -H node -e \
+  "import('/var/lib/pmtiles-swarm/node_modules/webtorrent').then(() => console.log('ok'))"
+```
+
+`npm approve-scripts node-datachannel` records the approval in `package.json`
+and silences the warning for that package:
+
+```json
+{ "allowScripts": { "node-datachannel@0.32.3": true } }
+```
+
+Leave `--strict-allow-scripts` alone for now. It blocks unapproved scripts
+outright, and in testing it also blocked approved ones — the resulting install
+has no WebRTC binary and WebTorrent will not load.
 
 The libtorrent engine also needs `python3` with the bindings, checked as the
 service account:

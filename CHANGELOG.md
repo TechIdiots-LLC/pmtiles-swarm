@@ -4,6 +4,12 @@
 ### ✨ Features and improvements
 - **The sample configuration ships with the package**, so an installed copy has one to copy from
   rather than only the repository — which is the one place someone installing from npm has not got.
+- **The `allowScripts` warning from npm 11.17 is explained.** npm is moving dependency install
+  scripts behind an allowlist; today it warns and still runs them, so an install that prints it is
+  fine. One of those scripts matters — `node-datachannel` downloads the WebRTC binary WebTorrent
+  needs, which is not in the published tarball — so the documentation gives a one-line check that
+  it landed, and says to leave `--strict-allow-scripts` alone, since in testing it blocked approved
+  scripts as well as unapproved ones.
 - **The service documentation installs into the account's own directory, not globally.**
   `sudo npm install -g` fails on some machines: a WebTorrent dependency runs `npx only-allow pnpm`
   as a preinstall step, and under `sudo` that npx cannot write root's cache. Installing as the
