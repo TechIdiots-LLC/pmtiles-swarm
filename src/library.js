@@ -562,7 +562,15 @@ export class Library {
 
     return this.#register(created, {
       categories: options.categories ?? options.category,
-      source: { type: 'http', location: url },
+      source: {
+        type: 'http',
+        location: url,
+        // Which scheduled source produced this, where one did. It is what
+        // groups successive builds of the same map together — the URLs differ
+        // by date, so they cannot be matched to each other any other way.
+        name: options.sourceName,
+      },
+      seeding: options.seeding,
       savePath,
       pmtiles: summary,
       kind: identified.kind,

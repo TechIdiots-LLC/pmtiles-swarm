@@ -2,6 +2,16 @@
 
 ## master
 ### ✨ Features and improvements
+- **A watched location can keep only the newest few builds.** `keep` on a source, and **Builds to
+  keep** in the console. Each build is a whole archive, so a daily 137 GB planet build kept for
+  ever fills any disk within the week. It deletes the data of what it retires, so it is off unless
+  set, and it only ever touches archives that same named source imported — anything added by hand,
+  adopted from a client, or taken from a peer is never considered. Sources can also carry their own
+  `seeding` limit, since a daily build that has done its share deserves different treatment from
+  the only copy of something.
+- **The global seeding limit has real fields.** It was editable only as a raw JSON textarea among
+  every other object setting, which is not a way to ask someone for a ratio. It now has the same
+  shape as the per-archive dialog that already existed.
 - **A download that stops is resumed, not restarted.** A planet archive is hours of transfer and a
   connection that drops partway is ordinary; until now that threw away everything transferred and
   began again, repeatedly. Each attempt now continues from the bytes already on disk with an HTTP

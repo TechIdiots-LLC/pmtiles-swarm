@@ -456,6 +456,11 @@ export class ScheduledSourceManager {
           // behind a login must never be published at all.
           webSeed: source.webSeed,
           webSeeds: source.webSeeds,
+          // Recorded on the entry so successive builds of the same map can be
+          // found later. Their URLs differ by date, so nothing else relates
+          // them to each other.
+          sourceName: source.name,
+          seeding: source.seeding,
           comment: source.comment
             ? `${source.comment} ${expandTemplate('{YYYY-MM-DD}', date)}`
             : undefined,
@@ -468,6 +473,7 @@ export class ScheduledSourceManager {
         if (source.latestLink) {
           await this.#linkLatest(source, entry);
         }
+        await this.#retire(source, entry);
         if (imported.length >= limit) break;
       } catch (error) {
         console.error(`[source] ${url}: ${error.message}`);
@@ -541,11 +547,14 @@ export class ScheduledSourceManager {
           retain: source.retain !== false,
           webSeed: source.webSeed,
           webSeeds: source.webSeeds,
+          sourceName: source.name,
+          seeding: source.seeding,
           comment: source.comment,
         });
         imported.push(entry);
         console.log(`[source] ${label}: imported ${entry.name} (${entry.infoHash})`);
         if (source.latestLink) await this.#linkLatest(source, entry);
+        await this.#retire(source, entry);
       } catch (error) {
         console.error(`[source] ${url}: ${error.message}`);
       }
@@ -605,6 +614,68 @@ export class ScheduledSourceManager {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Removes older builds from the same source, where `keep` says to.
+   *
+   * A daily planet build is 137 GB. Kept for ever, a source like that fills
+   * any disk within the week — and the older ones are rarely what anyone
+   * wants, because the whole point of a dated build is that a newer one
+   * replaces it. `keep: 1` means only the newest is held.
+   *
+   * Deliberately narrow, because this deletes data:
+   *
+   *   * Only archives this same named source imported. An archive added by
+   *     hand, adopted from a client, or taken from a peer is never touched,
+   *     even if it sits in the same directory.
+   *   * Never the one just imported, and never more than the count allows.
+   *   * Off unless `keep` is set. Silence has to mean "keep everything",
+   *     since the alternative is deleting archives nobody asked to lose.
+   *
+   * The torrent goes with the data. Leaving a catalog entry whose file is
+   * gone would leave the node advertising an archive it cannot serve, and
+   * every peer that asked would fail.
+   * @param {object} source - The source definition.
+   * @param {object} entry - The build just imported.
+   * @returns {Promise<string[]>} - The infohashes removed.
+   */
+  async #retire(source, entry) {
+    const keep = Number(source.keep);
+    if (!Number.isFinite(keep) || keep < 1) return [];
+    if (!source.name) return [];
+
+    const siblings = this.#catalog
+      .list()
+      .filter(
+        (candidate) =>
+          candidate.source?.name === source.name &&
+          candidate.infoHash !== entry.infoHash,
+      )
+      // Newest first, so what falls off the end is the oldest.
+      .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
+
+    // The one just imported occupies the first slot.
+    const doomed = siblings.slice(Math.max(0, keep - 1));
+    const removed = [];
+
+    for (const old of doomed) {
+      try {
+        await this.#library.remove(old.infoHash, { deleteData: true });
+        removed.push(old.infoHash);
+        console.log(
+          `[source] ${source.name}: retired ${old.name} — keeping the newest ` +
+            `${keep}`,
+        );
+      } catch (error) {
+        // Worth saying rather than swallowing: the disk this exists to protect
+        // is now not being protected.
+        console.error(
+          `[source] ${source.name}: could not retire ${old.name}: ${error.message}`,
+        );
+      }
+    }
+    return removed;
   }
 
   /**

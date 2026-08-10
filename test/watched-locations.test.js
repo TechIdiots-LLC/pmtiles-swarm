@@ -806,3 +806,116 @@ describe('the hint about candidate dates', () => {
     assert.doesNotMatch(line, /Neither offsetDays nor lookbackDays/);
   });
 });
+
+describe('retiring older builds from a source', () => {
+  /**
+   * A source that has already produced some builds, importing one more.
+   * @param {object} extra - Extra source fields, e.g. keep.
+   * @param {object[]} existing - Catalog entries already present.
+   * @returns {Promise<object>} - What was removed, and the options used.
+   */
+  async function importOneMore(extra = {}, existing = []) {
+    const server = http.createServer((req, res) => {
+      res.writeHead(req.url.endsWith('.pmtiles') ? 200 : 404).end('x');
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    const catalog = {
+      list: () => existing,
+      findBySource: () => null,
+    };
+    const removed = [];
+    const optionsUsed = [];
+
+    const manager = new ScheduledSourceManager(
+      {
+        addRemoteArchive: async (url, options) => {
+          optionsUsed.push(options);
+          return {
+            infoHash: 'new'.padEnd(40, '0'),
+            name: url.split('/').pop(),
+            createdAt: '2026-08-10T00:00:00.000Z',
+          };
+        },
+        remove: async (infoHash, options) => {
+          removed.push({ infoHash, ...options });
+          return true;
+        },
+      },
+      catalog,
+      {
+        sources: [
+          {
+            name: 'protomaps',
+            url: `http://127.0.0.1:${server.address().port}/{YYYYMMDD}.pmtiles`,
+            lookbackDays: 0,
+            ...extra,
+          },
+        ],
+      },
+    );
+
+    try {
+      await manager.sweep(new Date());
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+    return { removed, optionsUsed };
+  }
+
+  /** A build this source produced, `days` ago. */
+  const build = (days) => ({
+    infoHash: `old${days}`.padEnd(40, '0'),
+    name: `protomaps-${days}.pmtiles`,
+    createdAt: new Date(Date.UTC(2026, 7, 10 - days)).toISOString(),
+    source: { type: 'http', name: 'protomaps' },
+  });
+
+  it('keeps everything unless asked otherwise', async () => {
+    // Silence has to mean keep, since the alternative is deleting archives
+    // nobody asked to lose.
+    const { removed } = await importOneMore({}, [build(1), build(2), build(3)]);
+    assert.deepEqual(removed, []);
+  });
+
+  it('keeps only the newest when told to keep one', async () => {
+    // A daily 137 GB planet build fills any disk within the week otherwise.
+    const { removed } = await importOneMore({ keep: 1 }, [build(1), build(2)]);
+    assert.equal(removed.length, 2, 'both older builds go');
+    assert.ok(removed.every((call) => call.deleteData));
+  });
+
+  it('keeps the count it was given', async () => {
+    const { removed } = await importOneMore({ keep: 3 }, [build(1), build(2), build(3)]);
+    // The new one plus the two newest old ones is three; the oldest goes.
+    assert.deepEqual(
+      removed.map((call) => call.infoHash),
+      [build(3).infoHash],
+    );
+  });
+
+  it('never touches an archive this source did not import', async () => {
+    // Something added by hand, adopted from a client, or taken from a peer is
+    // not this source's to delete, however alike it looks.
+    const stranger = { ...build(9), source: { type: 'file', location: '/somewhere' } };
+    const adopted = { ...build(8), source: undefined };
+    const { removed } = await importOneMore({ keep: 1 }, [stranger, adopted]);
+    assert.deepEqual(removed, []);
+  });
+
+  it('never touches a build from a different source', async () => {
+    const other = { ...build(5), source: { type: 'http', name: 'mapterhorn' } };
+    const { removed } = await importOneMore({ keep: 1 }, [other]);
+    assert.deepEqual(removed, []);
+  });
+
+  it('passes the source name and its own seeding limit through', async () => {
+    // The name is what relates successive builds to each other at all: their
+    // URLs differ by date, so nothing else does.
+    const { optionsUsed } = await importOneMore({
+      seeding: { ratio: 2, then: 'stop' },
+    });
+    assert.equal(optionsUsed[0].sourceName, 'protomaps');
+    assert.deepEqual(optionsUsed[0].seeding, { ratio: 2, then: 'stop' });
+  });
+});

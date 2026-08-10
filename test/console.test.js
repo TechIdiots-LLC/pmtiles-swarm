@@ -369,3 +369,35 @@ describe('the map preview', () => {
     assert.doesNotMatch(preview, /layers read from the tiles/);
   });
 });
+
+describe('the seeding limit in settings', () => {
+  it('has real fields rather than a JSON textarea', () => {
+    // It was editable only as raw JSON among every other object setting,
+    // which is not a way to ask someone for a ratio.
+    assert.match(page, /function seedingPanel/);
+    assert.match(page, /data-seeding="ratio"/);
+    assert.match(page, /data-seeding="minutes"/);
+    assert.match(page, /data-seeding="then"/);
+  });
+
+  it('is not also rendered as raw JSON', () => {
+    // Two editors for one setting means whichever is read last wins, and the
+    // one nobody filled in wins by being empty.
+    assert.match(page, /key === 'seeding' \|\| key === 'speed'\) continue/);
+  });
+
+  it('clears a limit with null rather than undefined', () => {
+    // JSON.stringify drops an undefined value entirely, so an emptied box
+    // would never reach the server and the old limit would merge back over it.
+    const editor = page.slice(
+      page.indexOf('function readSeedingEditor'),
+      page.indexOf('function speedPanel'),
+    );
+    assert.match(editor, /:\s*null;/, 'an empty box must send null');
+    assert.doesNotMatch(editor, /:\s*undefined;/);
+  });
+
+  it('is collected when settings are saved', () => {
+    assert.match(page, /\.\.\.readSeedingEditor\(\)/);
+  });
+});

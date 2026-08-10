@@ -2613,6 +2613,61 @@
         return Number.isFinite(value) && value > 0 ? Math.round(value * 1024) : 0;
       };
 
+      function seedingPanel(config) {
+        const seeding = config.seeding ?? {};
+        const panel = document.createElement('div');
+        panel.className = 'panel';
+        panel.style.marginBottom = '1rem';
+        panel.dataset.seedingEditor = 'true';
+        panel.innerHTML = `
+          <h2 style="margin-top:0">Seeding limit</h2>
+          <div class="sub" style="margin-bottom:0.8rem">
+            What every archive does once it has given back enough. An archive
+            can override this for itself from its own panel; leave both boxes
+            empty to seed indefinitely.
+          </div>
+          <div class="rates">
+            <label class="rate"><span>Stop at ratio</span>
+              <input type="number" min="0" step="0.1" data-seeding="ratio"
+                     value="${seeding.ratio ?? ''}" placeholder="—" /></label>
+            <label class="rate"><span>or after</span>
+              <input type="number" min="0" data-seeding="minutes"
+                     value="${seeding.minutes ?? ''}" placeholder="—" /><span class="unit">minutes</span></label>
+            <label class="rate"><span>then</span>
+              <select data-seeding="then">
+                <option value="stop" ${seeding.then === 'remove' ? '' : 'selected'}>stop seeding</option>
+                <option value="remove" ${seeding.then === 'remove' ? 'selected' : ''}>remove the archive</option>
+              </select></label>
+          </div>
+          <div class="sub" style="margin-top:0.5rem">
+            Whichever is reached first. <b>Remove</b> deletes the archive from
+            this node — reasonable for a mirror that has done its share, and
+            not for the only copy of something.
+          </div>`;
+        return panel;
+      }
+
+      function readSeedingEditor() {
+        const panel = document.querySelector('[data-seeding-editor]');
+        if (!panel) return {};
+        const read = (key) => panel.querySelector(`[data-seeding="${key}"]`)?.value.trim() ?? '';
+        // null, not undefined: JSON.stringify drops an undefined value
+        // entirely, so an emptied box would never reach the server and the old
+        // limit would merge straight back over it. null survives the trip and
+        // means what the empty box means.
+        const number = (raw) => {
+          const value = Number(raw);
+          return raw !== '' && Number.isFinite(value) && value > 0 ? value : null;
+        };
+        return {
+          seeding: {
+            ratio: number(read('ratio')),
+            minutes: number(read('minutes')),
+            then: read('then') === 'remove' ? 'remove' : 'stop',
+          },
+        };
+      }
+
       function speedPanel(config) {
         const speed = config.speed ?? {};
         const alt = speed.alternative ?? {};
@@ -2943,6 +2998,7 @@
             the two. <span class="badge">restart</span>
           </div>`;
         body.append(group);
+        body.append(seedingPanel(config));
         body.append(speedPanel(config));
         group.querySelector('#cfg-cache-split').onchange = (event) => {
           const field = group.querySelector('#cfg-cache-path');
@@ -3073,6 +3129,12 @@
                 ['false', 'no'],
               ],
             },
+            {
+              field: 'keep',
+              label: 'Builds to keep',
+              placeholder: 'all',
+              number: true,
+            },
           ],
           rows: config.sources ?? [],
           preview: true,
@@ -3095,7 +3157,12 @@
             'URL carries credentials, in which case it is never published: a ' +
             'torrent goes out to the swarm and cannot be recalled. Choose no ' +
             'for an upstream that deletes old builds, where the URL would ' +
-            'outlive what it points at.',
+            'outlive what it points at. Builds to keep retires older ones from ' +
+            'this source as new ones arrive — 1 keeps only the newest, which ' +
+            'for a daily 137 GB planet build is the difference between a disk ' +
+            'that lasts and one that fills within the week. It deletes their ' +
+            'data, so it is off unless you set it, and it only ever touches ' +
+            'archives this same source imported.',
         });
 
         renderRowEditor({
@@ -3161,6 +3228,8 @@
         for (const [key, value] of Object.entries(config)) {
           // Shown above, in a form that says what they mean.
           if (key === 'incompleteSuffix' || key === 'cacheSavePath') continue;
+          // Shown as real fields above rather than as raw JSON.
+          if (key === 'seeding' || key === 'speed') continue;
           if (key === 'watch' || key === 'sources' || key === 'subscriptions') continue;
           if (key === 'onAdded' || key === 'onComplete') continue;
           const needsRestart = restartKeys.has(key);
@@ -3192,6 +3261,7 @@
           ...readRowEditors(rowEditorColumns),
           ...readHookEditor(),
           ...readSpeedEditor(),
+          ...readSeedingEditor(),
         };
         const mark = document.getElementById('cfg-mark');
         if (mark) {

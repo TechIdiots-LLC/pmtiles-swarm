@@ -484,8 +484,26 @@ today's URL and see whether it exists yet:
     In the console this is **Use URL as web seed** on each watched location, with
     *default* / *yes* / *no*.
 
+`keep`
+    How many builds from this source to hold. Unset keeps every one of them, which is
+    right for archives that are small or occasional and ruinous for a daily planet build:
+    at 137 GB a day, a source kept for ever fills any disk within the week.
+
+    `keep: 1` holds only the newest. It **deletes the data** of the ones it retires, so it
+    is off unless you set it, and it is deliberately narrow — it only ever touches
+    archives this same named source imported. Anything added by hand, adopted from a
+    torrent client, or taken from a peer is never considered, however alike it looks or
+    wherever it sits.
+
+`seeding`
+    A seeding limit for this source's builds, in the same shape as the global one:
+    `{ "ratio": 2, "minutes": 4320, "then": "stop" }`. Useful where one source's archives
+    deserve different treatment from the rest — a daily build that has done its share is a
+    better candidate for `then: "remove"` than the only copy of something.
+
 Each build becomes its own archive with its own torrent and its own lifetime, which is
-what you want — old builds stay seedable for as long as anyone still wants them.
+what you want — old builds stay seedable for as long as anyone still wants them, and
+`keep` is how you say for how long.
 
 Every candidate URL is checked with a HEAD, so a build that has not been published yet
 costs one request.
