@@ -2,6 +2,17 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.3.1
+
+Depends on pmtiles-torrent 0.3.0, which is what carries the resume-data fix below to an installed
+copy — 0.3.0 of this package shipped against a sidecar that could not find its own resume data.
+
+### ✨ Features and improvements
 - **The sample configuration ships with the package**, so an installed copy has one to copy from
   rather than only the repository — which is the one place someone installing from npm has not got.
 - **The `allowScripts` warning from npm 11.17 is explained.** npm is moving dependency install
