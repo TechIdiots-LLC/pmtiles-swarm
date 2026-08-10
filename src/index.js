@@ -321,6 +321,20 @@ PMTILES_SWARM_PUBLIC_URL
   sources.start();
   seeding.start();
   speed.start();
+
+  // Resume data on a timer as well as at shutdown. A clean stop writes it; a
+  // kill, a crash or a power cut does not, and whatever is lost is re-hashed
+  // on the way back up.
+  let resumeTimer;
+  const resumeSeconds = config.resumeSaveIntervalSeconds ?? 300;
+  if (resumeSeconds > 0 && engine.saveResume) {
+    resumeTimer = setInterval(() => {
+      engine
+        .saveResume()
+        .catch((error) => console.warn(`[resume] could not save: ${error.message}`));
+    }, resumeSeconds * 1000);
+    resumeTimer.unref?.();
+  }
   hooks.start();
   completion.start();
 
@@ -352,6 +366,7 @@ PMTILES_SWARM_PUBLIC_URL
   }
 
   stoppers.unshift(
+    { label: 'resume timer', stop: () => resumeTimer && clearInterval(resumeTimer), ms: 500 },
     { label: 'origin checks', stop: () => originTimer && clearInterval(originTimer), ms: 500 },
     { label: 'schedulers', stop: () => {
       sources.stop();

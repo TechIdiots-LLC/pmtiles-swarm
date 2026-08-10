@@ -570,6 +570,15 @@ const DEFAULTS = {
    * because splicing two builds together produces a torrent for bytes that
    * never existed.
    */
+  /**
+   * How often to write resume data, in seconds. Zero disables it.
+   *
+   * Resume data is what lets a restart skip re-hashing the store — on an
+   * 800 GB archive, the difference between instant and half an hour. A clean
+   * stop always writes it; this is for the stops that are not clean, where
+   * everything since the last write has to be checked again.
+   */
+  resumeSaveIntervalSeconds: 300,
   fetchAttempts: 10,
   /** How long to wait before resuming a download that stopped. */
   fetchRetrySeconds: 5,

@@ -29,6 +29,13 @@
   systemd already sends SIGTERM and the node installs its handlers before it begins work.
 
 ### 🐞 Bug fixes
+- **A restart no longer re-hashes every archive.** Resume data was being written and never found —
+  the lookup used an infohash no caller supplied, and `add_torrent_params.info_hashes` reads as
+  forty zeros for a torrent added from a `.torrent` file, so keying it off the torrent alone would
+  not have helped either. Fixed in pmtiles-torrent 0.3.0; on a 512 MiB archive the difference
+  measured 1.21s with a full re-hash against 0.02s with none, and it scales with the archive.
+  Resume data is also written every `resumeSaveIntervalSeconds` (five minutes by default) rather
+  than only at shutdown, so a kill or a power cut costs the last few minutes instead of everything.
 - **Every path in the configuration resolves against the configuration file.** `dataDir`,
   `savePath`, `cacheSavePath` and watched folders already did; `locations[].path` and
   `libtorrent.resumeDir` were left relative, which means relative to the working directory. Started
