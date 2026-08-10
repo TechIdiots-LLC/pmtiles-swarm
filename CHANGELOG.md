@@ -85,6 +85,14 @@
   at it quietly on every start. Unset keys still take libtorrent's own defaults.
 
 ### 🐞 Bug fixes
+- **A second request for a URL already being fetched joins the first.** The catalog cannot answer
+  that question — an entry exists only once the download has finished and the torrent has been
+  hashed, so for the hours in between `findBySource` says no and every caller starts its own copy.
+  The scheduler was safe by accident, since a poll holds a flag for its whole run, but nothing
+  protected `POST /api/torrents {url}` for something a schedule was already fetching: two
+  downloads of the same hundred gigabytes, both producing the same infohash, both trying to move
+  into the same directory. A failed download is not retained, so one network error does not become
+  permanent.
 - **One poll takes one build.** A date-based source imported *every* candidate in its lookback
   window, where a directory-listing source has always capped at `newest` (default 1) for the stated
   reason that each candidate is a whole archive. With a daily 137 GB planet build, `lookbackDays: 3`

@@ -1,5 +1,6 @@
 import assert from 'node:assert';
 import fs from 'node:fs/promises';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
@@ -140,5 +141,141 @@ describe('clearing staging at startup', () => {
       config: { dataDir: root, savePath: root },
     });
     assert.equal(await library.sweepIncoming(), 0);
+  });
+});
+
+describe('two requests for one URL', () => {
+  /** A slow server, so a second request genuinely overlaps the first. */
+  async function slowArchive() {
+    const dir = await fs.mkdtemp(path.join(workspace, 'dup-'));
+    const fixture = path.join(dir, 'src.pmtiles');
+    const { writeArchive } = await import('./pmtiles-fixture.js');
+    await writeArchive(fixture, {
+      tiles: [{ z: 0, x: 0, y: 0, data: Buffer.alloc(64, 7) }],
+      metadata: { name: 'demo' },
+    });
+    const body = await fs.readFile(fixture);
+
+    let requests = 0;
+    const server = http.createServer(async (_req, res) => {
+      requests += 1;
+      res.writeHead(200, { 'content-length': String(body.length), etag: '"x"' });
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      res.end(body);
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+
+    return {
+      dir,
+      url: `http://127.0.0.1:${server.address().port}/planet.pmtiles`,
+      requests: () => requests,
+      close: () => new Promise((resolve) => server.close(resolve)),
+    };
+  }
+
+  /** A library over a throwaway catalog and an inert engine. */
+  async function libraryIn(dir) {
+    const { Catalog } = await import('../src/catalog.js');
+    const { Library } = await import('../src/library.js');
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    const data = path.join(dir, 'torrents-data');
+    return {
+      catalog,
+      data,
+      library: new Library({
+        catalog,
+        engine: {
+          name: 'test',
+          list: async () => [],
+          get: async () => null,
+          add: async () => {},
+          remove: async () => {},
+        },
+        config: {
+          dataDir: dir,
+          savePath: data,
+          savePathLayout: 'infohash',
+          trackers: [],
+          pieceLength: 16384,
+        },
+      }),
+    };
+  }
+
+  it('joins the download already running instead of starting another', async () => {
+    // The catalog cannot answer this: an entry exists only once the download
+    // has finished, so for the hours in between every caller starts its own
+    // copy. The scheduler is safe by accident — a poll holds a flag for the
+    // whole import — but nothing protected `POST /api/torrents {url}` for
+    // something a schedule was already fetching.
+    const server = await slowArchive();
+    try {
+      const { library, catalog, data } = await libraryIn(server.dir);
+      const [first, second] = await Promise.all([
+        library.addRemoteArchive(server.url, {}),
+        library.addRemoteArchive(server.url, {}),
+      ]);
+
+      assert.equal(first.infoHash, second.infoHash, 'both get the same archive');
+      assert.equal(catalog.list().length, 1);
+
+      // Measured against what one add costs, rather than against a guess at
+      // which requests count: the probe reads ranges before the download and
+      // the exact number is an implementation detail, but "the same as one"
+      // is the property under test.
+      const alone = await slowArchive();
+      try {
+        const solo = await libraryIn(alone.dir);
+        await solo.library.addRemoteArchive(alone.url, {});
+        assert.equal(
+          server.requests(),
+          alone.requests(),
+          'two callers cost exactly what one does',
+        );
+      } finally {
+        await alone.close();
+      }
+
+      // And exactly one directory, with nothing stranded in staging — both
+      // would otherwise have moved into the same place, since the bytes are
+      // the same and so is the infohash.
+      const dirs = (await fs.readdir(data)).filter((name) => name !== INCOMING);
+      assert.deepEqual(dirs, [first.infoHash]);
+      assert.deepEqual(await fs.readdir(path.join(data, INCOMING)).catch(() => []), []);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('lets a later request start again once the first has finished', async () => {
+    // Joining is only for downloads actually in flight. Afterwards the catalog
+    // answers, and a repeat returns the existing archive rather than hanging
+    // on a promise that has long since settled.
+    const server = await slowArchive();
+    try {
+      const { library } = await libraryIn(server.dir);
+      const first = await library.addRemoteArchive(server.url, {});
+      const again = await library.addRemoteArchive(server.url, {});
+      assert.equal(again.infoHash, first.infoHash);
+      const afterFirst = server.requests();
+      await library.addRemoteArchive(server.url, {});
+      assert.equal(server.requests(), afterFirst, 'the catalog answered, unfetched');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('does not strand the next request behind a failed one', async () => {
+    // A rejected download must leave nothing behind that a later attempt would
+    // join, or one network failure would be permanent.
+    const dir = await fs.mkdtemp(path.join(workspace, 'fail-'));
+    const { library } = await libraryIn(dir);
+    const dead = 'http://127.0.0.1:1/planet.pmtiles';
+
+    await assert.rejects(() => library.addRemoteArchive(dead, {}));
+    // The second attempt fails on its own terms rather than resolving to the
+    // first's rejection, which is what a retained promise would do.
+    await assert.rejects(() => library.addRemoteArchive(dead, {}));
   });
 });

@@ -73,6 +73,8 @@ export class Library {
   #moves = new Map();
   /** In-flight remote adds, by URL, so they can be cancelled. */
   #running = new Map();
+  /** Downloads in progress, by URL, so a second request joins the first. */
+  #inFlight = new Map();
   /** The tile reader, told to forget an archive whose source may have changed. */
   #tiles;
 
@@ -511,6 +513,44 @@ export class Library {
   async addRemoteArchive(url, options = {}) {
     const existing = this.#catalog.findBySource(url);
     if (existing) return existing;
+
+    // A second request for a URL already being fetched joins the first.
+    //
+    // The catalog cannot answer this: an entry only exists once the download
+    // has finished and the torrent has been hashed, so for the hours in
+    // between, `findBySource` says no and every caller starts its own copy.
+    // The scheduler happens to be safe — a poll holds a flag for the whole
+    // import, so no tick can overlap it — but nothing protects the API, and
+    // `POST /api/torrents {url}` for something a schedule is already fetching
+    // used to mean two downloads of the same hundred gigabytes.
+    //
+    // Both would produce the same infohash and try to move into the same
+    // directory, so the second would land on the first: on Windows a failed
+    // rename, elsewhere a silent clobber of a file the engine is already
+    // seeding.
+    const inFlight = this.#inFlight.get(url);
+    if (inFlight) {
+      console.log(`[fetch] ${url} is already being fetched; joining that one`);
+      return inFlight;
+    }
+
+    const attempt = this.#fetchRemoteArchive(url, options).finally(() =>
+      this.#inFlight.delete(url),
+    );
+    this.#inFlight.set(url, attempt);
+    return attempt;
+  }
+
+  /**
+   * Fetches, hashes and registers one remote archive.
+   *
+   * Separate from `addRemoteArchive` so that the deduplication above wraps a
+   * single call and cannot be bypassed by a second entry point later.
+   * @param {string} url - HTTP(S) URL of the archive.
+   * @param {object} [options] - Category, trackers, piece length, save path.
+   * @returns {Promise<object>} - The catalog entry.
+   */
+  async #fetchRemoteArchive(url, options = {}) {
 
     // Tracked so it can be stopped. Hashing a remote archive can run for hours
     // and move hundreds of gigabytes; discovering it was a mistake should not
