@@ -63,6 +63,8 @@ export function createApp({
   catalog,
   engine,
   subscriptions,
+  sources,
+  hooks,
   tiles,
   warm,
   config,
@@ -1383,6 +1385,55 @@ export function createApp({
     route(async (_req, res) => {
       const added = await subscriptions.refresh();
       res.json({ added: added.length, entries: added });
+    }),
+  );
+
+  // The same for scheduled sources: ask now rather than at the next due time.
+  // Worth having for the same reason a feed refresh is — a schedule is a
+  // statement about ordinary operation, and setting one up is not ordinary
+  // operation. Waiting six hours to find out whether a URL template is right
+  // is how a typo survives a working day.
+  app.post(
+    '/api/sources/check',
+    route(async (_req, res) => {
+      if (!sources?.sweep) {
+        return res.status(501).json({ error: 'no scheduled sources here' });
+      }
+      const taken = await sources.sweep(new Date());
+      res.json({ taken: taken.length, entries: taken });
+    }),
+  );
+
+  // Run the completion hook again for one archive.
+  //
+  // The sweep runs it once and records that it has, so a six-hour build is not
+  // started six times over — but a hook that failed for a reason since fixed
+  // keeps that record too, and the only way to run it again was to stop the
+  // node and edit the catalog by hand.
+  //
+  // A POST, and therefore refused to a read-only token: this runs a command as
+  // the service user. It does not choose *which* command — that is still the
+  // config file's business, and `allowHooksFromApi` still guards it.
+  app.post(
+    '/api/torrents/:infoHash/hooks/complete',
+    route(async (req, res) => {
+      if (!hooks?.runComplete) {
+        return res.status(501).json({ error: 'hooks are not available here' });
+      }
+      try {
+        const started = await hooks.runComplete(req.params.infoHash);
+        res.json({ started: true, ...started });
+      } catch (error) {
+        // Told apart because they mean different things to whoever pressed
+        // the button: nothing configured, nothing to run it for, or already
+        // going.
+        const status = /unknown archive/.test(error.message)
+          ? 404
+          : /already running/.test(error.message)
+            ? 409
+            : 400;
+        res.status(status).json({ error: error.message });
+      }
     }),
   );
 

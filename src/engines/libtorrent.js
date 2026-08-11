@@ -134,6 +134,24 @@ export class LibtorrentEngine {
       });
       this.#child = child;
 
+      // A pipe to a process that has gone raises 'error' on the stream, and an
+      // unhandled 'error' event is not a rejected promise — it is a throw that
+      // takes the whole node down with it. That is what happened on every
+      // stop: systemd's default KillMode signals every process in the cgroup,
+      // so the sidecar exited first and the shutdown request was written into
+      // a dead pipe. The service died with EPIPE and status=1/FAILURE, having
+      // never saved its resume data, and no `.catch()` on the call could have
+      // caught it.
+      child.stdin.on('error', (error) => {
+        if (!this.#stopping) {
+          console.warn(`[libtorrent] sidecar input failed: ${error.message}`);
+        }
+        for (const [id, waiter] of this.#pending) {
+          this.#pending.delete(id);
+          waiter.reject(error);
+        }
+      });
+
       const timer = setTimeout(() => {
         reject(
           new Error(
@@ -481,7 +499,22 @@ export class LibtorrentEngine {
         },
       });
 
-      child.stdin.write(`${JSON.stringify({ id, op, params })}\n`);
+      // Checked and reported rather than thrown at. Writing to a closed pipe
+      // is ordinary during shutdown, and a call that cannot be sent should
+      // fail as a call rather than as the process.
+      if (!child.stdin.writable || child.stdin.destroyed) {
+        this.#pending.delete(id);
+        clearTimeout(timer);
+        reject(new Error(`libtorrent ${op}: the sidecar is no longer running`));
+        return;
+      }
+
+      child.stdin.write(`${JSON.stringify({ id, op, params })}\n`, (error) => {
+        if (!error) return;
+        this.#pending.delete(id);
+        clearTimeout(timer);
+        reject(new Error(`libtorrent ${op}: ${error.message}`));
+      });
     });
   }
 

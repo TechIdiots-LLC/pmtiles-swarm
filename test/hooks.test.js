@@ -346,3 +346,86 @@ describe('a hook whose command is not there', () => {
     assert.ok(written.length > 2, 'a second attempt was made');
   });
 });
+
+describe('running the completion hook on demand', () => {
+  /**
+   * A library holding one archive, recording what is written to the catalog.
+   * @param {object} extra - Fields to add to the entry.
+   * @returns {object} - The library and its entry.
+   */
+  function oneArchive(extra = {}) {
+    const entry = {
+      infoHash: 'a'.repeat(40),
+      name: 'planet-260803.osm.pbf',
+      savePath: '/tmp',
+      status: { progress: 1 },
+      completedAt: '2026-08-10T00:00:00.000Z',
+      ...extra,
+    };
+    const library = libraryOf([entry]);
+    return { library, entry };
+  }
+
+  it('runs again for an archive that already ran and failed', async () => {
+    // The dead end this exists for: completion is recorded before the command
+    // runs, so a hook that failed for a reason since fixed — a wrong path, a
+    // directory that was not writable — keeps that record. Until now the only
+    // way to run it again was to stop the node and edit the catalog by hand.
+    const { library } = oneArchive();
+    const hooks = new ProgramHooks(library, {
+      onComplete: { command: 'true', args: [] },
+    });
+
+    const log = console.log;
+    console.log = () => {};
+    try {
+      const started = await hooks.runComplete('a'.repeat(40));
+      assert.equal(started.name, 'planet-260803.osm.pbf');
+      assert.equal(started.command, 'true');
+    } finally {
+      console.log = log;
+    }
+
+    // Re-recorded, so the sweep does not treat this as a fresh completion a
+    // minute later.
+    assert.equal(library.written.length, 1);
+    assert.ok(library.written[0].completedAt);
+  });
+
+  it('says so when there is no hook to run', async () => {
+    const { library } = oneArchive();
+    const hooks = new ProgramHooks(library, {});
+    await assert.rejects(
+      () => hooks.runComplete('a'.repeat(40)),
+      /no onComplete hook is configured/,
+    );
+    assert.deepEqual(library.written, [], 'and records nothing');
+  });
+
+  it('says so when the archive is not here', async () => {
+    const { library } = oneArchive();
+    const hooks = new ProgramHooks(library, { onComplete: { command: 'true' } });
+    await assert.rejects(() => hooks.runComplete('f'.repeat(40)), /unknown archive/);
+  });
+
+  it('refuses to start a second run over a first', async () => {
+    // A build takes hours. Two of them writing the same output is worse than
+    // waiting.
+    const { library } = oneArchive();
+    const hooks = new ProgramHooks(library, {
+      onComplete: { command: process.execPath, args: ['-e', 'setTimeout(()=>{}, 3000)'] },
+    });
+
+    const log = console.log;
+    console.log = () => {};
+    try {
+      await hooks.runComplete('a'.repeat(40));
+      await assert.rejects(
+        () => hooks.runComplete('a'.repeat(40)),
+        /already running/,
+      );
+    } finally {
+      console.log = log;
+    }
+  });
+});

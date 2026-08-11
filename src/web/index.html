@@ -1386,6 +1386,20 @@
                  </div>`
           }
 
+          <h2>Completion hook</h2>
+          <div class="actions" id="hook-box">
+            <button id="run-hook">Run it for this archive</button>
+            <span class="sub" id="hook-note"></span>
+          </div>
+          <div class="sub" style="margin-bottom:1rem">
+            Runs the configured <code>onComplete</code> command again for this
+            archive. It normally runs once, when the download finishes, and is
+            recorded as having run so a build taking hours is not started over
+            every minute — which also means a hook that failed for a reason
+            since fixed will not retry on its own. What it does is decided in
+            the config file; this only decides when.
+          </div>
+
           <h2>Mode</h2>
           <div class="actions" id="mode-box">
             <button id="mode-mirror">Switch to mirror</button>
@@ -1448,6 +1462,30 @@
         const loaded = new Set(['general']);
 
         /** Shows one tab, loading it the first time. */
+        const runHook = $('run-hook');
+        if (runHook) {
+          runHook.onclick = async () => {
+            const note = $('hook-note');
+            runHook.disabled = true;
+            note.textContent = 'starting…';
+            try {
+              const result = await api(
+                `/api/torrents/${infoHash}/hooks/complete`,
+                { method: 'POST' },
+              );
+              // Started, not finished: the command may be a planet build, and
+              // nothing here waits for one.
+              note.textContent = `started ${result.command ?? 'the hook'}`;
+              toast('completion hook started');
+            } catch (error) {
+              note.textContent = error.message;
+              toast(error.message);
+            } finally {
+              runHook.disabled = false;
+            }
+          };
+        }
+
         const showPane = (name) => {
           activeTab = name;
           for (const other of panel.querySelectorAll('.tabs button')) {
@@ -2363,8 +2401,23 @@
        * @returns {void}
        */
       function renderRowEditor(spec) {
-        const { into, key, title, blurb, columns, rows, restart, preview, peerPreview, footnote } =
-          spec;
+        const {
+          into,
+          key,
+          title,
+          blurb,
+          columns,
+          rows,
+          restart,
+          preview,
+          peerPreview,
+          footnote,
+          // Where to POST a "do it now". A schedule is a statement about
+          // ordinary operation, and setting one up is not ordinary operation:
+          // waiting six hours to learn whether a URL template is right is how
+          // a typo survives a working day.
+          checkNow,
+        } = spec;
         rowEditorColumns[key] = columns;
         // Kept so a save can put back what this editor never showed. An entry
         // holds more than there are columns for it — a watch folder's
@@ -2443,6 +2496,11 @@
           </div>
           <div style="margin-top:0.5rem">
             <button type="button" data-act="add">Add row</button>
+            ${
+              checkNow
+                ? '<button type="button" data-act="check-now">Check now</button>'
+                : ''
+            }
             <span class="sub" data-role="note"></span>
           </div>
           ${footnote ? `<div class="sub" style="margin-top:0.6rem">${escapeHtml(footnote)}</div>` : ''}`;
@@ -2473,6 +2531,29 @@
 
           if (action === 'add') {
             tbody.insertAdjacentHTML('beforeend', rowHtml());
+            return;
+          }
+
+          if (action === 'check-now') {
+            // Against what is saved, not what is on screen. An unsaved row is
+            // not something the node knows about, and pretending otherwise
+            // would report on a source that does not exist yet.
+            const button = event.target;
+            button.disabled = true;
+            note.textContent = 'checking…';
+            try {
+              const result = await api(checkNow, { method: 'POST' });
+              const count = result.added ?? result.taken ?? 0;
+              note.textContent =
+                count > 0
+                  ? `took ${count} — save first if you have unsaved changes`
+                  : 'nothing new';
+              if (count > 0) refresh();
+            } catch (error) {
+              note.textContent = error.message;
+            } finally {
+              button.disabled = false;
+            }
             return;
           }
           if (action === 'drop') {
@@ -3319,6 +3400,7 @@
             },
           ],
           rows: config.sources ?? [],
+          checkNow: '/api/sources/check',
           preview: true,
           footnote:
             'Tokens combine however the upstream spells its filenames — ' +
@@ -3450,6 +3532,7 @@
             },
           ],
           rows: config.subscriptions ?? [],
+          checkNow: '/api/subscriptions/refresh',
           peerPreview: true,
           footnote:
             'Take as decides the disk this costs: cache joins the swarm and ' +

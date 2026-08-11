@@ -262,6 +262,8 @@ PMTILES_SWARM_PUBLIC_URL
     catalog,
     engine,
     subscriptions,
+    sources,
+    hooks,
     tiles,
     warm,
     config,

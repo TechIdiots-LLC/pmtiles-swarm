@@ -604,6 +604,8 @@ matters there is `maxConnections`, since every peer holds a NAT table entry. See
 | `POST` | `/api/sources/preview` | What a watched web location would take, without taking it |
 | `POST` | `/api/subscriptions/preview` | Whether a peer is reachable and what it offers |
 | `POST` | `/api/subscriptions/refresh` | Poll subscribed feeds now |
+| `POST` | `/api/sources/check` | Check scheduled sources now, rather than at the next due time |
+| `POST` | `/api/torrents/:infoHash/hooks/complete` | Run the completion hook again for one archive |
 | `GET` `POST` `DELETE` | `/api/tokens`, `/api/tokens/:id` | Mint, list and revoke access tokens |
 | `GET` `POST` | `/api/restart` | What a restart would do, and doing it |
 | `GET` `PATCH` | `/api/config` | Read and change settings |

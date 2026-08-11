@@ -194,6 +194,48 @@ export class ProgramHooks {
   }
 
   /**
+   * Runs the completion hook for one archive, now, whatever it did before.
+   *
+   * The sweep runs a hook once and records that it has: a build taking six
+   * hours must not be started six times over. But a hook that failed for a
+   * reason since fixed — a path that was wrong, a directory that was not
+   * writable — keeps that record too, and until now the only way to run it
+   * again was to stop the node and edit the catalog by hand.
+   *
+   * Started rather than awaited. The command may be a planet build, and a
+   * request that waited for it would time out long before it finished.
+   * @param {string} infoHash - The archive to run it for.
+   * @returns {Promise<object>} - What was started.
+   */
+  async runComplete(infoHash) {
+    if (!this.#config.onComplete?.command) {
+      throw new Error('no onComplete hook is configured');
+    }
+
+    const live = await this.#library.listWithStatus().catch(() => []);
+    const entry = live.find((candidate) => candidate.infoHash === infoHash);
+    if (!entry) throw new Error('unknown archive');
+    if (this.#running.has(infoHash)) {
+      throw new Error('it is already running for this archive');
+    }
+
+    // Recorded before starting, the same as the sweep does and for the same
+    // reason: whatever happens next, this is not a fresh completion to be
+    // picked up again a minute later.
+    await this.#library.catalog.put({
+      infoHash,
+      completedAt: new Date().toISOString(),
+    });
+
+    this.#running.add(infoHash);
+    this.#fire('onComplete', entry)
+      .catch(() => {})
+      .finally(() => this.#running.delete(infoHash));
+
+    return { name: entry.name, command: this.#config.onComplete.command };
+  }
+
+  /**
    * Runs one of the configured hooks, if it is configured.
    * @param {string} which - 'onAdded' or 'onComplete'.
    * @param {object} entry - The archive it is about.

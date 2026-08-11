@@ -7,6 +7,40 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.6.0
+### ✨ Features and improvements
+- **Check now, on scheduled sources and on feeds.** A schedule describes ordinary operation, and
+  setting one up is not ordinary operation — waiting six hours to find out whether a URL template
+  is right is how a typo survives a working day. `POST /api/sources/check` is new; the feed
+  equivalent existed and had no button. Both check what is *saved* rather than what is on screen,
+  since an unsaved row is not a source this node knows about.
+- **Run the completion hook again for one archive**, from its General tab or
+  `POST /api/torrents/<infohash>/hooks/complete`. Completion is recorded before the command runs,
+  so a build taking six hours is not started six times over — but a hook that failed for a reason
+  since fixed keeps that record too, and the only way to run it again was to stop the node and
+  edit the catalog by hand. Started rather than awaited, since the command may be a planet build;
+  refused with 409 if it is already running for that archive, because two builds writing the same
+  output is worse than waiting. It does not choose *which* command — that is still the config
+  file's business, and `allowHooksFromApi` still guards choosing it.
+
+### 🐞 Bug fixes
+- **The node no longer crashes while shutting down.** `child.stdin` had no `error` listener, and
+  an unhandled `'error'` event is not a rejected promise — it is a throw that takes the process
+  with it. systemd's default `KillMode` signals every process in a service's cgroup, so the Python
+  sidecar exited first and the shutdown request was written into a dead pipe:
+
+  ```
+  [shutdown] SIGTERM
+  Error: write EPIPE ... at #call (src/engines/libtorrent.js)
+  Main process exited, code=exited, status=1/FAILURE
+  ```
+
+  Every stop ended that way, and because the crash happened *inside* `destroy()`, the shutdown
+  that saves resume data never ran — so this was also a third, independent reason resume data
+  went missing. `Restart=always` brought the node back five seconds later looking healthy, which
+  is why it went unnoticed. A failed write now fails the call that made it; the pipe is checked
+  before writing; and there is a test that spawns a sidecar which reports ready and then exits.
+
 ## 0.5.6
 ### 🐞 Bug fixes
 - **The Pieces and Peers tabs redraw themselves.** A detail pane is filled once, the first time

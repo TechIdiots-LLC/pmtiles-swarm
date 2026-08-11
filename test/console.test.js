@@ -564,3 +564,24 @@ describe('the detail panes that change by themselves', () => {
     assert.equal(declarationDepths(script).get('refreshOpenPane'), 0);
   });
 });
+
+describe('running a schedule on demand', () => {
+  it('offers Check now on the editors that have somewhere to send it', () => {
+    // A schedule describes ordinary operation, and setting one up is not
+    // ordinary operation: waiting six hours to learn whether a URL template is
+    // right is how a typo survives a working day.
+    assert.match(page, /checkNow: '\/api\/sources\/check'/);
+    assert.match(page, /checkNow: '\/api\/subscriptions\/refresh'/);
+    assert.match(page, /data-act="check-now"/);
+  });
+
+  it('offers it only where a target was given', () => {
+    // Watched folders have no schedule to run early, so no button.
+    assert.match(page, /checkNow\s*\n?\s*\?\s*'<button type="button" data-act="check-now"/);
+  });
+
+  it('offers running the completion hook for one archive', () => {
+    assert.match(page, /id="run-hook"/);
+    assert.match(page, /\/hooks\/complete`,\s*\n\s*\{ method: 'POST' \}/);
+  });
+});
