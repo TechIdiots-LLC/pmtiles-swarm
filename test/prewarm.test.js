@@ -428,3 +428,80 @@ describe('when the first attempt happens', () => {
     assert.deepEqual(tiles.asked, [], 'and nothing was read while starting');
   });
 });
+
+describe('a summary that is not really a summary', () => {
+  it('does not retire an archive on a stored blank', async () => {
+    // The bug this exists for: `summary.format !== 'pbf'` counted an empty
+    // object as "read, and not vector, so done". A read that raced its
+    // deadline could leave one behind, and the archive was then permanently
+    // ineligible — no logs, no retries, and nothing to explain the silence.
+    const warmer = new HeadWarmer(tilesOf({}), catalogOf([]), {});
+
+    assert.equal(
+      warmer.due({ infoHash: 'a'.repeat(40), name: 'p.pmtiles', pmtiles: {} }),
+      true,
+      'an empty summary means nothing was read',
+    );
+    assert.equal(
+      warmer.due({
+        infoHash: 'b'.repeat(40),
+        name: 'p.pmtiles',
+        pmtiles: { minZoom: 0, maxZoom: 14 },
+      }),
+      true,
+      'and neither does one that never names a format',
+    );
+    // A real answer still retires it.
+    assert.equal(
+      warmer.due({
+        infoHash: 'c'.repeat(40),
+        name: 'p.pmtiles',
+        pmtiles: { format: 'png' },
+      }),
+      false,
+    );
+  });
+
+  it('abandons a read that never settles rather than stopping for good', async () => {
+    // #running is what stops two reads at once. A read that never returns held
+    // it for the life of the process, and every later pass returned at the
+    // first line — so the warmer died without saying anything.
+    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'p.pmtiles' }]);
+    const asked = [];
+    const tiles = {
+      asked,
+      summarize: async (infoHash) => {
+        asked.push(infoHash);
+        // The first read hangs for ever; a later one answers normally.
+        if (asked.length === 1) return new Promise(() => {});
+        return { format: 'png' };
+      },
+    };
+    let clock = 1_000_000;
+    const warmer = new HeadWarmer(tiles, catalog, {}, () => clock);
+
+    const warn = console.warn;
+    const log = console.log;
+    const said = [];
+    console.warn = (...parts) => said.push(parts.join(' '));
+    console.log = () => {};
+    try {
+      // Deliberately not awaited: it never settles, which is the point.
+      warmer.sweep();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(asked.length, 1);
+
+      clock += 60000;
+      await warmer.sweep();
+      assert.equal(asked.length, 1, 'still held while the read is plausible');
+
+      clock += 400000;                      // past three metadata timeouts
+      await warmer.sweep();
+      assert.equal(asked.length, 2, 'abandoned, and tried again');
+      assert.match(said[0], /being abandoned/);
+    } finally {
+      console.warn = warn;
+      console.log = log;
+    }
+  });
+});

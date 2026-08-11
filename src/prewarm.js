@@ -58,6 +58,7 @@ export class HeadWarmer {
   #attempts = new Map();
   #waiting = new Set();
   #running = false;
+  #runningSince = 0;
 
   /**
    * @param {object} tiles - The tile store, for `summarize`.
@@ -94,8 +95,13 @@ export class HeadWarmer {
     // archive this can say anything about.
     if (entry.kind && entry.kind !== 'pmtiles') return false;
 
+    // A summary that names a format is one a header was actually read for.
+    // Anything else — an empty object, or one left behind by a read that raced
+    // its deadline — is not an answer, and treating it as one retired the
+    // archive permanently: no logs, no retries, nothing to explain the silence.
     const summary = entry.pmtiles;
-    if (summary && (summary.format !== 'pbf' || summary.vectorLayers)) {
+    const read = Boolean(summary?.format);
+    if (read && (summary.format !== 'pbf' || summary.vectorLayers)) {
       return false;
     }
 
@@ -137,12 +143,27 @@ export class HeadWarmer {
    * @returns {Promise<object|null>} - The entry warmed, or null.
    */
   async sweep() {
-    if (!this.enabled || this.#running) return null;
+    if (!this.enabled) return null;
+
+    if (this.#running) {
+      // A read that never settles would otherwise hold this flag for the life
+      // of the process and stop every archive from ever being warmed again —
+      // silently, since nothing logs a pass that returns at the first line.
+      const stuck = (this.#config.tiles?.metadataTimeoutMs ?? 120000) * 3;
+      if (this.#now() - this.#runningSince < stuck) return null;
+      console.warn(
+        `[warm] a read has been running for ${Math.round(
+          (this.#now() - this.#runningSince) / 1000,
+        )}s and is being abandoned`,
+      );
+      this.#running = false;
+    }
 
     const entry = this.#catalog.list().find((candidate) => this.due(candidate));
     if (!entry) return null;
 
     this.#running = true;
+    this.#runningSince = this.#now();
     try {
       // The long timeout, not the interactive one: this is a byte range from
       // an archive nobody has asked for a piece of yet.

@@ -7,6 +7,19 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.5.5
+### 🐞 Bug fixes
+- **An archive could retire itself from head-warming and never say so.** The test for "already
+  read" was `summary.format !== 'pbf'`, and any stored summary *without* a format satisfies
+  that — so it counted as read, not vector, and therefore finished. A read that raced its
+  deadline leaves exactly such a summary behind, and from then on the archive was permanently
+  ineligible: no attempts, no log lines, and nothing to explain the silence. A summary now only
+  counts as an answer if it actually names a format.
+- **A read that never settles no longer disables warming for good.** The flag that stops two
+  reads running at once was held for the life of the process by a read that never returned, and
+  every later pass then returned at its first line — silently, for every archive. It is
+  abandoned after three times the metadata timeout, with a line saying so.
+
 ## 0.5.4
 ### ✨ Features and improvements
 - **The head-warm waits sensibly at both ends.** It used to read at the instant the node
