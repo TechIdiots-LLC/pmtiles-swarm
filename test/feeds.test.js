@@ -278,3 +278,36 @@ describe('the master switch', () => {
     }
   });
 });
+
+describe('keeping a feed from filling the disk', () => {
+  it('retires older copies once a new one lands', async () => {
+    // A feed publishing weekly leaves a copy behind every week, and goes on
+    // listing all of them — so pruning, which is about what the publisher
+    // still offers, can never clear them. Age can.
+    const { retains, expired } = await import('../src/retention.js');
+
+    const subscription = { keepDays: 10 };
+    assert.equal(retains(subscription), true);
+
+    const day = 24 * 60 * 60 * 1000;
+    const now = Date.parse('2026-08-11T00:00:00Z');
+    const family = [0, 7, 14, 21].map((age) => ({
+      infoHash: `age-${age}`,
+      name: `planet-${age}d.osm.pbf`,
+      createdAt: new Date(now - age * day).toISOString(),
+    }));
+
+    const doomed = expired({ family, keepDays: 10, now });
+    assert.deepEqual(
+      doomed.map((entry) => entry.name),
+      ['planet-14d.osm.pbf', 'planet-21d.osm.pbf'],
+      'a week of history survives; a fortnight does not',
+    );
+  });
+
+  it('is off unless asked for, like everywhere else it appears', async () => {
+    const { retains } = await import('../src/retention.js');
+    assert.equal(retains({}), false);
+    assert.equal(retains({ prune: 'delete' }), false, 'pruning is not retention');
+  });
+});

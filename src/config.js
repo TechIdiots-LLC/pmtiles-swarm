@@ -555,6 +555,21 @@ const DEFAULTS = {
    * and pruning, which needs to be able to notice an absence.
    */
   subscriptions: [],
+  /*
+   * A subscription also takes `keep` and `keepDays`, which are the same rules
+   * a watched folder and a scheduled source retire under and are applied by
+   * the same code.
+   *
+   * They answer a different question from `prune`. Pruning is about the
+   * publisher — it stopped offering this, so let it go — and needs a complete
+   * listing to mean anything, which is why it applies to a catalog and not to
+   * an RSS feed. These are about the disk: a feed publishing weekly leaves a
+   * copy behind every week and goes on listing all of them, and age is age
+   * however short the list is.
+   *
+   * Retirement runs only after something new has landed, and never removes
+   * the newest copy.
+   */
   /**
    * How often to re-check whether the sources archives were built from have
    * changed, in seconds. Zero disables it. A check is one HEAD request or stat

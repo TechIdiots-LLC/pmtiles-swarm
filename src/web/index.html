@@ -2419,6 +2419,14 @@
           checkNow,
         } = spec;
         rowEditorColumns[key] = columns;
+        // Where this editor's rows belong, and what they are on top of being
+        // rows. Two editors can be two views of one array — feeds and peers
+        // are both subscriptions — so the panel's own key is a DOM name, and
+        // this is where its records are written.
+        rowEditorTargets[key] = {
+          configKey: spec.configKey ?? key,
+          stamp: spec.stamp ?? {},
+        };
         // Kept so a save can put back what this editor never showed. An entry
         // holds more than there are columns for it — a watch folder's
         // pieceLength, a subscription's savePath — and a save that rebuilt each
@@ -2433,7 +2441,9 @@
           <td>
             ${
               column.options
-                ? `<select data-field="${column.field}" style="width:${column.wide ? '17rem' : '9rem'}">
+                ? `<select data-field="${column.field}"${
+                    column.onlyFor ? ` data-only-for="${column.onlyFor}"` : ''
+                  } style="width:${column.wide ? '17rem' : '9rem'}">
                      ${column.options
                        .map(
                          ([option, label]) =>
@@ -2445,6 +2455,7 @@
                    </select>`
                 : `<input
                      data-field="${column.field}"
+                     ${column.onlyFor ? `data-only-for="${column.onlyFor}"` : ''}
                      ${column.secret ? 'type="password" autocomplete="off"' : ''}
                      placeholder="${escapeHtml(column.placeholder ?? '')}"
                      style="width:${column.wide ? '17rem' : '9rem'}"
@@ -2507,6 +2518,40 @@
 
         const tbody = panel.querySelector('tbody');
         const note = panel.querySelector('[data-role="note"]');
+
+        /**
+         * Greys out the fields the chosen protocol does not read.
+         *
+         * The two halves of a subscription are not the same thing wearing
+         * different clothes. `newest` caps how many items a bounded feed hands
+         * over and means nothing to a catalog, which lists everything; `prune`
+         * needs a complete listing to make absence meaningful and so cannot
+         * apply to a feed. Offering both to both invites a setting that is
+         * quietly ignored, which is worse than not offering it.
+         *
+         * Left alone on "auto", since the protocol is then decided by the URL
+         * and this cannot know which it will be.
+         * @param {HTMLElement} row - The row to update.
+         * @returns {void}
+         */
+        const applyProtocol = (row) => {
+          const chosen = row.querySelector('[data-field="protocol"]')?.value;
+          for (const field of row.querySelectorAll('[data-only-for]')) {
+            const belongs = field.dataset.onlyFor;
+            const off = Boolean(chosen) && chosen !== belongs;
+            field.disabled = off;
+            field.title = off
+              ? `Only used by the ${belongs === 'rss' ? 'RSS' : 'catalog API'} protocol`
+              : '';
+          }
+        };
+
+        for (const row of tbody.querySelectorAll('tr')) applyProtocol(row);
+        panel.addEventListener('change', (event) => {
+          if (event.target.dataset?.field === 'protocol') {
+            applyProtocol(event.target.closest('tr'));
+          }
+        });
 
         panel.onclick = async (event) => {
           const token = event.target.dataset?.token;
@@ -2662,6 +2707,7 @@
         for (const [key, columns] of Object.entries(specs)) {
           const panel = document.querySelector(`[data-row-editor="${key}"]`);
           if (!panel) continue;
+          const target = rowEditorTargets[key] ?? { configKey: key, stamp: {} };
           const originals = rowEditorRows[key] ?? [];
           const records = [...panel.querySelectorAll('tbody tr')]
             .map((row) => {
@@ -2675,8 +2721,17 @@
                 origin === undefined ? {} : (originals[Number(origin)] ?? {}),
               );
             })
-            .filter((record) => record[columns[0].field]);
-          updates[key] = records;
+            .filter((record) => record[columns[0].field])
+            // What the section says about every row in it. A row in the feeds
+            // table is an RSS subscription because of where it is, which is
+            // the point of having two tables rather than a dropdown.
+            .map((record) => ({ ...record, ...target.stamp }));
+
+          // Appended, not assigned: several editors may write one setting.
+          updates[target.configKey] = [
+            ...(updates[target.configKey] ?? []),
+            ...records,
+          ];
         }
         return updates;
       }
@@ -3168,6 +3223,7 @@
       // ── Settings ──────────────────────────────────────────────────────────
       let restartKeys = new Set();
       let rowEditorColumns = {};
+      let rowEditorTargets = {};
       // What each editor was rendered from, so a save can put back the fields
       // it never showed.
       let rowEditorRows = {};
@@ -3229,6 +3285,7 @@
         // are lists of small records, which is exactly what a torrent client
         // gives a grid for, and what a textarea full of braces is worst at.
         rowEditorColumns = {};
+        rowEditorTargets = {};
         rowEditorRows = {};
         await renderTokenEditor(body);
         renderHookEditor(body, config, restartKeys);
@@ -3460,34 +3517,99 @@
           </div>`;
         body.append(feedGlobals);
 
+        // Which table a subscription belongs in — the same question the
+        // subscription manager asks itself: an explicit protocol decides it, and
+        // otherwise the shape of the URL does.
+        const isPeer = (row) =>
+          row.protocol === 'api' ||
+          (!row.protocol && /\/api\/catalog\/?$/.test(row.url ?? ''));
+        const following = config.subscriptions ?? [];
+
         renderRowEditor({
           into: body,
-          key: 'subscriptions',
-          title: 'Remote nodes',
+          key: 'feeds',
+          configKey: 'subscriptions',
+          // A row here is RSS because of the table it is in, which is the
+          // point of two tables rather than a dropdown nobody reads.
+          stamp: { protocol: 'rss' },
+          title: 'RSS feeds',
           blurb:
-            'Feeds this node follows: another swarm node, or any RSS feed ' +
-            'that carries torrents — planet.openstreetmap.org publishes one ' +
-            'for the planet dumps. An RSS feed says "here is what is new" ' +
-            'and is bounded by the publisher, so a node offline long enough ' +
-            'misses things for good; a catalog URL says "here is ' +
-            'everything", which is what makes reconciling possible. A token, ' +
-            'where the peer issued one, may get you more than it publishes ' +
-            'to the world.',
+            'Any feed that carries torrents — another swarm node publishes ' +
+            'one, and so does planet.openstreetmap.org for the planet dumps. ' +
+            'A feed says "here is what is new" and is bounded by whoever ' +
+            'publishes it, so a node offline long enough misses things for ' +
+            'good, and an absence from one means nothing at all.',
           columns: [
             {
               field: 'url',
-              label: 'Feed or catalog URL',
-              placeholder: 'https://peer.example.org/feed.xml',
+              label: 'Feed URL',
+              placeholder: 'https://planet.openstreetmap.org/pbf/planet-pbf-rss.xml',
               wide: true,
             },
             {
-              field: 'protocol',
-              label: 'Protocol',
+              field: 'mode',
+              label: 'Take as',
               options: [
-                ['', 'auto'],
-                ['rss', 'RSS'],
-                ['api', 'catalog API'],
+                ['cache', 'cache — on demand'],
+                ['mirror', 'mirror — whole copy'],
               ],
+            },
+            { field: 'newest', label: 'Items per check', placeholder: '1', number: true },
+            {
+              field: 'categories',
+              label: 'Categories',
+              placeholder: 'from-peer, planet',
+              list: true,
+            },
+            { field: 'filter', label: 'Name filter', placeholder: 'terrain' },
+            { field: 'savePath', label: 'Save to', placeholder: 'the default' },
+            { field: 'token', label: 'Token', placeholder: 'if issued one', secret: true },
+            { field: 'keep', label: 'Copies to keep', placeholder: 'all', number: true },
+            { field: 'keepDays', label: 'Keep for (days)', placeholder: 'for ever', number: true },
+            {
+              field: 'enabled',
+              label: 'On',
+              boolean: true,
+              options: [
+                ['', 'yes'],
+                ['false', 'no'],
+              ],
+            },
+          ],
+          rows: following.filter((row) => !isPeer(row)),
+          checkNow: '/api/subscriptions/refresh',
+          peerPreview: true,
+          footnote:
+            'Items per check is 1 by default and counts from the newest, ' +
+            'because a feed listing five planet dumps is four hundred ' +
+            'gigabytes if you take the lot; 0 takes everything it lists. ' +
+            'Copies to keep and Keep for are about your disk rather than the ' +
+            'publisher: a feed publishing weekly leaves a copy behind every ' +
+            'week and goes on listing all of them. Both run only after ' +
+            'something new has landed, and neither removes the newest copy. ' +
+            'There is no dropping here — absence from a bounded feed is not ' +
+            'evidence that anything was withdrawn, which is what a catalogue ' +
+            'is for.',
+        });
+
+        renderRowEditor({
+          into: body,
+          key: 'peers',
+          configKey: 'subscriptions',
+          stamp: { protocol: 'api' },
+          title: 'Remote nodes',
+          blurb:
+            'Another swarm node, followed through its catalogue rather than ' +
+            'its feed. A catalogue says "here is everything", which is what ' +
+            'makes reconciling possible — and dropping, which needs to be ' +
+            'able to notice an absence. A token, where the peer issued one, ' +
+            'may get you more than it publishes to the world.',
+          columns: [
+            {
+              field: 'url',
+              label: 'Catalogue URL',
+              placeholder: 'https://peer.example.org/api/catalog',
+              wide: true,
             },
             {
               field: 'mode',
@@ -3498,18 +3620,13 @@
               ],
             },
             {
-              field: 'newest',
-              label: 'Items per check',
-              placeholder: '1',
-              number: true,
-            },
-            {
               field: 'categories',
               label: 'Categories',
-              placeholder: 'from-peer, planet',
+              placeholder: 'from-peer',
               list: true,
             },
             { field: 'filter', label: 'Name filter', placeholder: 'terrain' },
+            { field: 'savePath', label: 'Save to', placeholder: 'the default' },
             { field: 'token', label: 'Token', placeholder: 'if issued one', secret: true },
             {
               field: 'prune',
@@ -3521,6 +3638,8 @@
                 ['delete', 'forget and delete'],
               ],
             },
+            { field: 'keep', label: 'Copies to keep', placeholder: 'all', number: true },
+            { field: 'keepDays', label: 'Keep for (days)', placeholder: 'for ever', number: true },
             {
               field: 'enabled',
               label: 'On',
@@ -3531,7 +3650,7 @@
               ],
             },
           ],
-          rows: config.subscriptions ?? [],
+          rows: following.filter(isPeer),
           checkNow: '/api/subscriptions/refresh',
           peerPreview: true,
           footnote:
@@ -3540,10 +3659,7 @@
             'every archive the peer lists. Dropping stays off unless chosen, ' +
             'only ever considers archives this peer sent, and never acts on a ' +
             'filtered or partial view — watch a new peer on "report only" ' +
-            'before trusting it with anything more. Items per check is 1 by ' +
-            'default and counts from the newest, because a feed listing five ' +
-            'planet dumps is four hundred gigabytes if you take the lot; 0 ' +
-            'takes everything it lists.',
+            'before trusting it with anything more.',
         });
 
         for (const [key, value] of Object.entries(config)) {

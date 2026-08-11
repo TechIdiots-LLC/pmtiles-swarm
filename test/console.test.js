@@ -585,3 +585,54 @@ describe('running a schedule on demand', () => {
     assert.match(page, /\/hooks\/complete`,\s*\n\s*\{ method: 'POST' \}/);
   });
 });
+
+describe('feeds and peers as two sections', () => {
+  it('renders them separately, both writing one setting', () => {
+    // They are not one thing wearing two hats. A feed is bounded and says
+    // "here is what is new"; a catalogue says "here is everything", which is
+    // the only thing that makes an absence mean anything. Half the columns
+    // differed, and a dropdown asking which kind of row this was is a question
+    // the table it sits in already answers.
+    assert.match(page, /key: 'feeds',\s+configKey: 'subscriptions',/);
+    assert.match(page, /key: 'peers',\s+configKey: 'subscriptions',/);
+    assert.ok(
+      !/key: 'subscriptions',/.test(page),
+      'the combined editor should be gone',
+    );
+  });
+
+  it('stamps each row with the protocol its section means', () => {
+    // Which removes "auto" from the console: the section decides, so a saved
+    // row always says which it is rather than leaving it to be inferred from
+    // the URL later.
+    assert.match(page, /stamp: \{ protocol: 'rss' \}/);
+    assert.match(page, /stamp: \{ protocol: 'api' \}/);
+  });
+
+  it('appends rather than assigns, so one does not clobber the other', () => {
+    // Both write `subscriptions`. Assigning would mean whichever rendered
+    // last silently deleted the other section's rows.
+    assert.match(page, /updates\[target\.configKey\] = \[\s*\n\s*\.\.\.\(updates\[target\.configKey\] \?\? \[\]\),/);
+  });
+
+  it('offers each section only the fields it reads', () => {
+    const feeds = page.slice(page.indexOf("key: 'feeds'"), page.indexOf("key: 'peers'"));
+    const peers = page.slice(page.indexOf("key: 'peers'"));
+
+    assert.ok(feeds.includes("field: 'newest'"), 'a feed is bounded, so it caps');
+    assert.ok(!feeds.includes("field: 'prune'"), 'and cannot prune on absence');
+
+    assert.ok(peers.includes("field: 'prune'"), 'a catalogue can notice a removal');
+    assert.ok(!peers.includes("field: 'newest'"), 'and lists everything, so nothing to cap');
+
+    for (const section of [feeds, peers]) {
+      assert.ok(section.includes("field: 'keepDays'"), 'both answer for their own disk');
+    }
+  });
+
+  it('sorts an existing row into the right section', () => {
+    // Configurations written before this existed say "auto", or say nothing.
+    assert.match(page, /const isPeer = \(row\) =>/);
+    assert.match(page, /row\.protocol === 'api' \|\|/);
+  });
+});

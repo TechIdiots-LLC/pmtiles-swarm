@@ -1,4 +1,5 @@
 import { parseFeed } from './feed.js';
+import { retains, retire } from './retention.js';
 
 /**
  * Follows other nodes' feeds and picks up what they publish.
@@ -174,6 +175,12 @@ export class SubscriptionManager {
         break;
       }
     }
+
+    // The disk side of following a feed. Pruning cannot apply here — absence
+    // from a bounded feed proves nothing — but age applies whatever the list
+    // is, which is what makes this the answer for a feed that publishes
+    // weekly for ever.
+    await this.#retire(subscription, added);
     return added;
   }
 
@@ -252,7 +259,44 @@ export class SubscriptionManager {
     }
 
     await this.#prune(subscription, document, archives);
+    await this.#retire(subscription, added);
     return added;
+  }
+
+  /**
+   * Removes what this feed's archives have outgrown.
+   *
+   * Separate from pruning, and answering a different question. Pruning is
+   * about the *publisher*: it has stopped offering this, so let it go. This is
+   * about the disk: a feed publishing weekly leaves a copy behind every week,
+   * and the publisher will go on listing all of them.
+   *
+   * That distinction is why an RSS feed can have this and cannot have pruning.
+   * Absence from a bounded feed is not evidence that anything was withdrawn —
+   * planet.openstreetmap.org lists five dumps and says nothing about the
+   * hundreds before them — but age is age however short the list is.
+   *
+   * Only after something new has landed, and never the newest copy, which are
+   * the same guards a scheduled source retires under. See `retire`.
+   * @param {object} subscription - The subscription.
+   * @param {object[]} added - What this pass took, newest first.
+   * @returns {Promise<void>} - Resolves once anything due has gone.
+   */
+  async #retire(subscription, added) {
+    if (added.length === 0 || !retains(subscription)) return;
+
+    await retire({
+      library: this.#library,
+      // Only what this feed brought in. An archive built here, added by hand,
+      // or taken from another peer is not this subscription's to remove.
+      family: this.#library.catalog
+        .list()
+        .filter((entry) => entry.source?.subscription === subscription.url),
+      entry: added[0],
+      keep: subscription.keep,
+      keepDays: subscription.keepDays,
+      label: `[sync] ${subscription.url}`,
+    });
   }
 
   /**

@@ -7,6 +7,30 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.7.0
+### ✨ Features and improvements
+- **A feed can be told how long to keep what it brings in.** `keep` and `keepDays` now work on a
+  subscription, applied by the same code a watched folder and a scheduled source retire under and
+  with the same guards: only after something new has landed, and never the newest copy. A feed
+  publishing weekly leaves a copy behind every week and the publisher goes on listing all of them,
+  so `keepDays: 10` against a weekly feed keeps a fortnight and drops the rest.
+
+  This is not what `prune` does, and the difference is why a feed needed its own answer. Pruning is
+  about the publisher — it stopped offering this, so let it go — and needs a complete listing for an
+  absence to mean anything, which is why it applies to a catalogue and not to a feed.
+  planet.openstreetmap.org lists five dumps and says nothing about the hundreds before them. Age is
+  age however short the list is.
+- **Feeds and remote nodes are two sections rather than one table with a dropdown.** They are not
+  one thing in two costumes: a feed is bounded and says "here is what is new", so it caps items per
+  check and can never prune; a catalogue says "here is everything", which is the only thing that
+  makes an absence meaningful. Half the columns applied to one and half to the other. A row is now
+  RSS or API because of the table it sits in, which also means a saved row states its protocol
+  instead of leaving it to be guessed from the URL later. Rows written before this are sorted into
+  a section by the same rule the subscription manager itself uses.
+- **A feed's save path is editable.** `savePath` was accepted in the configuration and offered
+  nowhere, so it could only be set by hand — and before the row editor learned to keep fields it
+  does not show, pressing Save would have deleted it.
+
 ## 0.6.0
 ### ✨ Features and improvements
 - **Check now, on scheduled sources and on feeds.** A schedule describes ordinary operation, and
