@@ -7,6 +7,25 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.5.3
+### 🐞 Bug fixes
+- **A "high" priority hint asked for nothing at all.** libtorrent's scale runs 0 to 7 and **4 is
+  the default every piece already has** — and high was mapped to 4. So the JSON metadata, which
+  the source hints the moment it reads a header, was raised to precisely what the other eighteen
+  thousand pieces already had, and waited its turn: hours, on a 72 GiB archive. It is 6 now,
+  above the default and below critical, so it arrives soon without ever going ahead of a tile
+  somebody is waiting for. `normal` stays at 1, deliberately below the default, because that is
+  what the idle leaf hydration uses and it must yield to everything.
+
+  There is a test for the mapping itself, since a priority that is merely ordinary fails by
+  doing nothing, which no behavioural test would notice.
+- **A partial head-read no longer reports itself as a complete one.** The header sits at byte
+  zero while the JSON metadata is wherever the writer put it — planetiler puts it after every
+  tile, so at the far end of the file — and `summarize` treats the second as decoration, so a
+  pass that got only the header still returned a summary and logged "read the head". It then
+  came back two minutes later, having genuinely succeeded and genuinely not finished, with
+  nothing in the log to explain the repetition. The two are now reported separately.
+
 ## 0.5.2
 ### 🐞 Bug fixes
 - **Asks for the `pmtiles-torrent` that 0.5.1 actually needs.** It shipped declaring `^0.3.2`,

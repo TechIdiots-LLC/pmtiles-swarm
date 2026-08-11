@@ -267,3 +267,48 @@ describe('an archive whose torrent metadata has not arrived', () => {
     assert.match(said[0], /waiting for the torrent metadata/);
   });
 });
+
+describe('what a partial read is called', () => {
+  it('does not report a header-only read as having read the metadata', async () => {
+    // The two arrive separately: the header is at byte zero, while the JSON
+    // metadata is wherever the writer put it — planetiler puts it after every
+    // tile, so on a 72 GiB archive it is the very end of the file. Calling both
+    // "read the head" made a pass that got half of it look complete, and left
+    // the repeat every couple of minutes unexplained.
+    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'planet.pmtiles' }]);
+    const warmer = new HeadWarmer(tilesOf({ format: 'pbf' }), catalog, {});
+
+    const said = [];
+    const log = console.log;
+    console.log = (...parts) => said.push(parts.join(' '));
+    try {
+      await warmer.sweep();
+    } finally {
+      console.log = log;
+    }
+
+    assert.match(said[0], /header read/);
+    assert.doesNotMatch(said[0], /vector layers/);
+    assert.match(said[0], /far end of the archive/);
+  });
+
+  it('says so plainly once both halves are in', async () => {
+    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'planet.pmtiles' }]);
+    const warmer = new HeadWarmer(
+      tilesOf({ format: 'pbf', vectorLayers: [{ id: 'water' }, { id: 'roads' }] }),
+      catalog,
+      {},
+    );
+
+    const said = [];
+    const log = console.log;
+    console.log = (...parts) => said.push(parts.join(' '));
+    try {
+      await warmer.sweep();
+    } finally {
+      console.log = log;
+    }
+
+    assert.match(said[0], /header and metadata read \(2 vector layers\)/);
+  });
+});

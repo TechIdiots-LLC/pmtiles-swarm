@@ -128,12 +128,25 @@ export class HeadWarmer {
         infoHash: entry.infoHash,
         pmtiles: { ...entry.pmtiles, ...summary },
       });
-      console.log(
-        `[warm] read the head of ${entry.name}` +
-          (summary.vectorLayers
-            ? ` (${summary.vectorLayers.length} vector layers)`
-            : ''),
-      );
+      // Said accurately, because the two halves arrive separately and the
+      // difference matters: the header is at byte zero, while the JSON
+      // metadata is wherever the writer put it — planetiler puts it after every
+      // tile, so on a 72 GiB archive it is the very end of the file. Reporting
+      // both as "read the head" made a pass that got half of it look complete,
+      // and left the repeat every couple of minutes unexplained.
+      if (summary.vectorLayers) {
+        console.log(
+          `[warm] ${entry.name}: header and metadata read ` +
+            `(${summary.vectorLayers.length} vector layers)`,
+        );
+      } else if (summary.format === 'pbf') {
+        console.log(
+          `[warm] ${entry.name}: header read; its metadata is at the far end ` +
+            'of the archive and has not arrived yet',
+        );
+      } else {
+        console.log(`[warm] ${entry.name}: header read`);
+      }
       return stored;
     } catch (error) {
       if (tooEarly(error)) {

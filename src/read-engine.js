@@ -9,7 +9,21 @@
  */
 
 /** libtorrent piece priorities. 0 means "do not fetch". */
-const LT_PRIORITY = { critical: 7, high: 4, normal: 1 };
+/**
+ * What a hint's priority means to libtorrent.
+ *
+ * libtorrent's scale runs 0 (do not download) to 7 (highest), and **4 is the
+ * default every piece already has**. So "high" was mapped to the default: the
+ * JSON metadata, which the source hints as high the moment it reads the header,
+ * was never prioritised at all — it waited its turn like the other eighteen
+ * thousand pieces, which on a 72 GiB archive is hours.
+ *
+ * 6 is above the default and below critical, which is what "fetch this sooner
+ * than the rest, but not ahead of a tile somebody is waiting for" should mean.
+ * `normal` stays at 1, deliberately *below* the default: it is what the idle
+ * leaf hydration uses, and that must yield to everything.
+ */
+const LT_PRIORITY = { critical: 7, high: 6, normal: 1 };
 
 /**
  * A TorrentEngine over the libtorrent sidecar the seed engine already runs.
