@@ -33,6 +33,9 @@ node src/index.js --config swarm.config.json
   address.
 - **[docs/running-as-a-service.md](docs/running-as-a-service.md)** — a systemd unit, why
   `Restart=always` is required rather than optional, and which ports want a firewall rule.
+- **[docs/docker.md](docs/docker.md)** — the `wifidb/pmtiles-swarm` image, the single `/data`
+  mount everything lives under, and why a BitTorrent peer is not the usual Docker networking
+  question.
 - **[docs/architecture-diagram.md](docs/architecture-diagram.md)** — how a publishing node, a
   serving tier, the swarm and both kinds of client fit together.
 
