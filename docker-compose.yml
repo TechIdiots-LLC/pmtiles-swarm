@@ -1,0 +1,56 @@
+# pmtiles-swarm
+#
+#   docker compose up -d
+#
+# One directory is mounted at /data and everything lives inside it, because the
+# configuration written there uses relative paths and pmtiles-swarm resolves
+# those against the config file. Edit ./data/swarm.config.json after the first
+# start — it is written with placeholders for the API key and password.
+
+services:
+  pmtiles-swarm:
+    image: wifidb/pmtiles-swarm:latest
+    container_name: pmtiles-swarm
+    restart: unless-stopped
+
+    volumes:
+      - ./data:/data
+
+    # Host networking, and it is worth understanding why rather than copying
+    # it. This is a BitTorrent peer, not only an HTTP server:
+    #
+    #   * Incoming peer connections need the listen port to be reachable. On a
+    #     NAT-ed bridge network they are not, so the node only ever makes
+    #     outgoing connections and looks like it is in an empty swarm.
+    #   * The DHT tells other peers where to find you. Behind bridge NAT it
+    #     advertises the container's address, which nothing can reach.
+    #   * UPnP and NAT-PMP ask the router for a forward. From inside a bridge
+    #     network they ask the wrong device.
+    #
+    # The cost is that the container shares the host's network stack, so the
+    # ports below are the host's ports and nothing isolates them.
+    network_mode: host
+
+    # Swap the two blocks if you would rather keep the isolation. Seeding still
+    # works — outgoing connections are unaffected — but expect fewer peers, and
+    # forward 6881 on the router by hand since UPnP will not do it for you.
+    #
+    # network_mode: bridge
+    # ports:
+    #   - "8090:8090"          # tiles, feeds, .torrent endpoints
+    #   - "8091:8091"          # console and API
+    #   - "6881:6881/tcp"      # libtorrent
+    #   - "6881:6881/udp"      # uTP and the DHT, which are not TCP
+    #   - "6882:6882/tcp"      # WebTorrent, if secondaryEngines is set
+    #   - "6882:6882/udp"
+
+    # Matches the uid the image runs as. Change both if the mounted directory
+    # belongs to someone else on the host; the container has no way to guess.
+    user: "10001:10001"
+
+    # An archive is served by holding a socket per peer and file descriptors
+    # for the reader, and the default is usually too low to seed at scale.
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535

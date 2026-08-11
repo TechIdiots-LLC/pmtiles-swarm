@@ -1,0 +1,15 @@
+# The build needs the manifest, the lock and src. Everything else only makes
+# the context bigger and the cache less useful.
+.git
+.github
+node_modules
+test
+docs
+data
+*.log
+
+# A configuration is deployment state, and one baked into an image is a
+# credential shipped to whoever pulls it. The entrypoint writes a fresh one.
+swarm.config*.json
+!swarm.config.json.sample
+*.bak

@@ -7,6 +7,27 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+### 📚 Documentation
+- **A Docker image**, `wifidb/pmtiles-swarm`, for amd64 and arm64. Nothing in the package changed;
+  this is a way to run what was already there.
+
+  One mount matters. `/data` holds the configuration, and the configuration is written entirely in
+  relative paths — which works because pmtiles-swarm resolves paths against the configuration file
+  rather than the working directory, so everything lands inside whatever was mounted and the file
+  says nothing about containers. A missing configuration is written on first start, so
+  `docker run -v somewhere:/data` is enough to get a node. An existing one is never touched.
+
+  The documentation is blunt about the two things that are not the usual Docker questions.
+  Networking: this is a BitTorrent peer, and bridge NAT breaks incoming connections, makes the DHT
+  advertise an unreachable address, and points UPnP at the wrong device — so host networking is
+  usually right, and that is a real trade rather than a default worth copying. And one peer port
+  *per engine*, TCP and UDP both, since uTP and the DHT are not TCP; WebRTC needs no port at all,
+  being outbound-only through a `wss://` tracker.
+
+  Images build on a published release, in their own workflow. An image failing must not be able to
+  fail a publish that already succeeded, or strand a release that cannot be re-run because npm
+  already has the version.
+
 ## 0.7.0
 ### ✨ Features and improvements
 - **A feed can be told how long to keep what it brings in.** `keep` and `keepDays` now work on a

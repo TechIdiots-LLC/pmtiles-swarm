@@ -62,3 +62,106 @@ jobs:
               || { echo "sidecar has no op_${op}"; exit 1; }
           done
           echo "all ops present"
+
+  image:
+    name: Docker image (${{ matrix.arch }})
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Both architectures, on native runners. The risk this job exists for
+          # is architecture-specific — python3-libtorrent and the nodesource
+          # package set are what differ — so building only amd64 would test the
+          # half that was never in doubt.
+          - runs-on: ubuntu-24.04
+            arch: amd64
+          - runs-on: ubuntu-24.04-arm
+            arch: arm64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          tags: pmtiles-swarm:ci-${{ matrix.arch }}
+          load: true
+          push: false
+          cache-from: type=gha,scope=ci-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=ci-${{ matrix.arch }}
+
+      - name: Start it against an empty /data
+        run: |
+          # Empty on purpose: the entrypoint has to write a working
+          # configuration, which is what makes `docker run -v somewhere:/data`
+          # enough to get a node. A test with a config supplied would never
+          # exercise that.
+          mkdir -p "$RUNNER_TEMP/data"
+          docker run -d --name swarm             -v "$RUNNER_TEMP/data:/data"             -p 8090:8090 -p 8091:8091             pmtiles-swarm:ci-${{ matrix.arch }}
+
+      - name: Wait for the engine
+        run: |
+          # "[engine] libtorrent ready" is the line that matters. It means the
+          # sidecar started and python3-libtorrent imported, which is the whole
+          # reason this job builds for two architectures.
+          for i in $(seq 1 60); do
+            if docker logs swarm 2>&1 | grep -q '\[engine\] .* ready'; then
+              echo "engine up after ${i}s"
+              exit 0
+            fi
+            if ! docker ps -q --filter name=swarm | grep -q .; then
+              echo "container exited"
+              break
+            fi
+            sleep 1
+          done
+          echo "engine did not come up"
+          docker logs swarm 2>&1 | tail -40
+          exit 1
+
+      - name: Check what the entrypoint wrote
+        run: |
+          test -f "$RUNNER_TEMP/data/swarm.config.json" || {
+            echo "no configuration was written"; exit 1; }
+          # Relative paths are the whole design: they are what puts the state
+          # inside the mount rather than inside the container.
+          node -e "
+            const c = require('$RUNNER_TEMP/data/swarm.config.json');
+            for (const [k, v] of [['dataDir', c.dataDir], ['savePath', c.savePath]]) {
+              if (!String(v).startsWith('./')) throw new Error(k + ' is not relative: ' + v);
+            }
+            console.log('config is relative:', c.dataDir, c.savePath);
+          "
+          for dir in state state/resume archives generated; do
+            test -d "$RUNNER_TEMP/data/$dir" || { echo "missing $dir"; exit 1; }
+          done
+          echo "the mounted directory holds the node's state"
+
+      - name: Check it serves
+        run: |
+          # The public surface needs no credential, which is what makes it a
+          # usable check — and a feed is the thing a subscriber would ask for.
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8090/feed.xml >/dev/null; then
+              echo "public surface answered"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "public surface never answered"
+          docker logs swarm 2>&1 | tail -40
+          exit 1
+
+      - name: Stop it cleanly
+        run: |
+          # A stop that is not clean is a bug this project has had: the sidecar
+          # dies first and the node used to crash writing to its pipe. A
+          # non-zero exit here would be that, back again.
+          docker stop -t 45 swarm
+          STATUS="$(docker inspect -f '{{.State.ExitCode}}' swarm)"
+          echo "exit code: $STATUS"
+          docker logs swarm 2>&1 | tail -20
+          test "$STATUS" = "0" || { echo "unclean shutdown"; exit 1; }
