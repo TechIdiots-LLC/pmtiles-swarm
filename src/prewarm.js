@@ -24,6 +24,24 @@
 /** How long to leave an archive alone after a failed attempt. */
 const DEFAULT_BACKOFF_MS = 120000;
 
+/**
+ * Whether a failure means "not yet" rather than "not working".
+ *
+ * An archive joined from a magnet has no metainfo until BEP 9 has finished, and
+ * until then the engine cannot say where a byte range even falls — so a read
+ * asked for in the same second the node started is refused before it reaches
+ * the swarm at all. That is a wait, not an attempt, and treating it as one cost
+ * the full backoff for something that resolves in seconds.
+ *
+ * Matched on the message because that is what the engine gives us; both the
+ * sidecar and the WebTorrent engine word it the same way.
+ * @param {Error} error - What the read threw.
+ * @returns {boolean} - True when it is worth trying again shortly.
+ */
+function tooEarly(error) {
+  return /metadata has not arrived|not held here/i.test(error?.message ?? '');
+}
+
 export class HeadWarmer {
   #tiles;
   #catalog;
@@ -31,6 +49,7 @@ export class HeadWarmer {
   #now;
   #timer;
   #tried = new Map();
+  #waiting = new Set();
   #running = false;
 
   /**
@@ -95,13 +114,15 @@ export class HeadWarmer {
     if (!entry) return null;
 
     this.#running = true;
-    this.#tried.set(entry.infoHash, this.#now());
     try {
       // The long timeout, not the interactive one: this is a byte range from
       // an archive nobody has asked for a piece of yet.
       const summary = await this.#tiles.summarize(entry.infoHash, {
         timeoutMs: this.#config.tiles?.metadataTimeoutMs ?? 120000,
       });
+
+      this.#tried.set(entry.infoHash, this.#now());
+      this.#waiting.delete(entry.infoHash);
 
       const stored = await this.#catalog.put({
         infoHash: entry.infoHash,
@@ -115,10 +136,26 @@ export class HeadWarmer {
       );
       return stored;
     } catch (error) {
-      // Ordinary while an archive is young — the piece holding the header may
-      // not exist anywhere reachable yet. Worth saying once per attempt, since
-      // it is the answer to "why is my preview blank", and the backoff keeps
-      // it from becoming noise.
+      if (tooEarly(error)) {
+        // Not stamped, so the next pass tries again in seconds rather than in
+        // minutes — and said once, because a node that has just started will
+        // answer this way until the metainfo lands.
+        if (!this.#waiting.has(entry.infoHash)) {
+          this.#waiting.add(entry.infoHash);
+          console.log(
+            `[warm] ${entry.name}: waiting for the torrent metadata before ` +
+              'reading its head',
+          );
+        }
+        return null;
+      }
+
+      // A real attempt: it reached the swarm and found nothing. Ordinary while
+      // an archive is young, since the piece holding the header may not exist
+      // anywhere reachable yet. Worth saying, because it is the answer to "why
+      // is my preview blank", and the backoff keeps it from becoming noise.
+      this.#tried.set(entry.infoHash, this.#now());
+      this.#waiting.delete(entry.infoHash);
       console.warn(`[warm] ${entry.name}: ${error.message}`);
       return null;
     } finally {

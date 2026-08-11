@@ -194,3 +194,76 @@ describe('reading the head', () => {
     assert.deepEqual(tiles.asked, []);
   });
 });
+
+describe('an archive whose torrent metadata has not arrived', () => {
+  it('is retried on the next pass, not after the full backoff', async () => {
+    // A magnet join has no metainfo until BEP 9 finishes, and with no trackers
+    // — which is what a 404 on the .torrent leaves you with — that means
+    // waiting for the DHT. The engine refuses before the read reaches the
+    // swarm at all, so it is a wait rather than an attempt; counting it as one
+    // meant retrying every two minutes for something that resolves in seconds.
+    const entry = { infoHash: 'a'.repeat(40), name: 'planet.pmtiles' };
+    const catalog = catalogOf([entry]);
+
+    let ready = false;
+    const asked = [];
+    const tiles = {
+      asked,
+      summarize: async (infoHash) => {
+        asked.push(infoHash);
+        if (!ready) throw new Error('metadata has not arrived yet');
+        return { format: 'png' };
+      },
+    };
+
+    let clock = 1_000_000;
+    const warmer = new HeadWarmer(tiles, catalog, {}, () => clock);
+
+    const log = console.log;
+    console.log = () => {};
+    try {
+      await warmer.sweep();
+      assert.equal(asked.length, 1);
+
+      // A second later, not two minutes.
+      clock += 1000;
+      await warmer.sweep();
+      assert.equal(asked.length, 2, 'tried again without waiting out a backoff');
+
+      ready = true;
+      clock += 1000;
+      await warmer.sweep();
+    } finally {
+      console.log = log;
+    }
+
+    assert.equal(asked.length, 3);
+    assert.equal(catalog.written.length, 1, 'and it lands once the swarm can answer');
+  });
+
+  it('says so once rather than on every pass', async () => {
+    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'p.pmtiles' }]);
+    const tiles = tilesOf(new Error('metadata has not arrived yet'));
+    let clock = 1_000_000;
+    const warmer = new HeadWarmer(tiles, catalog, {}, () => clock);
+
+    const said = [];
+    const log = console.log;
+    const warn = console.warn;
+    console.log = (...parts) => said.push(parts.join(' '));
+    console.warn = (...parts) => said.push(parts.join(' '));
+    try {
+      for (let pass = 0; pass < 4; pass += 1) {
+        clock += 1000;
+        await warmer.sweep();
+      }
+    } finally {
+      console.log = log;
+      console.warn = warn;
+    }
+
+    assert.equal(tiles.asked.length, 4, 'it keeps trying');
+    assert.equal(said.length, 1, `but says so once: ${said.join(' | ')}`);
+    assert.match(said[0], /waiting for the torrent metadata/);
+  });
+});

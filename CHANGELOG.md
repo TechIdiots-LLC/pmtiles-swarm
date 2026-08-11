@@ -7,6 +7,27 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.5.1
+### ✨ Features and improvements
+- **An archive joined by magnet writes its own `.torrent` on a libtorrent node.** The machinery
+  was already there — `captureMetadata` writes the metainfo down, and completion sweeps retry it
+  for anything still missing one — but it asks the engine for the metainfo, and the libtorrent
+  engine had no way to give it. Only WebTorrent did, and WebTorrent only ever receives archives
+  that are already complete. So on the engine most people run, a magnet-joined archive could
+  never produce a `.torrent`, however long it ran.
+
+  That is one gap with a long tail: a node with no `.torrent` to publish serves a feed whose
+  enclosure URLs 404, so its subscribers join by magnet too, and a magnet carrying no trackers
+  has only the DHT to find its first peer with. Needs `pmtiles-torrent` 0.4.0, which added the
+  op; against an older sidecar the call is refused and caught, exactly as before.
+
+### 🐞 Bug fixes
+- **A head-warm that was simply too early no longer waits out the full backoff.** An archive
+  joined by magnet has no metainfo until BEP 9 finishes, so a read asked for in the same second
+  the node started is refused before it reaches the swarm at all. That is a wait, not an
+  attempt: it is now retried on the next pass rather than in two minutes, and reported once
+  rather than every time.
+
 ## 0.5.0
 ### ✨ Features and improvements
 - **The head of a newly joined archive is read without waiting to be asked.** A PMTiles archive

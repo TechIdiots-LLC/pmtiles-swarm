@@ -325,15 +325,31 @@ export class LibtorrentEngine {
   }
 
   /**
+   * The metainfo of a torrent, so a magnet can stop being a magnet.
+   * @param {string} infoHash - The archive.
+   * @returns {Promise<Uint8Array|null>} - The .torrent bytes, or null.
+   */
+  async metadata(infoHash) {
+    // The same thing a torrent client's "export .torrent" offers, and for the
+    // same reason: once BEP 9 has delivered the info dictionary, this node
+    // holds everything a .torrent contains — whether or not a byte of the
+    // archive itself has arrived.
+    //
+    // Without it a node that joined by magnet has no .torrent to publish, so
+    // every subscriber following its feed also joins by magnet; and a magnet
+    // that carries no trackers has only the DHT to find its first peer with,
+    // which is minutes of waiting per archive rather than none. libtorrent
+    // could always do this. Nothing had asked it to.
+    const result = await this.#call('metadata', { infoHash });
+    if (!result?.torrentFile) return null;
+    return new Uint8Array(Buffer.from(result.torrentFile, 'base64'));
+  }
+
+  /**
    * Creates a torrent from a local file.
-   *
-   * Defaults to hybrid v1+v2, which is the capability that justifies this
-   * engine: v2 gives per-file merkle trees with 16 KiB leaf blocks, so a peer
-   * can verify a small block without holding the whole hash list, while the v1
-   * half keeps every existing client working.
-   * @param {string} filePath - Path to the archive.
+   * @param {string} filePath - The file to hash.
    * @param {object} [options] - Piece length, trackers, web seeds, format.
-   * @returns {Promise<object>} - The created torrent, torrentFile as bytes.
+   * @returns {Promise<object>} - The torrent file and what it describes.
    */
   async createTorrent(filePath, options = {}) {
     const result = await this.#call(
