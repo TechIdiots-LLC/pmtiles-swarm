@@ -7,6 +7,29 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.5.0
+### ✨ Features and improvements
+- **The head of a newly joined archive is read without waiting to be asked.** A PMTiles archive
+  is useless until its 127-byte header has been read: it names where the root directory and the
+  JSON metadata live, and reading it raises both to a high piece priority — so the head of the
+  file arrives out of order instead of whenever a download happens to reach byte zero. That
+  machinery existed and was spec-correct, but only ran when something read the archive, and the
+  backfill that would have followed up began by requiring a summary to already exist. A freshly
+  joined archive has none, and the one thing that would have created one was the TileJSON route,
+  which is exactly what fails without a header. So an archive being mirrored stayed unservable
+  for hours while the few kilobytes that would have made it servable sat at position zero.
+
+  It now reads one archive's head at a time — several at once turn a queue of archives into a
+  queue of stalled reads competing for the same bandwidth — with the long metadata timeout
+  rather than the interactive one, backing off between attempts, because a young archive having
+  no peer that holds its first piece is ordinary rather than exceptional. It comes back for
+  vector layers separately, since a writer may put the JSON metadata after every tile and one
+  read routinely gets the header and not the metadata.
+
+  New under `tiles`: `prewarm` (default true), `prewarmIntervalSeconds` (30) and
+  `prewarmBackoffSeconds` (120). Turn it off on a node that distributes archives but never
+  serves tiles from them.
+
 ## 0.4.6
 ### ✨ Features and improvements
 - **A feed's categories are a list, and are called categories.** The console offered a single

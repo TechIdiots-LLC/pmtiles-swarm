@@ -445,6 +445,29 @@ const DEFAULTS = {
      */
     headerTimeoutMs: 12000,
     /**
+     * Read the head of a newly joined archive without waiting to be asked.
+     *
+     * A PMTiles archive is useless until its header has been read: it names
+     * where the root directory and the JSON metadata are, and reading it also
+     * raises those to a high piece priority, so the head of the file arrives
+     * out of order rather than whenever a download happens to reach it. Left
+     * to the first request, an archive being mirrored is unservable for hours
+     * while the bytes that would make it servable sit at position zero.
+     *
+     * Off makes sense on a node that only distributes and never serves tiles.
+     */
+    prewarm: true,
+    /** How often to look for an archive whose head has not been read. */
+    prewarmIntervalSeconds: 30,
+    /**
+     * How long to leave an archive alone after a failed read.
+     *
+     * Failure here is ordinary rather than exceptional — a brand-new archive
+     * may have no peer holding its first piece yet — so this is a retry
+     * interval, not an error budget.
+     */
+    prewarmBackoffSeconds: 120,
+    /**
      * What a missing tile answers with: true for 404, false for 204.
      *
      * This is not cosmetic. MapLibre only overzooms a parent tile when the

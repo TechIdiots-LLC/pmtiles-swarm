@@ -19,6 +19,7 @@ import { closeServer, installSignalHandlers, runStoppers } from './shutdown.js';
 import { ScheduledSourceManager } from './sources.js';
 import { SubscriptionManager } from './subscriptions.js';
 import { TileStore } from './tiles.js';
+import { HeadWarmer } from './prewarm.js';
 import { WarmRunner } from './warm.js';
 import { WatchManager } from './watch.js';
 
@@ -216,6 +217,12 @@ PMTILES_SWARM_PUBLIC_URL
   library.attachTiles(tiles);
   const warm = new WarmRunner(tiles);
 
+  // Reads the head of anything joined but not yet understood — the header,
+  // then the root directory and metadata it points at. Without this an archive
+  // being mirrored is unservable until the download happens to reach byte
+  // zero, and the request that would have read it times out long before.
+  const headWarmer = new HeadWarmer(tiles, catalog, config);
+
   // Restarting one subsystem, rather than the process, for the settings that
   // only that subsystem reads. Each stops and starts from the live config, so
   // nothing here has to know what changed — only what to rebuild.
@@ -337,6 +344,11 @@ PMTILES_SWARM_PUBLIC_URL
   }
   hooks.start();
   completion.start();
+  // The header is 127 bytes and names where the root directory and the JSON
+  // metadata live (PMTiles v3 spec, fields at offsets 8 and 24). Reading it
+  // raises both to a high piece priority, so an archive becomes servable in
+  // seconds rather than at whatever hour the download reaches byte zero.
+  headWarmer.start();
 
   // Watch the sources archives were built from. A changed source does not
   // invalidate its torrent, but it does mean any web seed pointing there will
@@ -375,6 +387,7 @@ PMTILES_SWARM_PUBLIC_URL
       completion.stop();
       subscriptions.stop();
       warm.stop();
+      headWarmer.stop();
     }, ms: 1000 },
     { label: 'watchers', stop: () => watch.stop() },
     {
