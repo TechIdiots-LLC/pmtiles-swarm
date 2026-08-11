@@ -488,16 +488,28 @@ restart.
 
 ### Following other nodes
 
-`subscriptions` are the peers this node takes archives from, editable in Settings under **Remote
-nodes**. An RSS feed says "here is what is new" and is bounded by the publisher's `feedMaxItems`,
-so a node offline long enough misses things permanently; a `/api/catalog` URL says "here is
-everything", which is what makes reconciling — and pruning — possible.
+`subscriptions` are what this node takes archives from, editable in Settings as two sections:
+**RSS feeds** and **Remote nodes**. They are not one thing in two costumes. A feed says "here is
+what is new" and is bounded by the publisher's `feedMaxItems`, so a node offline long enough
+misses things permanently, and an absence from one proves nothing; a `/api/catalog` URL says
+"here is everything", which is what makes reconciling — and pruning — possible. A row belongs to
+whichever section it sits in, and is saved with that protocol rather than leaving it to be
+inferred from the URL.
 
 `mode` decides what following one costs: `cache` joins the swarm and fetches only what is read,
 `mirror` commits to a whole copy of every archive the peer lists. `token` is presented to the peer,
-which may then publish more than it publishes to the world. `prune` is off unless chosen, only ever
-considers archives that peer sent, and never acts on a filtered or partial view — start a new peer
-on `"report"` and watch it before trusting it with more.
+which may then publish more than it publishes to the world.
+
+`newest` caps how many items one check of a **feed** may take, counting from the newest, and
+defaults to 1 — planet.openstreetmap.org lists five planet dumps, and taking the lot is four
+hundred gigabytes nobody asked for. It means nothing to a catalogue, which lists everything.
+
+`keep` and `keepDays` retire what a subscription has brought in, exactly as they do for a watched
+folder or a scheduled source: only after something new has landed, and never the newest copy. They
+answer for your disk. `prune` answers for the publisher — it is off unless chosen, only ever
+considers archives that peer sent, never acts on a filtered or partial view, and **applies to a
+catalogue only**, since absence from a bounded feed is not evidence that anything was withdrawn.
+Start a new peer on `"report"` and watch it before trusting it with more.
 
 Peer tokens are redacted from `GET /api/config` like any other credential, and a save that echoes
 the placeholder back keeps the stored one.

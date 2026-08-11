@@ -117,9 +117,16 @@ poor trade for the archive itself.
 
 ## Removing what a peer no longer offers
 
-A feed can only ever say "here is something new". Following one, a node
-accumulates and never sheds — remove an archive at the source and every
-subscriber keeps seeding it indefinitely.
+Two different questions, with two different answers, and it is worth keeping
+them apart: whether the **publisher** still offers an archive, and whether
+**you** still want it on your disk.
+
+### The publisher stopped offering it
+
+A feed can only ever say "here is something new". Nothing about it distinguishes
+"withdrawn" from "further down a list that only carries five items", so absence
+from a feed is not evidence of anything and **`prune` does not apply to an RSS
+subscription at all** — setting it there is quietly inert.
 
 The catalogue API can say "here is everything", which is the only way a
 consumer can notice an absence. `prune` acts on that, and it is deliberately
@@ -288,6 +295,15 @@ OpenStreetMap publishes for the planet dumps:
 `newest` is how many items one check may take, counting from the newest, and
 it is **1 by default**. That feed lists five planet dumps, so without a cap the
 first poll is roughly four hundred gigabytes. `0` takes everything it lists.
+
+`keepDays` is how long to keep what it brings in. A feed publishing weekly
+leaves a copy behind every week and the publisher goes on listing all of them,
+so without it a subscription grows for ever — which is the case pruning cannot
+help with, because nothing was ever withdrawn. `keep` says the same thing as a
+count. Both are the rules a watched folder and a scheduled source retire under,
+applied by the same code and with the same guards: **only after something new
+has landed**, and **never the newest copy**, so a feed that goes quiet cannot
+empty your disk.
 
 The items are `.osm.pbf`, not map archives, and that is fine: joining an
 existing torrent does not require the content to be anything in particular —

@@ -7,6 +7,18 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+### 📚 Documentation
+- **`prune` does not apply to an RSS subscription**, which the documentation did not say and a
+  reader would reasonably have assumed otherwise — it is accepted there and quietly does nothing.
+  Absence from a bounded feed is not evidence that anything was withdrawn, so pruning needs a
+  catalogue. The two questions are now separated where they are described: whether the publisher
+  still offers an archive, and whether you still want it on your disk.
+- **Feed retention is documented**, along with the claim it replaces. The subscribing guide said a
+  node following a feed "accumulates and never sheds", which was true when it was written and is
+  what `keep` and `keepDays` on a subscription now answer.
+- **The README describes the two settings sections** rather than the single table they replaced,
+  and covers `newest`, `keep` and `keepDays` — none of which it mentioned.
+
 ## 0.7.0
 ### ✨ Features and improvements
 - **A feed can be told how long to keep what it brings in.** `keep` and `keepDays` now work on a
