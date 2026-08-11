@@ -31,7 +31,7 @@ const TAIL_LINES = 20;
  * The set mirrors a torrent client's, so an existing script keeps working:
  *
  *   %N name          %I infohash      %F content path
- *   %L category      %G tags          %D save path
+ *   %L category      %G categories    %D save path
  *   %Z size          %C file count
  *
  * @param {string} argument - An argument possibly containing placeholders.

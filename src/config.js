@@ -643,7 +643,7 @@ const DEFAULTS = {
    *   }
    *
    * Placeholders match a torrent client's, so an existing script keeps working:
-   * %N name, %L first category, %G all tags, %F content path, %D save path,
+   * %N name, %L first category, %G all categories, %F content path, %D save path,
    * %Z size, %C file count, %I infohash.
    *
    * Command and arguments are separate rather than one string a shell pulls

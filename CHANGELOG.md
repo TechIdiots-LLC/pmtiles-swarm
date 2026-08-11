@@ -7,6 +7,24 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.4.6
+### ✨ Features and improvements
+- **A feed's categories are a list, and are called categories.** The console offered a single
+  "Tag as" string while the configuration has always accepted `categories` as a list — one
+  concept under two names across two editors. It is now the same Categories column a watched
+  folder has. An existing `"category": "openmaptiles"` still works and needs no migration.
+  Everything user-facing now says category rather than tag, including the `%G` placeholder's
+  description and the API table.
+
+### 🐞 Bug fixes
+- **Saving in the console no longer deletes settings it does not show.** Each record was rebuilt
+  from the rendered columns alone, so every field without a column was dropped the first time
+  anyone pressed Save — a watched folder's `pieceLength`, `stabilitySeconds`, `trackers` and
+  `sparse`, a subscription's `savePath`. Nothing warned, because from the console's side the
+  save succeeded. Each row now remembers the entry it was rendered from and a save starts from
+  that, overlaying the columns; an emptied box still removes its field, since that is an
+  instruction rather than a gap.
+
 ## 0.4.5
 ### 🐞 Bug fixes
 - **A hook whose command could not be started is tried again.** Completion is recorded before

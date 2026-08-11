@@ -843,7 +843,7 @@ export function createApp({
   // Tags, after the fact. They could only be set when an archive was added,
   // which is the wrong moment to have to know: a build becomes "weekly" when
   // there is a second one, and an archive is marked for sharing long after it
-  // arrives. Accepts a whole list, or add/remove for one tag at a time.
+  // arrives. Accepts a whole list, or add/remove for one category at a time.
   app.patch(
     '/api/torrents/:infoHash/categories',
     route(async (req, res) => {
@@ -1426,7 +1426,7 @@ export function createApp({
   /**
    * Whether an archive may leave this node, for this caller.
    *
-   * Any tag matching is enough. A tag names one thing an archive is, not the
+   * Any category matching is enough. A category names one thing an archive is, not the
    * whole of what it is, so a planet build tagged both "basemaps" and "weekly"
    * belongs in a basemaps feed whether or not weekly is also published.
    * @param {object} entry - Catalog entry.

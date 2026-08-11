@@ -587,7 +587,7 @@ matters there is `maxConnections`, since every peer holds a NAT table entry. See
 | `GET` | `/api/torrents/:infoHash/peers`, `/trackers`, `/content` | Per-peer, per-tracker and per-file detail |
 | `GET` | `/api/torrents/:infoHash/pieces` | Which pieces are held, how rare each is, and what peers hold |
 | `PATCH` | `/api/torrents/:infoHash/mode` | Switch between mirror and cache |
-| `PATCH` | `/api/torrents/:infoHash/categories` | Set, add or remove tags |
+| `PATCH` | `/api/torrents/:infoHash/categories` | Set, add or remove categories |
 | `PATCH` | `/api/torrents/:infoHash/seeding` | Per-archive seeding limit, or "use the global one" |
 | `PATCH` `GET` | `/api/torrents/:infoHash/location` | Move the data; poll the move |
 | `POST` | `/api/torrents/:infoHash/pause`, `/resume` | Stop offering it, without forgetting it |
@@ -599,7 +599,7 @@ matters there is `maxConnections`, since every peer holds a NAT table entry. See
 | `POST` | `/api/check-origins` | Check every archive with a watchable source |
 | `GET` `DELETE` | `/api/adds` | Downloads still in flight, and cancelling one by URL |
 | `GET` `POST` | `/api/speed` | Which speed limits are in force, and the manual switch between the two sets |
-| `GET` | `/api/categories` | Every tag, with the endpoints resolving to its newest build |
+| `GET` | `/api/categories` | Every category, with the endpoints resolving to its newest build |
 | `POST` | `/api/adopt`, `/api/adopt/candidates` | Take over what an engine or another node holds |
 | `POST` | `/api/sources/preview` | What a watched web location would take, without taking it |
 | `POST` | `/api/subscriptions/preview` | Whether a peer is reachable and what it offers |

@@ -357,7 +357,7 @@
           addressed by its infohash — which is what makes a tile immutable and
           cacheable for a year — so a style pointed at one is pinned to that
           build forever. These endpoints always resolve to the newest archive
-          carrying the tag.
+          carrying the category.
         </div>
         <div id="category-list"></div>
         <div class="empty" id="categories-empty" hidden>
@@ -543,8 +543,8 @@
             <button type="button" id="add-category">Add</button>
           </div>
           <div class="sub">
-            An archive can carry several. Feeds include anything tagged with
-            the category asked for.
+            An archive can carry several. Feeds include every archive
+            carrying the category asked for.
           </div>
         </div>
 
@@ -2327,6 +2327,11 @@
         const { into, key, title, blurb, columns, rows, restart, preview, peerPreview, footnote } =
           spec;
         rowEditorColumns[key] = columns;
+        // Kept so a save can put back what this editor never showed. An entry
+        // holds more than there are columns for it — a watch folder's
+        // pieceLength, a subscription's savePath — and a save that rebuilt each
+        // record from the columns alone deleted every one of them.
+        rowEditorRows[key] = rows;
         const panel = document.createElement('div');
         panel.className = 'panel';
         panel.style.marginBottom = '1rem';
@@ -2368,8 +2373,8 @@
             }
           </td>`;
 
-        const rowHtml = (row = {}) => `
-          <tr>
+        const rowHtml = (row = {}, index) => `
+          <tr${index === undefined ? '' : ` data-origin="${index}"`}>
             ${columns.map((column) => cell(column, row[column.field])).join('')}
             <td>
               ${preview ? '<button type="button" data-act="preview">Preview</button>' : ''}
@@ -2392,7 +2397,9 @@
                   <th></th>
                 </tr>
               </thead>
-              <tbody>${[...rows, {}].map((row) => rowHtml(row)).join('')}</tbody>
+              <tbody>${[...rows, {}]
+                .map((row, index) => rowHtml(row, index < rows.length ? index : undefined))
+                .join('')}</tbody>
             </table>
           </div>
           <div style="margin-top:0.5rem">
@@ -2492,11 +2499,19 @@
        * @param {object[]} columns - Column definitions.
        * @returns {object} - The record.
        */
-      function readRow(row, columns) {
-        const record = {};
+      function readRow(row, columns, original = {}) {
+        // Starts from what was there. The editor shows the fields worth
+        // offering, not every field an entry may hold, and rebuilding from the
+        // columns alone silently dropped the rest.
+        const record = { ...original };
         for (const column of columns) {
           const raw = row.querySelector(`[data-field="${column.field}"]`)?.value.trim() ?? '';
-          if (!raw) continue;
+          // Emptied on purpose is still an instruction, so the field goes
+          // rather than the original value surviving underneath it.
+          if (!raw) {
+            delete record[column.field];
+            continue;
+          }
           if (column.list) {
             record[column.field] = raw
               .split(',')
@@ -2527,8 +2542,19 @@
         for (const [key, columns] of Object.entries(specs)) {
           const panel = document.querySelector(`[data-row-editor="${key}"]`);
           if (!panel) continue;
+          const originals = rowEditorRows[key] ?? [];
           const records = [...panel.querySelectorAll('tbody tr')]
-            .map((row) => readRow(row, columns))
+            .map((row) => {
+              // A row added in the console has no original; one rendered from
+              // the configuration is matched back to it, so a removed row takes
+              // its own hidden fields with it and the others keep theirs.
+              const origin = row.dataset.origin;
+              return readRow(
+                row,
+                columns,
+                origin === undefined ? {} : (originals[Number(origin)] ?? {}),
+              );
+            })
             .filter((record) => record[columns[0].field]);
           updates[key] = records;
         }
@@ -3022,6 +3048,9 @@
       // ── Settings ──────────────────────────────────────────────────────────
       let restartKeys = new Set();
       let rowEditorColumns = {};
+      // What each editor was rendered from, so a save can put back the fields
+      // it never showed.
+      let rowEditorRows = {};
 
       async function loadSettings() {
         const { config, restartRequired, configPath } = await api('/api/config');
@@ -3080,6 +3109,7 @@
         // are lists of small records, which is exactly what a torrent client
         // gives a grid for, and what a textarea full of braces is worst at.
         rowEditorColumns = {};
+        rowEditorRows = {};
         await renderTokenEditor(body);
         renderHookEditor(body, config, restartKeys);
 
@@ -3352,7 +3382,12 @@
               placeholder: '1',
               number: true,
             },
-            { field: 'category', label: 'Tag as', placeholder: 'from-peer' },
+            {
+              field: 'categories',
+              label: 'Categories',
+              placeholder: 'from-peer, planet',
+              list: true,
+            },
             { field: 'filter', label: 'Name filter', placeholder: 'terrain' },
             { field: 'token', label: 'Token', placeholder: 'if issued one', secret: true },
             {

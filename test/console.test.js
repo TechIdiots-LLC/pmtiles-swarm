@@ -479,3 +479,53 @@ describe('the incomplete marker in the archive table', () => {
     );
   });
 });
+
+describe('saving a row editor', () => {
+  it('keeps the fields the editor never showed', async () => {
+    // The bug this exists for: each record was rebuilt from the rendered
+    // columns alone, so every field without a column was deleted the first
+    // time anyone pressed Save. A watch folder lost its pieceLength and
+    // stabilitySeconds; a subscription lost its savePath. Nothing warned,
+    // because from the console's side the save succeeded.
+    assert.match(
+      page,
+      /function readRow\(row, columns, original = \{\}\)/,
+      'a row is read against what it was rendered from',
+    );
+    assert.match(
+      page,
+      /const record = \{ \.\.\.original \}/,
+      'and starts from it rather than from nothing',
+    );
+    assert.match(
+      page,
+      /rowEditorRows\[key\] = rows/,
+      'the originals are kept when the editor renders',
+    );
+    assert.match(
+      page,
+      /data-origin=/,
+      'each rendered row remembers which original it came from',
+    );
+  });
+
+  it('still lets a field be cleared', async () => {
+    // The other half: an emptied box has to mean "remove this", not "leave
+    // whatever was there underneath".
+    assert.match(
+      page,
+      /delete record\[column\.field\];/,
+      'an emptied field is removed rather than falling back to the original',
+    );
+  });
+
+  it('offers categories as a list, the same as a watched folder', async () => {
+    // It was a single "Tag as" string while the config has always accepted a
+    // list — and two names for one thing across two editors.
+    assert.ok(
+      !/label: 'Tag as'/.test(page),
+      'nothing is called a tag any more',
+    );
+    assert.match(page, /field: 'categories',\s+label: 'Categories',/);
+  });
+});

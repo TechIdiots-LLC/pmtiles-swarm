@@ -34,7 +34,7 @@ import path from 'node:path';
  * them. Accepts the older single `category` string so catalogues written before
  * tagging keep working — they are read as a list of one.
  * @param {object} source - Anything with `categories` and/or `category`.
- * @returns {string[]} - Sorted, de-duplicated, non-empty tags.
+ * @returns {string[]} - Sorted, de-duplicated, non-empty categories.
  */
 export function normalizeCategories(source) {
   const raw = [
@@ -117,7 +117,7 @@ export class Catalog {
    * @returns {CatalogEntry[]} - Matching entries.
    */
   byCategory(category) {
-    // Any match, not all: a tag names one thing an archive is, and asking for
+    // Any match, not all: a category names one thing an archive is, and asking for
     // "terrain" should find everything tagged terrain whatever else it is.
     return this.list().filter((entry) =>
       normalizeCategories(entry).includes(category),

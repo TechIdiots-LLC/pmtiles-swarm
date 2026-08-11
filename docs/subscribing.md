@@ -156,7 +156,7 @@ the peer's to retract:
 Provenance is what makes this possible: an archive records which subscription
 sent it, and only that subscription can ever propose removing it.
 
-## Sharing only what you tag
+## Sharing only what you categorise
 
 Category feeds let a *subscriber* narrow what it takes. They do not narrow what
 you publish: `/feed.xml` carries the whole catalogue, so a peer who could follow

@@ -346,7 +346,7 @@ export class SubscriptionManager {
    */
   async #add(item, subscription) {
     const options = {
-      // A subscriber may file a peer's archives under its own tags; failing
+      // A subscriber may file a peer's archives under its own categories; failing
       // that, whatever the peer tagged them with comes across.
       categories:
         subscription.categories ??
