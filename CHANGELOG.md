@@ -7,6 +7,19 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.5.6
+### 🐞 Bug fixes
+- **The Pieces and Peers tabs redraw themselves.** A detail pane is filled once, the first time
+  it is opened — right for the panes describing an archive, whose name and source and trackers
+  do not change, and wrong for the two describing what is happening *now*. Pieces arrived and
+  peers came and went behind a picture taken when the tab was opened, and the only way to see
+  the current one was to close the panel and open it again, or reload the page. Those two now
+  follow the same three-second tick as the archive table. The rest stay lazy, since redrawing a
+  pane nobody is watching is requests every tick for nothing — which is why they load on demand
+  in the first place. Only while visible, and never queued behind a redraw still in flight: a
+  piece map of a large archive is a real request, and three seconds is not long enough to assume
+  the last one finished.
+
 ## 0.5.5
 ### 🐞 Bug fixes
 - **An archive could retire itself from head-warming and never say so.** The test for "already

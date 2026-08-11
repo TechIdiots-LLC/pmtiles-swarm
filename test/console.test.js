@@ -529,3 +529,38 @@ describe('saving a row editor', () => {
     assert.match(page, /field: 'categories',\s+label: 'Categories',/);
   });
 });
+
+describe('the detail panes that change by themselves', () => {
+  it('redraws pieces and peers on the refresh tick', async () => {
+    // A pane is filled once, the first time it is shown — right for the ones
+    // describing an archive, wrong for the two describing what is happening
+    // now. Those sat frozen until the reader closed the panel and opened it
+    // again, or reloaded the page.
+    assert.match(page, /const LIVE_PANES = new Set\(\['pieces', 'peers'\]\)/);
+    assert.match(
+      page,
+      /renderRows\(\);\s+refreshOpenPane\(\);/,
+      'the refresh loop redraws the open pane after the rows',
+    );
+  });
+
+  it('leaves the panes that describe the archive alone', async () => {
+    // Refreshing a pane nobody is watching is requests a tick for nothing,
+    // which is why they load lazily in the first place.
+    assert.match(page, /LIVE_PANES\.has\(activeTab\)/);
+  });
+
+  it('does not queue a slow redraw behind its successors', async () => {
+    // A piece map of a large archive is a real request; three seconds is not
+    // long enough to assume the last one finished.
+    assert.match(page, /if \(refreshingPane \|\| !selected/);
+    assert.match(page, /refreshingPane = false;/);
+  });
+
+  it('is declared where the refresh loop can reach it', async () => {
+    // The same trap the shared-helper test exists for: a helper nested inside
+    // another function is a ReferenceError at tick time, not at load time.
+    const script = page.split('<script type="module">')[1].split('</script>')[0];
+    assert.equal(declarationDepths(script).get('refreshOpenPane'), 0);
+  });
+});

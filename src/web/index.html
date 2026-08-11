@@ -729,6 +729,21 @@
       // before the node has said whether its engine applies one.
       let incompleteMarker = null;
       let activeTab = 'general';
+      /**
+       * Panes worth redrawing while they are open.
+       *
+       * A detail pane is filled once, the first time it is shown, which is
+       * right for the ones describing an archive: its name, its source, its
+       * trackers. It is wrong for these two, which describe what is happening
+       * *now* — pieces arriving and peers coming and going — and which sat
+       * frozen until the reader thought to close the panel and open it again.
+       *
+       * The rest stay as they are. Refreshing a pane nobody is watching is
+       * four requests a tick for nothing, which is why they are loaded lazily
+       * in the first place.
+       */
+      const LIVE_PANES = new Set(['pieces', 'peers']);
+      let refreshingPane = false;
 
       // What the header switch shows, so a click knows what it is toggling to.
       let speedState = null;
@@ -894,6 +909,7 @@
             ` · <b>${status.archives}</b> archives`;
           archives = list;
           renderRows();
+          refreshOpenPane();
         } catch (error) {
           $('status').textContent = `disconnected: ${error.message}`;
         }
@@ -1071,6 +1087,29 @@
         String(value ?? '').replace(/[&<>"']/g, (c) =>
           ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c],
         );
+
+      /**
+       * Redraws the open detail pane, when it is one that changes by itself.
+       *
+       * Guarded against overlapping, because a piece map of a large archive is
+       * a real request and a slow one must not have a queue of its successors
+       * behind it.
+       * @returns {void}
+       */
+      function refreshOpenPane() {
+        if (refreshingPane || !selected || !LIVE_PANES.has(activeTab)) return;
+        const pane = document.querySelector(`[data-pane="${activeTab}"]`);
+        // Only while it is on screen: a hidden pane is one the reader moved
+        // away from, and the panel may have been replaced since.
+        if (!pane || pane.hidden) return;
+
+        refreshingPane = true;
+        Promise.resolve(fillPane(activeTab, selected))
+          .catch(() => {})
+          .finally(() => {
+            refreshingPane = false;
+          });
+      }
 
       /**
        * Fills one detail tab, the first time it is opened.
