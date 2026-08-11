@@ -7,6 +7,20 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.5.4
+### ✨ Features and improvements
+- **The head-warm waits sensibly at both ends.** It used to read at the instant the node
+  started — when an archive joined by magnet has no metainfo, the engine has no peers, and the
+  attempt is certain to find nothing — and then leave a flat two minutes between every try
+  afterwards. Neither suited what was actually being waited for. The first pass now comes ten
+  seconds in, and the wait after an attempt that did not finish starts at fifteen seconds and
+  doubles to a ten-minute ceiling: seconds early on, when what is missing is usually a peer or a
+  piece already in flight, and minutes later on, when it is one piece at the far end of an
+  archive nobody has finished downloading.
+
+  New under `tiles`: `prewarmInitialDelaySeconds` (10) and `prewarmMaxBackoffSeconds` (600).
+  `prewarmBackoffSeconds` is now the *first* wait rather than every wait, and defaults to 15.
+
 ## 0.5.3
 ### 🐞 Bug fixes
 - **A "high" priority hint asked for nothing at all.** libtorrent's scale runs 0 to 7 and **4 is

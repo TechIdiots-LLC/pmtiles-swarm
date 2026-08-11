@@ -460,13 +460,28 @@ const DEFAULTS = {
     /** How often to look for an archive whose head has not been read. */
     prewarmIntervalSeconds: 30,
     /**
-     * How long to leave an archive alone after a failed read.
+     * How long to let the node settle before the first attempt.
      *
-     * Failure here is ordinary rather than exceptional — a brand-new archive
-     * may have no peer holding its first piece yet — so this is a retry
-     * interval, not an error budget.
+     * At the moment a node starts, an archive joined by magnet has no metainfo
+     * and the engine has no peers, so a read attempted immediately is certain
+     * to find nothing.
      */
-    prewarmBackoffSeconds: 120,
+    prewarmInitialDelaySeconds: 10,
+    /**
+     * The first wait after an attempt that did not finish the job, doubling up
+     * to `prewarmMaxBackoffSeconds`.
+     *
+     * Not finishing is ordinary rather than exceptional here, so this is a
+     * retry interval and not an error budget — and it doubles because the two
+     * ends of the problem want different answers. Just after a start, what is
+     * being waited for is usually seconds away: a peer, a connection, a piece
+     * already in flight. Ten attempts later it is one piece at the far end of
+     * an archive nobody has finished, and asking every fifteen seconds
+     * achieves nothing but log lines.
+     */
+    prewarmBackoffSeconds: 15,
+    /** Where the doubling stops. */
+    prewarmMaxBackoffSeconds: 600,
     /**
      * What a missing tile answers with: true for 404, false for 204.
      *

@@ -312,3 +312,119 @@ describe('what a partial read is called', () => {
     assert.match(said[0], /header and metadata read \(2 vector layers\)/);
   });
 });
+
+describe('how long it waits between tries', () => {
+  /**
+   * A warmer whose reads never finish the job, with a movable clock.
+   * @param {object} config - Configuration to use.
+   * @returns {object} - The warmer, its clock and what it asked.
+   */
+  function neverFinishing(config = {}) {
+    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'planet.pmtiles' }]);
+    // Vector, and its metadata never arrives — so every pass succeeds at the
+    // header and stays due, which is the case that repeats.
+    const tiles = tilesOf({ format: 'pbf' });
+    const clock = { now: 1_000_000 };
+    return {
+      warmer: new HeadWarmer(tiles, catalog, config, () => clock.now),
+      clock,
+      tiles,
+    };
+  }
+
+  /**
+   * Runs passes until the archive is tried again, reporting the gap.
+   * @param {object} harness - From neverFinishing.
+   * @returns {Promise<number>} - Seconds waited.
+   */
+  async function nextGap(harness) {
+    const before = harness.tiles.asked.length;
+    let waited = 0;
+    while (harness.tiles.asked.length === before && waited < 4000) {
+      harness.clock.now += 1000;
+      waited += 1;
+      await harness.warmer.sweep();
+    }
+    return waited;
+  }
+
+  it('starts short and doubles, rather than waiting the same time for ever', async () => {
+    // A flat interval is wrong at both ends. Right after a start, what is being
+    // waited for is usually seconds away — a peer, a connection, a piece in
+    // flight. Ten attempts later it is one piece at the far end of an archive
+    // nobody has finished, and asking again soon achieves nothing.
+    const harness = neverFinishing();
+    const log = console.log;
+    console.log = () => {};
+    try {
+      await harness.warmer.sweep();          // the first attempt
+      const gaps = [];
+      for (let round = 0; round < 4; round += 1) {
+        gaps.push(await nextGap(harness));
+      }
+      assert.deepEqual(gaps, [15, 30, 60, 120], `got ${gaps.join(', ')}`);
+    } finally {
+      console.log = log;
+    }
+  });
+
+  it('stops doubling at the ceiling', async () => {
+    const harness = neverFinishing({
+      tiles: { prewarmBackoffSeconds: 10, prewarmMaxBackoffSeconds: 40 },
+    });
+    const log = console.log;
+    console.log = () => {};
+    try {
+      await harness.warmer.sweep();
+      const gaps = [];
+      for (let round = 0; round < 4; round += 1) {
+        gaps.push(await nextGap(harness));
+      }
+      assert.deepEqual(gaps, [10, 20, 40, 40], `got ${gaps.join(', ')}`);
+    } finally {
+      console.log = log;
+    }
+  });
+});
+
+describe('when the first attempt happens', () => {
+  it('lets the node settle rather than reading at the moment it starts', async () => {
+    // At the moment a node starts, an archive joined by magnet has no metainfo
+    // and the engine has no peers, so a read attempted immediately is certain
+    // to find nothing and exists only to say so.
+    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'p.pmtiles' }]);
+    const tiles = tilesOf({ format: 'png' });
+
+    const scheduled = [];
+    const realTimeout = globalThis.setTimeout;
+    const realInterval = globalThis.setInterval;
+    globalThis.setTimeout = (fn, ms) => {
+      scheduled.push(['timeout', ms]);
+      return realTimeout(() => {}, 1e9);
+    };
+    globalThis.setInterval = (fn, ms) => {
+      scheduled.push(['interval', ms]);
+      return realInterval(() => {}, 1e9);
+    };
+
+    let warmer;
+    try {
+      warmer = new HeadWarmer(tiles, catalog, {});
+      warmer.start();
+    } finally {
+      globalThis.setTimeout = realTimeout;
+      globalThis.setInterval = realInterval;
+    }
+    warmer.stop();
+
+    assert.deepEqual(
+      scheduled,
+      [
+        ['timeout', 10000],
+        ['interval', 30000],
+      ],
+      'the first pass is scheduled, not run on the spot',
+    );
+    assert.deepEqual(tiles.asked, [], 'and nothing was read while starting');
+  });
+});

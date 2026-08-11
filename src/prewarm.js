@@ -21,8 +21,14 @@
  * the first few seconds if the right few kilobytes are asked for first.
  */
 
-/** How long to leave an archive alone after a failed attempt. */
-const DEFAULT_BACKOFF_MS = 120000;
+/** The first wait after an attempt that did not finish the job. */
+const DEFAULT_BACKOFF_SECONDS = 15;
+
+/** Where the doubling stops. */
+const DEFAULT_MAX_BACKOFF_SECONDS = 600;
+
+/** How long to let the node settle before the first attempt. */
+const DEFAULT_INITIAL_DELAY_SECONDS = 10;
 
 /**
  * Whether a failure means "not yet" rather than "not working".
@@ -49,6 +55,7 @@ export class HeadWarmer {
   #now;
   #timer;
   #tried = new Map();
+  #attempts = new Map();
   #waiting = new Set();
   #running = false;
 
@@ -93,8 +100,30 @@ export class HeadWarmer {
     }
 
     const last = this.#tried.get(entry.infoHash) ?? 0;
-    const backoff = (this.#config.tiles?.prewarmBackoffSeconds ?? 120) * 1000;
-    return this.#now() - last >= (backoff || DEFAULT_BACKOFF_MS);
+    return this.#now() - last >= this.#backoffFor(entry.infoHash);
+  }
+
+  /**
+   * How long to wait before trying this archive again.
+   *
+   * Doubling, from a short first wait to a long ceiling. A flat interval is
+   * wrong at both ends: right after a node starts, the thing being waited for
+   * is usually a few seconds away — a peer, a connection, a piece already in
+   * flight — so a two-minute wait wastes most of it. Ten attempts later the
+   * thing being waited for is a single piece at the far end of an archive
+   * nobody has finished downloading, and asking every two minutes achieves
+   * nothing but log lines.
+   * @param {string} infoHash - The archive.
+   * @returns {number} - Milliseconds to wait.
+   */
+  #backoffFor(infoHash) {
+    const base =
+      (this.#config.tiles?.prewarmBackoffSeconds ?? DEFAULT_BACKOFF_SECONDS) * 1000;
+    const ceiling =
+      (this.#config.tiles?.prewarmMaxBackoffSeconds ?? DEFAULT_MAX_BACKOFF_SECONDS) *
+      1000;
+    const attempts = this.#attempts.get(infoHash) ?? 0;
+    return Math.min(base * 2 ** Math.max(0, attempts - 1), ceiling);
   }
 
   /**
@@ -123,6 +152,14 @@ export class HeadWarmer {
 
       this.#tried.set(entry.infoHash, this.#now());
       this.#waiting.delete(entry.infoHash);
+      // Counted even on success, because a read that got the header and not
+      // the metadata has not finished and will be back. The count only matters
+      // while an archive is still due, and one that is done is never asked
+      // about again.
+      this.#attempts.set(
+        entry.infoHash,
+        (this.#attempts.get(entry.infoHash) ?? 0) + 1,
+      );
 
       const stored = await this.#catalog.put({
         infoHash: entry.infoHash,
@@ -169,6 +206,10 @@ export class HeadWarmer {
       // is my preview blank", and the backoff keeps it from becoming noise.
       this.#tried.set(entry.infoHash, this.#now());
       this.#waiting.delete(entry.infoHash);
+      this.#attempts.set(
+        entry.infoHash,
+        (this.#attempts.get(entry.infoHash) ?? 0) + 1,
+      );
       console.warn(`[warm] ${entry.name}: ${error.message}`);
       return null;
     } finally {
@@ -189,7 +230,17 @@ export class HeadWarmer {
       this.sweep().catch((error) =>
         console.error(`[warm] sweep failed: ${error.message}`),
       );
-    run();
+
+    // Not immediately. At the moment a node starts, an archive joined by
+    // magnet has no metainfo, the engine has no peers, and nothing can be read
+    // from anywhere — so the first pass is guaranteed to find nothing and
+    // exists only to say so.
+    const delay =
+      (this.#config.tiles?.prewarmInitialDelaySeconds ??
+        DEFAULT_INITIAL_DELAY_SECONDS) * 1000;
+    const first = setTimeout(run, Math.max(0, delay));
+    first.unref?.();
+
     this.#timer = setInterval(run, seconds * 1000);
     this.#timer.unref?.();
   }
