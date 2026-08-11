@@ -7,6 +7,15 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.5.2
+### 🐞 Bug fixes
+- **Asks for the `pmtiles-torrent` that 0.5.1 actually needs.** It shipped declaring `^0.3.2`,
+  and a caret on a `0.x` version allows patch updates only — so that range can never install
+  0.4.0, which is where the op behind writing a `.torrent` for a magnet-joined archive lives.
+  As published, 0.5.1 could not get the sidecar its own new code depends on. It fails safely
+  either way, since an older sidecar answers "unknown op" and the call is caught, but it fails
+  silently: the feed keeps serving enclosure URLs that 404 and nothing says why.
+
 ## 0.5.1
 ### ✨ Features and improvements
 - **An archive joined by magnet writes its own `.torrent` on a libtorrent node.** The machinery
