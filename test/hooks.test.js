@@ -291,3 +291,58 @@ describe('a hook that says a great deal', () => {
     );
   });
 });
+
+describe('a hook whose command is not there', () => {
+  it('is tried again rather than marked done for ever', async () => {
+    // Completion is recorded before the command runs, so a six-hour build is
+    // not started six times over. But a command that never launched has not
+    // started anything, and keeping the stamp meant fixing the path and still
+    // never seeing it run — the archive was permanently, silently done.
+    const entry = {
+      infoHash: 'e'.repeat(40),
+      name: 'planet.osm.pbf',
+      savePath: '/tmp',
+      status: { progress: 1 },
+    };
+    const written = [];
+    const library = {
+      listWithStatus: async () => [entry],
+      catalog: {
+        put: async (patch) => {
+          written.push(patch);
+          Object.assign(entry, patch);
+          return entry;
+        },
+      },
+    };
+    const hooks = new ProgramHooks(library, {
+      onComplete: { command: '/does/not/exist/torrent_finished.sh', args: ['%N'] },
+    });
+
+    const realWarn = console.warn;
+    const realError = console.error;
+    console.warn = () => {};
+    console.error = () => {};
+    try {
+      await hooks.sweep();
+      // The clear happens once the spawn has failed, which is a tick or two.
+      for (let waited = 0; waited < 2000 && entry.completedAt !== null; waited += 25) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+    } finally {
+      console.warn = realWarn;
+      console.error = realError;
+    }
+
+    assert.equal(entry.completedAt, null, 'the stamp is given back');
+    assert.deepEqual(
+      written.map((patch) => patch.completedAt === null),
+      [false, true],
+      'stamped first, then cleared — not simply never stamped',
+    );
+
+    // And the next sweep tries it again, which is the whole point.
+    await hooks.sweep();
+    assert.ok(written.length > 2, 'a second attempt was made');
+  });
+});

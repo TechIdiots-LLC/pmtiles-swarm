@@ -1,8 +1,14 @@
 # Running as a systemd service
 
-Setting up the account, then the unit. Two lines in that unit are not optional,
-and one line most people copy from elsewhere should be deleted — the rest is
-ordinary.
+Setting up the account, then the unit, then the directories it writes to.
+
+Two lines in that unit are not optional and one line most people copy from
+elsewhere should be deleted, but neither is what costs the afternoon. That is
+**permission to write**, which here means three separate things that all have to
+agree: the filesystem bits, the group the process actually holds, and
+`ReadWritePaths`. Any one of them says no on its own, and the failure looks the
+same each time — so [Where it writes](#where-it-writes) is worth reading before
+the first archive rather than after.
 
 ## An account of its own
 
@@ -45,6 +51,24 @@ Generate the key rather than inventing one:
 ```sh
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
+
+### Where the archives go
+
+Wherever `savePath` points, and it is rarely under `/var/lib` — archives are
+measured in hundreds of gigabytes and usually live on their own mount. Make it
+before the first download, owned by the service:
+
+```sh
+sudo install -d -o pmtiles-swarm -g pmtiles-swarm -m 0755 /mnt/store/torrent-data
+```
+
+`0755` rather than `0750` because it leaves the option of serving those files
+over HTTP later; `0750` if you would rather they stay private. Nothing in
+pmtiles-swarm depends on which you choose.
+
+A directory this account owns outright needs nothing further. One that another
+service also writes to is a different job — see
+[a folder shared with another service](#a-folder-shared-with-another-service).
 
 ## Node, and the package
 
@@ -160,17 +184,26 @@ TimeoutStopSec=45
 # descriptors of its own.
 LimitNOFILE=65535
 
-# The archives and the sidecar are the only things it needs to touch.
+# Everything else is read-only inside this unit's namespace.
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
 NoNewPrivileges=true
-# Both, since the console rewrites the configuration when a token is minted.
+
+# The starting pair: /var/lib for the data directory, /etc because the console
+# rewrites the configuration when a token is minted. Anywhere else the
+# configuration points — savePath above all — has to be added here or the write
+# is refused whatever its permissions say. See "Where it writes".
 ReadWritePaths=/var/lib/pmtiles-swarm /etc/pmtiles-swarm
 
 [Install]
 WantedBy=multi-user.target
 ```
+
+`PrivateTmp=true` is worth one more note, because it surprises people writing
+hooks: the service gets its own `/tmp`, so a script that keeps a lock or a log
+there is invisible from a normal shell, and a run started by hand cannot see the
+lock a hook run holds. Have hooks log somewhere real.
 
 ## The two lines that matter
 
@@ -189,61 +222,95 @@ while the Python sidecar kept running and kept the data directory locked.
 
 Leave `KillMode` at its default, so the sidecar goes with its parent.
 
-## Paths
+## Where it writes
 
-Every path in the configuration resolves **relative to the configuration
-file**, not to the working directory:
+Three separate things decide whether the service can write to a directory, and
+**each can refuse on its own**. A permission problem, a group problem and a
+namespace problem all produce the same symptom — an operation that silently does
+nothing, or a hook that exits 1 with no output — so it is worth confirming all
+three rather than guessing between them.
+
+### 1. The paths in the configuration
+
+Every path resolves **relative to the configuration file**, not to the working
+directory:
 
 ```
 /etc/pmtiles-swarm/swarm.config.json     with "dataDir": "./data"
   -> /etc/pmtiles-swarm/data
 ```
 
-That is usually not what you want for a service. Use absolute paths for
-anything that holds data:
+That is rarely what you want for a service. Use absolute paths for anything
+holding data:
 
 ```json
 {
   "dataDir": "/var/lib/pmtiles-swarm",
-  "savePath": "/var/lib/pmtiles-swarm/archives",
+  "savePath": "/mnt/store/torrent-data",
   "libtorrent": { "resumeDir": "/var/lib/pmtiles-swarm/resume" }
 }
 ```
 
-`ProtectSystem=strict` makes the whole filesystem read-only apart from what
-`ReadWritePaths` names, so every one of those has to be listed. An archive
-directory on another mount needs its own entry.
+### 2. Every one of them in `ReadWritePaths`
 
-## Sharing a folder with another service
+`ProtectSystem=strict` presents the whole filesystem as read-only inside the
+unit's namespace. The refusal happens **there, before any permission bit is
+consulted** — so a directory whose ownership and mode are perfect still fails if
+it is not named here.
+
+List every directory the configuration points at, plus anywhere a hook writes:
+
+```ini
+ReadWritePaths=/var/lib/pmtiles-swarm /etc/pmtiles-swarm   /mnt/store /mnt/work/planetiler
+```
+
+`ReadWritePaths=` is a list: repeated assignments **merge** rather than replace,
+whether in the unit itself or in a drop-in from `systemctl edit pmtiles-swarm`.
+So a drop-in adds to what the unit already names. An empty assignment on its own
+line is the only thing that resets it.
+
+The one to forget is `savePath`, because it is usually on another mount and
+nothing complains until a download starts — at which point a torrent that cannot
+write fails in a way that reads like a network problem.
+
+### 3. Permission on the directory itself
+
+A directory this account owns needs nothing beyond
+[the setup above](#where-the-archives-go). A shared one does.
+
+### A folder shared with another service
 
 A folder produced by something else — a generation script, or a directory a
-torrent client already owns — needs three things, and group membership is only
-the first of them.
+torrent client already owns — takes three steps, and group membership is only
+the first:
 
 ```sh
 # 1. Put the service account in the owning group.
 sudo usermod -aG qbittorrent-nox pmtiles-swarm
 
 # 2. Give that group write, and setgid so new entries inherit it.
-sudo find /mnt/hd-16TB/store/generated -type d -exec chmod 2775 {} +
-sudo find /mnt/hd-16TB/store/generated -type f -exec chmod 664 {} +
+sudo find /mnt/store/generated -type d -exec chmod 2775 {} +
+sudo find /mnt/store/generated -type f -exec chmod 664 {} +
 
-# 3. Make what the service creates group-writable too.
-sudo systemctl edit pmtiles-swarm
-sudo systemctl restart pmtiles-swarm
+# 3. Make what this service creates group-writable too, then restart.
+sudo systemctl edit pmtiles-swarm     # [Service] / UMask=0002
+sudo systemctl daemon-reload && sudo systemctl restart pmtiles-swarm
 ```
 
-Step 3 opens an override; the two lines to put in it are:
+**A folder at 0755 gives the group `r-x`.** Membership alone buys read access and
+nothing else — enough to hash and seed an archive, not enough for anything that
+writes. So this looks like it worked right up until the first thing that does.
 
-```ini
-[Service]
-UMask=0002
-```
+The `2` in `2775` is setgid, and it is what stops this drifting: without it a
+file the service creates belongs to group `pmtiles-swarm`, the other service
+cannot touch it, and you are back here in a month. `UMask=0002` is the same
+thought for the mode — without it a new file is `0644` and the other account can
+delete it but not modify it.
 
-**A folder at 0755 gives the group `r-x`.** Membership alone buys read access
-and nothing else, which is enough to hash and seed an archive and not enough to
-do anything else with the folder — so this looks like it worked until the first
-thing that writes.
+Split by type rather than using `chmod -R`. On a **directory** the execute bit
+is the search bit: it permits resolving a path *through* the directory, so
+removing it leaves a folder whose contents you can list and not one of which you
+can open. Files should lose it; directories must not.
 
 Three features want write, and it is worth knowing which, because a read-only
 folder is a perfectly reasonable way to run:
@@ -254,33 +321,38 @@ folder is a perfectly reasonable way to run:
 | `keep`, `keepDays` | Deletes retired builds |
 | `onComplete` | Whatever the script does, since it runs as this account |
 
-Renaming and deleting need write on the **directory**, not on the file, which is
-why the directory bits are the ones that matter. `UMask=0002` matters for the
-other direction: without it a file the service creates is `0644`, and the other
-service can delete it but not modify it.
+Renaming and deleting need write on the **directory**, not on the file — which is
+why the directory bits are the ones that matter, and why a build written under a
+temporary name and renamed into place works with directory write alone.
 
-**Group membership is read when a process starts**, so the restart is not
-optional. Neither is `ReadWritePaths`: `ProtectSystem=strict` presents the rest
-of the filesystem as read-only inside the unit's namespace, and the write is
-refused there before the permission bits are consulted. Every folder outside
-`/var/lib/pmtiles-swarm` has to be named, in a drop-in from
-`systemctl edit pmtiles-swarm`:
+### Two checks that lie
 
-```ini
-[Service]
-ReadWritePaths=/mnt/store/generated /mnt/work/planetiler
-UMask=0002
+**`id pmtiles-swarm`** reads `/etc/group` and shows the new group the instant
+`usermod` returns, whether or not the running process has it. Supplementary
+groups are read when a process starts, so the restart is not optional — and this
+is what proves it:
+
+```sh
+grep -E '^(Uid|Gid|Groups)'   /proc/$(systemctl show -p MainPID --value pmtiles-swarm)/status
+getent group qbittorrent-nox      # is that GID in the Groups line above?
 ```
 
-`ReadWritePaths=` accumulates, so a drop-in adds to what the unit already lists
-rather than replacing it.
+If it is missing even after a restart, name it outright rather than relying on
+how systemd resolves groups when `User=` and `Group=` are both set:
 
-Two things that look like checks and are not. `id pmtiles-swarm` reads
-`/etc/group` and shows the new group the instant `usermod` returns, whether or
-not the running process has it — read `/proc/$(systemctl show -p MainPID --value
-pmtiles-swarm)/status` instead. And `sudo -u pmtiles-swarm touch …` runs outside
-the unit's namespace, so it succeeds on permissions alone while the service is
-still being refused.
+```ini
+SupplementaryGroups=qbittorrent-nox
+```
+
+**`sudo -u pmtiles-swarm touch …`** runs outside the unit's namespace, so it
+succeeds on permission bits alone while the service is still being refused by
+`ProtectSystem`. It can prove a permission problem; it cannot clear one.
+
+What the running service actually has:
+
+```sh
+systemctl show -p ReadWritePaths -p UMask -p SupplementaryGroups pmtiles-swarm
+```
 
 ## The sidecar
 
@@ -371,3 +443,21 @@ Then check it is actually serving:
 curl -fsS localhost:8090/feed.xml >/dev/null && echo "public surface ok"
 curl -fsS localhost:8091/api/status | head -c 200
 ```
+
+And that it can write where it is supposed to, which nothing above proves:
+
+```sh
+systemctl show -p ReadWritePaths -p UMask -p SupplementaryGroups pmtiles-swarm
+grep -E '^Groups' /proc/$(systemctl show -p MainPID --value pmtiles-swarm)/status
+```
+
+Two things that go wrong quietly rather than loudly, and are worth confirming
+once rather than diagnosing later:
+
+* An archive that re-hashes its whole store on every start means resume data is
+  not being written. There should be one file per torrent in `resumeDir` within
+  `resumeSaveIntervalSeconds` of a start.
+* A hook that never seems to run. It logs what it launched and why it stopped —
+  `journalctl -u pmtiles-swarm | grep -i onComplete` — and a hook redirecting its
+  own output to a file will have nothing for the journal to show, which is not
+  the same as not having run.

@@ -169,9 +169,25 @@ export class ProgramHooks {
 
       this.#running.add(entry.infoHash);
       fired.push(entry);
-      this.#fire('onComplete', entry).finally(() =>
-        this.#running.delete(entry.infoHash),
-      );
+      this.#fire('onComplete', entry)
+        .then(async (result) => {
+          // Recorded before running so a six-hour build is not started six
+          // times over — but a command that never launched has not started
+          // anything, and keeping the stamp would mean fixing the path and
+          // still never seeing it run. That one case is given back.
+          if (result?.started === false) {
+            await this.#library.catalog.put({
+              infoHash: entry.infoHash,
+              completedAt: null,
+            });
+            console.warn(
+              `[hook] ${entry.name}: the command never started, so this will ` +
+                'be tried again on the next sweep',
+            );
+          }
+        })
+        .catch(() => {})
+        .finally(() => this.#running.delete(entry.infoHash));
     }
 
     return fired;
@@ -237,7 +253,13 @@ export class ProgramHooks {
         stream?.on('data', collect);
       }
 
-      const report = (problem) => {
+      // A failure to spawn raises 'error' and then, on some platforms, 'close'
+      // with a nonsense exit code — so the first account of what happened is
+      // the true one and the second is noise.
+      let reported = false;
+      const report = (problem, started = true) => {
+        if (reported) return;
+        reported = true;
         if (problem) {
           console.error(`[${label}] ${entry.name}: ${problem}`);
         } else {
@@ -248,12 +270,14 @@ export class ProgramHooks {
         for (const line of tail) {
           if (line.trim()) console.log(`[${label}]   ${line}`);
         }
-        resolve();
+        resolve({ started });
       };
 
       // A command that could not be started at all — no such file, not
-      // executable — never reaches 'close'.
-      child.on('error', (error) => report(error.message));
+      // executable, a working directory that is not there — never reaches
+      // 'close'. Reported as not started, which is what lets the caller try
+      // again: this is a configuration to fix, not a job that ran and failed.
+      child.on('error', (error) => report(error.message, false));
       child.on('close', (code, signal) => {
         if (signal) return report(`killed by ${signal}`);
         report(code === 0 ? undefined : `exited with code ${code}`);

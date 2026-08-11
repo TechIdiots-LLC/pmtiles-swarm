@@ -7,6 +7,28 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.4.5
+### 🐞 Bug fixes
+- **A hook whose command could not be started is tried again.** Completion is recorded before
+  the command runs, so that a six-hour build is not started six times over — but a command that
+  never launched has not started anything, and keeping the record meant fixing the path and
+  still never seeing it run. The archive was permanently, silently done. A failure to spawn now
+  hands the record back; a command that ran and failed keeps it, because retrying that every
+  minute is how a broken build becomes a broken loop. A spawn failure also raised two accounts
+  of itself on some platforms — the real error, then a nonsense exit code — and only the first
+  stands now.
+
+### 📚 Documentation
+- **The service guide is organised around the thing that actually costs an afternoon.**
+  Permissions were spread across three sections and `ReadWritePaths` was explained twice, in
+  neither place completely. There is now one **Where it writes** section built on the fact that
+  three separate things decide whether a write succeeds — the filesystem bits, the group the
+  process actually holds, and `ReadWritePaths` — that each refuse on their own and all fail
+  identically. It also covers creating the archive directory, which was never mentioned even
+  though `savePath` is the entry most often missing from `ReadWritePaths`; why `chmod -R` is
+  the wrong tool, since on a directory the execute bit is the search bit; `SupplementaryGroups=`
+  for when a group will not appear; and that `PrivateTmp=true` hides a hook's lock and log.
+
 ## 0.4.4
 ### 🐞 Bug fixes
 - **The console no longer claims an `.incomplete` file that is not there.** The marker was a
