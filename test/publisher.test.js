@@ -226,7 +226,10 @@ describe('waiting for the DHT before publishing', () => {
       puts,
       becomeReady() {
         this.ready = true;
-        this.found = 1;
+        // Enough to store a record. One is what a freshly bootstrapped table
+        // holds, and that entry is the bootstrap host rather than a peer that
+        // will keep anything.
+        this.found = 12;
         for (const fn of listeners.splice(0)) fn();
       },
       ready: false,
@@ -287,11 +290,12 @@ describe('waiting for the DHT before publishing', () => {
       log: (line) => logs.push(line),
     });
 
-    publisher.start({ readyMs: 30 });
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    // A table that never fills, so the wait runs out.
+    publisher.start({ readyMs: 60 });
+    await new Promise((resolve) => setTimeout(resolve, 200));
 
     assert.ok(
-      logs.some((line) => line.includes('found no peers')),
+      logs.some((line) => line.includes('found only')),
       'named the cause',
     );
     assert.ok(logs.some((line) => line.includes('UDP')), 'and what to check');

@@ -7,6 +7,22 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.14.3
+### 🐞 Bug fixes
+- **The publisher waits for a usable routing table rather than a single node.** A freshly
+  bootstrapped table holds one entry — the bootstrap host, which stores nothing — so publishing
+  against it failed once per category with "No nodes to query" before any retry could help. It now
+  waits for eight, for up to two minutes, and says what it is waiting for as it goes.
+
+  Two minutes rather than longer because this turned out to be bimodal rather than slow: a socket
+  that can reach the DHT fills its table in a few seconds, and one that cannot is still empty ten
+  minutes later. Waiting past that buys nothing and delays saying so.
+
+  Worth knowing where that comes from, since the log looks like a swarm problem and is not: on a
+  multi-WAN router each new UDP socket is assigned a gateway by the load balancer and then keeps
+  it, so a socket that lands on a WAN with no working return path never recovers — which is why
+  retrying could not rescue a bad run and only a restart changed the outcome.
+
 ## 0.14.2
 ### 🐞 Bug fixes
 - **Waiting for the DHT's `ready` event was not enough.** It fires when the bootstrap lookup

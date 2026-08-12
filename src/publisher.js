@@ -50,11 +50,37 @@ import { mutableMagnet, publishInfoHash } from './mutable.js';
 /** Republish well inside the ~2h a DHT keeps an item. */
 const DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
 
-/** How long to wait for the DHT to bootstrap before publishing anyway. */
-const DEFAULT_READY_MS = 60_000;
+/**
+ * How long to wait for the DHT to find peers before publishing anyway.
+ *
+ * Minutes rather than seconds, because bootstrapping is not uniformly fast and
+ * publishing early does not fail gracefully -- it fails once per category with
+ * a message that reads like something is broken.
+ *
+ * Not longer, because in practice this is bimodal rather than slow: a socket
+ * that can reach the DHT fills its table in a few seconds, and one that cannot
+ * is still empty ten minutes later. Observed on a multi-WAN router, where each
+ * new socket gets a gateway assigned by the load balancer and is then stuck
+ * with it -- so retrying never rescued a bad socket, and only a restart
+ * re-rolled it. Waiting past a couple of minutes buys nothing and delays
+ * saying so.
+ */
+const DEFAULT_READY_MS = 2 * 60_000;
+
+/** How often to say that it is still waiting, so a slow start is legible. */
+const WAITING_LOG_MS = 60_000;
 
 /** First retry delay after an attempt where nothing was published. */
 const RETRY_MS = 30_000;
+
+/**
+ * Nodes wanted before a first publish is worth attempting.
+ *
+ * One is what a freshly bootstrapped table holds, and a put against it fails
+ * with "No nodes to query" -- the entry is the bootstrap host, not a peer that
+ * will store anything.
+ */
+const MINIMUM_NODES = 8;
 
 export class MutablePublisher {
   #catalog;
@@ -208,15 +234,15 @@ export class MutablePublisher {
   async #firstPublish(readyMs) {
     const nodes = await this.#whenDhtReady(readyMs);
     if (this.#stopped) return;
-    if (nodes === 0) {
+    if (nodes !== null && nodes < MINIMUM_NODES) {
       // Named rather than left to be inferred. A routing table that is still
       // empty after a minute means the bootstrap queries are not being
       // answered, and every "No nodes to query" after this is that same fact
       // reported once per category.
       this.#log(
-        `[mutable] the DHT found no peers in ${Math.round(readyMs / 1000)}s. Publishing ` +
-          'will fail until it does — check that outbound UDP is not blocked, and that ' +
-          'the bootstrap hosts resolve',
+        `[mutable] the DHT found only ${nodes} nodes in ${Math.round(readyMs / 60000)} ` +
+          'minutes. Publishing will keep retrying — if it never succeeds, check that ' +
+          'outbound UDP is not blocked and that the bootstrap hosts resolve',
       );
     } else if (nodes) {
       this.#log(`[mutable] DHT ready with ${nodes} nodes`);
@@ -248,10 +274,21 @@ export class MutablePublisher {
       });
     }
 
+    // Waited out rather than given up on. A table with a single bootstrap
+    // entry is not enough to store a record -- the put needs somewhere to put
+    // it -- so this holds until there are a few, saying so as it goes.
     let count = this.#nodeCount();
-    while (count === 0 && Date.now() < deadline && !this.#stopped) {
+    let lastSaid = Date.now();
+    while (count !== null && count < MINIMUM_NODES && Date.now() < deadline && !this.#stopped) {
+      if (Date.now() - lastSaid >= WAITING_LOG_MS) {
+        lastSaid = Date.now();
+        this.#log(
+          `[mutable] waiting for the DHT (${count} nodes so far). ` +
+            'Bootstrapping can take several minutes on a home connection',
+        );
+      }
       await new Promise((resolve) => {
-        const timer = setTimeout(resolve, 1000);
+        const timer = setTimeout(resolve, 2000);
         timer.unref?.();
       });
       count = this.#nodeCount();
