@@ -273,6 +273,15 @@ PMTILES_SWARM_PUBLIC_URL
       ]);
       const pem = await fs.readFile(config.mutable.keyPath, 'utf8');
       const dht = new DHT();
+      // Bound explicitly rather than left to bind implicitly on first send,
+      // so the port is predictable and can be forwarded if you want this to
+      // be a reachable DHT node. 0 takes an ephemeral one, which is all
+      // publishing needs.
+      await new Promise((resolve, reject) => {
+        dht.once('error', reject);
+        dht.listen(config.mutable.dhtPort ?? 0, resolve);
+      });
+      console.log(`[mutable] DHT on UDP ${dht.address().port}`);
       publisher = new MutablePublisher({
         catalog,
         dht,

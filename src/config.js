@@ -425,6 +425,19 @@ const DEFAULTS = {
     keyPath: undefined,
     /** How often to republish, in seconds. */
     republishSeconds: 1800,
+    /**
+     * UDP port for this node's DHT socket. 0 takes an ephemeral one.
+     *
+     * Publishing does not need a forwarded port: a put is outbound, and the
+     * replies come back on the same socket the way any UDP client's do, which
+     * NAT handles. Setting a fixed port and forwarding it makes this a
+     * reachable DHT node, which gives better lookups and contributes back —
+     * but nothing here requires it.
+     *
+     * Do not reuse the libtorrent engine's port. That engine runs a DHT of its
+     * own, and two sockets cannot hold one port.
+     */
+    dhtPort: 0,
   },
   /**
    * What this node has served, at `GET /api/stats`.

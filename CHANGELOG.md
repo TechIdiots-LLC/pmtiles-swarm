@@ -39,6 +39,11 @@
   a record published once works all afternoon and quietly stops resolving by evening. A category
   whose put fails does not stop the others.
 
+  The DHT socket is bound explicitly on `mutable.dhtPort`, ephemeral by default, and the port is
+  reported at startup. Publishing needs no forward — a put is outbound and replies return on the
+  same socket — but a fixed, forwarded port makes this a reachable DHT node with better lookups.
+  It must not reuse the libtorrent engine's port, which runs a DHT of its own.
+
   **`bittorrent-dht` is now a direct dependency** rather than reached for through webtorrent's
   client, so publishing works on a node running the libtorrent engine alone.
 - **[docs/running-as-a-service.md](docs/running-as-a-service.md) covers the key**: generating it as

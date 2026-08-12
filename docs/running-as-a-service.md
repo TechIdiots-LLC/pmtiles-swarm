@@ -422,6 +422,27 @@ rather than a fault: the config syncing is harmless, and the key not syncing is
 the point. If the noise bothers you, set `mutable.publish` to `false` in the
 standby's config after the sync.
 
+### It does not need a port forwarded
+
+The DHT socket is separate from the seeding engine's, and by default takes an
+ephemeral UDP port (`mutable.dhtPort: 0`). That is enough to publish: a put is
+outbound — find nodes, then send — and the replies come back on the same
+socket the way any UDP client's do, which NAT handles without help.
+
+Setting a fixed port and forwarding it makes this a *reachable* DHT node, which
+means better lookups and contributing back to the network. Worth doing if this
+node is long-lived, but nothing here requires it.
+
+**Do not reuse the libtorrent engine's port.** That engine runs a DHT of its own
+on `libtorrent.listen`, and two sockets cannot hold one port — the node would
+fail to start.
+
+The port in use is reported at startup:
+
+```
+[mutable] DHT on UDP 63213
+```
+
 ### Confirming it works
 
 ```sh
