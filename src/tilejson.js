@@ -100,7 +100,9 @@ function buildTorrentBlock(entry, root) {
       // and buildable by any node, because it contains only the public half.
       magnet: mutableMagnet(entry.mutable.publicKey, {
         salt: entry.mutable.salt,
-        name: entry.name,
+        // The category, not this build: the record resolves to whichever
+        // archive is current, and `dn` is a label the metadata replaces.
+        name: entry.mutable.salt,
         webSeeds: entry.webSeeds,
       }),
     };

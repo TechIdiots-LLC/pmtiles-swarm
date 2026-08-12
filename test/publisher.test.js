@@ -170,7 +170,7 @@ describe('the magnet a style points at', () => {
 
     assert.match(magnet, /^magnet:\?xs=urn:btpk:[0-9a-f]{64}/);
     assert.match(magnet, /&s=openmaptiles/);
-    assert.match(magnet, /&dn=planet\.pmtiles/);
+    assert.match(magnet, /&dn=openmaptiles(&|$)/, 'named for the category');
     // The web seed is what makes it useful with no peers: a client can range
     // read the archive over HTTP and still be correct.
     assert.match(magnet, /&ws=https%3A%2F%2Fexample\.org%2Fplanet\.pmtiles/);

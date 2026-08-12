@@ -214,7 +214,12 @@ export class MutablePublisher {
   magnetFor(category, entry) {
     return mutableMagnet(this.#key.publicKey, {
       salt: category,
-      name: entry?.name,
+      // The category rather than the build. This magnet resolves to whichever
+      // archive is current, so naming one of them dates the string the moment
+      // the next build lands. `dn` is only a label -- the real name arrives
+      // with the metadata and overrides it -- so nothing depends on this
+      // beyond being honest about what the magnet identifies.
+      name: category,
       webSeeds: entry?.webSeeds,
     });
   }

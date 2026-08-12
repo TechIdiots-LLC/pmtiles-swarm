@@ -7,6 +7,16 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.15.2
+### 🐞 Bug fixes
+- **A mutable magnet is named after its category rather than a build.** `dn=` was taken from
+  whichever archive was newest when the string was generated, so a magnet whose whole purpose is to
+  resolve to *the current* build carried the name of one particular build — dated the moment the
+  next one landed. It now reads `dn=openmaptiles`.
+
+  Nothing depended on it: `dn` is a display hint, replaced by the real name as soon as metadata
+  arrives. It was simply describing the wrong thing.
+
 ## 0.15.1
 ### 🐞 Bug fixes
 - **The downloaded bar showed nothing on an archive that was plainly downloading.** A column on

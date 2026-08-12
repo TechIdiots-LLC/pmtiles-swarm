@@ -73,7 +73,8 @@ function styleUrlFor(category, newest, base) {
   const magnet = newest?.mutable?.publicKey
     ? mutableMagnet(newest.mutable.publicKey, {
         salt: newest.mutable.salt ?? category,
-        name: newest.name,
+        // The category, since that is what this magnet resolves to.
+        name: newest.mutable.salt ?? category,
         webSeeds: newest.webSeeds,
       })
     : newest?.magnet;
