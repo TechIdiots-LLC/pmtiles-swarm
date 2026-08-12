@@ -21,6 +21,30 @@
  * so republishing on a timer is not an optimisation here — it is the feature.
  */
 
+/*
+ * Why this uses bittorrent-dht rather than an engine's own DHT.
+ *
+ * Both seeding engines run a DHT already, so a third one looks redundant.
+ * It is not, for two different reasons:
+ *
+ *   libtorrent   - its DHT lives in the Python sidecar, and the 2.x Python
+ *                  bindings do not expose dht_put_item or dht_get_item at all.
+ *                  The alerts are bound (dht_mutable_item_alert, dht_put_alert)
+ *                  so the C++ side supports BEP 44, but there is no method to
+ *                  start one. Checked against 2.0.13; worth re-checking if a
+ *                  later binding adds them, because a sidecar op would then be
+ *                  the tidier answer for a libtorrent-only node.
+ *
+ *   webtorrent   - its DHT *is* bittorrent-dht, reachable as `client.dht`, so
+ *                  reusing it is possible and would save a socket. Not done,
+ *                  to keep one code path that behaves the same whichever
+ *                  engine is configured.
+ *
+ * The dependency itself costs nothing: webtorrent already depends on the same
+ * version, and npm dedupes them to one install. Declaring it directly only
+ * removes the reliance on a transitive.
+ */
+
 import { mutableMagnet, publishInfoHash } from './mutable.js';
 
 /** Republish well inside the ~2h a DHT keeps an item. */
