@@ -441,8 +441,22 @@ Then check it is actually serving:
 
 ```sh
 curl -fsS localhost:8090/feed.xml >/dev/null && echo "public surface ok"
-curl -fsS localhost:8091/api/status | head -c 200
+node /opt/pmtiles-swarm/src/index.js status \
+  --config /etc/pmtiles-swarm/swarm.config.json
 ```
+
+Ask through the status command rather than with `curl`. Reaching the API by hand
+means getting the bind address, the admin port and the credential right in one
+go, and each of them fails in a way that looks like a broken node: a node bound
+to its LAN address refuses a request to `localhost`, and the header it accepts
+is `authorization: Bearer`, so anything else is a 401. The status command reads
+all three out of the config file the service is running with. It exits non-zero
+when the node does not answer or its engine is down, so it also works as the
+last step of a deployment script.
+
+An archive listed with a state of `—` is one the catalog holds and the engine is
+not. Just after a start that is normal and passes within a minute or so. If it
+persists, the engine refused it, and the journal says why.
 
 And that it can write where it is supposed to, which nothing above proves:
 

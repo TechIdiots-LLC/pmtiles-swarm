@@ -81,6 +81,47 @@ more often.
 Note also that the node comes *back* on `rise` successful checks — 2 by
 default — so a flapping node re-enters rotation quickly whichever you choose.
 
+## The backend pool
+
+**Settings → Backend Pools → Add**, mode **HTTP (Layer 7)**.
+
+### Balancing algorithm
+
+**Round Robin.** Tile requests are stateless, numerous and roughly the same
+size, which is the case round robin is for.
+
+**Not Source-IP Hash, even though it is the default here.** It exists for
+sticky sessions, and tiles have no session to be sticky about. Worse, it fails
+quietly in exactly the setup this document assumes: behind a CDN every request
+arrives from a handful of edge addresses, so hashing on the source pins almost
+all traffic to one node while the others sit idle and healthy. A NAT'd office
+or a mobile carrier does the same thing on a smaller scale.
+
+Two others are worth knowing about, for arrangements this is not:
+
+**Least Connections**, when long transfers share the backend with short ones.
+A web-seed range request can run for minutes while a tile takes milliseconds,
+and round robin will happily queue tiles behind a transfer. If web seeds are
+served from a different host — an ordinary web server in front of the published
+directory, which is the usual arrangement — that variance is not here and round
+robin is simpler.
+
+**URI Hash**, for a tier of **cache-mode** nodes. Such a node holds only the
+pieces it has read, so sending the same region to different nodes makes each of
+them pay the cold read separately — the one real cost of scaling a cache-mode
+tier horizontally. `balance uri depth 2` hashes on `/archives/<infohash>` and
+gives archive affinity, at the price of concentrating one archive on one node.
+For nodes holding complete copies there is no cold read to avoid, so this is a
+cost with no benefit.
+
+### HTTP/2
+
+Enable it on the frontend and leave *HTTP/2 without TLS* unchecked: the client
+gets HTTP/2, the node is spoken to over HTTP/1.1, which is what it speaks.
+Balancing in HTTP mode is per request rather than per connection, so a client
+multiplexing a hundred tile requests over one HTTP/2 connection still has them
+spread across the pool.
+
 ## Real servers
 
 **Settings → Real Servers → Add**, one per node, port **8090**.

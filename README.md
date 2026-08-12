@@ -589,6 +589,38 @@ network equipment: peers request 16 KiB blocks whatever the piece size. The sett
 matters there is `maxConnections`, since every peer holds a NAT table entry. See
 [docs/publishing.md](docs/publishing.md).
 
+## Asking a running node what it is doing
+
+```sh
+node src/index.js status --config /etc/pmtiles-swarm/swarm.config.json
+```
+
+```
+engine  libtorrent  ready
+version 0.8.0
+17 archives, 1 the engine does not know about
+
+NAME                                             SIZE  STATE       PROGRESS
+planetiler-openmaptiles-260803.pmtiles         81 GiB  seeding         100%
+planet-260803.osm.pbf                          94 GiB  downloading      37%
+planetiler-openmaptiles-260810.pmtiles         83 GiB  —                 —
+```
+
+It reads the same config file the node runs with, so the address, the port and the credential come
+from one place rather than being remembered and retyped. That matters more than it sounds: the API
+is on `adminPort`, not the public port; the node binds where `host` says, which is usually not
+loopback; and it accepts `authorization: Bearer`, not `x-api-key`. Get any one of those wrong with
+`curl` and the answer is a refused connection or a 401 — both of which read as a broken node rather
+than a mistyped command.
+
+An archive with a state of `—` is one the catalog holds and the engine is not. Directly after a
+restart that is normal and passes. Persisting, it means the engine refused it, and the log says
+why.
+
+Exit status is 0 when the node answered and its engine is up, 1 when it did not or is not — so it
+works in a deployment script. `--json` gives the raw `/api/status` and `/api/torrents` replies for
+anything that wants to parse rather than read.
+
 ## API
 
 | Method | Path | Purpose |

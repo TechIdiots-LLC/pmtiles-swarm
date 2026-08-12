@@ -7,6 +7,45 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.9.0
+### ✨ Features and improvements
+- **`pmtiles-swarm status`**, which asks a running node what it is doing and reads the answer out
+  loud. It takes the same config file the node runs with, so the address, the port and the
+  credential come from one place rather than being remembered and retyped. That is the whole
+  point of it: the API is on `adminPort` rather than the public port, the node binds where `host`
+  says and that is usually not loopback, and it accepts `authorization: Bearer` and not
+  `x-api-key`. Get any one of those wrong by hand and the answer is a refused connection or a 401,
+  both of which read as a broken node rather than as a mistyped command — which is exactly how
+  they were read while diagnosing the archive fixed below.
+
+  It names the case that is otherwise silent: an archive the catalog holds and the engine does
+  not, which through `curl` is a row of empty columns and looks like a corrupt archive. Just after
+  a start it is normal and passes; persisting, the engine refused it and the log says why. Exits
+  non-zero when the node does not answer or its engine is down, so it can be the last step of a
+  deployment script, and `--json` hands back the raw replies for anything that would rather parse.
+
+  Also warns when `--config` names a file that is not there. Startup ignores that on purpose, so
+  a first run can write one — but for a question about a running node the silence is
+  misleading, since the answer then describes the default address and looks entirely real.
+
+- **[docs/haproxy.md](docs/haproxy.md) now covers the backend pool**: why round robin rather than
+  the plugin's default of Source-IP Hash, which fails quietly behind a CDN by pinning nearly all
+  traffic to one node while the rest sit idle and healthy; when least-connections or URI hash are
+  worth having instead; and what HTTP/2 on the frontend does and does not change about balancing.
+
+### 🐞 Bug fixes
+- **An archive built from a watched folder no longer sits at 0%, seeding nobody, for a quarter of
+  an hour.** The libtorrent engine dropped `seedOnly` on its way to the sidecar, so libtorrent
+  re-hashed an 81 GiB archive that had been read end to end moments earlier to produce its
+  torrent. Everything else already handled it — the library sets it in five places, the
+  composite engine checks it against what the primary reports, qBittorrent has its own flag for
+  it — and this one engine silently did not pass it on. Needs pmtiles-torrent 0.4.1, which the
+  existing dependency range picks up on a fresh install.
+- **`docs/running-as-a-service.md` no longer suggests checking a node with `curl localhost:8091`.**
+  It names loopback and sends no credential, so on a node bound to its LAN address with a key
+  configured it fails twice over, in the two ways that look most like a broken node. It now uses
+  the status command.
+
 ## 0.8.0
 ### ✨ Features and improvements
 - **`GET /health`**, for a load balancer: 200 when this node can serve, 503 when its engine

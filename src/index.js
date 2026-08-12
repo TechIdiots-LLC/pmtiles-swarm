@@ -92,20 +92,26 @@ function createOneEngine(name, config) {
  * @returns {Promise<void>} - Resolves once listening.
  */
 async function main() {
-  const { values } = parseArgs({
+  const { values, positionals } = parseArgs({
     options: {
       config: { type: 'string', short: 'c' },
       port: { type: 'string', short: 'p' },
       help: { type: 'boolean', short: 'h' },
+      json: { type: 'boolean' },
     },
-    allowPositionals: false,
+    allowPositionals: true,
   });
 
   if (values.help) {
     console.log(`pmtiles-swarm — BitTorrent distribution for PMTiles archives
 
+Usage:
+  pmtiles-swarm [--config FILE]          start the node
+  pmtiles-swarm status [--config FILE]   ask a running node what it is doing
+
   --config, -c   path to a JSON config file
   --port,   -p   override the listen port
+  --json         machine-readable output, for the status command
   --help,   -h   this message
 
 Environment: PMTILES_SWARM_PORT, PMTILES_SWARM_DATA_DIR, PMTILES_SWARM_ENGINE,
@@ -117,6 +123,23 @@ PMTILES_SWARM_PUBLIC_URL
 
   const config = await loadConfig(values.config);
   if (values.port) config.port = Number(values.port);
+
+  // Asking rather than starting. Everything it needs — which address the admin
+  // listener is on, which port, and the credential — comes from the same
+  // configuration the node runs with, so there is nothing to pass and nothing
+  // to get wrong.
+  if (positionals[0] === 'status') {
+    const { runStatus } = await import('./status-command.js');
+    process.exitCode = await runStatus(config, { json: values.json });
+    return;
+  }
+
+  if (positionals.length > 0) {
+    console.error(`unknown command: ${positionals[0]}`);
+    console.error('try: pmtiles-swarm status');
+    process.exitCode = 2;
+    return;
+  }
 
   // Everything that has to be stopped, in the order it should be stopped,
   // filled in as startup proceeds.
