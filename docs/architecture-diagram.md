@@ -224,7 +224,7 @@ New data means a new infohash, which is what makes cache invalidation free.
 %%{init: {"flowchart": {"rankSpacing": 60}}}%%
 graph LR
     NEW["new planet.pmtiles<br/><small>weekly build</small>"] --> HASH["primary re-hashes<br/>→ new infohash"]
-    HASH --> BEP["BEP 46 mutable entry<br/><small>same public key, seq+1</small>"]
+    HASH --> BEP["BEP 46 mutable entry<br/><small>same public key, new seq</small>"]
     HASH --> FEED["new RSS item"]
 
     BEP --> FOLLOW["clients following the key<br/>see the new version"]
@@ -239,8 +239,36 @@ graph LR
 **Key points:** tile URLs are content-addressed, so they never need invalidating.
 The old infohash stays valid and servable for as long as anyone still holds it —
 useful for clients pinned to a known-good build — while new requests move to the
-new one as soon as they re-read `tiles.json`. The only mutable thing in the whole
-system is that one document.
+new one as soon as they re-read `tiles.json`.
+
+**There are exactly two mutable things**, and they say the same thing by
+different means: the `/latest/<category>/` documents, which need this server, and
+the BEP 46 record, which does not. A style pointing at the public key resolves
+the current build over the DHT with nothing of ours running at all. Only the node
+that builds signs those records — see
+[security.md](security.md#the-publisher-key-is-not-a-credential), because the key
+behaves unlike every other secret in the system.
+
+The sequence number is derived from the clock rather than incremented, so a
+publisher that is rebuilt or restored from backup carries on without needing to
+remember where it had got to.
+
+### Bootstrapping without the server
+
+A torrent-aware client still has to *learn* the magnet from somewhere, and until
+it does, the swarm — the part that depends on no server — is unreachable
+precisely when the server is down. The fix is that the magnet travels in the
+**fragment** of the TileJSON URL a style already carries:
+
+```
+https://swarm.example.org/latest/openmaptiles/tiles.json#magnet:?xs=urn:btpk:…&s=openmaptiles&ws=…
+```
+
+A fragment is never sent in an HTTP request, so ordinary clients fetch the
+TileJSON and ignore it while a swarm-aware one reads the magnet before making any
+call. With a BEP 46 key in it (`xs=urn:btpk:`) rather than an infohash, that
+string does not go stale on the next build either. See
+[serving-tiles.md](serving-tiles.md#a-fragment-that-survives-a-rebuild).
 
 ---
 

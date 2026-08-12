@@ -188,6 +188,56 @@ Three ways past it, in order of preference:
 2. Bind to `127.0.0.1` and reach it through a reverse proxy that authenticates.
 3. Set `allowUnauthenticated: true`, if the network really is trusted.
 
+## The publisher key is not a credential
+
+Everything above guards *this node*: who may read the API, who may change
+settings, who may add an archive. The publisher key is a different kind of
+secret, and the difference is worth stating plainly because the habits do not
+carry over.
+
+`mutable.keyPath` holds an ed25519 private key used to sign BEP 46 records — the
+DHT entries that say which archive is the current build of a category. It is a
+**signing key**, closer to a code-signing certificate than to an API token.
+
+| | An access credential (`apiKey`, a token, `password`) | The publisher key |
+| --- | --- | --- |
+| What it grants | access to one node | authority over what your subscribers believe |
+| If it leaks | that node is compromised | anyone can sign a record pointing your subscribers at any archive |
+| If you lose it | mint another | every style pointing at that public key breaks, permanently |
+| Rotation | revoke and reissue | there is none |
+
+That third row is the one people are unprepared for. A public key **is** the
+identity: there is no registry to update and no way to tell a subscriber that a
+new key is also you. Losing the file ends that identity.
+
+And the second row is why it does not belong on a serving tier. A leaked API key
+lets someone read a node. A leaked publisher key lets someone tell every
+subscriber that an archive they control is your latest planet build — signed,
+verifying correctly, and indistinguishable from a real announcement.
+
+**So it lives on exactly one machine.** Only the node that builds needs it;
+serving nodes carry the public half on the catalog entry and hand it out in the
+TileJSON, which is why a serving tier can be compromised without anyone being
+able to publish. Running two publishers under one key is separately a mistake:
+they fight over the sequence number.
+
+Practically:
+
+- `chmod 400`, owned by the service account. Nothing in the product writes it
+  back, so it does not need to be writable and should not be.
+- Back it up **off the machine**, and treat the backup as seriously as the
+  original.
+- Do not put it in an image, a config-sync set, or anywhere a standby will
+  receive it. Under HA sync the configuration replicates and the key does not,
+  which is the intended asymmetry rather than an oversight — the standby logs
+  `not publishing: ENOENT` and serves normally.
+- It is unrelated to `auth`. Turning authentication off does not expose it, and
+  rotating the API key does not affect it.
+
+Generate one with `pmtiles-swarm publisher-key`. Setup detail is in
+[running-as-a-service.md](running-as-a-service.md#the-publisher-key); what it is
+*for* is in [serving-tiles.md](serving-tiles.md#a-fragment-that-survives-a-rebuild).
+
 ## What this is not
 
 **It is not a defence against someone on your network.** Sessions are bearer
