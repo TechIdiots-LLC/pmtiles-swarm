@@ -7,6 +7,22 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.16.0
+### ✨ Features and improvements
+- **A Traffic tab in the console**, which is where the statistics added in 0.10.0 should have been
+  all along — until now the only thing on screen was a single "tiles served" figure on an
+  archive's detail, and the node-level report, the breakdowns and the recent requests had no user
+  interface at all.
+
+  It shows what this node has served: totals, then per archive with a zoom histogram, a status
+  breakdown, p50/p95 and how many distinct clients — and the last forty requests with address,
+  tile, status, size and duration. Refreshes every five seconds while the tab is open, with a
+  switch to stop it, and a reset button that is deliberately a separate action from reading, so a
+  page polling the endpoint can never erase the history it is drawing.
+
+  Behind a load balancer this is the only honest way to see how traffic is really distributed:
+  open it on each node and compare, rather than trusting what the balancer believes it sent.
+
 ## 0.15.2
 ### 🐞 Bug fixes
 - **A mutable magnet is named after its category rather than a build.** `dn=` was taken from

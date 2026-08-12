@@ -309,6 +309,7 @@
       <nav>
         <button id="tab-archives" class="on">Archives</button>
         <button id="tab-categories">Categories</button>
+        <button id="tab-traffic">Traffic</button>
         <button id="tab-settings">Settings</button>
         <button id="logout" hidden>Sign out</button>
       </nav>
@@ -364,6 +365,17 @@
           No categories yet. Tag an archive when you add it, or from its detail
           panel, and it will appear here.
         </div>
+      </section>
+
+      <section id="view-traffic" hidden>
+        <div class="bar">
+          <button id="traffic-refresh">Refresh</button>
+          <label class="choice">
+            <input type="checkbox" id="traffic-live" checked /> keep refreshing
+          </label>
+          <button id="traffic-reset" style="margin-left:auto">Reset counters</button>
+        </div>
+        <div id="traffic-body"><div class="sub">loading…</div></div>
       </section>
 
       <section id="view-settings" hidden>
@@ -3888,12 +3900,13 @@
 
       // ── Tabs ──────────────────────────────────────────────────────────────
       const showTab = (name) => {
-        for (const tab of ['archives', 'categories', 'settings']) {
+        for (const tab of ['archives', 'categories', 'traffic', 'settings']) {
           $(`view-${tab}`).hidden = tab !== name;
           $(`tab-${tab}`).classList.toggle('on', tab === name);
         }
         if (name === 'settings') loadSettings().catch((e) => toast(e.message));
         if (name === 'categories') loadCategories().catch((e) => toast(e.message));
+        if (name === 'traffic') loadTraffic().catch((e) => toast(e.message));
       };
       // The footer's year, set from the clock rather than typed into a file
       // nobody will remember to edit. The version beside it arrives with the
@@ -3902,6 +3915,157 @@
 
       $('tab-archives').onclick = () => showTab('archives');
       $('tab-categories').onclick = () => showTab('categories');
+      $('tab-traffic').onclick = () => showTab('traffic');
+
+      // ── Traffic ───────────────────────────────────────────────────────────
+      //
+      // What this node has served, which is a different question from whether
+      // it is healthy. Behind a balancer it is the only honest way to see how
+      // traffic is really distributed: ask each node what it did, rather than
+      // trusting what the balancer believes it sent.
+      let trafficTimer = null;
+
+      /** Draws a zoom histogram, since zoom is the shape of the load. */
+      const zoomBars = (counts) => {
+        const entries = Object.entries(counts ?? {});
+        if (entries.length === 0) return '<span class="sub">—</span>';
+        const peak = Math.max(...entries.map(([, n]) => n));
+        return entries
+          .map(([z, n]) => {
+            const height = Math.max(2, Math.round((n / peak) * 20));
+            return `<span title="z${z}: ${n.toLocaleString()}" style="display:inline-block;width:6px;margin-right:1px;vertical-align:bottom;height:${height}px;background:var(--accent);opacity:0.75"></span>`;
+          })
+          .join('');
+      };
+
+      const statusList = (counts) => {
+        const entries = Object.entries(counts ?? {});
+        if (entries.length === 0) return '<span class="sub">—</span>';
+        return entries.map(([code, n]) => `${code} ${n.toLocaleString()}`).join(' · ');
+      };
+
+      /**
+       * Reads the report and draws it.
+       * @returns {Promise<void>} - Resolves once drawn.
+       */
+      async function loadTraffic() {
+        const body = $('traffic-body');
+        let report;
+        try {
+          report = await api('/api/stats?recent=40');
+        } catch (error) {
+          if (error.status === 501) {
+            body.innerHTML =
+              '<div class="panel"><div class="sub">Tile statistics are turned off on this node — set <code>tileStats</code> in the configuration to enable them.</div></div>';
+            return;
+          }
+          throw error;
+        }
+
+        const archives = Object.entries(report.archives ?? {}).sort(
+          (a, b) => b[1].requests - a[1].requests,
+        );
+        const since = new Date(report.since);
+        const recent = report.recent ?? [];
+
+        const archiveRows = archives
+          .map(([hash, a]) => {
+            const clients = Object.keys(a.clients ?? {}).length;
+            return `<tr>
+              <td><b>${escapeHtml(a.name ?? hash.slice(0, 12))}</b>
+                <div class="sub">${escapeHtml(hash.slice(0, 12))}…${clients ? ` · ${clients} client${clients === 1 ? '' : 's'}` : ''}</div></td>
+              <td>${a.requests.toLocaleString()}</td>
+              <td>${bytes(a.bytes)}</td>
+              <td>${zoomBars(a.byZoom)}</td>
+              <td class="sub">${statusList(a.byStatus)}</td>
+              <td>${a.p50ms === null ? '—' : `${Math.round(a.p50ms)} / ${Math.round(a.p95ms)} ms`}</td>
+            </tr>`;
+          })
+          .join('');
+
+        const recentRows = recent
+          .map(
+            (row) => `<tr>
+              <td class="sub">${new Date(row.at).toLocaleTimeString()}</td>
+              <td>${escapeHtml(row.ip ?? '—')}</td>
+              <td class="sub">${escapeHtml(row.name ?? (row.infoHash ?? '').slice(0, 12) ?? '—')}</td>
+              <td>${row.z ?? '—'}/${row.x ?? '—'}/${row.y ?? '—'}</td>
+              <td>${row.status ?? '—'}</td>
+              <td>${bytes(row.bytes)}</td>
+              <td>${row.ms === null ? '—' : `${Math.round(row.ms)} ms`}</td>
+            </tr>`,
+          )
+          .join('');
+
+        body.innerHTML = `
+          <div class="panel" style="margin-bottom:0.8rem">
+            <h2 style="margin-top:0">${escapeHtml(report.node ?? 'this node')}</h2>
+            <div class="grid">
+              <div><span>requests</span><b>${(report.requests ?? 0).toLocaleString()}</b></div>
+              <div><span>sent</span><b>${bytes(report.bytes)}</b></div>
+              <div><span>archives touched</span><b>${archives.length}</b></div>
+              <div><span>counting since</span><b>${since.toLocaleTimeString()}</b>
+                <span class="sub">a restart clears this</span></div>
+            </div>
+          </div>
+
+          ${
+            archives.length === 0
+              ? '<div class="panel"><div class="sub">Nothing served yet. Counters start empty and a restart clears them.</div></div>'
+              : `<div class="panel" style="margin-bottom:0.8rem">
+                  <h2 style="margin-top:0">By archive</h2>
+                  <table><thead><tr>
+                    <th>Archive</th><th>Requests</th><th>Sent</th><th>Zooms</th><th>Status</th><th>p50 / p95</th>
+                  </tr></thead><tbody>${archiveRows}</tbody></table>
+                  <div class="sub" style="margin-top:0.5rem">
+                    Bytes are counted as sent, so a gzipped vector tile counts compressed — the
+                    number that matters for bandwidth, and not what the client ends up holding.
+                  </div>
+                </div>`
+          }
+
+          ${
+            recent.length === 0
+              ? ''
+              : `<div class="panel">
+                  <h2 style="margin-top:0">Recent requests</h2>
+                  <table><thead><tr>
+                    <th>When</th><th>From</th><th>Archive</th><th>Tile</th><th>Status</th><th>Size</th><th>Took</th>
+                  </tr></thead><tbody>${recentRows}</tbody></table>
+                  <div class="sub" style="margin-top:0.5rem">
+                    The address is whatever this process can see. Behind a proxy sending no
+                    <code>X-Forwarded-For</code> it is the proxy for everything arriving through
+                    it — which still separates direct traffic from proxied, but not who sent it.
+                  </div>
+                </div>`
+          }`;
+      }
+
+      const trafficPoll = () => {
+        clearInterval(trafficTimer);
+        if (!$('traffic-live').checked) return;
+        trafficTimer = setInterval(() => {
+          if (!$('view-traffic').hidden) loadTraffic().catch(() => {});
+        }, 5000);
+      };
+
+      $('traffic-refresh').onclick = () => loadTraffic().catch((e) => toast(e.message));
+      $('traffic-live').onchange = trafficPoll;
+      trafficPoll();
+
+      $('traffic-reset').onclick = async () => {
+        // Deliberately separate from reading: a page polling the endpoint must
+        // never be able to erase the history it is drawing.
+        if (!confirm('Clear the counters and recent requests on this node?')) return;
+        try {
+          await api('/api/stats', { method: 'DELETE' });
+          toast('Counters cleared');
+          await loadTraffic();
+        } catch (error) {
+          toast(error.message);
+        }
+      };
+
       $('tab-settings').onclick = () => showTab('settings');
 
       // ── Sign in ───────────────────────────────────────────────────────────
