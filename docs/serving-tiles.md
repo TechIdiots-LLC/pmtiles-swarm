@@ -160,6 +160,72 @@ Both peer-to-peer engines reuse the client already seeding the archive rather
 than starting a second one. One peer pool, one port, one DHT node — and for
 libtorrent, one sidecar process.
 
+## Carrying the magnet in the URL fragment
+
+The `torrent` block below solves the problem *after* the TileJSON has been
+fetched. It does not solve the one before it: a torrent-aware client that cannot
+reach this server has nothing to work with, so the swarm — the part that does
+not depend on any server — is unreachable precisely when the server is down.
+
+The fix is to put the magnet in the URL **fragment**:
+
+```json
+"sources": {
+  "openmaptiles": {
+    "type": "vector",
+    "url": "https://swarm.example.org/latest/openmaptiles/tiles.json#magnet:?xt=urn:btih:4813a0e6…&dn=…&tr=…&ws=…"
+  }
+}
+```
+
+A fragment is never sent in an HTTP request, so the same string works
+everywhere:
+
+| Client | What happens |
+| --- | --- |
+| maplibre-gl-js, Leaflet, anything | fetches the TileJSON, ignores the fragment |
+| maplibre-native without a plugin | the same |
+| torrent-aware | reads the magnet **before any network call**, and still has it if the fetch fails |
+
+The console's **Copy TileJSON URL + magnet** button produces exactly this.
+
+A magnet needs no encoding in a fragment — RFC 3986 allows `?`, `&`, `=` and `:`
+there — and leaving it readable matters for something people paste into a style
+file by hand.
+
+### What a client should do with it
+
+Three paths, each a strict fallback of the one above:
+
+1. **The TileJSON URL.** One request, the full document including
+   `vector_layers`. Fastest, and what an ordinary client does anyway.
+2. **The `ws=` web seed.** Two HTTP range requests — the header and root
+   directory near the start of the archive, the JSON metadata at the far end —
+   and the TileJSON can be derived from them. Works when this API is down but
+   the file is still on a web server, and it is the same order of cost as (1).
+3. **The swarm.** No HTTP at all. Slowest from cold, because BEP 9 has to
+   deliver the metainfo first, and the only one that survives the server
+   disappearing entirely.
+
+Everything those need is in the magnet: `xt` identifies the archive, `dn` names
+the file, `tr` finds peers, `ws` gives the HTTP fallback.
+
+### One caveat on `/latest/` URLs
+
+`/latest/<category>/tiles.json` follows the category, and a magnet naming an
+infohash does not — it pins the build that was current when the URL was copied.
+So the fragment goes stale on the next build while the URL does not.
+
+That is survivable, because the fragment is only consulted when the TileJSON
+cannot be fetched, and an older build renders where a blank map does not. But it
+means the two halves can disagree, and the fix is a **mutable** magnet
+(`xs=urn:btpk:…`, BEP 46) whose target is resolved over the DHT rather than
+baked into the string. See [src/mutable.js](../src/mutable.js) — note that
+nothing publishes those records yet.
+
+For an immutable `/archives/<infohash>/tiles.json` URL the question does not
+arise: both halves name the same fixed archive.
+
 ## The `torrent` block
 
 TileJSON documents from this server carry a non-standard `torrent` member:

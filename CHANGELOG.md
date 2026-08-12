@@ -7,6 +7,28 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.11.0
+### ✨ Features and improvements
+- **The magnet can travel in the TileJSON URL's fragment**, and the console will build that string
+  for you: **Copy TileJSON URL + magnet**. A fragment is never sent in an HTTP request, so one
+  string serves every client — maplibre-gl-js, Leaflet and plain maplibre-native fetch the
+  TileJSON and ignore it, while a torrent-aware client reads the magnet **before making any network
+  call at all**.
+
+  That last part is the point. The `torrent` block inside the TileJSON only helps once the TileJSON
+  has been fetched, which leaves the swarm — the one part that depends on no server —
+  unreachable exactly when the server is down. With the magnet in the fragment a client can fall
+  back to the `ws=` web seed (two range requests, and the TileJSON derives from the archive's own
+  header and metadata) or to the swarm itself.
+
+  Documented in [docs/serving-tiles.md](docs/serving-tiles.md), including the caveat worth knowing:
+  on a `/latest/<category>/` URL the fragment pins the build that was current when it was copied,
+  while the URL keeps following the category, so the two can disagree after a rebuild. Survivable,
+  since the fragment is only consulted when the TileJSON cannot be fetched and an older build
+  renders where a blank map does not — and properly fixed by a mutable `xs=urn:btpk:` magnet,
+  which needs the BEP 46 publishing that [src/mutable.js](src/mutable.js) has machinery for and
+  nothing yet calls.
+
 ## 0.10.0
 ### ✨ Features and improvements
 - **`GET /api/stats`**, which answers what a node has actually served. Until now a tile request was
