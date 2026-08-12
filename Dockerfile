@@ -71,7 +71,12 @@ VOLUME ["/data"]
 #
 # A NAT-ed bridge network breaks incoming peer connections whatever is listed
 # here; see docs/docker.md for why host networking is usually the answer.
-EXPOSE 8090/tcp 8091/tcp 6881/tcp 6881/udp 6882/tcp 6882/udp
+# 6883/udp is the BEP 46 publisher's DHT, and only means anything if
+# mutable.dhtPort is set to it. Publishing needs no inbound port at all -- a
+# put is outbound and the replies return on the same socket -- so this is here
+# for the node that wants to be a reachable DHT node rather than merely a
+# participating one.
+EXPOSE 8090/tcp 8091/tcp 6881/tcp 6881/udp 6882/tcp 6882/udp 6883/udp
 
 # tini reaps the Python sidecar. Without an init, a sidecar that outlives a
 # restart becomes a zombie holding the data directory lock.

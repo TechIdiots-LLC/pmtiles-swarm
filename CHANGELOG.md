@@ -8,6 +8,11 @@
 - _...Add new stuff here..._
 
 ### 📚 Documentation
+- **The image exposes 6883/udp** for the BEP 46 publisher's DHT, and the entrypoint's own messages
+  now go to stderr rather than stdout — so `docker run … publisher-key > publisher.pem` writes a
+  key rather than a key with `[docker]` lines through the middle of it. Publishing needs no inbound
+  port; the port is there for a container that wants to be a reachable DHT node rather than merely
+  a participating one.
 - **A Docker image**, `wifidb/pmtiles-swarm`, for amd64 and arm64. Nothing in the package changed;
   this is a way to run what was already there.
 

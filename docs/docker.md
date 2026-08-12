@@ -88,6 +88,7 @@ mistake that leaves half of BitTorrent unreachable while looking correct.
 | 8091 | Console and API. Do not expose this one to the internet |
 | 6881 | libtorrent, TCP **and** UDP |
 | 6882 | WebTorrent, TCP and UDP — only when `secondaryEngines` is set |
+| 6883 | UDP, the BEP 46 publisher's DHT — only when `mutable.dhtPort` says so, and optional even then |
 
 **One peer port per engine.** Each engine is its own listener and two cannot
 share a port, so a node running libtorrent with WebTorrent alongside it needs
@@ -101,6 +102,33 @@ is idle until you add:
 **WebRTC needs no port.** Browser peers are reached through a `wss://` tracker
 and ICE, which is outbound only — there is nothing to forward for them, and
 nothing that a reverse proxy carries.
+
+**The publisher's DHT does not need one either.** A container that publishes
+BEP 46 records works with no inbound port at all: a put is outbound, and the
+replies come back on the same socket the way any UDP client's do. Pin and
+publish 6883 only to make this a *reachable* DHT node, which earns a better
+routing table and contributes back:
+
+```json
+{ "mutable": { "publish": true, "keyPath": "/data/publisher.pem", "dhtPort": 6883 } }
+```
+
+Note that this is a third UDP socket. Each engine runs a DHT of its own on its
+peer port, so 6883 has to be clear of both — two sockets cannot hold one port,
+and the container will fail to start if they collide.
+
+**The key belongs on a mount, not in the image.** `/data/publisher.pem`, created
+with
+
+```sh
+docker run --rm wifidb/pmtiles-swarm publisher-key > /path/to/data/publisher.pem
+chmod 400 /path/to/data/publisher.pem
+```
+
+and readable by the uid the container runs as. Baking it into an image would
+ship your signing identity to anyone who pulls it. Only the node that builds
+needs it; see
+[docs/serving-tiles.md](serving-tiles.md#a-fragment-that-survives-a-rebuild).
 
 ## Permissions
 

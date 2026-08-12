@@ -43,6 +43,7 @@ services:
     #   - "6881:6881/udp"      # uTP and the DHT, which are not TCP
     #   - "6882:6882/tcp"      # WebTorrent, if secondaryEngines is set
     #   - "6882:6882/udp"
+    #   - "6883:6883/udp"      # the publisher's DHT, only with mutable.dhtPort
 
     # Matches the uid the image runs as. Change both if the mounted directory
     # belongs to someone else on the host; the container has no way to guess.

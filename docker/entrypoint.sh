@@ -19,7 +19,10 @@ DIR="$(dirname "$CONFIG")"
 mkdir -p "$DIR"
 
 if [ ! -e "$CONFIG" ]; then
-  echo "[docker] no configuration at $CONFIG — writing a default"
+  # To stderr, so stdout carries only what the program produces. A
+  # subcommand like `publisher-key` is redirected to a file, and a stray
+  # line of ours in the middle of a PEM would be a corrupt key.
+  echo "[docker] no configuration at $CONFIG — writing a default" >&2
   cat > "$CONFIG" <<JSON
 {
   "host": "0.0.0.0",
@@ -50,7 +53,7 @@ if [ ! -e "$CONFIG" ]; then
   }
 }
 JSON
-  echo "[docker] edit $CONFIG — the API key and password are placeholders"
+  echo "[docker] edit $CONFIG — the API key and password are placeholders" >&2
 fi
 
 # The directories the default names. Made here rather than left to the node,
