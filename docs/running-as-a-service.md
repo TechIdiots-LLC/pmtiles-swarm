@@ -354,6 +354,116 @@ What the running service actually has:
 systemctl show -p ReadWritePaths -p UMask -p SupplementaryGroups pmtiles-swarm
 ```
 
+## The publisher key
+
+Only needed if this node publishes BEP 46 records — the signed DHT entries that
+let a style point at a category rather than at a build that goes stale. Skip
+this section entirely if it does not build archives.
+
+**Generate it as the service account**, so the file is owned by the user that
+has to read it:
+
+```sh
+sudo -u pmtiles-swarm -H /var/lib/pmtiles-swarm/node_modules/.bin/pmtiles-swarm   publisher-key > /etc/pmtiles-swarm/publisher.pem
+sudo chown pmtiles-swarm:pmtiles-swarm /etc/pmtiles-swarm/publisher.pem
+sudo chmod 400 /etc/pmtiles-swarm/publisher.pem
+```
+
+The PEM goes to stdout and the public key to stderr, so the redirect above
+captures only the key material and you still see the public half on the
+terminal. Write that public key down — it is what subscribers point at, and it
+is the one part you will want later.
+
+`400` rather than `600`: the service only ever reads this. Nothing in the
+product writes it back, so removing write permission costs nothing and means a
+compromised process cannot quietly replace it.
+
+Then in `/etc/pmtiles-swarm/swarm.config.json`:
+
+```json
+{
+  "mutable": {
+    "publish": true,
+    "keyPath": "/etc/pmtiles-swarm/publisher.pem"
+  }
+}
+```
+
+`/etc/pmtiles-swarm` is already in `ReadWritePaths` because the console rewrites
+the configuration there, so the unit needs no change.
+
+### Back it up, off this machine
+
+Losing this file breaks **every style pointing at that public key, permanently**
+— there is no recovery, no reissue, and no way to prove to a subscriber that a
+new key is you. It is not like an API key you can rotate.
+
+Back it up somewhere that is not this disk, and treat the backup as seriously as
+the original: whoever holds it can publish a signed record telling your
+subscribers that any archive is the current build, and clients will believe it
+because the signature checks out.
+
+### Exactly one publisher
+
+Two nodes publishing under one key fight over the sequence number, each
+overwriting the other's claim about what is current. So the PEM belongs on the
+build node and nowhere else.
+
+**This matters if you run HA config sync.** The configuration will replicate to
+the standby, `publish: true` and all — but the PEM will not, because you are
+not going to copy it. The standby then logs
+
+```
+[mutable] not publishing: ENOENT: no such file or directory
+```
+
+on every start and carries on serving normally. That is the intended outcome
+rather than a fault: the config syncing is harmless, and the key not syncing is
+the point. If the noise bothers you, set `mutable.publish` to `false` in the
+standby's config after the sync.
+
+### It does not need a port forwarded
+
+The DHT socket is separate from the seeding engine's, and by default takes an
+ephemeral UDP port (`mutable.dhtPort: 0`). That is enough to publish: a put is
+outbound — find nodes, then send — and the replies come back on the same
+socket the way any UDP client's do, which NAT handles without help.
+
+Setting a fixed port and forwarding it makes this a *reachable* DHT node, which
+means better lookups and contributing back to the network. Worth doing if this
+node is long-lived, but nothing here requires it.
+
+**Do not reuse the libtorrent engine's port.** That engine runs a DHT of its own
+on `libtorrent.listen`, and two sockets cannot hold one port — the node would
+fail to start.
+
+The port in use is reported at startup:
+
+```
+[mutable] DHT on UDP 63213
+```
+
+### Confirming it works
+
+```sh
+journalctl -u pmtiles-swarm | grep mutable
+```
+
+A healthy publisher says which categories it is announcing and under which key
+at startup, then one line per category whenever a build moves:
+
+```
+[mutable] publishing 3 categories as 7680dc95248eb807… every 30m
+[mutable] openmaptiles -> 4813a0e68e4b (seq 1786108931, 8 nodes)
+```
+
+`nodes` is how many DHT peers stored the record. **Zero means nobody did**, and
+the record does not exist however healthy the log looks otherwise — check that
+UDP is not blocked and that the DHT is reachable.
+
+The first publish waits about fifteen seconds after start, because a put into a
+DHT that has not finished bootstrapping reaches nobody.
+
 ## The sidecar
 
 The libtorrent engine runs Python as a child process, so the service user needs
@@ -373,15 +483,32 @@ rather than exiting. Name the interpreter explicitly when the service user's
 
 ## Ports
 
-Four listeners, and only the peer ports want a firewall rule. See
+Five listeners, and only the peer ports want a firewall rule. See
 [ports and reachability](engines.md#ports-and-reachability) for the detail.
 
 | | |
 | --- | --- |
 | `libtorrent.listen` — 6881, TCP and UDP | forward it |
 | `webtorrent.clientOptions.torrentPort` — pin it, or it changes every start | forward it |
+| `mutable.dhtPort` — UDP, ephemeral by default | optional; see below |
 | `port` — 8090 | your proxy or CDN |
 | `adminPort` — 8091, bound to `127.0.0.1` | nothing; that is the point |
+
+`mutable.dhtPort` is the odd one. Publishing works without any forward, because
+a put is outbound and the replies come back on the same socket the way any UDP
+client's do. Pin it and forward it only if you want this to be a *reachable*
+DHT node — which earns a better routing table and contributes back, and is
+worth having on a node that runs continuously.
+
+Pin it to something free: **not** `libtorrent.listen`, which is a DHT of its
+own, and not `torrentPort`. `6883` sits clear of both.
+
+```json
+{ "mutable": { "dhtPort": 6883 } }
+```
+
+Note that each engine runs its own DHT as well, so a node with both engines has
+three UDP participants. Only this one is yours to place.
 
 ## Updating
 
@@ -441,8 +568,25 @@ Then check it is actually serving:
 
 ```sh
 curl -fsS localhost:8090/feed.xml >/dev/null && echo "public surface ok"
-curl -fsS localhost:8091/api/status | head -c 200
+sudo -u pmtiles-swarm -H /var/lib/pmtiles-swarm/node_modules/.bin/pmtiles-swarm \
+  status --config /etc/pmtiles-swarm/swarm.config.json
 ```
+
+Safe to run against a live node: it asks over HTTP and takes no lock, so it is
+not the second process the data directory would refuse.
+
+Ask through the status command rather than with `curl`. Reaching the API by hand
+means getting the bind address, the admin port and the credential right in one
+go, and each of them fails in a way that looks like a broken node: a node bound
+to its LAN address refuses a request to `localhost`, and the header it accepts
+is `authorization: Bearer`, so anything else is a 401. The status command reads
+all three out of the config file the service is running with. It exits non-zero
+when the node does not answer or its engine is down, so it also works as the
+last step of a deployment script.
+
+An archive listed with a state of `—` is one the catalog holds and the engine is
+not. Just after a start that is normal and passes within a minute or so. If it
+persists, the engine refused it, and the journal says why.
 
 And that it can write where it is supposed to, which nothing above proves:
 

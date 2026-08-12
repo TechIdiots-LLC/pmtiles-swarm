@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -13,6 +14,7 @@ import {
   isPublicSurface,
 } from './auth.js';
 import { normalizeCategories } from './catalog.js';
+import { guessKind } from './library.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
 import { freeSpace, listLocations } from './locations.js';
@@ -69,6 +71,7 @@ export function createApp({
   warm,
   config,
   speed,
+  stats,
   reloaders = {},
   shutdown,
 }) {
@@ -397,6 +400,59 @@ export function createApp({
     }),
   );
 
+  /**
+   * Whether this node should be sent traffic.
+   *
+   * For a load balancer, which needs three things this did not have: no
+   * credential, a cheap answer, and a status code rather than a body to parse.
+   * A balancer checking `/feed.xml` instead — the nearest thing that existed —
+   * gets 200 from a node whose engine is dead, because a feed is built from
+   * the catalog and never touches the swarm.
+   *
+   * Readiness rather than liveness. `engine.list()` is a round trip to the
+   * engine, so a reply means the sidecar is answering and not merely that Node
+   * is; that is the difference worth reporting, since everything that makes
+   * this node useful to a swarm goes through it.
+   *
+   * Cached, because a balancer asks every couple of seconds and an IPC round
+   * trip per check is a cost with nothing to show for it. The window is short
+   * enough that a node which has just died is out of rotation within one more
+   * check than it would have been.
+   */
+  let healthChecked = 0;
+  let healthOk = true;
+  let healthError;
+  const HEALTH_TTL_MS = 2000;
+
+  app.get(
+    '/health',
+    route(async (_req, res) => {
+      const now = Date.now();
+      if (now - healthChecked >= HEALTH_TTL_MS) {
+        healthChecked = now;
+        try {
+          await engine.list();
+          healthOk = true;
+          healthError = undefined;
+        } catch (error) {
+          healthOk = false;
+          healthError = error.message;
+        }
+      }
+
+      // Never cached anywhere. A stale health check is worse than none: it
+      // keeps a dead node in rotation for as long as whatever cached it says.
+      res.setHeader('cache-control', 'no-store');
+      res.setHeader('access-control-allow-origin', '*');
+      res.status(healthOk ? 200 : 503).json({
+        status: healthOk ? 'ok' : 'unavailable',
+        engine: engine.name,
+        version: VERSION,
+        ...(healthOk ? {} : { error: healthError }),
+      });
+    }),
+  );
+
   app.get(
     '/api/status',
     route(async (_req, res) => {
@@ -439,6 +495,39 @@ export function createApp({
           mode: s.mode ?? 'cache',
         })),
       });
+    }),
+  );
+
+  // What this node has served, which is a different question from whether it
+  // is healthy. Admin-side: it names archives and client addresses, and a
+  // public endpoint reporting who else is using a node is a privacy question
+  // nobody asked for.
+  app.get(
+    '/api/stats',
+    route(async (req, res) => {
+      if (!stats) {
+        return res.status(501).json({ error: 'tile statistics are disabled' });
+      }
+      const recent = req.query.recent === undefined ? undefined : Number(req.query.recent);
+      res.setHeader('cache-control', 'no-store');
+      res.json({
+        node: config.nodeName ?? os.hostname(),
+        ...stats.snapshot({ recent }),
+      });
+    }),
+  );
+
+  // Deliberately a separate verb: reading counters should never be able to
+  // clear them, or a dashboard polling the endpoint would erase the history
+  // it is drawing.
+  app.delete(
+    '/api/stats',
+    route(async (_req, res) => {
+      if (!stats) {
+        return res.status(501).json({ error: 'tile statistics are disabled' });
+      }
+      stats.reset();
+      res.status(204).end();
     }),
   );
 
@@ -676,7 +765,12 @@ export function createApp({
       // Optional call: a missing method throws before any .catch could see it.
       const diskBytes =
         (await library.diskUsage?.(entry.infoHash).catch(() => null)) ?? null;
-      res.json({ ...entry, status, reading, diskBytes });
+      // Null until a tile has been asked for, and reset by a restart — the
+      // same lifetime as `reading`, and worth reading alongside it: an archive
+      // being read through the swarm while serving thousands of tiles is a
+      // different situation from one doing neither.
+      const served = stats?.forArchive(entry.infoHash) ?? null;
+      res.json({ ...entry, status, reading, diskBytes, served });
     }),
   );
 
@@ -1828,6 +1922,95 @@ export function createApp({
   // with authentication configured this answered 401 — to the very callers it
   // exists for, since this is the URL the TileJSON torrent block advertises and
   // the one a syncing peer follows.
+  /**
+   * Whether this node can serve *this* archive yet.
+   *
+   * A different question from `/health`, and answered separately because
+   * nobody asks it per request. `/health` decides whether a node should be
+   * sent traffic at all; this decides whether a newly published archive has
+   * become servable here — which is what you want to know after a build lands
+   * and before pointing anything at it.
+   *
+   * Reports rather than acts. It starts no read and waits for nothing: a probe
+   * that does work on demand is a probe that can be used to make a node do
+   * work on demand. The head warmer is what makes an archive ready; this only
+   * says whether it has.
+   *
+   * The three answers are deliberately different codes, because they call for
+   * different responses from whoever asked. 503 is "not yet, ask again". 415
+   * is "never" — an MBTiles archive is distributed here and cannot be read a
+   * byte range at a time, so waiting for it would be waiting for ever. 404 is
+   * "not here at all".
+   */
+  app.get(
+    '/archives/:infoHash/ready',
+    route(async (req, res) => {
+      const entry = catalog.get(req.params.infoHash);
+      // Never cached. The whole value of this is that it changes.
+      res.setHeader('cache-control', 'no-store');
+      res.setHeader('access-control-allow-origin', '*');
+
+      if (!entry) {
+        return res.status(404).json({ ready: false, reason: 'unknown archive' });
+      }
+
+      const kind = entry.kind ?? guessKind(entry.name ?? '');
+      const shape = {
+        infoHash: entry.infoHash,
+        name: entry.name,
+        kind: kind ?? 'unknown',
+        complete: entry.complete === true,
+      };
+
+      if (kind !== 'pmtiles') {
+        return res.status(415).json({
+          ...shape,
+          ready: false,
+          reason:
+            `this is ${kind ? `a ${kind}` : 'not a PMTiles'} archive, and only ` +
+            'PMTiles can be read a byte range at a time — it will not become ' +
+            'servable by waiting',
+        });
+      }
+
+      const summary = entry.pmtiles;
+      // A summary that names a format is one a header was actually read for.
+      // Anything else is a partial left by a read that did not finish.
+      if (!summary?.format) {
+        return res.status(503).json({
+          ...shape,
+          ready: false,
+          reason: 'its header has not been read yet',
+        });
+      }
+
+      // Vector tiles without their layer list can be served, but nothing can
+      // be styled from them: the TileJSON a map asks for would carry no
+      // vector_layers. The metadata sits wherever the writer put it, which for
+      // planetiler is after every tile, so it routinely arrives long after the
+      // header.
+      if (summary.format === 'pbf' && !summary.vectorLayers) {
+        return res.status(503).json({
+          ...shape,
+          ready: false,
+          format: summary.format,
+          reason: 'its metadata has not been read yet, so it carries no vector layers',
+        });
+      }
+
+      res.json({
+        ...shape,
+        ready: true,
+        format: summary.format,
+        minZoom: summary.minZoom,
+        maxZoom: summary.maxZoom,
+        ...(summary.vectorLayers
+          ? { vectorLayers: summary.vectorLayers.length }
+          : {}),
+      });
+    }),
+  );
+
   app.get(
     '/archives/:infoHash/archive.torrent',
     route(async (req, res) => {
@@ -1889,6 +2072,31 @@ export function createApp({
       res.on('close', () => {
         if (!res.writableEnded) controller.abort();
       });
+
+      // Counted on the way out rather than at each return: this handler ends
+      // in six different places (200, 204, 404, 415, 400, a read error), and
+      // one hook catches all of them without any of them having to remember.
+      // Abandoned requests are not counted -- a panning map cancels constantly
+      // and those were never served.
+      if (stats) {
+        const startedAt = process.hrtime.bigint();
+        res.on('finish', () => {
+          stats.record({
+            infoHash,
+            name: entry.name,
+            z,
+            x,
+            y,
+            status: res.statusCode,
+            bytes: Number(res.getHeader('content-length')) || 0,
+            ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
+            // Whatever this process can see. Behind a proxy that sends no
+            // X-Forwarded-For this is the proxy's address, which is itself
+            // the answer to "did this arrive directly or through HAProxy".
+            ip: req.ip,
+          });
+        });
+      }
 
       let tile;
       try {

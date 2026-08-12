@@ -398,6 +398,67 @@ const DEFAULTS = {
    */
   trustProxy: false,
   /**
+   * Announcing the current build of each category over the DHT (BEP 46).
+   *
+   * A category is the only stable handle this system has — every archive is
+   * addressed by its infohash, so a style pointing at one goes stale on the
+   * next build. `/latest/<category>/` fixes that with a server; this fixes it
+   * without one, as a signed DHT record naming whichever infohash is current.
+   *
+   * **Only the node that builds needs this.** Serving nodes carry the public
+   * half on the catalog entry and hand it out in the TileJSON; publishing is
+   * the only thing the secret is used for. Two nodes publishing under one key
+   * would fight over the sequence number, so run exactly one publisher.
+   *
+   * The key is a signing key, not a credential: whoever holds it can tell your
+   * subscribers that any archive is the current build, signed. Treat it the way
+   * you would a code-signing key. Generate one with
+   * `pmtiles-swarm publisher-key`.
+   *
+   * Records expire from the DHT after roughly two hours, so this republishes on
+   * a timer. Nothing else keeps them alive.
+   */
+  mutable: {
+    /** Publish records. Off unless a key is configured and this is set. */
+    publish: false,
+    /** PEM file holding the ed25519 keypair. Never leaves the publisher. */
+    keyPath: undefined,
+    /** How often to republish, in seconds. */
+    republishSeconds: 1800,
+    /**
+     * UDP port for this node's DHT socket. 0 takes an ephemeral one.
+     *
+     * Publishing does not need a forwarded port: a put is outbound, and the
+     * replies come back on the same socket the way any UDP client's do, which
+     * NAT handles. Setting a fixed port and forwarding it makes this a
+     * reachable DHT node, which gives better lookups and contributes back —
+     * but nothing here requires it.
+     *
+     * Do not reuse the libtorrent engine's port. That engine runs a DHT of its
+     * own, and two sockets cannot hold one port.
+     */
+    dhtPort: 0,
+  },
+  /**
+   * What this node has served, at `GET /api/stats`.
+   *
+   * Per-archive counters and a fixed ring of recent requests, both in memory,
+   * so the cost does not grow with traffic. Nothing is written to disk: a
+   * restart is how you reset it, and an access log would bring retention and
+   * disk questions this deliberately does not have.
+   *
+   * `recent: 0` keeps the counters and drops the per-request ring. Setting
+   * `tileStats` to `false` turns the whole thing off.
+   *
+   * Note what the client address means behind a proxy: without
+   * `X-Forwarded-For` it is the proxy's own address, which still answers
+   * whether a request arrived directly or through it, but not who sent it.
+   */
+  tileStats: {
+    /** Recent requests kept for inspection. */
+    recent: 200,
+  },
+  /**
    * Tile serving: a TileJSON endpoint and z/x/y tiles per archive.
    *
    * A node holding a complete copy reads its local file. A node in cache mode

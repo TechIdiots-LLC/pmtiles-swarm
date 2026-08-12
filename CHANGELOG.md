@@ -27,6 +27,228 @@
   Images build on a published release, in their own workflow. An image failing must not be able to
   fail a publish that already succeeded, or strand a release that cannot be re-run because npm
   already has the version.
+## 0.12.0
+### ✨ Features and improvements
+- **A category can now be addressed without a server at all.** A node that builds can publish a
+  signed DHT record (BEP 46) naming whichever archive is currently newest in each category, so a
+  style can point at a magnet that never goes stale:
+
+  ```
+  magnet:?xs=urn:btpk:<public key>&s=openmaptiles&dn=…&ws=…
+  ```
+
+  No infohash in it, which is the whole point — an infohash is what goes stale on the next build,
+  and it is why the fragment convention added in 0.11.0 could not be used for `/latest/` URLs. The
+  salt is the category name, so **one keypair addresses every category** rather than needing one
+  each.
+
+  Turn it on with `mutable.publish` and a key from the new **`pmtiles-swarm publisher-key`**
+  command. Off by default.
+
+  **Only the node that builds needs the key.** Serving nodes receive the public half on the catalog
+  entry, through the same sync that already carries `magnet` and `webSeeds`, and assemble the
+  identical magnet from it — there is nothing secret in one. Ten nodes behind a balancer hand out
+  the same string and none of them can publish. Run exactly one publisher: two under one key would
+  fight over the sequence number.
+
+  It is a **signing key rather than a credential**. Whoever holds it can tell your subscribers that
+  any archive is the current build, signed, and clients will believe it.
+
+  Records expire from the DHT after roughly two hours, so the node republishes on a timer
+  (`republishSeconds`, default 1800). That timer is the feature, not an optimisation — without it
+  a record published once works all afternoon and quietly stops resolving by evening. A category
+  whose put fails does not stop the others.
+
+  The DHT socket is bound explicitly on `mutable.dhtPort`, ephemeral by default, and the port is
+  reported at startup. Publishing needs no forward — a put is outbound and replies return on the
+  same socket — but a fixed, forwarded port makes this a reachable DHT node with better lookups.
+  It must not reuse the libtorrent engine's port, which runs a DHT of its own.
+
+  **`bittorrent-dht` is now a direct dependency** rather than reached for through webtorrent's
+  client, so publishing works on a node running the libtorrent engine alone.
+- **[docs/running-as-a-service.md](docs/running-as-a-service.md) covers the key**: generating it as
+  the service account so ownership is right, `chmod 400` because nothing ever writes it back, why
+  it must be backed up off the machine (losing it breaks every style pointing at that public key,
+  permanently, with no reissue), and what happens under HA config sync — the configuration
+  replicates to the standby and the key does not, so the standby logs `not publishing: ENOENT` and
+  serves on, which is the intended outcome rather than a fault. Also how to confirm it is working,
+  including that `nodes: 0` in the log means nobody stored the record however healthy the rest of
+  the line looks.
+- **The TileJSON's `torrent.mutable` block carries the magnet**, built from the public key, so no
+  consumer has to know how to assemble one. `mutableMagnet()` also accepts a hex key now — which
+  is all a serving node has — and carries `ws=` web seeds, so a client with no peers can still
+  range-read the archive over HTTP.
+
+## 0.11.0
+### ✨ Features and improvements
+- **The magnet can travel in the TileJSON URL's fragment**, and the console will build that string
+  for you: **Copy TileJSON URL + magnet**. A fragment is never sent in an HTTP request, so one
+  string serves every client — maplibre-gl-js, Leaflet and plain maplibre-native fetch the
+  TileJSON and ignore it, while a torrent-aware client reads the magnet **before making any network
+  call at all**.
+
+  That last part is the point. The `torrent` block inside the TileJSON only helps once the TileJSON
+  has been fetched, which leaves the swarm — the one part that depends on no server —
+  unreachable exactly when the server is down. With the magnet in the fragment a client can fall
+  back to the `ws=` web seed (two range requests, and the TileJSON derives from the archive's own
+  header and metadata) or to the swarm itself.
+
+  Documented in [docs/serving-tiles.md](docs/serving-tiles.md), including the caveat worth knowing:
+  on a `/latest/<category>/` URL the fragment pins the build that was current when it was copied,
+  while the URL keeps following the category, so the two can disagree after a rebuild. Survivable,
+  since the fragment is only consulted when the TileJSON cannot be fetched and an older build
+  renders where a blank map does not — and properly fixed by a mutable `xs=urn:btpk:` magnet,
+  which needs the BEP 46 publishing that [src/mutable.js](src/mutable.js) has machinery for and
+  nothing yet calls.
+
+## 0.10.0
+### ✨ Features and improvements
+- **`GET /api/stats`**, which answers what a node has actually served. Until now a tile request was
+  answered and forgotten, so the most ordinary operational questions had no answer at all: which
+  archive is carrying the load, which zooms are being pulled, whether a node behind a balancer is
+  getting its share, and whether the traffic hammering it arrived directly or through the proxy.
+
+  Per-archive counters — requests, bytes, a breakdown by zoom and by status, p50/p95 latency, and
+  a count per client address — plus a fixed ring of the most recent requests. Both live in memory
+  and are bounded, so the cost is the same after a billion tiles as after ten. Nothing is written
+  to disk: a restart is how you reset it, and an access log would bring retention and disk
+  questions this deliberately does not have. `DELETE /api/stats` clears it, deliberately a separate
+  verb so a dashboard polling the endpoint cannot erase the history it is drawing.
+
+  The report names the node that answered, which is the point behind a load balancer — ask each
+  one directly and the counters say how traffic is really distributed rather than how the balancer
+  believes it is. Admin-side rather than public, because it lists archives and client addresses.
+
+  Bytes are counted **as sent**, so a gzipped vector tile counts its compressed size. That is the
+  number that matters for bandwidth and it is not what the client ends up holding.
+
+  What a client address means depends on the proxy in front. Without `X-Forwarded-For` it is the
+  proxy's own address for everything arriving through it — still enough to separate direct
+  traffic from proxied, which is usually the question being asked, but not who sent it. For real
+  client addresses the proxy has to send the header and `trustProxy` has to name it.
+
+  Configured under `tileStats`: `recent` sets how many requests to keep, `0` keeps the counters and
+  drops the ring, and `false` turns the whole thing off, after which the endpoint answers 501.
+- **The archive detail shows what it has served**, in the console and on
+  `GET /api/torrents/<infohash>` as a `served` block. Worth reading next to `reading`: an archive
+  being read through the swarm while serving thousands of tiles is a different situation from one
+  doing neither.
+
+## 0.9.1
+### 🐞 Bug fixes
+- **Requires pmtiles-torrent 0.4.2, which is what actually makes a newly built archive visible.**
+  0.9.0 said the 0% was the dropped `seedOnly`. That was half of it — the half that made the
+  archive *slow*. The half that made it *invisible* was in the sidecar: creation defaults to a
+  hybrid v1+v2 torrent, and libtorrent answers `info_hash()` for a hybrid with the truncated v2
+  hash, while the catalog, the magnet and every v1 peer use v1. The engine held the archive under
+  a name the catalog could not look up, so a correctly seeding archive was reported as one the
+  engine had never heard of, and no tile could be served from it. The dependency floor moves to
+  0.4.2 rather than being left to whatever a fresh install happens to resolve.
+
+  Expect hybrid archives to re-check once on the first start after upgrading: their resume files
+  are now looked for under the corrected name, and the old ones are not found.
+- **The service documentation pointed its status check at a path that does not exist.** It named
+  `/opt/pmtiles-swarm/src`, while a node installed the way the rest of that document describes has
+  its executable in `/var/lib/pmtiles-swarm/node_modules/.bin`. Running the documented command
+  found no dependencies and failed on the first import — which is the same
+  wrong-command-in-documentation problem the status command exists to end.
+
+## 0.9.0
+### ✨ Features and improvements
+- **`pmtiles-swarm status`**, which asks a running node what it is doing and reads the answer out
+  loud. It takes the same config file the node runs with, so the address, the port and the
+  credential come from one place rather than being remembered and retyped. That is the whole
+  point of it: the API is on `adminPort` rather than the public port, the node binds where `host`
+  says and that is usually not loopback, and it accepts `authorization: Bearer` and not
+  `x-api-key`. Get any one of those wrong by hand and the answer is a refused connection or a 401,
+  both of which read as a broken node rather than as a mistyped command — which is exactly how
+  they were read while diagnosing the archive fixed below.
+
+  It names the case that is otherwise silent: an archive the catalog holds and the engine does
+  not, which through `curl` is a row of empty columns and looks like a corrupt archive. Just after
+  a start it is normal and passes; persisting, the engine refused it and the log says why. Exits
+  non-zero when the node does not answer or its engine is down, so it can be the last step of a
+  deployment script, and `--json` hands back the raw replies for anything that would rather parse.
+
+  Also warns when `--config` names a file that is not there. Startup ignores that on purpose, so
+  a first run can write one — but for a question about a running node the silence is
+  misleading, since the answer then describes the default address and looks entirely real.
+
+- **[docs/haproxy.md](docs/haproxy.md) now covers the backend pool**: why round robin rather than
+  the plugin's default of Source-IP Hash, which fails quietly behind a CDN by pinning nearly all
+  traffic to one node while the rest sit idle and healthy; when least-connections or URI hash are
+  worth having instead; and what HTTP/2 on the frontend does and does not change about balancing.
+
+### 🐞 Bug fixes
+- **An archive built from a watched folder no longer sits at 0%, seeding nobody, for a quarter of
+  an hour.** The libtorrent engine dropped `seedOnly` on its way to the sidecar, so libtorrent
+  re-hashed an 81 GiB archive that had been read end to end moments earlier to produce its
+  torrent. Everything else already handled it — the library sets it in five places, the
+  composite engine checks it against what the primary reports, qBittorrent has its own flag for
+  it — and this one engine silently did not pass it on. Needs pmtiles-torrent 0.4.1, which the
+  existing dependency range picks up on a fresh install.
+- **`docs/running-as-a-service.md` no longer suggests checking a node with `curl localhost:8091`.**
+  It names loopback and sends no credential, so on a node bound to its LAN address with a key
+  configured it fails twice over, in the two ways that look most like a broken node. It now uses
+  the status command.
+
+## 0.8.0
+### ✨ Features and improvements
+- **`GET /health`**, for a load balancer: 200 when this node can serve, 503 when its engine
+  cannot, no credential and nothing to parse. It asks the engine rather than itself, which is the
+  distinction that makes it worth having — a feed is built from the catalogue and never touches
+  the swarm, so a balancer checking `/feed.xml`, the nearest thing that existed, gets 200 from a
+  node whose engine is dead and keeps sending it traffic. The answer is cached for two seconds,
+  because a balancer asks often and each check is an inter-process round trip, and it is sent
+  `no-store`: a stale health check keeps a dead node in rotation for as long as whatever cached
+  it says so.
+- **`GET /archives/<infohash>/ready`**, which answers a different question — whether a *particular*
+  archive has become servable on this node. 200 once its header and, for vector, its layers have
+  been read; 503 with which half is missing; **415** for an archive that can never be served,
+  since MBTiles is distributed here but cannot be read a byte range at a time and polling it would
+  be polling for ever; 404 when it is not here. It reports rather than acts, starting no read and
+  waiting for nothing — a probe that does work on demand is a probe that can be used to make a
+  node do work on demand.
+- **[docs/haproxy.md](docs/haproxy.md)**, written against the OPNsense plugin: the health monitor
+  field by field, how the check interval trades against failover time, timeouts long enough for a
+  web seed to finish, `X-Forwarded-Proto`, gating a deployment on `/ready` — and a table of what a
+  reverse proxy in front of a BitTorrent node simply cannot carry.
+
+### 🐞 Bug fixes
+- **Head-warming no longer tries to read a PMTiles header out of a `.osm.pbf`.** The guard was
+  `entry.kind && entry.kind !== 'pmtiles'`, and `guessKind` answers `undefined` for anything it
+  does not recognise — so it never fired for exactly the archives it existed to exclude. Every
+  planet dump being mirrored, and every MBTiles archive, was read as though it had a header,
+  failed, and came back on the backoff for ever. The test is positive now: the kind has to *be*
+  PMTiles, taken from the entry where it is known and from the file name where it is not.
+
+## 0.7.1
+### 🐞 Bug fixes
+- **A feed no longer deletes its only complete copy.** Retention was written for a watched folder
+  and a scheduled source, where the archive it is handed is already whole — the file was there, or
+  the fetch finished. A subscription is not like that: it joins a torrent, and the data arrives
+  hours later. So `keep: 1` on a feed removed last week's complete copy the moment this week's
+  torrent was announced, leaving nothing complete at all for the length of an 88 GiB download.
+  `keepDays` had the same exposure, a copy ageing out while its replacement was still arriving.
+
+  Retention on a subscription now waits for the newest copy to be whole, which makes `keep: 1`
+  mean *the last complete copy* — the only reading of it that is safe there. It also runs on every
+  poll rather than only on polls that took something, because what is being waited for is a
+  download finishing rather than a poll happening. Watched folders and scheduled sources are
+  unchanged: they hand over a finished archive, and asking them for a completion marker they never
+  set would have stopped their retention working.
+
+### 📚 Documentation
+- **`prune` does not apply to an RSS subscription**, which the documentation did not say and a
+  reader would reasonably have assumed otherwise — it is accepted there and quietly does nothing.
+  Absence from a bounded feed is not evidence that anything was withdrawn, so pruning needs a
+  catalogue. The two questions are now separated where they are described: whether the publisher
+  still offers an archive, and whether you still want it on your disk.
+- **Feed retention is documented**, along with the claim it replaces. The subscribing guide said a
+  node following a feed "accumulates and never sheds", which was true when it was written and is
+  what `keep` and `keepDays` on a subscription now answer.
+- **The README describes the two settings sections** rather than the single table they replaced,
+  and covers `newest`, `keep` and `keepDays` — none of which it mentioned.
 
 ## 0.7.0
 ### ✨ Features and improvements

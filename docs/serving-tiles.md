@@ -160,6 +160,120 @@ Both peer-to-peer engines reuse the client already seeding the archive rather
 than starting a second one. One peer pool, one port, one DHT node — and for
 libtorrent, one sidecar process.
 
+## Carrying the magnet in the URL fragment
+
+The `torrent` block below solves the problem *after* the TileJSON has been
+fetched. It does not solve the one before it: a torrent-aware client that cannot
+reach this server has nothing to work with, so the swarm — the part that does
+not depend on any server — is unreachable precisely when the server is down.
+
+The fix is to put the magnet in the URL **fragment**:
+
+```json
+"sources": {
+  "openmaptiles": {
+    "type": "vector",
+    "url": "https://swarm.example.org/latest/openmaptiles/tiles.json#magnet:?xt=urn:btih:4813a0e6…&dn=…&tr=…&ws=…"
+  }
+}
+```
+
+A fragment is never sent in an HTTP request, so the same string works
+everywhere:
+
+| Client | What happens |
+| --- | --- |
+| maplibre-gl-js, Leaflet, anything | fetches the TileJSON, ignores the fragment |
+| maplibre-native without a plugin | the same |
+| torrent-aware | reads the magnet **before any network call**, and still has it if the fetch fails |
+
+The console's **Copy TileJSON URL + magnet** button produces exactly this.
+
+A magnet needs no encoding in a fragment — RFC 3986 allows `?`, `&`, `=` and `:`
+there — and leaving it readable matters for something people paste into a style
+file by hand.
+
+### What a client should do with it
+
+Three paths, each a strict fallback of the one above:
+
+1. **The TileJSON URL.** One request, the full document including
+   `vector_layers`. Fastest, and what an ordinary client does anyway.
+2. **The `ws=` web seed.** Two HTTP range requests — the header and root
+   directory near the start of the archive, the JSON metadata at the far end —
+   and the TileJSON can be derived from them. Works when this API is down but
+   the file is still on a web server, and it is the same order of cost as (1).
+3. **The swarm.** No HTTP at all. Slowest from cold, because BEP 9 has to
+   deliver the metainfo first, and the only one that survives the server
+   disappearing entirely.
+
+Everything those need is in the magnet: `xt` identifies the archive, `dn` names
+the file, `tr` finds peers, `ws` gives the HTTP fallback.
+
+### One caveat on `/latest/` URLs
+
+`/latest/<category>/tiles.json` follows the category, and a magnet naming an
+infohash does not — it pins the build that was current when the URL was copied.
+So the fragment goes stale on the next build while the URL does not.
+
+That is survivable, because the fragment is only consulted when the TileJSON
+cannot be fetched, and an older build renders where a blank map does not. But it
+means the two halves can disagree, and the fix is a **mutable** magnet
+(`xs=urn:btpk:…`, BEP 46) whose target is resolved over the DHT rather than
+baked into the string. See [src/mutable.js](../src/mutable.js) — note that
+nothing publishes those records yet.
+
+For an immutable `/archives/<infohash>/tiles.json` URL the question does not
+arise: both halves name the same fixed archive.
+
+### A fragment that survives a rebuild
+
+The caveat above — a pinned infohash going stale — is what BEP 46 fixes. A node
+that publishes signs a DHT record naming whichever infohash is current, and the
+magnet then names the **category** rather than a build:
+
+```
+magnet:?xs=urn:btpk:<public key>&s=openmaptiles&dn=…&ws=…
+```
+
+No infohash anywhere, so nothing to go stale. A client resolves the record over
+the DHT and joins whatever is current.
+
+Turn it on with a key on the node that builds:
+
+```sh
+pmtiles-swarm publisher-key > /etc/pmtiles-swarm/publisher.pem
+chmod 600 /etc/pmtiles-swarm/publisher.pem
+```
+
+```json
+{ "mutable": { "publish": true, "keyPath": "/etc/pmtiles-swarm/publisher.pem" } }
+```
+
+The magnet then appears in every TileJSON as `torrent.mutable.magnet`, and the
+console's copy button uses it for category URLs.
+
+**Only the node that builds needs the key.** Serving nodes receive the public
+half on the catalog entry, through the same subscription sync that carries
+`magnet` and `webSeeds`, and assemble the identical magnet from it — there is
+nothing secret in one. Ten nodes behind a balancer hand out the same string and
+none of them can publish.
+
+**Run exactly one publisher.** Two nodes publishing under one key would fight
+over the sequence number, each overwriting the other's claim about what is
+current.
+
+**It is a signing key, not a credential.** Whoever holds it can tell your
+subscribers that any archive is the current build, signed, and they will believe
+it. Treat it the way you would a code-signing key: lose it and every style
+pointing at that public key breaks permanently.
+
+**Records expire after roughly two hours**, so the node republishes on a timer
+(`republishSeconds`, default 1800). That timer is not an optimisation — without
+it a record published once works all afternoon and stops resolving by evening.
+If the publisher is offline longer than that, the DHT path goes quiet until it
+returns; the HTTP TileJSON URL is unaffected.
+
 ## The `torrent` block
 
 TileJSON documents from this server carry a non-standard `torrent` member:
@@ -199,6 +313,85 @@ For an archive published as a mutable torrent, the block also carries
 `mutable.publicKey`, so a client that understands BEP 46 can follow updates
 rather than pinning to the version the document was generated from. See
 [publishing](publishing.md).
+
+## Health checks
+
+```
+GET /health
+```
+
+200 when this node can serve, 503 when it cannot, no credential and no body
+worth parsing — which is what a load balancer needs. It is on the public
+surface, so it answers on the same port the tiles do.
+
+**It asks the engine, not just itself.** A reply means the engine answered a
+round trip, which is the difference worth reporting: a feed is built from the
+catalog and never touches the swarm, so a balancer checking `/feed.xml` gets
+200 from a node whose engine is dead and keeps sending it traffic.
+
+The answer is cached for a couple of seconds, because a balancer asks often and
+each check costs an inter-process round trip. A node that has just died leaves
+rotation one check later than it otherwise would.
+
+It sends `cache-control: no-store`. A stale health check is worse than none —
+it keeps a dead node in rotation for as long as whatever cached it says so.
+
+```
+backend tiles
+    option httpchk GET /health
+    http-check expect status 200
+    server node1 10.0.0.11:8090 check inter 5s
+```
+
+Configured through a form rather than a file, and with the rest of what a proxy
+in front of this needs — timeouts, `X-Forwarded-Proto`, and the ports it cannot
+carry — in [docs/haproxy.md](haproxy.md).
+
+### Whether one archive is servable yet
+
+```
+GET /archives/<infohash>/ready
+```
+
+A different question, and worth keeping apart from the one above. `/health`
+decides whether a node should be sent traffic at all; this says whether a
+newly published archive has become servable *here* — which is what you want
+after a build lands and before pointing anything at it.
+
+| | |
+| --- | --- |
+| **200** | Ready. Its header has been read, and a vector archive has its layers |
+| **503** | Not yet — ask again. The body says which half is missing |
+| **415** | Never. MBTiles is distributed here but cannot be read a byte range at a time, so waiting would be waiting for ever |
+| **404** | Not on this node |
+
+The codes differ because the responses differ: one is "poll me", one is "stop
+polling", and a script that treats them alike either gives up too early or
+waits for something that will never happen.
+
+It **reports rather than acts** — it starts no read and waits for nothing. A
+probe that does work on demand is a probe that can be used to make a node do
+work on demand. Reading the head is the head warmer's job; this only says
+whether it has happened.
+
+So the shape of a deployment check across a serving tier is: publish, then poll
+every node until each answers 200, then move `latest`.
+
+```sh
+for node in 10.0.0.11 10.0.0.12; do
+  until curl -fsS "http://$node:8090/archives/$INFOHASH/ready" >/dev/null; do
+    sleep 10
+  done
+done
+```
+
+`curl -f` fails on 503 and on 415 alike, so treat 415 separately if an MBTiles
+archive could ever reach that loop — otherwise it never ends.
+
+An archive this node holds *completely* can still be read from disk with the
+engine down, so 503 is a statement about the node rather than about every
+request it could answer. That is the right way round for a balancer with
+somewhere else to send the traffic.
 
 ## Caching
 

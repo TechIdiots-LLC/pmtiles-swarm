@@ -311,3 +311,47 @@ describe('keeping a feed from filling the disk', () => {
     assert.equal(retains({ prune: 'delete' }), false, 'pruning is not retention');
   });
 });
+
+describe('keeping only the last complete copy', () => {
+  it('is what keep: 1 means on a feed', async () => {
+    // The difference from a watched folder: there, an archive is whole when it
+    // is imported. A subscription joins a torrent and the data arrives hours
+    // later, so "keep the newest" has to mean "keep the newest *complete*" or
+    // it deletes the only usable copy the moment a new one is announced.
+    const { retire } = await import('../src/retention.js');
+
+    const family = (newestComplete) => [
+      { infoHash: 'new', name: 'planet-260810.osm.pbf', complete: newestComplete },
+      { infoHash: 'old', name: 'planet-260803.osm.pbf', complete: true },
+    ];
+
+    const removals = [];
+    const library = {
+      remove: async (infoHash, options) => removals.push({ infoHash, ...options }),
+    };
+
+    const downloading = family(false);
+    await retire({
+      library, family: downloading, entry: downloading[0],
+      keep: 1, label: '[t]', requireComplete: true,
+    });
+    assert.deepEqual(removals, [], 'nothing goes while the new copy is partial');
+
+    const finished = family(true);
+    const log = console.log;
+    console.log = () => {};
+    try {
+      await retire({
+        library, family: finished, entry: finished[0],
+        keep: 1, label: '[t]', requireComplete: true,
+      });
+    } finally {
+      console.log = log;
+    }
+    assert.deepEqual(
+      removals.map((r) => r.infoHash),
+      ['old'],
+      'and the previous copy goes once the new one is whole',
+    );
+  });
+});

@@ -36,6 +36,9 @@ node src/index.js --config swarm.config.json
 - **[docs/docker.md](docs/docker.md)** — the `wifidb/pmtiles-swarm` image, the single `/data`
   mount everything lives under, and why a BitTorrent peer is not the usual Docker networking
   question.
+- **[docs/haproxy.md](docs/haproxy.md)** — health monitors, what a reverse proxy carries and
+  what it cannot, timeouts long enough for a web seed, and gating a deployment on
+  `/archives/<infohash>/ready`.
 - **[docs/architecture-diagram.md](docs/architecture-diagram.md)** — how a publishing node, a
   serving tier, the swarm and both kinds of client fit together.
 
@@ -491,16 +494,28 @@ restart.
 
 ### Following other nodes
 
-`subscriptions` are the peers this node takes archives from, editable in Settings under **Remote
-nodes**. An RSS feed says "here is what is new" and is bounded by the publisher's `feedMaxItems`,
-so a node offline long enough misses things permanently; a `/api/catalog` URL says "here is
-everything", which is what makes reconciling — and pruning — possible.
+`subscriptions` are what this node takes archives from, editable in Settings as two sections:
+**RSS feeds** and **Remote nodes**. They are not one thing in two costumes. A feed says "here is
+what is new" and is bounded by the publisher's `feedMaxItems`, so a node offline long enough
+misses things permanently, and an absence from one proves nothing; a `/api/catalog` URL says
+"here is everything", which is what makes reconciling — and pruning — possible. A row belongs to
+whichever section it sits in, and is saved with that protocol rather than leaving it to be
+inferred from the URL.
 
 `mode` decides what following one costs: `cache` joins the swarm and fetches only what is read,
 `mirror` commits to a whole copy of every archive the peer lists. `token` is presented to the peer,
-which may then publish more than it publishes to the world. `prune` is off unless chosen, only ever
-considers archives that peer sent, and never acts on a filtered or partial view — start a new peer
-on `"report"` and watch it before trusting it with more.
+which may then publish more than it publishes to the world.
+
+`newest` caps how many items one check of a **feed** may take, counting from the newest, and
+defaults to 1 — planet.openstreetmap.org lists five planet dumps, and taking the lot is four
+hundred gigabytes nobody asked for. It means nothing to a catalogue, which lists everything.
+
+`keep` and `keepDays` retire what a subscription has brought in, exactly as they do for a watched
+folder or a scheduled source: only after something new has landed, and never the newest copy. They
+answer for your disk. `prune` answers for the publisher — it is off unless chosen, only ever
+considers archives that peer sent, never acts on a filtered or partial view, and **applies to a
+catalogue only**, since absence from a bounded feed is not evidence that anything was withdrawn.
+Start a new peer on `"report"` and watch it before trusting it with more.
 
 Peer tokens are redacted from `GET /api/config` like any other credential, and a save that echoes
 the placeholder back keeps the stored one.
@@ -577,6 +592,93 @@ network equipment: peers request 16 KiB blocks whatever the piece size. The sett
 matters there is `maxConnections`, since every peer holds a NAT table entry. See
 [docs/publishing.md](docs/publishing.md).
 
+## Asking a running node what it is doing
+
+```sh
+node src/index.js status --config /etc/pmtiles-swarm/swarm.config.json
+```
+
+```
+engine  libtorrent  ready
+version 0.8.0
+17 archives, 1 the engine does not know about
+
+NAME                                             SIZE  STATE       PROGRESS
+planetiler-openmaptiles-260803.pmtiles         81 GiB  seeding         100%
+planet-260803.osm.pbf                          94 GiB  downloading      37%
+planetiler-openmaptiles-260810.pmtiles         83 GiB  —                 —
+```
+
+It reads the same config file the node runs with, so the address, the port and the credential come
+from one place rather than being remembered and retyped. That matters more than it sounds: the API
+is on `adminPort`, not the public port; the node binds where `host` says, which is usually not
+loopback; and it accepts `authorization: Bearer`, not `x-api-key`. Get any one of those wrong with
+`curl` and the answer is a refused connection or a 401 — both of which read as a broken node rather
+than a mistyped command.
+
+An archive with a state of `—` is one the catalog holds and the engine is not. Directly after a
+restart that is normal and passes. Persisting, it means the engine refused it, and the log says
+why.
+
+Exit status is 0 when the node answered and its engine is up, 1 when it did not or is not — so it
+works in a deployment script. `--json` gives the raw `/api/status` and `/api/torrents` replies for
+anything that wants to parse rather than read.
+
+## Seeing what a node is actually serving
+
+```sh
+curl -s -H "authorization: Bearer $KEY" http://172.16.1.49:8091/api/stats | jq
+```
+
+```json
+{
+  "node": "planetgen",
+  "since": "2026-08-12T14:02:11.004Z",
+  "requests": 18422,
+  "bytes": 743112904,
+  "archives": {
+    "4813a0e68e4b88def6d4ef3c4eabde84ffc0c068": {
+      "name": "planetiler-openmaptiles-260803.pmtiles",
+      "requests": 18422,
+      "bytes": 743112904,
+      "byZoom": { "0": 12, "7": 3311, "14": 9022 },
+      "byStatus": { "200": 18104, "204": 301, "404": 17 },
+      "clients": { "172.16.1.2": 17980, "172.16.1.41": 442 },
+      "p50ms": 3,
+      "p95ms": 41
+    }
+  },
+  "recent": [
+    { "at": "…", "ip": "172.16.1.41", "z": 14, "x": 4823, "y": 6155,
+      "status": 200, "bytes": 41221, "ms": 2 }
+  ]
+}
+```
+
+Counters per archive, plus a fixed ring of the most recent requests. Both live in
+memory and are bounded, so the cost is the same after a billion tiles as after
+ten, and a restart is how you reset it. Nothing is written to disk — an access
+log brings retention and disk questions this deliberately does not have.
+
+`node` names which machine answered, which is the point behind a load balancer:
+ask each node directly and the counters tell you how traffic is actually
+distributed, rather than what the balancer believes.
+
+**What the client address means depends on your proxy.** `clients` records what
+the process can see. Without `X-Forwarded-For` that is the proxy's own address
+for everything arriving through it — still enough to separate direct traffic
+from proxied, which is usually the question, but not who sent it. For real
+client addresses, have the proxy send the header and set `trustProxy` to name
+it; see [docs/haproxy.md](docs/haproxy.md).
+
+Bytes are counted **as sent**, so a gzipped vector tile counts its compressed
+size. That is the number that matters for bandwidth, and it is not what the
+client ends up holding.
+
+Configured under `tileStats`: `recent` sets how many requests to keep (`0` keeps
+the counters and drops the ring), and `"tileStats": false` turns it off, after
+which the endpoint answers 501.
+
 ## API
 
 | Method | Path | Purpose |
@@ -611,12 +713,15 @@ matters there is `maxConnections`, since every peer holds a NAT table entry. See
 | `POST` | `/api/torrents/:infoHash/hooks/complete` | Run the completion hook again for one archive |
 | `GET` `POST` `DELETE` | `/api/tokens`, `/api/tokens/:id` | Mint, list and revoke access tokens |
 | `GET` `POST` | `/api/restart` | What a restart would do, and doing it |
+| `GET` `DELETE` | `/api/stats` | What this node has served — per-archive counters and the last N requests; `DELETE` clears them |
 | `GET` `PATCH` | `/api/config` | Read and change settings |
 | `POST` | `/api/login`, `/api/logout` | Console sign-in |
 | `GET` | `/api/session` | Who this request is, and whether a credential is needed at all |
 | `GET` | `/api/catalog` | The whole catalogue, for a peer keeping itself in step |
 | `GET` | `/archives/:infoHash/tiles.json` | TileJSON — **public** |
 | `GET` | `/archives/:infoHash/:z/:x/:y.:ext` | One tile — **public** |
+| `GET` | `/health` | 200 when this node can serve, 503 when its engine cannot — **public**, no credential, for a load balancer |
+| `GET` | `/archives/:infoHash/ready` | Whether this node can serve *this* archive yet: 200 ready, 503 not yet, 415 never — **public** |
 | `GET` | `/archives/:infoHash/archive.torrent` | The `.torrent` a torrent-aware client joins with — **public** |
 | `GET` | `/archives/:infoHash/preview` | Map preview for one archive — admin, not public |
 | `GET` | `/latest/:category/tiles.json`, `/:name.torrent`, `/magnet` | The newest build in a category — **public**. The torrent name is yours to choose, so a link can read `planetiler-openmaptiles-latest.torrent`; it redirects to the immutable URL, which names the download after the build it actually is |

@@ -163,3 +163,78 @@ describe('retiring what has outlived them', () => {
     assert.deepEqual(lib.removed, []);
   });
 });
+
+describe('waiting for the new copy to be whole', () => {
+  /**
+   * A library recording removals rather than performing any.
+   * @returns {object} - The library and what it was asked to remove.
+   */
+  function library() {
+    const removed = [];
+    return { removed, remove: async (infoHash, opts) => removed.push({ infoHash, ...opts }) };
+  }
+
+  const copies = (newestComplete) => [
+    { infoHash: 'new', name: 'planet-260810.osm.pbf', complete: newestComplete,
+      buildDate: new Date(NOW).toISOString() },
+    { infoHash: 'old', name: 'planet-260803.osm.pbf', complete: true,
+      buildDate: new Date(NOW - 7 * DAY).toISOString() },
+  ];
+
+  it('keeps the old copy while the new one is still downloading', async () => {
+    // A watched folder and a scheduled source hand over an archive that is
+    // already whole. A subscription joins a torrent and the data arrives hours
+    // later — so retiring on the join would delete last week's complete copy
+    // the moment this week's was announced, leaving nothing complete at all
+    // for the length of the download.
+    const family = copies(false);
+    const lib = library();
+    const removed = await retire({
+      library: lib,
+      family,
+      entry: family[0],
+      keep: 1,
+      label: '[t]',
+      requireComplete: true,
+    });
+
+    assert.deepEqual(removed, []);
+    assert.deepEqual(lib.removed, [], 'the only complete copy is still here');
+  });
+
+  it('retires it once the new one is whole', async () => {
+    const family = copies(true);
+    const lib = library();
+    const log = console.log;
+    console.log = () => {};
+    try {
+      await retire({
+        library: lib,
+        family,
+        entry: family[0],
+        keep: 1,
+        label: '[t]',
+        requireComplete: true,
+      });
+    } finally {
+      console.log = log;
+    }
+
+    assert.deepEqual(lib.removed, [{ infoHash: 'old', deleteData: true }]);
+  });
+
+  it('is off for the callers that hand over a finished archive', async () => {
+    // A watched folder imports a file that exists. Making it wait for a
+    // `complete` flag it never sets would stop retention working there.
+    const family = copies(undefined);
+    const lib = library();
+    const log = console.log;
+    console.log = () => {};
+    try {
+      await retire({ library: lib, family, entry: family[0], keep: 1, label: '[t]' });
+    } finally {
+      console.log = log;
+    }
+    assert.equal(lib.removed.length, 1, 'retires without asking about completeness');
+  });
+});

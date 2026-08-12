@@ -112,11 +112,28 @@ describe('tilejson', () => {
       entry({ mutable: { publicKey: 'deadbeef', salt: 'planet', seq: 7 } }),
       base,
     );
-    assert.deepEqual(doc.torrent.mutable, {
-      publicKey: 'deadbeef',
-      salt: 'planet',
-      seq: 7,
-    });
+    assert.equal(doc.torrent.mutable.publicKey, 'deadbeef');
+    assert.equal(doc.torrent.mutable.salt, 'planet');
+    assert.equal(doc.torrent.mutable.seq, 7);
+  });
+
+  it('builds the magnet a style can point at, from the public key alone', () => {
+    // The reason this is assembled here rather than left to the consumer: any
+    // node can build it, because it contains only the public half. Ten serving
+    // nodes hand out one identical string and none of them can publish.
+    const doc = buildTileJson(
+      entry({ mutable: { publicKey: 'deadbeef', salt: 'planet', seq: 7 } }),
+      base,
+    );
+    const { magnet } = doc.torrent.mutable;
+    assert.match(magnet, /^magnet:\?xs=urn:btpk:deadbeef/);
+    assert.match(magnet, /&s=planet/);
+    // Carries the web seed, so a client with no peers can still range-read the
+    // archive over HTTP and derive everything it needs.
+    assert.match(magnet, /&ws=https%3A%2F%2Fmaps\.example\.org%2Ffixture\.pmtiles/);
+    // And no infohash, which is the entire point: an infohash is what goes
+    // stale on the next build.
+    assert.doesNotMatch(magnet, /btih/);
   });
 
   it('omits the mutable block when the archive is not mutable', () => {

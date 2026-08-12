@@ -1349,6 +1349,15 @@
             <div><span>origin</span><b>${escapeHtml(originOf(entry).label)}</b>
               <span class="sub">${escapeHtml(originOf(entry).detail)}</span></div>
             <div><span>reading via</span><b>${escapeHtml(entry.reading?.mode ?? 'not open')}</b></div>
+            <div><span>tiles served</span><b>${
+              entry.served ? entry.served.requests.toLocaleString() : '—'
+            }</b><span class="sub">${
+              entry.served
+                ? `${bytes(entry.served.bytes)} sent · ${
+                    entry.served.p50ms === null ? '—' : `${Math.round(entry.served.p50ms)} ms`
+                  } median`
+                : 'since this node started'
+            }</span></div>
             <div><span>format</span><b>${escapeHtml(summary.format ?? '—')}</b></div>
             <div><span>zoom</span><b>${summary.minZoom ?? '—'}–${summary.maxZoom ?? '—'}</b></div>
             <div><span>web seeds</span><b>${(entry.webSeeds ?? []).length}</b></div>
@@ -1371,6 +1380,7 @@
             <button id="copy-magnet">Copy magnet</button>
             <button id="copy-hash">Copy infohash</button>
             ${servable ? `<button id="copy-tilejson">Copy TileJSON URL</button>
+            <button id="copy-tilejson-swarm" title="The same URL with the magnet in the fragment. A fragment is never sent to the server, so ordinary clients fetch the TileJSON exactly as before; a torrent-aware client reads the magnet from it and can still join the swarm when this server is unreachable.">Copy TileJSON URL + magnet</button>
             <a href="${tileJson}" target="_blank" rel="noreferrer"><button type="button">Open TileJSON</button></a>
             <a href="${base}/archives/${entry.infoHash}/preview" target="_blank" rel="noreferrer"><button type="button">${
               summary.format === 'pbf' ? 'Inspect' : 'Preview'
@@ -1642,6 +1652,20 @@
         $('copy-magnet').onclick = () => copy(entry.magnet ?? '', 'Magnet link');
         if (servable) {
           $('copy-tilejson').onclick = () => copy(tileJson, 'TileJSON URL');
+          // The magnet rides in the fragment, which is client-side only and
+          // never sent in the request. So the same string serves both: an
+          // ordinary client fetches the TileJSON and ignores the fragment, and
+          // a torrent-aware one reads the magnet before making any call at all
+          // — which is what lets it start when this server is down.
+          //
+          // A magnet is legal in a fragment unencoded (RFC 3986 allows ?, &, =
+          // and : there), and leaving it readable matters for something people
+          // paste into a style file by hand.
+          $('copy-tilejson-swarm').onclick = () =>
+            copy(
+              entry.magnet ? `${tileJson}#${entry.magnet}` : tileJson,
+              entry.magnet ? 'TileJSON URL with magnet' : 'TileJSON URL (no magnet on this archive)',
+            );
         }
         $('copy-hash').onclick = () => copy(entry.infoHash, 'Infohash');
 

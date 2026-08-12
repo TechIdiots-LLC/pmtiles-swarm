@@ -180,7 +180,7 @@ export class SubscriptionManager {
     // from a bounded feed proves nothing — but age applies whatever the list
     // is, which is what makes this the answer for a feed that publishes
     // weekly for ever.
-    await this.#retire(subscription, added);
+    await this.#retire(subscription);
     return added;
   }
 
@@ -259,7 +259,7 @@ export class SubscriptionManager {
     }
 
     await this.#prune(subscription, document, archives);
-    await this.#retire(subscription, added);
+    await this.#retire(subscription);
     return added;
   }
 
@@ -279,23 +279,33 @@ export class SubscriptionManager {
    * Only after something new has landed, and never the newest copy, which are
    * the same guards a scheduled source retires under. See `retire`.
    * @param {object} subscription - The subscription.
-   * @param {object[]} added - What this pass took, newest first.
    * @returns {Promise<void>} - Resolves once anything due has gone.
    */
-  async #retire(subscription, added) {
-    if (added.length === 0 || !retains(subscription)) return;
+  async #retire(subscription) {
+    if (!retains(subscription)) return;
 
+    // Only what this feed brought in. An archive built here, added by hand, or
+    // taken from another peer is not this subscription's to remove.
+    const family = this.#library.catalog
+      .list()
+      .filter((entry) => entry.source?.subscription === subscription.url);
+    if (family.length === 0) return;
+
+    // Every poll, not only the polls that took something. What is being waited
+    // for is the newest copy *finishing*, which happens hours after the poll
+    // that started it — so retiring only on the way in would either act far
+    // too early or never act at all.
     await retire({
       library: this.#library,
-      // Only what this feed brought in. An archive built here, added by hand,
-      // or taken from another peer is not this subscription's to remove.
-      family: this.#library.catalog
-        .list()
-        .filter((entry) => entry.source?.subscription === subscription.url),
-      entry: added[0],
+      family,
+      entry: family[0],
       keep: subscription.keep,
       keepDays: subscription.keepDays,
       label: `[sync] ${subscription.url}`,
+      // The newest copy here is a download rather than a file that was already
+      // there, so nothing goes until it is whole. That is what makes `keep: 1`
+      // mean "the last complete copy".
+      requireComplete: true,
     });
   }
 

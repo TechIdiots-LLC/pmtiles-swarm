@@ -144,6 +144,8 @@ export function isPublicSurface(path) {
   if (/^\/archives\/[^/]+\/preview\/?$/.test(path)) return false;
 
   return (
+    // A load balancer checks this, and it checks the public port.
+    path === '/health' ||
     path === '/api/catalog' ||
     path === '/api/catalog/' ||
     path === '/feed.xml' ||

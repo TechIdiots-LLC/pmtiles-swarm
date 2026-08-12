@@ -18,6 +18,7 @@ import { SeedingLimits } from './seeding.js';
 import { closeServer, installSignalHandlers, runStoppers } from './shutdown.js';
 import { ScheduledSourceManager } from './sources.js';
 import { SubscriptionManager } from './subscriptions.js';
+import { TileStats } from './tile-stats.js';
 import { TileStore } from './tiles.js';
 import { HeadWarmer } from './prewarm.js';
 import { WarmRunner } from './warm.js';
@@ -92,20 +93,27 @@ function createOneEngine(name, config) {
  * @returns {Promise<void>} - Resolves once listening.
  */
 async function main() {
-  const { values } = parseArgs({
+  const { values, positionals } = parseArgs({
     options: {
       config: { type: 'string', short: 'c' },
       port: { type: 'string', short: 'p' },
       help: { type: 'boolean', short: 'h' },
+      json: { type: 'boolean' },
     },
-    allowPositionals: false,
+    allowPositionals: true,
   });
 
   if (values.help) {
     console.log(`pmtiles-swarm — BitTorrent distribution for PMTiles archives
 
+Usage:
+  pmtiles-swarm [--config FILE]          start the node
+  pmtiles-swarm status [--config FILE]   ask a running node what it is doing
+  pmtiles-swarm publisher-key            print a new BEP 46 signing key
+
   --config, -c   path to a JSON config file
   --port,   -p   override the listen port
+  --json         machine-readable output, for the status command
   --help,   -h   this message
 
 Environment: PMTILES_SWARM_PORT, PMTILES_SWARM_DATA_DIR, PMTILES_SWARM_ENGINE,
@@ -117,6 +125,37 @@ PMTILES_SWARM_PUBLIC_URL
 
   const config = await loadConfig(values.config);
   if (values.port) config.port = Number(values.port);
+
+  // Asking rather than starting. Everything it needs — which address the admin
+  // listener is on, which port, and the credential — comes from the same
+  // configuration the node runs with, so there is nothing to pass and nothing
+  // to get wrong.
+  if (positionals[0] === 'status') {
+    const { runStatus } = await import('./status-command.js');
+    process.exitCode = await runStatus(config, { json: values.json });
+    return;
+  }
+
+  if (positionals[0] === 'publisher-key') {
+    const { generatePublisherKey, publisherKeyToPem } = await import('./mutable.js');
+    const key = generatePublisherKey();
+    // The PEM on stdout so it can be redirected to a file; everything else on
+    // stderr so that redirect stays clean.
+    process.stdout.write(publisherKeyToPem(key));
+    console.error('');
+    console.error(`public key: ${Buffer.from(key.publicKey).toString('hex')}`);
+    console.error('Save the PEM where only this node can read it, and point');
+    console.error('mutable.keyPath at it. It signs what your subscribers');
+    console.error('believe is the current build, so treat it as a signing key.');
+    return;
+  }
+
+  if (positionals.length > 0) {
+    console.error(`unknown command: ${positionals[0]}`);
+    console.error('try: pmtiles-swarm status');
+    process.exitCode = 2;
+    return;
+  }
 
   // Everything that has to be stopped, in the order it should be stopped,
   // filled in as startup proceeds.
@@ -213,6 +252,59 @@ PMTILES_SWARM_PUBLIC_URL
     );
   }
 
+  // What this node has served. In memory and bounded, so it costs the same
+  // after a billion tiles as after ten; `tileStats.recent: 0` keeps the
+  // counters and drops the per-request ring, and `false` turns it off.
+  const stats =
+    config.tileStats === false
+      ? null
+      : new TileStats({ recent: config.tileStats?.recent });
+
+  // Announcing the current build of each category over the DHT. Only ever on
+  // the node that builds: the key signs what subscribers believe is current,
+  // and two publishers under one key would fight over the sequence number.
+  let publisher;
+  if (config.mutable?.publish && config.mutable?.keyPath) {
+    try {
+      const [{ publisherKeyFromPem }, { MutablePublisher }, DHT] = await Promise.all([
+        import('./mutable.js'),
+        import('./publisher.js'),
+        import('bittorrent-dht').then((m) => m.default),
+      ]);
+      const pem = await fs.readFile(config.mutable.keyPath, 'utf8');
+      const dht = new DHT();
+      // Bound explicitly rather than left to bind implicitly on first send,
+      // so the port is predictable and can be forwarded if you want this to
+      // be a reachable DHT node. 0 takes an ephemeral one, which is all
+      // publishing needs.
+      await new Promise((resolve, reject) => {
+        dht.once('error', reject);
+        dht.listen(config.mutable.dhtPort ?? 0, resolve);
+      });
+      console.log(`[mutable] DHT on UDP ${dht.address().port}`);
+      publisher = new MutablePublisher({
+        catalog,
+        dht,
+        key: publisherKeyFromPem(pem),
+        intervalMs: (config.mutable.republishSeconds ?? 1800) * 1000,
+      });
+      stoppers.unshift({
+        label: 'mutable publisher',
+        stop: () => {
+          publisher.stop();
+          dht.destroy();
+        },
+        ms: 2000,
+      });
+      publisher.start();
+    } catch (error) {
+      // Never fatal: a node that cannot publish should still serve. Loudly
+      // reported, because the failure is otherwise invisible until a
+      // subscriber's style quietly stops resolving.
+      console.error(`[mutable] not publishing: ${error.message}`);
+    }
+  }
+
   const tiles = new TileStore({ catalog, engine, config });
   library.attachTiles(tiles);
   const warm = new WarmRunner(tiles);
@@ -268,6 +360,7 @@ PMTILES_SWARM_PUBLIC_URL
     warm,
     config,
     speed,
+    stats,
     reloaders,
     shutdown: () => runStoppers(stoppers),
   });

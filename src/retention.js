@@ -99,6 +99,7 @@ export function expired({ family, keep, keepDays, now = Date.now() }) {
  * @param {number} [options.keep] - How many of the newest to hold.
  * @param {number} [options.keepDays] - How old a build may get, in days.
  * @param {string} options.label - How to name this family in the log.
+ * @param {boolean} [options.requireComplete] - Wait for the newest to be whole.
  * @param {number} [options.now] - The current time, for testing.
  * @returns {Promise<string[]>} - The infohashes removed.
  */
@@ -109,8 +110,23 @@ export async function retire({
   keep,
   keepDays,
   label,
+  requireComplete = false,
   now,
 }) {
+  // Where the new copy is a download rather than a file that already exists.
+  //
+  // A watched folder and a scheduled source hand over an archive that is
+  // whole: the file was there, or the fetch finished. A subscription does not
+  // — it joins a torrent, and the data arrives hours later. Retiring on the
+  // join would delete last week's complete copy the moment this week's was
+  // announced, leaving nothing complete for the length of the download.
+  //
+  // So `keep: 1` here means "the last complete copy", which is the only
+  // reading of it that is safe.
+  if (requireComplete && entry?.complete !== true) {
+    return [];
+  }
+
   const doomed = expired({ family, keep, keepDays, now });
   if (doomed.length === 0) return [];
 

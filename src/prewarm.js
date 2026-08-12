@@ -21,6 +21,8 @@
  * the first few seconds if the right few kilobytes are asked for first.
  */
 
+import { guessKind } from './library.js';
+
 /** The first wait after an attempt that did not finish the job. */
 const DEFAULT_BACKOFF_SECONDS = 15;
 
@@ -91,9 +93,20 @@ export class HeadWarmer {
    * @returns {boolean} - True to attempt a read.
    */
   due(entry) {
-    // Only PMTiles has a head worth reading. A .osm.pbf from a feed is not an
-    // archive this can say anything about.
-    if (entry.kind && entry.kind !== 'pmtiles') return false;
+    // Only PMTiles has a head worth reading, and this has to be a positive
+    // test rather than the absence of a negative one.
+    //
+    // `guessKind` answers `undefined` for anything it does not recognise — a
+    // .osm.pbf from a feed, for instance — so `entry.kind && entry.kind !==
+    // 'pmtiles'` never fired for exactly the archives it was meant to exclude.
+    // Every planet dump being mirrored was read as though it had a PMTiles
+    // header, failed, and came back on the backoff for ever.
+    //
+    // Taken from the entry where it is known and from the name where it is
+    // not, since an archive joined by magnet has no kind until its metadata
+    // arrives.
+    const kind = entry.kind ?? guessKind(entry.name ?? '');
+    if (kind !== 'pmtiles') return false;
 
     // A summary that names a format is one a header was actually read for.
     // Anything else — an empty object, or one left behind by a read that raced

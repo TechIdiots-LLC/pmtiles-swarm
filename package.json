@@ -1,6 +1,6 @@
 {
   "name": "pmtiles-swarm",
-  "version": "0.7.0",
+  "version": "0.12.0",
   "description": "BitTorrent distribution for PMTiles map archives: create torrents, watch folders, publish and subscribe to RSS feeds, and seed through qBittorrent or an embedded client",
   "type": "module",
   "main": "src/index.js",
@@ -32,6 +32,7 @@
   "dependencies": {
     "@maplibre/maplibre-gl-inspect": "^1.8.2",
     "bencode": "^4.0.1",
+    "bittorrent-dht": "^11.0.12",
     "chokidar": "^5.0.0",
     "create-torrent": "^6.1.0",
     "express": "^5.2.1",
@@ -39,7 +40,7 @@
     "maplibre-gl": "^6.2.0",
     "parse-torrent": "^11.0.24",
     "pmtiles": "^4.4.1",
-    "pmtiles-torrent": "^0.4.0",
+    "pmtiles-torrent": "^0.4.2",
     "webtorrent": "^3.0.21"
   },
   "engines": {

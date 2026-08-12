@@ -254,6 +254,12 @@ export class LibtorrentEngine {
       savePath: request.savePath ?? this.#options.savePath,
       mode: request.mode,
       paused: request.paused,
+      // The caller's claim that the data is already on disk, which for an
+      // archive created here it is: the file was read end to end a moment ago
+      // to produce the torrent. Without passing it on, libtorrent hashes the
+      // whole archive again before seeding a byte — a quarter of an hour for
+      // an 81 GiB build, during which it reads as 0% and serves nobody.
+      seedOnly: request.seedOnly,
     });
     return result.infoHash;
   }
