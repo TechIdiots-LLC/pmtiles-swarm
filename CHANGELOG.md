@@ -7,6 +7,40 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.13.0
+### ✨ Features and improvements
+- **The publisher's DHT socket is bound explicitly, on a configurable port.** It was left to bind
+  implicitly on its first send, which works but takes an unpredictable ephemeral port and reports
+  nothing — so there was no way to forward it, and no way to tell which one it had. `mutable.dhtPort`
+  now sets it (`0`, ephemeral, by default) and the port is logged at startup.
+
+  Publishing needs no forward either way: a put is outbound, and the replies come back on the same
+  socket the way any UDP client's do. Pinning and forwarding one makes this a *reachable* DHT node
+  instead, which earns a better routing table and contributes back — worth having on a node that
+  runs continuously.
+
+  It must not collide with an engine's port. Each seeding engine runs a DHT of its own, so a node
+  with both has three UDP participants and only this one is placed here; two sockets cannot hold
+  one port and the node would fail to start.
+
+### 📚 Documentation
+- **[docs/running-as-a-service.md](docs/running-as-a-service.md) covers the publisher key**:
+  generating it as the service account so ownership is right, `chmod 400` because nothing ever
+  writes it back, and why it must be backed up off the machine — losing it breaks every style
+  pointing at that public key, permanently, with no reissue. Also what happens under HA config
+  sync: the configuration replicates to the standby and the key does not, so the standby logs
+  `not publishing: ENOENT` and serves on, which is the intended outcome rather than a fault. And
+  how to confirm it works, including that `nodes: 0` in the log means nobody stored the record
+  however healthy the rest of the line looks.
+- **The ports table lists the DHT port**, which had only been described in the publisher section —
+  not where anyone looks when deciding what to forward.
+- **Why publishing does not reuse an engine's DHT** is recorded in
+  [src/publisher.js](src/publisher.js), since it will be asked again. libtorrent's is unreachable:
+  the 2.x Python bindings expose neither `dht_put_item` nor `dht_get_item`, though the alerts are
+  bound, so the C++ side supports BEP 44 and there is simply no method to call. WebTorrent's *is*
+  `bittorrent-dht` and could be reused to save a socket; that is a deliberate choice rather than an
+  oversight, taken to keep one code path that behaves the same whichever engine is configured.
+
 ## 0.12.0
 ### ✨ Features and improvements
 - **A category can now be addressed without a server at all.** A node that builds can publish a
@@ -39,21 +73,8 @@
   a record published once works all afternoon and quietly stops resolving by evening. A category
   whose put fails does not stop the others.
 
-  The DHT socket is bound explicitly on `mutable.dhtPort`, ephemeral by default, and the port is
-  reported at startup. Publishing needs no forward — a put is outbound and replies return on the
-  same socket — but a fixed, forwarded port makes this a reachable DHT node with better lookups.
-  It must not reuse the libtorrent engine's port, which runs a DHT of its own.
-
   **`bittorrent-dht` is now a direct dependency** rather than reached for through webtorrent's
   client, so publishing works on a node running the libtorrent engine alone.
-- **[docs/running-as-a-service.md](docs/running-as-a-service.md) covers the key**: generating it as
-  the service account so ownership is right, `chmod 400` because nothing ever writes it back, why
-  it must be backed up off the machine (losing it breaks every style pointing at that public key,
-  permanently, with no reissue), and what happens under HA config sync — the configuration
-  replicates to the standby and the key does not, so the standby logs `not publishing: ENOENT` and
-  serves on, which is the intended outcome rather than a fault. Also how to confirm it is working,
-  including that `nodes: 0` in the log means nobody stored the record however healthy the rest of
-  the line looks.
 - **The TileJSON's `torrent.mutable` block carries the magnet**, built from the public key, so no
   consumer has to know how to assemble one. `mutableMagnet()` also accepts a hex key now — which
   is all a serving node has — and carries `ws=` web seeds, so a client with no peers can still
