@@ -7,6 +7,22 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.7.1
+### 🐞 Bug fixes
+- **A feed no longer deletes its only complete copy.** Retention was written for a watched folder
+  and a scheduled source, where the archive it is handed is already whole — the file was there, or
+  the fetch finished. A subscription is not like that: it joins a torrent, and the data arrives
+  hours later. So `keep: 1` on a feed removed last week's complete copy the moment this week's
+  torrent was announced, leaving nothing complete at all for the length of an 88 GiB download.
+  `keepDays` had the same exposure, a copy ageing out while its replacement was still arriving.
+
+  Retention on a subscription now waits for the newest copy to be whole, which makes `keep: 1`
+  mean *the last complete copy* — the only reading of it that is safe there. It also runs on every
+  poll rather than only on polls that took something, because what is being waited for is a
+  download finishing rather than a poll happening. Watched folders and scheduled sources are
+  unchanged: they hand over a finished archive, and asking them for a completion marker they never
+  set would have stopped their retention working.
+
 ### 📚 Documentation
 - **`prune` does not apply to an RSS subscription**, which the documentation did not say and a
   reader would reasonably have assumed otherwise — it is accepted there and quietly does nothing.
