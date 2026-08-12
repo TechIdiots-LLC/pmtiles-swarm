@@ -441,9 +441,12 @@ Then check it is actually serving:
 
 ```sh
 curl -fsS localhost:8090/feed.xml >/dev/null && echo "public surface ok"
-node /opt/pmtiles-swarm/src/index.js status \
-  --config /etc/pmtiles-swarm/swarm.config.json
+sudo -u pmtiles-swarm -H /var/lib/pmtiles-swarm/node_modules/.bin/pmtiles-swarm \
+  status --config /etc/pmtiles-swarm/swarm.config.json
 ```
+
+Safe to run against a live node: it asks over HTTP and takes no lock, so it is
+not the second process the data directory would refuse.
 
 Ask through the status command rather than with `curl`. Reaching the API by hand
 means getting the bind address, the admin port and the credential right in one
