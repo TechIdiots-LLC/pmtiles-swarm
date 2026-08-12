@@ -419,9 +419,29 @@ RSS and BEP 46 fail in opposite ways, which is the argument for publishing both:
 | RSS | a server that stays up | the server goes away |
 | BEP 46 | periodic republishing | the record expires (hours, not days) |
 
-**Status:** the crypto and magnet handling are tested — 32-byte keys, 64-byte signatures
-verifying, roundtrip stable. Publishing and resolving against a live DHT, and interop
-with libtorrent's exact value encoding, are **not yet verified**.
+**This is built in.** The code above is what a host application would call; a node only
+needs a key and a setting:
+
+```sh
+pmtiles-swarm publisher-key > /etc/pmtiles-swarm/publisher.pem
+chmod 400 /etc/pmtiles-swarm/publisher.pem
+```
+
+```json
+{ "mutable": { "publish": true, "keyPath": "/etc/pmtiles-swarm/publisher.pem" } }
+```
+
+It then announces the newest archive in each category, salted by category name so one key
+addresses all of them, and republishes before the records expire. Only the node that builds
+needs the key — see
+[running-as-a-service.md](running-as-a-service.md#the-publisher-key) for setting it up and
+[security.md](security.md#the-publisher-key-is-not-a-credential) for why it is not a
+credential.
+
+**Status:** publishing is verified against a live DHT — records stored by 54 nodes at the
+last check. **Resolving** one from outside the publishing network is not yet verified:
+nodes accepting a record is not the same claim as a stranger reading it back, and only the
+second matters to a subscriber.
 
 ## Making the archives serveable
 

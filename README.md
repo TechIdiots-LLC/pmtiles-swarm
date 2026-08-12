@@ -115,8 +115,31 @@ subscribers forward, and they fail differently, so publishing both is cheap insu
 
 - **RSS** — easy to consume, understood by existing clients, needs a server that stays up.
 - **BEP 46** — an ed25519-signed DHT record naming the current infohash, addressed by public key
-  rather than infohash (`magnet:?xs=urn:btpk:…`). No server needed, but the record expires and must
-  be republished. See [src/mutable.js](src/mutable.js).
+  rather than infohash (`magnet:?xs=urn:btpk:…`). No server needed at all.
+
+Publishing those records is built in. The node that builds gets a key — `pmtiles-swarm
+publisher-key` — and announces the newest archive in each category, salted by category name so one
+keypair addresses all of them. Records expire from the DHT after about two hours, so it republishes
+on a timer; that timer is the feature rather than an optimisation. Serving nodes need nothing: they
+receive the public half on the catalog entry and hand it out in the TileJSON, which is why a
+serving tier can be compromised without anyone being able to publish.
+
+```json
+{ "mutable": { "publish": true, "keyPath": "/etc/pmtiles-swarm/publisher.pem" } }
+```
+
+The routing table is remembered between runs (`dht-nodes.json` in the data directory), which
+matters more than it sounds: bootstrapping from hostnames alone was measured working about one
+start in seven on a domestic connection, and a saved table turns that into every start. It is the
+same thing libtorrent does, and why its DHT works on hosts where a fresh socket does not.
+
+**What a style should point at** is then the category's TileJSON URL with that magnet in its
+fragment — the console's Categories page has a **For a style** row that gives you the whole
+string. A fragment is never sent in an HTTP request, so ordinary clients fetch the TileJSON and
+ignore it, while a swarm-aware one reads the magnet before making any call and can start when the
+server cannot answer. With `xs=urn:btpk:` rather than an infohash it does not go stale on the next
+build either. See [docs/serving-tiles.md](docs/serving-tiles.md) and
+[docs/security.md](docs/security.md), because that key behaves unlike every other secret here.
 
 ## Configuration
 
@@ -742,9 +765,13 @@ another node, watched web locations including directory listings and date templa
 limits and what is left of them, in-place settings reload and process restart, and two-node
 subscription sync in both directions over both RSS and the catalog API.
 
-Not yet exercised: the qBittorrent engine against a real instance, watch-folder imports, and
-BEP 46 publish/resolve against a live DHT (the crypto and magnet handling are tested; interop
-with libtorrent's encoding is not).
+Running in production: watch-folder imports feeding a nightly planet build, an 18-archive library
+of roughly 2.5 TB behind HAProxy, and BEP 46 records published to a live DHT — 54 nodes stored the
+last one.
+
+Not yet exercised: the qBittorrent engine against a real instance, and **resolving** a BEP 46
+record from outside the publishing network. Nodes accept the records and report storing them, which
+is not the same claim as a stranger reading one back, and only the second matters to a subscriber.
 
 ## License and attribution
 

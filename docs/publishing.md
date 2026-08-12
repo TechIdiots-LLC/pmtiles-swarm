@@ -779,4 +779,12 @@ rebuild, which fail differently, so publishing both is cheap insurance:
   public key rather than infohash (`magnet:?xs=urn:btpk:…`). No server required, but the
   record expires and must be republished.
 
-See [subscribing.md](subscribing.md).
+Publishing those records is built in: give the building node a key with `pmtiles-swarm
+publisher-key`, set `mutable.publish`, and it announces the newest archive in each category
+and republishes on a timer. Serving nodes need nothing — they receive the public half on
+the catalog entry and hand it out in the TileJSON.
+
+See [subscribing.md](subscribing.md) for the shape of it,
+[serving-tiles.md](serving-tiles.md#a-fragment-that-survives-a-rebuild) for what a style
+should then point at, and [security.md](security.md#the-publisher-key-is-not-a-credential)
+for why that key wants treating like a signing key rather than an API token.
