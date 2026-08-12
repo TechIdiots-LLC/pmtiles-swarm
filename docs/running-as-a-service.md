@@ -354,6 +354,95 @@ What the running service actually has:
 systemctl show -p ReadWritePaths -p UMask -p SupplementaryGroups pmtiles-swarm
 ```
 
+## The publisher key
+
+Only needed if this node publishes BEP 46 records — the signed DHT entries that
+let a style point at a category rather than at a build that goes stale. Skip
+this section entirely if it does not build archives.
+
+**Generate it as the service account**, so the file is owned by the user that
+has to read it:
+
+```sh
+sudo -u pmtiles-swarm -H /var/lib/pmtiles-swarm/node_modules/.bin/pmtiles-swarm   publisher-key > /etc/pmtiles-swarm/publisher.pem
+sudo chown pmtiles-swarm:pmtiles-swarm /etc/pmtiles-swarm/publisher.pem
+sudo chmod 400 /etc/pmtiles-swarm/publisher.pem
+```
+
+The PEM goes to stdout and the public key to stderr, so the redirect above
+captures only the key material and you still see the public half on the
+terminal. Write that public key down — it is what subscribers point at, and it
+is the one part you will want later.
+
+`400` rather than `600`: the service only ever reads this. Nothing in the
+product writes it back, so removing write permission costs nothing and means a
+compromised process cannot quietly replace it.
+
+Then in `/etc/pmtiles-swarm/swarm.config.json`:
+
+```json
+{
+  "mutable": {
+    "publish": true,
+    "keyPath": "/etc/pmtiles-swarm/publisher.pem"
+  }
+}
+```
+
+`/etc/pmtiles-swarm` is already in `ReadWritePaths` because the console rewrites
+the configuration there, so the unit needs no change.
+
+### Back it up, off this machine
+
+Losing this file breaks **every style pointing at that public key, permanently**
+— there is no recovery, no reissue, and no way to prove to a subscriber that a
+new key is you. It is not like an API key you can rotate.
+
+Back it up somewhere that is not this disk, and treat the backup as seriously as
+the original: whoever holds it can publish a signed record telling your
+subscribers that any archive is the current build, and clients will believe it
+because the signature checks out.
+
+### Exactly one publisher
+
+Two nodes publishing under one key fight over the sequence number, each
+overwriting the other's claim about what is current. So the PEM belongs on the
+build node and nowhere else.
+
+**This matters if you run HA config sync.** The configuration will replicate to
+the standby, `publish: true` and all — but the PEM will not, because you are
+not going to copy it. The standby then logs
+
+```
+[mutable] not publishing: ENOENT: no such file or directory
+```
+
+on every start and carries on serving normally. That is the intended outcome
+rather than a fault: the config syncing is harmless, and the key not syncing is
+the point. If the noise bothers you, set `mutable.publish` to `false` in the
+standby's config after the sync.
+
+### Confirming it works
+
+```sh
+journalctl -u pmtiles-swarm | grep mutable
+```
+
+A healthy publisher says which categories it is announcing and under which key
+at startup, then one line per category whenever a build moves:
+
+```
+[mutable] publishing 3 categories as 7680dc95248eb807… every 30m
+[mutable] openmaptiles -> 4813a0e68e4b (seq 1786108931, 8 nodes)
+```
+
+`nodes` is how many DHT peers stored the record. **Zero means nobody did**, and
+the record does not exist however healthy the log looks otherwise — check that
+UDP is not blocked and that the DHT is reachable.
+
+The first publish waits about fifteen seconds after start, because a put into a
+DHT that has not finished bootstrapping reaches nobody.
+
 ## The sidecar
 
 The libtorrent engine runs Python as a child process, so the service user needs

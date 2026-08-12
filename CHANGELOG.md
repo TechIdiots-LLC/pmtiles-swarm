@@ -41,6 +41,14 @@
 
   **`bittorrent-dht` is now a direct dependency** rather than reached for through webtorrent's
   client, so publishing works on a node running the libtorrent engine alone.
+- **[docs/running-as-a-service.md](docs/running-as-a-service.md) covers the key**: generating it as
+  the service account so ownership is right, `chmod 400` because nothing ever writes it back, why
+  it must be backed up off the machine (losing it breaks every style pointing at that public key,
+  permanently, with no reissue), and what happens under HA config sync — the configuration
+  replicates to the standby and the key does not, so the standby logs `not publishing: ENOENT` and
+  serves on, which is the intended outcome rather than a fault. Also how to confirm it is working,
+  including that `nodes: 0` in the log means nobody stored the record however healthy the rest of
+  the line looks.
 - **The TileJSON's `torrent.mutable` block carries the magnet**, built from the public key, so no
   consumer has to know how to assemble one. `mutableMagnet()` also accepts a hex key now — which
   is all a serving node has — and carries `ws=` web seeds, so a client with no peers can still
