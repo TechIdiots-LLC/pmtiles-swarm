@@ -7,6 +7,25 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.9.1
+### 🐞 Bug fixes
+- **Requires pmtiles-torrent 0.4.2, which is what actually makes a newly built archive visible.**
+  0.9.0 said the 0% was the dropped `seedOnly`. That was half of it — the half that made the
+  archive *slow*. The half that made it *invisible* was in the sidecar: creation defaults to a
+  hybrid v1+v2 torrent, and libtorrent answers `info_hash()` for a hybrid with the truncated v2
+  hash, while the catalog, the magnet and every v1 peer use v1. The engine held the archive under
+  a name the catalog could not look up, so a correctly seeding archive was reported as one the
+  engine had never heard of, and no tile could be served from it. The dependency floor moves to
+  0.4.2 rather than being left to whatever a fresh install happens to resolve.
+
+  Expect hybrid archives to re-check once on the first start after upgrading: their resume files
+  are now looked for under the corrected name, and the old ones are not found.
+- **The service documentation pointed its status check at a path that does not exist.** It named
+  `/opt/pmtiles-swarm/src`, while a node installed the way the rest of that document describes has
+  its executable in `/var/lib/pmtiles-swarm/node_modules/.bin`. Running the documented command
+  found no dependencies and failed on the first import — which is the same
+  wrong-command-in-documentation problem the status command exists to end.
+
 ## 0.9.0
 ### ✨ Features and improvements
 - **`pmtiles-swarm status`**, which asks a running node what it is doing and reads the answer out
