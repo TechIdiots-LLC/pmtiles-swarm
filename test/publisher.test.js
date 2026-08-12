@@ -213,3 +213,115 @@ describe('starting and stopping', () => {
     assert.equal(dht.puts.length, 0);
   });
 });
+
+describe('waiting for the DHT before publishing', () => {
+  /**
+   * A DHT that is not ready until told, and records puts.
+   * @returns {object} - The fake, and a way to declare it ready.
+   */
+  function bootstrapping() {
+    const puts = [];
+    const listeners = [];
+    return {
+      puts,
+      becomeReady() {
+        this.ready = true;
+        for (const fn of listeners.splice(0)) fn();
+      },
+      ready: false,
+      once(event, fn) {
+        if (event === 'ready') listeners.push(fn);
+      },
+      put(value, callback) {
+        if (!this.ready) {
+          // What bittorrent-dht actually says with an empty routing table, and
+          // what every category reported in the field.
+          setImmediate(() => callback(new Error('No nodes to query')));
+          return;
+        }
+        puts.push(value);
+        setImmediate(() => callback(null, Buffer.alloc(20, 1), 8));
+      },
+    };
+  }
+
+  it('holds off until the DHT says it has peers', async () => {
+    // The bug: a fixed fifteen-second delay was a bet on how long
+    // bootstrapping takes, and it lost -- every category failed with
+    // "No nodes to query" before the routing table had anything in it.
+    const dht = bootstrapping();
+    const publisher = new MutablePublisher({
+      catalog: fakeCatalog([entry('a'.repeat(40), ['openmaptiles'])]),
+      dht,
+      key: generatePublisherKey(),
+      log: () => {},
+    });
+
+    publisher.start({ readyMs: 5_000 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(dht.puts.length, 0, 'nothing attempted while unbootstrapped');
+
+    dht.becomeReady();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(dht.puts.length, 1, 'published once it was ready');
+    publisher.stop();
+  });
+
+  it('publishes anyway rather than waiting for ever, and says why', async () => {
+    // A DHT that never bootstraps means UDP is not getting out, which is worth
+    // saying once rather than leaving to be inferred from repeated failures.
+    const dht = bootstrapping();
+    const logs = [];
+    const publisher = new MutablePublisher({
+      catalog: fakeCatalog([entry('a'.repeat(40), ['openmaptiles'])]),
+      dht,
+      key: generatePublisherKey(),
+      log: (line) => logs.push(line),
+    });
+
+    publisher.start({ readyMs: 30 });
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    assert.ok(
+      logs.some((line) => line.includes('has not found any peers')),
+      'named the cause',
+    );
+    assert.ok(logs.some((line) => line.includes('UDP')), 'and what to check');
+    publisher.stop();
+  });
+
+  it('retries sooner than the republish interval when nothing published', async () => {
+    // Waiting out thirty minutes to discover the DHT is still not ready is
+    // half an hour of advertising a key that resolves to nothing.
+    const dht = bootstrapping();
+    const publisher = new MutablePublisher({
+      catalog: fakeCatalog([entry('a'.repeat(40), ['openmaptiles'])]),
+      dht,
+      key: generatePublisherKey(),
+      intervalMs: 60 * 60 * 1000,
+      log: () => {},
+    });
+
+    // Ready, but the first attempt fails; the retry should still come quickly.
+    dht.ready = true;
+    const failing = { ...dht, put: (v, cb) => setImmediate(() => cb(new Error('nope'))) };
+    const first = new MutablePublisher({
+      catalog: fakeCatalog([entry('a'.repeat(40), ['openmaptiles'])]),
+      dht: failing,
+      key: generatePublisherKey(),
+      intervalMs: 60 * 60 * 1000,
+      log: () => {},
+    });
+
+    await first.publishAll({ retryDelayMs: 30 });
+    let attempts = 0;
+    failing.put = (v, cb) => {
+      attempts += 1;
+      setImmediate(() => cb(new Error('nope')));
+    };
+    await new Promise((resolve) => setTimeout(resolve, 90));
+    assert.ok(attempts >= 1, 'tried again without waiting for the interval');
+    first.stop();
+    publisher.stop();
+  });
+});

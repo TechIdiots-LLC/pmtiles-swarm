@@ -50,8 +50,11 @@ import { mutableMagnet, publishInfoHash } from './mutable.js';
 /** Republish well inside the ~2h a DHT keeps an item. */
 const DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
 
-/** Grace period before the first publish, for the DHT to find peers. */
-const DEFAULT_READY_MS = 15_000;
+/** How long to wait for the DHT to bootstrap before publishing anyway. */
+const DEFAULT_READY_MS = 60_000;
+
+/** First retry delay after an attempt where nothing was published. */
+const RETRY_MS = 30_000;
 
 export class MutablePublisher {
   #catalog;
@@ -59,6 +62,7 @@ export class MutablePublisher {
   #key;
   #intervalMs;
   #timer = null;
+  #retryTimer = null;
   #stopped = false;
   #log;
   /** Last published infohash per category, so an unchanged build stays quiet. */
@@ -138,6 +142,9 @@ export class MutablePublisher {
         this.#log(`[mutable] ${category} failed: ${error.message}`);
       }
     }
+    if (done.length === 0 && this.#current().size > 0) {
+      this.#scheduleRetry(options.retryDelayMs ?? RETRY_MS);
+    }
     return done;
   }
 
@@ -165,17 +172,14 @@ export class MutablePublisher {
    * @returns {void}
    */
   start(options = {}) {
-    // A put into a DHT that has not found peers yet reaches nobody, and
-    // bootstrapping is the first thing a fresh node does. Waiting costs one
-    // interval of staleness at worst and makes the first publish mean
-    // something.
-    const first = setTimeout(() => {
-      if (this.#stopped) return;
-      this.publishAll({ force: true }).catch((error) =>
-        this.#log(`[mutable] first publish failed: ${error.message}`),
-      );
-    }, options.readyMs ?? DEFAULT_READY_MS);
-    first.unref?.();
+    // Waited for rather than guessed at. A put into a DHT whose routing table
+    // is still empty fails with "No nodes to query", and a fixed delay is a
+    // bet on how long bootstrapping takes -- one this lost in the field, where
+    // fifteen seconds was not enough and every category failed on the first
+    // attempt.
+    this.#firstPublish(options.readyMs ?? DEFAULT_READY_MS).catch((error) =>
+      this.#log(`[mutable] first publish failed: ${error.message}`),
+    );
 
     this.#timer = setInterval(() => {
       this.publishAll().catch((error) =>
@@ -191,12 +195,75 @@ export class MutablePublisher {
   }
 
   /**
+   * Waits for the DHT to bootstrap, then publishes.
+   * @param {number} readyMs - How long to wait before going ahead regardless.
+   * @returns {Promise<void>} - Resolves once the first attempt is done.
+   */
+  async #firstPublish(readyMs) {
+    const bootstrapped = await this.#whenDhtReady(readyMs);
+    if (this.#stopped) return;
+    if (!bootstrapped) {
+      // Said rather than swallowed: a DHT that never bootstraps means UDP is
+      // not getting out, and every failure after this is a consequence of it.
+      this.#log(
+        `[mutable] the DHT has not found any peers after ${Math.round(readyMs / 1000)}s ` +
+          '— publishing anyway, but check that outbound UDP is not blocked',
+      );
+    }
+    await this.publishAll({ force: true });
+  }
+
+  /**
+   * Resolves once the DHT reports itself ready, or the wait runs out.
+   * @param {number} timeoutMs - How long to wait.
+   * @returns {Promise<boolean>} - Whether it became ready.
+   */
+  #whenDhtReady(timeoutMs) {
+    if (this.#dht?.ready) return Promise.resolve(true);
+    // A stand-in without an event emitter is ready by definition.
+    if (typeof this.#dht?.once !== 'function') return Promise.resolve(true);
+
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), timeoutMs);
+      timer.unref?.();
+      this.#dht.once('ready', () => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+    });
+  }
+
+  /**
+   * Tries again sooner than the republish interval.
+   *
+   * An attempt where nothing published usually means the DHT is not ready yet,
+   * and waiting out a thirty-minute interval to discover that again is half an
+   * hour of a node advertising a key that resolves to nothing.
+   * @param {number} delayMs - How long to wait first.
+   * @returns {void}
+   */
+  #scheduleRetry(delayMs) {
+    if (this.#stopped || this.#retryTimer) return;
+    const timer = setTimeout(() => {
+      this.#retryTimer = null;
+      if (this.#stopped) return;
+      this.publishAll({ retryDelayMs: Math.min(delayMs * 2, this.#intervalMs) }).catch(
+        (error) => this.#log(`[mutable] retry failed: ${error.message}`),
+      );
+    }, delayMs);
+    timer.unref?.();
+    this.#retryTimer = timer;
+  }
+
+  /**
    * Stops republishing.
    * @returns {void}
    */
   stop() {
     this.#stopped = true;
     if (this.#timer) clearInterval(this.#timer);
+    if (this.#retryTimer) clearTimeout(this.#retryTimer);
     this.#timer = null;
+    this.#retryTimer = null;
   }
 }

@@ -7,6 +7,23 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.14.1
+### 🐞 Bug fixes
+- **The publisher waited a fixed fifteen seconds for the DHT and then published into an empty
+  routing table**, so on a real node every category failed at once:
+
+  ```
+  [mutable] openmaptiles failed: failed to publish mutable record: No nodes to query
+  ```
+
+  A fixed delay was a bet on how long bootstrapping takes. It now waits for the DHT's own `ready`
+  event instead, which fires in a couple of seconds on a healthy network, and only gives up after
+  a minute — saying so when it does, because a DHT that never bootstraps means outbound UDP is not
+  getting out and every later failure is a consequence of that.
+- **A failed attempt no longer waits out the whole republish interval.** Nothing published meant
+  half an hour of advertising a public key that resolves to nothing before trying again. It now
+  retries after 30 seconds, backing off towards the interval.
+
 ## 0.14.0
 ### ✨ Features and improvements
 - **The Categories page hands you the URL a style should actually use.** A new **For a style** row
