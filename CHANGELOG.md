@@ -7,6 +7,17 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.16.1
+### 🐞 Bug fixes
+- **Client addresses are recorded without the IPv4-mapped prefix.** A dual-stack listener reports
+  IPv4 peers as `::ffff:172.16.1.2`, so the Traffic tab showed an address nobody types — and
+  would have counted one client twice had it reached the node over both stacks.
+
+  Only a display and counting matter: `trustProxy` matching is unaffected, since Express compares
+  mapped addresses against plain IPv4 entries correctly. Verified rather than assumed, because
+  `"trustProxy": "172.16.1.2, 172.16.1.3"` looking like it should not match a `::ffff:` socket is
+  exactly the sort of thing that would have been quietly wrong.
+
 ## 0.16.0
 ### ✨ Features and improvements
 - **A Traffic tab in the console**, which is where the statistics added in 0.10.0 should have been

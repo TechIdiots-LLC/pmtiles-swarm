@@ -103,6 +103,12 @@ export class TileStats {
     const { infoHash, z, status } = entry;
     if (!infoHash) return;
 
+    // A dual-stack listener reports IPv4 peers as ::ffff:172.16.1.2, which is
+    // the same client written two ways -- so counting it as written would
+    // split one address across two entries the moment anything reached the
+    // node over plain IPv4 as well.
+    const ip = entry.ip ? entry.ip.replace(/^::ffff:/, '') : entry.ip;
+
     let archive = this.#archives.get(infoHash);
     if (!archive) {
       archive = {
@@ -135,20 +141,20 @@ export class TileStats {
     if (Number.isFinite(status)) {
       archive.byStatus.set(status, (archive.byStatus.get(status) ?? 0) + 1);
     }
-    if (entry.ip) {
+    if (ip) {
       // Counted rather than listed: a busy node sees a handful of distinct
       // sources — the proxy, a few LAN clients — and the count is the answer
       // to "is this arriving directly or through HAProxy".
-      const seen = archive.clients.get(entry.ip) ?? { requests: 0, bytes: 0 };
+      const seen = archive.clients.get(ip) ?? { requests: 0, bytes: 0 };
       seen.requests += 1;
       seen.bytes += bytes;
-      archive.clients.set(entry.ip, seen);
+      archive.clients.set(ip, seen);
     }
 
     if (this.#limit === 0) return;
     const row = {
       at: archive.lastSeen,
-      ip: entry.ip ?? null,
+      ip: ip ?? null,
       infoHash,
       name: archive.name ?? null,
       z: Number.isInteger(z) ? z : null,

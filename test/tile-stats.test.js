@@ -64,6 +64,19 @@ describe('counting what a node has served', () => {
     });
   });
 
+  it('counts a client once however its address is written', () => {
+    // A dual-stack listener reports IPv4 peers as ::ffff:172.16.1.2. Counted
+    // as written, one proxy reaching the node over both stacks would appear
+    // as two clients -- and the recent list would show an address nobody
+    // types.
+    const stats = new TileStats();
+    stats.record(hit({ ip: '::ffff:172.16.1.2' }));
+    stats.record(hit({ ip: '172.16.1.2' }));
+
+    assert.deepEqual(stats.snapshot().archives.aaaa.clients, { '172.16.1.2': 2 });
+    assert.equal(stats.recent()[0].ip, '172.16.1.2');
+  });
+
   it('reports percentiles rather than an average', () => {
     // An average hides the slow tail, which on a cache-mode node is the whole
     // story: most tiles are cached and instant, and the cold ones cost a piece
