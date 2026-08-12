@@ -20,7 +20,10 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           check-latest: true
-      - run: npm ci --prefer-offline --no-audit
+      # --ignore-scripts: node-datachannel's prebuilt-binary download is
+      # third-party and flaky, and nothing here needs the binary. See
+      # release.yml for the longer note.
+      - run: npm ci --ignore-scripts --prefer-offline --no-audit
       - run: npm test
 
   sidecar:
@@ -39,7 +42,10 @@ jobs:
       # so it has to be installed before it can be checked. Testing it here
       # anyway is deliberate: this project spawns it, and a protocol change
       # upstream should fail here rather than at run time.
-      - run: npm ci --prefer-offline --no-audit
+      # --ignore-scripts: node-datachannel's prebuilt-binary download is
+      # third-party and flaky, and nothing here needs the binary. See
+      # release.yml for the longer note.
+      - run: npm ci --ignore-scripts --prefer-offline --no-audit
       # The sidecar is the one part that cannot be exercised without
       # libtorrent present, so install it rather than leave it untested.
       - run: pip install libtorrent

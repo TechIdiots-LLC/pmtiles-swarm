@@ -77,7 +77,23 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
-        run: npm ci --prefer-offline --no-audit
+        # --ignore-scripts, deliberately. The only install script that matters
+        # here is node-datachannel's, which downloads a prebuilt WebRTC binary
+        # for WebTorrent -- and when that download fails it falls back to
+        # building from source, which crashed the 0.14.0 release with
+        # "No prebuilt binaries found (target=8 runtime=napi arch=x64 libc=
+        # platform=linux)". The same lockfile had published minutes earlier, so
+        # it is the download rather than a real incompatibility.
+        #
+        # Nothing here needs that binary: the suite passes without it, and npm
+        # publish ships source rather than node_modules, so install scripts have
+        # no bearing on the artifact. A third-party binary download must not be
+        # able to block a release.
+        #
+        # Whether WebRTC actually works on a given machine is checked where it
+        # matters, after installing on the host -- see
+        # docs/running-as-a-service.md.
+        run: npm ci --ignore-scripts --prefer-offline --no-audit
 
       # No typecheck or build step: this package is plain ESM and ships its
       # source. The workflow was adapted from pmtiles-torrent, which is

@@ -25,6 +25,17 @@
   The magnet was already available on an individual archive, but a category URL is what a style
   points at, and that is the page where it was missing.
 
+### 🐞 Bug fixes
+- **CI and the release workflow install with `--ignore-scripts`.** The 0.14.0 release failed in
+  `npm ci` because `node-datachannel` — WebTorrent's WebRTC binary, four levels down the tree —
+  found no prebuilt binary for the runner and crashed trying to build from source. The same
+  lockfile had published minutes earlier, so it was the download rather than an incompatibility.
+
+  Nothing in CI needs that binary: the suite passes without it, and `npm publish` ships source
+  rather than `node_modules`, so install scripts have no bearing on what is published. A
+  third-party binary download should not be able to block a release. Whether WebRTC works on a
+  given machine is still checked where it matters, after installing on the host.
+
 ## 0.13.1
 ### 🐞 Bug fixes
 - **A node with a secondary engine no longer takes a quarter of an hour to start listening.**
