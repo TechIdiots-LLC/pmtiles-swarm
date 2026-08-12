@@ -7,6 +7,27 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.15.0
+### ✨ Features and improvements
+- **The DHT routing table is remembered between runs**, which is the difference between publishing
+  reliably and gambling on each start. Field measurements on a domestic connection: a fresh socket
+  usually found one node and never recovered, while roughly one start in seven found sixteen within
+  five seconds — and no amount of retrying rescued a bad one.
+
+  This is what libtorrent does, and why the libtorrent engine's DHT works on hosts where a fresh
+  bittorrent-dht socket does not: it saves its table and reloads it rather than bootstrapping cold
+  every time. Saved to `dht-nodes.json` in the data directory (`mutable.statePath`), written every
+  five minutes and on shutdown, and never overwritten with an empty table — a bad run must not
+  replace a good table with its own nothing.
+
+  The bootstrap list also now matches libtorrent's rather than the library default, adding
+  `dht.libtorrent.org:25401` and `router.bitcomet.com:6881`. Remembered nodes are tried first and
+  the hostnames stay behind them, since a saved table can be entirely stale.
+- **A DHT socket that cannot reach the network is replaced rather than retried.** Retrying on a bad
+  socket failed at 30s, 60s, 2m and 4m in the field while a restart succeeded, so after two futile
+  cycles the publisher now opens a new socket itself instead of waiting for someone to restart the
+  service. A socket that is finding peers is never replaced, whatever its puts are doing.
+
 ## 0.14.3
 ### 🐞 Bug fixes
 - **The publisher waits for a usable routing table rather than a single node.** A freshly

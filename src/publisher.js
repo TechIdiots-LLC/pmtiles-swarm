@@ -74,6 +74,16 @@ const WAITING_LOG_MS = 60_000;
 const RETRY_MS = 30_000;
 
 /**
+ * Failed cycles before opening a new DHT socket.
+ *
+ * A socket that cannot reach the DHT never recovers: retrying on it failed at
+ * 30s, 60s, 2m and 4m in the field, while a restart -- a new socket, a new
+ * source port, a new NAT state -- worked roughly one attempt in seven. So when
+ * retrying is demonstrably futile, re-roll rather than wait for a human.
+ */
+const REROLL_AFTER = 2;
+
+/**
  * Nodes wanted before a first publish is worth attempting.
  *
  * One is what a freshly bootstrapped table holds, and a put against it fails
@@ -90,6 +100,10 @@ export class MutablePublisher {
   #timer = null;
   #retryTimer = null;
   #stopped = false;
+  #createDht = null;
+  #ownsDht = false;
+  /** Consecutive cycles that published nothing, for deciding to re-roll. */
+  #failedCycles = 0;
   #log;
   /** Last published infohash per category, so an unchanged build stays quiet. */
   #published = new Map();
@@ -97,14 +111,19 @@ export class MutablePublisher {
   /**
    * @param {object} options - Wiring.
    * @param {object} options.catalog - Catalog to read categories from.
-   * @param {object} options.dht - A bittorrent-dht instance.
+   * @param {object} [options.dht] - A bittorrent-dht instance to use as-is.
+   * @param {Function} [options.createDht] - Opens a fresh one, already listening.
+   *   Given this, the publisher owns the socket and replaces it when it proves
+   *   unable to reach the DHT.
    * @param {object} options.key - Keypair from `publisherKeyFromPem`.
    * @param {number} [options.intervalMs] - Republish interval.
    * @param {Function} [options.log] - Where to report.
    */
-  constructor({ catalog, dht, key, intervalMs, log = console.log }) {
+  constructor({ catalog, dht, createDht, key, intervalMs, log = console.log }) {
     this.#catalog = catalog;
-    this.#dht = dht;
+    this.#dht = dht ?? null;
+    this.#createDht = createDht ?? null;
+    this.#ownsDht = Boolean(createDht) && !dht;
     this.#key = key;
     this.#intervalMs = intervalMs ?? DEFAULT_INTERVAL_MS;
     this.#log = log;
@@ -175,7 +194,10 @@ export class MutablePublisher {
       }
     }
     if (done.length === 0 && this.#current().size > 0) {
+      this.#failedCycles += 1;
       this.#scheduleRetry(options.retryDelayMs ?? RETRY_MS);
+    } else if (done.length > 0) {
+      this.#failedCycles = 0;
     }
     return done;
   }
@@ -201,6 +223,7 @@ export class MutablePublisher {
    * Starts publishing, and keeps republishing before the records expire.
    * @param {object} [options] - Timing.
    * @param {number} [options.readyMs] - Grace before the first publish.
+   * @param {number} [options.retryMs] - First retry delay, for tests.
    * @returns {void}
    */
   start(options = {}) {
@@ -209,7 +232,7 @@ export class MutablePublisher {
     // bet on how long bootstrapping takes -- one this lost in the field, where
     // fifteen seconds was not enough and every category failed on the first
     // attempt.
-    this.#firstPublish(options.readyMs ?? DEFAULT_READY_MS).catch((error) =>
+    this.#firstPublish(options.readyMs ?? DEFAULT_READY_MS, options.retryMs).catch((error) =>
       this.#log(`[mutable] first publish failed: ${error.message}`),
     );
 
@@ -231,7 +254,8 @@ export class MutablePublisher {
    * @param {number} readyMs - How long to wait before going ahead regardless.
    * @returns {Promise<void>} - Resolves once the first attempt is done.
    */
-  async #firstPublish(readyMs) {
+  async #firstPublish(readyMs, retryMs) {
+    if (!this.#dht && this.#createDht) this.#dht = await this.#createDht();
     const nodes = await this.#whenDhtReady(readyMs);
     if (this.#stopped) return;
     if (nodes !== null && nodes < MINIMUM_NODES) {
@@ -247,7 +271,7 @@ export class MutablePublisher {
     } else if (nodes) {
       this.#log(`[mutable] DHT ready with ${nodes} nodes`);
     }
-    await this.publishAll({ force: true });
+    await this.publishAll({ force: true, retryDelayMs: retryMs });
   }
 
   /**
@@ -287,8 +311,12 @@ export class MutablePublisher {
             'Bootstrapping can take several minutes on a home connection',
         );
       }
+      // Never past the deadline: sleeping a flat two seconds overshoots a
+      // short wait by the whole interval, which makes the wait unpredictable
+      // and the behaviour hard to test.
+      const remaining = deadline - Date.now();
       await new Promise((resolve) => {
-        const timer = setTimeout(resolve, 2000);
+        const timer = setTimeout(resolve, Math.max(10, Math.min(2000, remaining)));
         timer.unref?.();
       });
       count = this.#nodeCount();
@@ -318,15 +346,62 @@ export class MutablePublisher {
    */
   #scheduleRetry(delayMs) {
     if (this.#stopped || this.#retryTimer) return;
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       this.#retryTimer = null;
       if (this.#stopped) return;
-      this.publishAll({ retryDelayMs: Math.min(delayMs * 2, this.#intervalMs) }).catch(
-        (error) => this.#log(`[mutable] retry failed: ${error.message}`),
-      );
+      try {
+        await this.#rerollIfHopeless();
+        await this.publishAll({
+          retryDelayMs: Math.min(delayMs * 2, this.#intervalMs),
+        });
+      } catch (error) {
+        this.#log(`[mutable] retry failed: ${error.message}`);
+      }
     }, delayMs);
     timer.unref?.();
     this.#retryTimer = timer;
+  }
+
+  /**
+   * Lets a caller read the current DHT, whichever socket that now is.
+   *
+   * Needed because this may replace the socket it was given, so a caller
+   * holding the original would save a table belonging to a socket that has
+   * been closed.
+   * @param {Function} save - Receives the live DHT.
+   * @returns {Promise<*>} - Whatever `save` returns, or 0 with no socket.
+   */
+  async saveTable(save) {
+    if (!this.#dht) return 0;
+    return save(this.#dht);
+  }
+
+  /**
+   * Replaces the DHT socket when retrying on it is demonstrably futile.
+   *
+   * Only when this publisher opened the socket, and only while its table is
+   * still unusable — a socket that is finding peers is working, whatever the
+   * puts are doing, and swapping it would throw away a good one.
+   * @returns {Promise<void>} - Resolves once any replacement is ready.
+   */
+  async #rerollIfHopeless() {
+    if (!this.#ownsDht || this.#failedCycles < REROLL_AFTER) return;
+    const count = this.#nodeCount();
+    if (count === null || count >= MINIMUM_NODES) return;
+
+    this.#log(
+      `[mutable] this DHT socket has found ${count} nodes and is not recovering — ` +
+        'opening a new one',
+    );
+    try {
+      this.#dht?.destroy?.();
+    } catch {
+      // A socket being replaced is not worth reporting if it objects to closing.
+    }
+    this.#dht = await this.#createDht();
+    this.#failedCycles = 0;
+    const found = await this.#whenDhtReady(DEFAULT_READY_MS);
+    if (found !== null) this.#log(`[mutable] new DHT socket has ${found} nodes`);
   }
 
   /**
@@ -339,5 +414,13 @@ export class MutablePublisher {
     if (this.#retryTimer) clearTimeout(this.#retryTimer);
     this.#timer = null;
     this.#retryTimer = null;
+    // Only what this publisher opened: a caller that supplied a socket owns it.
+    if (this.#ownsDht) {
+      try {
+        this.#dht?.destroy?.();
+      } catch {
+        // Shutting down; nothing useful to do about a socket that will not close.
+      }
+    }
   }
 }

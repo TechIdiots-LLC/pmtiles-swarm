@@ -343,3 +343,115 @@ describe('waiting for the DHT before publishing', () => {
     publisher.stop();
   });
 });
+
+describe('replacing a DHT socket that never finds peers', () => {
+  /**
+   * A socket that finds nodes only if told to.
+   * @param {number} found - Nodes its table will report.
+   * @returns {object} - A DHT-shaped fake.
+   */
+  function socket(found) {
+    // Built as one object the members close over: `nodes.count()` written as a
+    // method would have `this` bound to `nodes`, report undefined, and the
+    // publisher would correctly read that as "cannot tell" and skip every
+    // behaviour under test.
+    const fake = {
+      found,
+      destroyed: false,
+      ready: true,
+      nodes: { count: () => fake.found },
+      once(event, fn) {
+        if (event === 'ready') setImmediate(fn);
+      },
+      put(value, callback) {
+        if (fake.found === 0) {
+          setImmediate(() => callback(new Error('No nodes to query')));
+          return;
+        }
+        setImmediate(() => callback(null, Buffer.alloc(20, 1), fake.found));
+      },
+      destroy() {
+        fake.destroyed = true;
+      },
+    };
+    return fake;
+  }
+
+  it('opens a new one once retrying is demonstrably futile', async () => {
+    // The field evidence: a socket that cannot reach the DHT never recovers,
+    // and retrying on it failed at 30s, 60s, 2m and 4m — while a restart, a
+    // new socket with a new source port, worked about one attempt in seven.
+    const opened = [socket(0), socket(0), socket(12)];
+    let next = 0;
+    const publisher = new MutablePublisher({
+      catalog: fakeCatalog([entry('a'.repeat(40), ['openmaptiles'])]),
+      createDht: async () => opened[next++],
+      key: generatePublisherKey(),
+      intervalMs: 60 * 60 * 1000,
+      log: () => {},
+    });
+
+    publisher.start({ readyMs: 20, retryMs: 30 });
+    // Long enough for the first attempt and the two retries a re-roll needs.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+
+    assert.ok(next > 1, 'a replacement socket was opened');
+    assert.ok(opened[0].destroyed, 'and the hopeless one was closed');
+    publisher.stop();
+  });
+
+  it('keeps a socket that is finding peers, whatever the puts do', async () => {
+    // A working socket must not be thrown away because a put failed for its
+    // own reasons — that would trade a good socket for a fresh gamble.
+    const healthy = socket(30);
+    healthy.put = (value, callback) => setImmediate(() => callback(new Error('rejected')));
+    let created = 0;
+    const publisher = new MutablePublisher({
+      catalog: fakeCatalog([entry('a'.repeat(40), ['openmaptiles'])]),
+      createDht: async () => {
+        created += 1;
+        return healthy;
+      },
+      key: generatePublisherKey(),
+      intervalMs: 60 * 60 * 1000,
+      log: () => {},
+    });
+
+    publisher.start({ readyMs: 20, retryMs: 30 });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+
+    assert.equal(created, 1, 'no replacement while the table is healthy');
+    assert.equal(healthy.destroyed, false);
+    publisher.stop();
+  });
+
+  it('closes the socket it opened when stopped', async () => {
+    const only = socket(12);
+    const publisher = new MutablePublisher({
+      catalog: fakeCatalog([entry('a'.repeat(40), ['openmaptiles'])]),
+      createDht: async () => only,
+      key: generatePublisherKey(),
+      log: () => {},
+    });
+    publisher.start({ readyMs: 10 });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    publisher.stop();
+    assert.equal(only.destroyed, true);
+  });
+
+  it('leaves a socket it was handed alone', async () => {
+    // A caller that supplied one owns it, which is what the tests above rely
+    // on and what a host application would expect.
+    const supplied = socket(12);
+    const publisher = new MutablePublisher({
+      catalog: fakeCatalog([entry('a'.repeat(40), ['openmaptiles'])]),
+      dht: supplied,
+      key: generatePublisherKey(),
+      log: () => {},
+    });
+    publisher.start({ readyMs: 10 });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    publisher.stop();
+    assert.equal(supplied.destroyed, false);
+  });
+});

@@ -438,6 +438,15 @@ const DEFAULTS = {
      * own, and two sockets cannot hold one port.
      */
     dhtPort: 0,
+    /**
+     * Where to remember the DHT routing table between runs.
+     *
+     * Defaults to `dht-nodes.json` in the data directory. Bootstrapping from
+     * hostnames alone is unreliable enough that a node doing it on every start
+     * is gambling each time; libtorrent saves its table for the same reason,
+     * which is why its DHT works on hosts where a fresh socket does not.
+     */
+    statePath: undefined,
   },
   /**
    * What this node has served, at `GET /api/stats`.

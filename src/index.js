@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs/promises';
+import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { createApp } from './api.js';
 import { assertSafeToListen, createAuth } from './auth.js';
@@ -272,29 +273,60 @@ PMTILES_SWARM_PUBLIC_URL
         import('bittorrent-dht').then((m) => m.default),
       ]);
       const pem = await fs.readFile(config.mutable.keyPath, 'utf8');
-      const dht = new DHT();
-      // Bound explicitly rather than left to bind implicitly on first send,
-      // so the port is predictable and can be forwarded if you want this to
-      // be a reachable DHT node. 0 takes an ephemeral one, which is all
-      // publishing needs.
-      await new Promise((resolve, reject) => {
-        dht.once('error', reject);
-        dht.listen(config.mutable.dhtPort ?? 0, resolve);
-      });
-      console.log(`[mutable] DHT on UDP ${dht.address().port}`);
+      // A factory rather than an instance, so the publisher can replace a
+      // socket that proves unable to reach the DHT. Bound explicitly rather
+      // than left to bind implicitly on first send, so the port is
+      // predictable and can be forwarded; 0 takes an ephemeral one, which is
+      // all publishing needs — and is what lets a replacement differ from
+      // what it replaced.
+      const { loadNodes, saveNodes } = await import('./dht-state.js');
+      const statePath =
+        config.mutable.statePath ?? path.join(config.dataDir, 'dht-nodes.json');
+
+      const openDht = async () => {
+        // Started from a table that worked before where there is one, the way
+        // libtorrent does. Bootstrapping from hostnames alone is unreliable
+        // enough that a node doing it on every start is gambling each time.
+        const bootstrap = await loadNodes(statePath);
+        const dht = new DHT({ bootstrap });
+        await new Promise((resolve, reject) => {
+          dht.once('error', reject);
+          dht.listen(config.mutable.dhtPort ?? 0, resolve);
+        });
+        console.log(
+          `[mutable] DHT on UDP ${dht.address().port} ` +
+            `(${bootstrap.length} bootstrap addresses)`,
+        );
+        return dht;
+      };
+
       publisher = new MutablePublisher({
         catalog,
-        dht,
+        createDht: openDht,
         key: publisherKeyFromPem(pem),
         intervalMs: (config.mutable.republishSeconds ?? 1800) * 1000,
       });
+      // Saved periodically rather than only on the way out, because the run
+      // that finds a good table is often the one that is later killed rather
+      // than stopped, and a table nobody wrote down is a table nobody keeps.
+      const saveTable = setInterval(() => {
+        publisher
+          .saveTable((dht) => saveNodes(statePath, dht))
+          .catch(() => {});
+      }, 5 * 60_000);
+      saveTable.unref?.();
+
       stoppers.unshift({
         label: 'mutable publisher',
-        stop: () => {
+        stop: async () => {
+          clearInterval(saveTable);
+          const saved = await publisher
+            .saveTable((dht) => saveNodes(statePath, dht))
+            .catch(() => 0);
+          if (saved) console.log(`[mutable] remembered ${saved} DHT nodes`);
           publisher.stop();
-          dht.destroy();
         },
-        ms: 2000,
+        ms: 3000,
       });
       publisher.start();
     } catch (error) {
