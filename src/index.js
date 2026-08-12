@@ -18,6 +18,7 @@ import { SeedingLimits } from './seeding.js';
 import { closeServer, installSignalHandlers, runStoppers } from './shutdown.js';
 import { ScheduledSourceManager } from './sources.js';
 import { SubscriptionManager } from './subscriptions.js';
+import { TileStats } from './tile-stats.js';
 import { TileStore } from './tiles.js';
 import { HeadWarmer } from './prewarm.js';
 import { WarmRunner } from './warm.js';
@@ -236,6 +237,14 @@ PMTILES_SWARM_PUBLIC_URL
     );
   }
 
+  // What this node has served. In memory and bounded, so it costs the same
+  // after a billion tiles as after ten; `tileStats.recent: 0` keeps the
+  // counters and drops the per-request ring, and `false` turns it off.
+  const stats =
+    config.tileStats === false
+      ? null
+      : new TileStats({ recent: config.tileStats?.recent });
+
   const tiles = new TileStore({ catalog, engine, config });
   library.attachTiles(tiles);
   const warm = new WarmRunner(tiles);
@@ -291,6 +300,7 @@ PMTILES_SWARM_PUBLIC_URL
     warm,
     config,
     speed,
+    stats,
     reloaders,
     shutdown: () => runStoppers(stoppers),
   });

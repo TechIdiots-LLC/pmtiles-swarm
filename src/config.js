@@ -398,6 +398,25 @@ const DEFAULTS = {
    */
   trustProxy: false,
   /**
+   * What this node has served, at `GET /api/stats`.
+   *
+   * Per-archive counters and a fixed ring of recent requests, both in memory,
+   * so the cost does not grow with traffic. Nothing is written to disk: a
+   * restart is how you reset it, and an access log would bring retention and
+   * disk questions this deliberately does not have.
+   *
+   * `recent: 0` keeps the counters and drops the per-request ring. Setting
+   * `tileStats` to `false` turns the whole thing off.
+   *
+   * Note what the client address means behind a proxy: without
+   * `X-Forwarded-For` it is the proxy's own address, which still answers
+   * whether a request arrived directly or through it, but not who sent it.
+   */
+  tileStats: {
+    /** Recent requests kept for inspection. */
+    recent: 200,
+  },
+  /**
    * Tile serving: a TileJSON endpoint and z/x/y tiles per archive.
    *
    * A node holding a complete copy reads its local file. A node in cache mode

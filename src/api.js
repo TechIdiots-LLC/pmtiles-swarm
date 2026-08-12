@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -70,6 +71,7 @@ export function createApp({
   warm,
   config,
   speed,
+  stats,
   reloaders = {},
   shutdown,
 }) {
@@ -496,6 +498,39 @@ export function createApp({
     }),
   );
 
+  // What this node has served, which is a different question from whether it
+  // is healthy. Admin-side: it names archives and client addresses, and a
+  // public endpoint reporting who else is using a node is a privacy question
+  // nobody asked for.
+  app.get(
+    '/api/stats',
+    route(async (req, res) => {
+      if (!stats) {
+        return res.status(501).json({ error: 'tile statistics are disabled' });
+      }
+      const recent = req.query.recent === undefined ? undefined : Number(req.query.recent);
+      res.setHeader('cache-control', 'no-store');
+      res.json({
+        node: config.nodeName ?? os.hostname(),
+        ...stats.snapshot({ recent }),
+      });
+    }),
+  );
+
+  // Deliberately a separate verb: reading counters should never be able to
+  // clear them, or a dashboard polling the endpoint would erase the history
+  // it is drawing.
+  app.delete(
+    '/api/stats',
+    route(async (_req, res) => {
+      if (!stats) {
+        return res.status(501).json({ error: 'tile statistics are disabled' });
+      }
+      stats.reset();
+      res.status(204).end();
+    }),
+  );
+
   // Settings. Everything read per request takes effect immediately because the
   // running config object is the one being mutated; everything bound at startup
   // is written to the file and reported back as needing a restart, rather than
@@ -730,7 +765,12 @@ export function createApp({
       // Optional call: a missing method throws before any .catch could see it.
       const diskBytes =
         (await library.diskUsage?.(entry.infoHash).catch(() => null)) ?? null;
-      res.json({ ...entry, status, reading, diskBytes });
+      // Null until a tile has been asked for, and reset by a restart — the
+      // same lifetime as `reading`, and worth reading alongside it: an archive
+      // being read through the swarm while serving thousands of tiles is a
+      // different situation from one doing neither.
+      const served = stats?.forArchive(entry.infoHash) ?? null;
+      res.json({ ...entry, status, reading, diskBytes, served });
     }),
   );
 
@@ -2032,6 +2072,31 @@ export function createApp({
       res.on('close', () => {
         if (!res.writableEnded) controller.abort();
       });
+
+      // Counted on the way out rather than at each return: this handler ends
+      // in six different places (200, 204, 404, 415, 400, a read error), and
+      // one hook catches all of them without any of them having to remember.
+      // Abandoned requests are not counted -- a panning map cancels constantly
+      // and those were never served.
+      if (stats) {
+        const startedAt = process.hrtime.bigint();
+        res.on('finish', () => {
+          stats.record({
+            infoHash,
+            name: entry.name,
+            z,
+            x,
+            y,
+            status: res.statusCode,
+            bytes: Number(res.getHeader('content-length')) || 0,
+            ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
+            // Whatever this process can see. Behind a proxy that sends no
+            // X-Forwarded-For this is the proxy's address, which is itself
+            // the answer to "did this arrive directly or through HAProxy".
+            ip: req.ip,
+          });
+        });
+      }
 
       let tile;
       try {

@@ -1349,6 +1349,15 @@
             <div><span>origin</span><b>${escapeHtml(originOf(entry).label)}</b>
               <span class="sub">${escapeHtml(originOf(entry).detail)}</span></div>
             <div><span>reading via</span><b>${escapeHtml(entry.reading?.mode ?? 'not open')}</b></div>
+            <div><span>tiles served</span><b>${
+              entry.served ? entry.served.requests.toLocaleString() : '—'
+            }</b><span class="sub">${
+              entry.served
+                ? `${bytes(entry.served.bytes)} sent · ${
+                    entry.served.p50ms === null ? '—' : `${Math.round(entry.served.p50ms)} ms`
+                  } median`
+                : 'since this node started'
+            }</span></div>
             <div><span>format</span><b>${escapeHtml(summary.format ?? '—')}</b></div>
             <div><span>zoom</span><b>${summary.minZoom ?? '—'}–${summary.maxZoom ?? '—'}</b></div>
             <div><span>web seeds</span><b>${(entry.webSeeds ?? []).length}</b></div>

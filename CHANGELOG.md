@@ -7,6 +7,39 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.10.0
+### ✨ Features and improvements
+- **`GET /api/stats`**, which answers what a node has actually served. Until now a tile request was
+  answered and forgotten, so the most ordinary operational questions had no answer at all: which
+  archive is carrying the load, which zooms are being pulled, whether a node behind a balancer is
+  getting its share, and whether the traffic hammering it arrived directly or through the proxy.
+
+  Per-archive counters — requests, bytes, a breakdown by zoom and by status, p50/p95 latency, and
+  a count per client address — plus a fixed ring of the most recent requests. Both live in memory
+  and are bounded, so the cost is the same after a billion tiles as after ten. Nothing is written
+  to disk: a restart is how you reset it, and an access log would bring retention and disk
+  questions this deliberately does not have. `DELETE /api/stats` clears it, deliberately a separate
+  verb so a dashboard polling the endpoint cannot erase the history it is drawing.
+
+  The report names the node that answered, which is the point behind a load balancer — ask each
+  one directly and the counters say how traffic is really distributed rather than how the balancer
+  believes it is. Admin-side rather than public, because it lists archives and client addresses.
+
+  Bytes are counted **as sent**, so a gzipped vector tile counts its compressed size. That is the
+  number that matters for bandwidth and it is not what the client ends up holding.
+
+  What a client address means depends on the proxy in front. Without `X-Forwarded-For` it is the
+  proxy's own address for everything arriving through it — still enough to separate direct
+  traffic from proxied, which is usually the question being asked, but not who sent it. For real
+  client addresses the proxy has to send the header and `trustProxy` has to name it.
+
+  Configured under `tileStats`: `recent` sets how many requests to keep, `0` keeps the counters and
+  drops the ring, and `false` turns the whole thing off, after which the endpoint answers 501.
+- **The archive detail shows what it has served**, in the console and on
+  `GET /api/torrents/<infohash>` as a `served` block. Worth reading next to `reading`: an archive
+  being read through the swarm while serving thousands of tiles is a different situation from one
+  doing neither.
+
 ## 0.9.1
 ### 🐞 Bug fixes
 - **Requires pmtiles-torrent 0.4.2, which is what actually makes a newly built archive visible.**

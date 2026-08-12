@@ -621,6 +621,61 @@ Exit status is 0 when the node answered and its engine is up, 1 when it did not 
 works in a deployment script. `--json` gives the raw `/api/status` and `/api/torrents` replies for
 anything that wants to parse rather than read.
 
+## Seeing what a node is actually serving
+
+```sh
+curl -s -H "authorization: Bearer $KEY" http://172.16.1.49:8091/api/stats | jq
+```
+
+```json
+{
+  "node": "planetgen",
+  "since": "2026-08-12T14:02:11.004Z",
+  "requests": 18422,
+  "bytes": 743112904,
+  "archives": {
+    "4813a0e68e4b88def6d4ef3c4eabde84ffc0c068": {
+      "name": "planetiler-openmaptiles-260803.pmtiles",
+      "requests": 18422,
+      "bytes": 743112904,
+      "byZoom": { "0": 12, "7": 3311, "14": 9022 },
+      "byStatus": { "200": 18104, "204": 301, "404": 17 },
+      "clients": { "172.16.1.2": 17980, "172.16.1.41": 442 },
+      "p50ms": 3,
+      "p95ms": 41
+    }
+  },
+  "recent": [
+    { "at": "…", "ip": "172.16.1.41", "z": 14, "x": 4823, "y": 6155,
+      "status": 200, "bytes": 41221, "ms": 2 }
+  ]
+}
+```
+
+Counters per archive, plus a fixed ring of the most recent requests. Both live in
+memory and are bounded, so the cost is the same after a billion tiles as after
+ten, and a restart is how you reset it. Nothing is written to disk — an access
+log brings retention and disk questions this deliberately does not have.
+
+`node` names which machine answered, which is the point behind a load balancer:
+ask each node directly and the counters tell you how traffic is actually
+distributed, rather than what the balancer believes.
+
+**What the client address means depends on your proxy.** `clients` records what
+the process can see. Without `X-Forwarded-For` that is the proxy's own address
+for everything arriving through it — still enough to separate direct traffic
+from proxied, which is usually the question, but not who sent it. For real
+client addresses, have the proxy send the header and set `trustProxy` to name
+it; see [docs/haproxy.md](docs/haproxy.md).
+
+Bytes are counted **as sent**, so a gzipped vector tile counts its compressed
+size. That is the number that matters for bandwidth, and it is not what the
+client ends up holding.
+
+Configured under `tileStats`: `recent` sets how many requests to keep (`0` keeps
+the counters and drops the ring), and `"tileStats": false` turns it off, after
+which the endpoint answers 501.
+
 ## API
 
 | Method | Path | Purpose |
@@ -655,6 +710,7 @@ anything that wants to parse rather than read.
 | `POST` | `/api/torrents/:infoHash/hooks/complete` | Run the completion hook again for one archive |
 | `GET` `POST` `DELETE` | `/api/tokens`, `/api/tokens/:id` | Mint, list and revoke access tokens |
 | `GET` `POST` | `/api/restart` | What a restart would do, and doing it |
+| `GET` `DELETE` | `/api/stats` | What this node has served — per-archive counters and the last N requests; `DELETE` clears them |
 | `GET` `PATCH` | `/api/config` | Read and change settings |
 | `POST` | `/api/login`, `/api/logout` | Console sign-in |
 | `GET` | `/api/session` | Who this request is, and whether a credential is needed at all |
