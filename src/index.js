@@ -109,6 +109,7 @@ async function main() {
 Usage:
   pmtiles-swarm [--config FILE]          start the node
   pmtiles-swarm status [--config FILE]   ask a running node what it is doing
+  pmtiles-swarm publisher-key            print a new BEP 46 signing key
 
   --config, -c   path to a JSON config file
   --port,   -p   override the listen port
@@ -132,6 +133,20 @@ PMTILES_SWARM_PUBLIC_URL
   if (positionals[0] === 'status') {
     const { runStatus } = await import('./status-command.js');
     process.exitCode = await runStatus(config, { json: values.json });
+    return;
+  }
+
+  if (positionals[0] === 'publisher-key') {
+    const { generatePublisherKey, publisherKeyToPem } = await import('./mutable.js');
+    const key = generatePublisherKey();
+    // The PEM on stdout so it can be redirected to a file; everything else on
+    // stderr so that redirect stays clean.
+    process.stdout.write(publisherKeyToPem(key));
+    console.error('');
+    console.error(`public key: ${Buffer.from(key.publicKey).toString('hex')}`);
+    console.error('Save the PEM where only this node can read it, and point');
+    console.error('mutable.keyPath at it. It signs what your subscribers');
+    console.error('believe is the current build, so treat it as a signing key.');
     return;
   }
 
@@ -244,6 +259,42 @@ PMTILES_SWARM_PUBLIC_URL
     config.tileStats === false
       ? null
       : new TileStats({ recent: config.tileStats?.recent });
+
+  // Announcing the current build of each category over the DHT. Only ever on
+  // the node that builds: the key signs what subscribers believe is current,
+  // and two publishers under one key would fight over the sequence number.
+  let publisher;
+  if (config.mutable?.publish && config.mutable?.keyPath) {
+    try {
+      const [{ publisherKeyFromPem }, { MutablePublisher }, DHT] = await Promise.all([
+        import('./mutable.js'),
+        import('./publisher.js'),
+        import('bittorrent-dht').then((m) => m.default),
+      ]);
+      const pem = await fs.readFile(config.mutable.keyPath, 'utf8');
+      const dht = new DHT();
+      publisher = new MutablePublisher({
+        catalog,
+        dht,
+        key: publisherKeyFromPem(pem),
+        intervalMs: (config.mutable.republishSeconds ?? 1800) * 1000,
+      });
+      stoppers.unshift({
+        label: 'mutable publisher',
+        stop: () => {
+          publisher.stop();
+          dht.destroy();
+        },
+        ms: 2000,
+      });
+      publisher.start();
+    } catch (error) {
+      // Never fatal: a node that cannot publish should still serve. Loudly
+      // reported, because the failure is otherwise invisible until a
+      // subscriber's style quietly stops resolving.
+      console.error(`[mutable] not publishing: ${error.message}`);
+    }
+  }
 
   const tiles = new TileStore({ catalog, engine, config });
   library.attachTiles(tiles);

@@ -226,6 +226,54 @@ nothing publishes those records yet.
 For an immutable `/archives/<infohash>/tiles.json` URL the question does not
 arise: both halves name the same fixed archive.
 
+### A fragment that survives a rebuild
+
+The caveat above — a pinned infohash going stale — is what BEP 46 fixes. A node
+that publishes signs a DHT record naming whichever infohash is current, and the
+magnet then names the **category** rather than a build:
+
+```
+magnet:?xs=urn:btpk:<public key>&s=openmaptiles&dn=…&ws=…
+```
+
+No infohash anywhere, so nothing to go stale. A client resolves the record over
+the DHT and joins whatever is current.
+
+Turn it on with a key on the node that builds:
+
+```sh
+pmtiles-swarm publisher-key > /etc/pmtiles-swarm/publisher.pem
+chmod 600 /etc/pmtiles-swarm/publisher.pem
+```
+
+```json
+{ "mutable": { "publish": true, "keyPath": "/etc/pmtiles-swarm/publisher.pem" } }
+```
+
+The magnet then appears in every TileJSON as `torrent.mutable.magnet`, and the
+console's copy button uses it for category URLs.
+
+**Only the node that builds needs the key.** Serving nodes receive the public
+half on the catalog entry, through the same subscription sync that carries
+`magnet` and `webSeeds`, and assemble the identical magnet from it — there is
+nothing secret in one. Ten nodes behind a balancer hand out the same string and
+none of them can publish.
+
+**Run exactly one publisher.** Two nodes publishing under one key would fight
+over the sequence number, each overwriting the other's claim about what is
+current.
+
+**It is a signing key, not a credential.** Whoever holds it can tell your
+subscribers that any archive is the current build, signed, and they will believe
+it. Treat it the way you would a code-signing key: lose it and every style
+pointing at that public key breaks permanently.
+
+**Records expire after roughly two hours**, so the node republishes on a timer
+(`republishSeconds`, default 1800). That timer is not an optimisation — without
+it a record published once works all afternoon and stops resolving by evening.
+If the publisher is offline longer than that, the DHT path goes quiet until it
+returns; the HTTP TileJSON URL is unaffected.
+
 ## The `torrent` block
 
 TileJSON documents from this server carry a non-standard `torrent` member:

@@ -1,3 +1,4 @@
+import { mutableMagnet } from './mutable.js';
 import { TileStore } from './tiles.js';
 
 /**
@@ -95,6 +96,13 @@ function buildTorrentBlock(entry, root) {
       publicKey: entry.mutable.publicKey,
       salt: entry.mutable.salt,
       seq: entry.mutable.seq,
+      // Built here so a consumer does not have to know how to assemble one,
+      // and buildable by any node, because it contains only the public half.
+      magnet: mutableMagnet(entry.mutable.publicKey, {
+        salt: entry.mutable.salt,
+        name: entry.name,
+        webSeeds: entry.webSeeds,
+      }),
     };
   }
   return block;

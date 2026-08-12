@@ -398,6 +398,35 @@ const DEFAULTS = {
    */
   trustProxy: false,
   /**
+   * Announcing the current build of each category over the DHT (BEP 46).
+   *
+   * A category is the only stable handle this system has — every archive is
+   * addressed by its infohash, so a style pointing at one goes stale on the
+   * next build. `/latest/<category>/` fixes that with a server; this fixes it
+   * without one, as a signed DHT record naming whichever infohash is current.
+   *
+   * **Only the node that builds needs this.** Serving nodes carry the public
+   * half on the catalog entry and hand it out in the TileJSON; publishing is
+   * the only thing the secret is used for. Two nodes publishing under one key
+   * would fight over the sequence number, so run exactly one publisher.
+   *
+   * The key is a signing key, not a credential: whoever holds it can tell your
+   * subscribers that any archive is the current build, signed. Treat it the way
+   * you would a code-signing key. Generate one with
+   * `pmtiles-swarm publisher-key`.
+   *
+   * Records expire from the DHT after roughly two hours, so this republishes on
+   * a timer. Nothing else keeps them alive.
+   */
+  mutable: {
+    /** Publish records. Off unless a key is configured and this is set. */
+    publish: false,
+    /** PEM file holding the ed25519 keypair. Never leaves the publisher. */
+    keyPath: undefined,
+    /** How often to republish, in seconds. */
+    republishSeconds: 1800,
+  },
+  /**
    * What this node has served, at `GET /api/stats`.
    *
    * Per-archive counters and a fixed ring of recent requests, both in memory,

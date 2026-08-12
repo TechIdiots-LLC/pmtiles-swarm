@@ -82,20 +82,34 @@ function rawPublicKey(publicKey) {
  *
  * Note this carries no infohash: `xs=urn:btpk:` names the public key, and the
  * client resolves it through the DHT to whatever infohash is current.
- * @param {Uint8Array} publicKey - Raw 32-byte public key.
+ * @param {Uint8Array | string} publicKey - Raw 32-byte public key, or its hex form.
+ *   A serving node has only the hex, off the catalog entry, and must be able to
+ *   build this string without ever seeing the raw key or the private half.
  * @param {object} [options] - Extra magnet parameters.
  * @param {string} [options.name] - Display name for the archive.
  * @param {string[]} [options.trackers] - Tracker announce URLs.
+ * @param {string[]} [options.webSeeds] - BEP 19 web seeds.
  * @param {string} [options.salt] - Salt, when one key publishes several archives.
  * @returns {string} - A BEP 46 magnet URI.
  */
 export function mutableMagnet(publicKey, options = {}) {
-  const hex = Buffer.from(publicKey).toString('hex');
+  // Buffer.from(string) would read hex as UTF-8 and produce a 64-byte key, so
+  // the two forms have to be told apart rather than coerced.
+  const hex =
+    typeof publicKey === 'string'
+      ? publicKey.toLowerCase()
+      : Buffer.from(publicKey).toString('hex');
   const parts = [`magnet:?xs=urn:btpk:${hex}`];
   if (options.name) parts.push(`dn=${encodeURIComponent(options.name)}`);
   if (options.salt) parts.push(`s=${encodeURIComponent(options.salt)}`);
   for (const tracker of options.trackers ?? []) {
     parts.push(`tr=${encodeURIComponent(tracker)}`);
+  }
+  // Carried because it is what makes a magnet useful with no peers at all: a
+  // client can range-read the archive over HTTP and still be correct, which is
+  // the difference between a slow first paint and a blank map.
+  for (const seed of options.webSeeds ?? []) {
+    parts.push(`ws=${encodeURIComponent(seed)}`);
   }
   return parts.join('&');
 }

@@ -7,6 +7,45 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.12.0
+### ✨ Features and improvements
+- **A category can now be addressed without a server at all.** A node that builds can publish a
+  signed DHT record (BEP 46) naming whichever archive is currently newest in each category, so a
+  style can point at a magnet that never goes stale:
+
+  ```
+  magnet:?xs=urn:btpk:<public key>&s=openmaptiles&dn=…&ws=…
+  ```
+
+  No infohash in it, which is the whole point — an infohash is what goes stale on the next build,
+  and it is why the fragment convention added in 0.11.0 could not be used for `/latest/` URLs. The
+  salt is the category name, so **one keypair addresses every category** rather than needing one
+  each.
+
+  Turn it on with `mutable.publish` and a key from the new **`pmtiles-swarm publisher-key`**
+  command. Off by default.
+
+  **Only the node that builds needs the key.** Serving nodes receive the public half on the catalog
+  entry, through the same sync that already carries `magnet` and `webSeeds`, and assemble the
+  identical magnet from it — there is nothing secret in one. Ten nodes behind a balancer hand out
+  the same string and none of them can publish. Run exactly one publisher: two under one key would
+  fight over the sequence number.
+
+  It is a **signing key rather than a credential**. Whoever holds it can tell your subscribers that
+  any archive is the current build, signed, and clients will believe it.
+
+  Records expire from the DHT after roughly two hours, so the node republishes on a timer
+  (`republishSeconds`, default 1800). That timer is the feature, not an optimisation — without it
+  a record published once works all afternoon and quietly stops resolving by evening. A category
+  whose put fails does not stop the others.
+
+  **`bittorrent-dht` is now a direct dependency** rather than reached for through webtorrent's
+  client, so publishing works on a node running the libtorrent engine alone.
+- **The TileJSON's `torrent.mutable` block carries the magnet**, built from the public key, so no
+  consumer has to know how to assemble one. `mutableMagnet()` also accepts a hex key now — which
+  is all a serving node has — and carries `ws=` web seeds, so a client with no peers can still
+  range-read the archive over HTTP.
+
 ## 0.11.0
 ### ✨ Features and improvements
 - **The magnet can travel in the TileJSON URL's fragment**, and the console will build that string
