@@ -36,6 +36,8 @@ export class CompositeEngine {
   #timer;
   /** Infohashes handed to secondaries, so they are not handed over twice. */
   #shared = new Set();
+  /** Serialises background hand-overs, so they never run all at once. */
+  #shareChain = Promise.resolve();
   /** Set once a stop has begun, so late timers do nothing. */
   #stopping = false;
 
@@ -133,10 +135,52 @@ export class CompositeEngine {
     const infoHash = await this.#primary.add(request);
 
     if (this.#shareable(request) && (await this.#primaryHasItAll(infoHash))) {
-      await this.#shareOne(infoHash, request);
+      // Queued rather than awaited. Handing an archive to a seeding client it
+      // has not seen before makes it hash every byte first, which is minutes
+      // for tens of gigabytes -- so awaiting it here put that cost inside the
+      // caller. On startup, where the library is restored one archive at a
+      // time, that meant a node sat silent for a quarter of an hour before it
+      // would listen, doing work the periodic sweep exists to do anyway.
+      //
+      // Serialised through one chain rather than fired off freely: seventeen
+      // archives hashing at once on a spinning disk is slower than seventeen
+      // in turn, and far harder to reason about.
+      this.#queueShare(infoHash, request);
     }
 
     return infoHash;
+  }
+
+  /**
+   * Resolves once every queued hand-over has finished.
+   *
+   * Nothing in normal operation waits for this — that is the point of the
+   * queue — but a caller that wants to observe the result, a test above all,
+   * needs somewhere to wait rather than a guess about microtask order.
+   * @returns {Promise<void>} - Resolves when the queue is empty.
+   */
+  async whenShared() {
+    // Awaited twice: the first await settles what is queued now, and anything
+    // that queued more while it ran is picked up by the second.
+    await this.#shareChain;
+    await this.#shareChain;
+  }
+
+  /**
+   * Runs a share after any already queued, without making the caller wait.
+   * @param {string} infoHash - The archive.
+   * @param {object} request - The original add request.
+   * @returns {void}
+   */
+  #queueShare(infoHash, request) {
+    this.#shareChain = this.#shareChain
+      .then(() => (this.#stopping ? undefined : this.#shareOne(infoHash, request)))
+      // #shareOne already swallows an engine refusing the archive; this is the
+      // last resort, so one failure cannot break the chain for everything
+      // queued behind it.
+      .catch((error) =>
+        console.warn(`[engine] could not hand over ${infoHash}: ${error.message}`),
+      );
   }
 
   /**

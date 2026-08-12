@@ -7,6 +7,31 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.13.1
+### 🐞 Bug fixes
+- **A node with a secondary engine no longer takes a quarter of an hour to start listening.**
+  Handing an archive to a second seeding client makes it hash every byte before it will serve any
+  — minutes for tens of gigabytes — and that hand-over was **awaited** inside `add()`. On startup,
+  where the library is restored one archive at a time, the cost landed end to end before the node
+  would bind its port. A seventeen-archive library sat silent for about fifteen minutes.
+
+  The hand-over is now queued and the caller carries on. Nothing depended on waiting for it: the
+  periodic sweep that already exists to catch archives finishing later is the same mechanism, and
+  a failed hand-over already un-marks itself so that sweep retries it.
+
+  Queued through one chain rather than fired off freely, so hand-overs still run one at a time —
+  seventeen archives hashing at once on a spinning disk is slower than seventeen in turn, and much
+  harder to reason about.
+- **Restoring a large library reports progress.** It said nothing at all until it had finished, so
+  a node that was working and a node that was stuck looked identical for as long as it took — long
+  enough, on a real library, to go looking for a debugger:
+
+  ```
+  [restore] 6 of 17 after 15s
+  ```
+
+  On a timer rather than per archive, so a small library stays quiet.
+
 ## 0.13.0
 ### ✨ Features and improvements
 - **The publisher's DHT socket is bound explicitly, on a configurable port.** It was left to bind

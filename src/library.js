@@ -1463,9 +1463,41 @@ export class Library {
    */
   async restore() {
     const entries = this.#catalog.list();
-    let restored = 0;
-    let failed = 0;
+    const tally = { restored: 0, failed: 0 };
 
+    // Restoring a large library is slow, and until now it said nothing until
+    // it had finished -- so a node that was working and a node that was stuck
+    // looked identical for as long as it took, which on a real library was
+    // long enough to reach for a debugger. Reported on a timer rather than per
+    // archive, so a small library stays quiet and a large one stops being a
+    // mystery.
+    const startedAt = Date.now();
+    const progress = setInterval(() => {
+      const seconds = Math.round((Date.now() - startedAt) / 1000);
+      console.log(
+        `[restore] ${tally.restored + tally.failed} of ${entries.length} ` +
+          `after ${seconds}s`,
+      );
+    }, 15_000);
+    progress.unref?.();
+
+    try {
+      return await this.#restoreEach(entries, tally);
+    } finally {
+      clearInterval(progress);
+    }
+  }
+
+  /**
+   * The restore loop itself.
+   *
+   * Counts into the caller's tally rather than its own, so the progress timer
+   * above has something to read while this is still running.
+   * @param {object[]} entries - Catalog entries, newest first.
+   * @param {{restored: number, failed: number}} tally - Mutated as it goes.
+   * @returns {Promise<{restored: number, failed: number}>} - That tally.
+   */
+  async #restoreEach(entries, tally) {
     for (const entry of entries) {
       // An engine that cannot open its port will fail every one of these, each
       // after its own timeout. Stopping at the first is the difference between
@@ -1473,13 +1505,13 @@ export class Library {
       // minutes per archive.
       if (this.#engine.fatalError) {
         console.error(`[restore] stopping: ${this.#engine.fatalError.message}`);
-        failed += entries.length - restored;
+        tally.failed += entries.length - tally.restored;
         break;
       }
 
       try {
         if (!entry.torrentPath && !entry.magnet) {
-          failed++;
+          tally.failed++;
           continue;
         }
 
@@ -1495,7 +1527,7 @@ export class Library {
                 `usable (${error.code ?? error.message}), so it cannot start. ` +
                 'Move it with Set location, or make that path reachable again.',
             );
-            failed++;
+            tally.failed++;
             continue;
           }
         }
@@ -1505,14 +1537,14 @@ export class Library {
         // own add and skip that, which is why an archive that could not find a
         // peer stayed unable to find one across every restart.
         await this.#readd(entry);
-        restored++;
+        tally.restored++;
       } catch (error) {
-        failed++;
+        tally.failed++;
         console.error(`[restore] ${entry.name}: ${error.message}`);
       }
     }
 
-    return { restored, failed };
+    return tally;
   }
 
   /**

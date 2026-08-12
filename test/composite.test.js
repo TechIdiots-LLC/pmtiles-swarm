@@ -72,6 +72,7 @@ describe('running two engines over one library', () => {
       mode: 'mirror',
     });
 
+    await engine.whenShared();
     assert.equal(primary.calls.filter(([kind]) => kind === 'add').length, 1);
     assert.equal(secondary.calls.filter(([kind]) => kind === 'add').length, 1);
   });
@@ -91,6 +92,7 @@ describe('running two engines over one library', () => {
     });
 
     assert.equal(primary.calls.filter(([kind]) => kind === 'add').length, 1);
+    await engine.whenShared();
     assert.deepEqual(secondary.calls, []);
   });
 
@@ -108,6 +110,7 @@ describe('running two engines over one library', () => {
       mode: 'cache',
     });
 
+    await engine.whenShared();
     assert.deepEqual(secondary.calls, []);
   });
 
@@ -166,6 +169,7 @@ describe('running two engines over one library', () => {
 
     // And it can be handed over again if it goes back to being a mirror.
     await engine.shareComplete();
+    await engine.whenShared();
     assert.equal(secondary.calls.filter(([kind]) => kind === 'add').length, 2);
   });
 });
@@ -384,6 +388,7 @@ describe('what a secondary is allowed to be handed', () => {
     });
 
     await engine.add({ torrentFile: new Uint8Array([1]), seedOnly: true, mode: 'mirror' });
+    await engine.whenShared();
     assert.deepEqual(secondary.added, [], 'nothing should have been handed over');
   });
 
@@ -395,6 +400,7 @@ describe('what a secondary is allowed to be handed', () => {
     });
 
     await engine.add({ torrentFile: new Uint8Array([1]), seedOnly: true, mode: 'mirror' });
+    await engine.whenShared();
     assert.equal(secondary.added.length, 1);
   });
 
@@ -411,6 +417,7 @@ describe('what a secondary is allowed to be handed', () => {
     });
 
     await engine.add({ torrentFile: new Uint8Array([1]), seedOnly: true, mode: 'mirror' });
+    await engine.whenShared();
     assert.equal(secondary.added[0].readyTimeoutMs, 1800000);
   });
 
@@ -425,6 +432,7 @@ describe('what a secondary is allowed to be handed', () => {
     });
 
     await engine.add({ torrentFile: new Uint8Array([1]), seedOnly: true, mode: 'mirror' });
+    await engine.whenShared();
     assert.equal(secondary.added.length, 1);
   });
 });
@@ -472,3 +480,129 @@ describe('persisting resume data across engines', () => {
     assert.deepEqual(other.calls, [['saveResume']]);
   });
 });
+
+describe('handing archives to a secondary without blocking on it', () => {
+  /**
+   * A secondary whose add() never settles until released.
+   * @returns {object} - The engine, its received adds, and the release.
+   */
+  function slowSecondary() {
+    const added = [];
+    let release;
+    const blocked = new Promise((resolve) => {
+      release = resolve;
+    });
+    return {
+      added,
+      release,
+      engine: {
+        name: 'slow',
+        connect: async () => {},
+        add: async (request) => {
+          added.push(request);
+          await blocked;
+          return 'a'.repeat(40);
+        },
+        list: async () => [],
+        get: async () => null,
+        remove: async () => {},
+        destroy: async () => {},
+      },
+    };
+  }
+
+  it('returns before the secondary has finished taking it', async () => {
+    // The bug this fixes: a seeding client handed an archive it has not seen
+    // hashes every byte before it will serve any, which is minutes for tens of
+    // gigabytes. Awaiting that put the cost inside the caller, and on startup
+    // -- where the library is restored one archive at a time -- a node sat
+    // silent for a quarter of an hour before it would listen.
+    const primary = recording('primary', [status()]);
+    const slow = slowSecondary();
+    const engine = new CompositeEngine({ primary, secondaries: [slow.engine] });
+
+    const finished = await Promise.race([
+      engine
+        .add({ torrentFile: new Uint8Array([1]), seedOnly: true, mode: 'mirror' })
+        .then(() => 'added'),
+      new Promise((resolve) => setTimeout(() => resolve('still waiting'), 200)),
+    ]);
+
+    assert.equal(finished, 'added', 'add() did not wait for the hand-over');
+    assert.equal(slow.added.length, 1, 'but the hand-over did start');
+    slow.release();
+    await engine.whenShared();
+  });
+
+  it('runs hand-overs one at a time rather than all at once', async () => {
+    // Seventeen archives hashing simultaneously on a spinning disk is slower
+    // than seventeen in turn, and far harder to reason about.
+    let active = 0;
+    let peak = 0;
+    const secondary = {
+      name: 'counting',
+      connect: async () => {},
+      add: async () => {
+        active += 1;
+        peak = Math.max(peak, active);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        active -= 1;
+        return 'a'.repeat(40);
+      },
+      list: async () => [],
+      get: async () => null,
+      remove: async () => {},
+      destroy: async () => {},
+    };
+    const primary = recording('primary', [status()]);
+    const engine = new CompositeEngine({ primary, secondaries: [secondary] });
+
+    for (const n of [1, 2, 3, 4]) {
+      await engine.add({
+        magnet: `magnet:?xt=urn:btih:${String(n).repeat(40)}`,
+        seedOnly: true,
+        mode: 'mirror',
+      });
+    }
+    await engine.whenShared();
+
+    assert.equal(peak, 1, 'never more than one hand-over in flight');
+  });
+
+  it('one refusal does not block what is queued behind it', async () => {
+    const seen = [];
+    const secondary = {
+      name: 'picky',
+      connect: async () => {},
+      add: async (request) => {
+        seen.push(request.magnet);
+        if (seen.length === 1) throw new Error('not today');
+        return 'a'.repeat(40);
+      },
+      list: async () => [],
+      get: async () => null,
+      remove: async () => {},
+      destroy: async () => {},
+    };
+    const primary = recording('primary', [status()]);
+    const engine = new CompositeEngine({ primary, secondaries: [secondary] });
+
+    const warn = console.warn;
+    console.warn = () => {};
+    try {
+      for (const n of [1, 2]) {
+        await engine.add({
+          magnet: `magnet:?xt=urn:btih:${String(n).repeat(40)}`,
+          seedOnly: true,
+          mode: 'mirror',
+        });
+      }
+      await engine.whenShared();
+    } finally {
+      console.warn = warn;
+    }
+
+    assert.equal(seen.length, 2, 'the second was still attempted');
+  });
+});
+
