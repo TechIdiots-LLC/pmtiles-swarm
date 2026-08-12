@@ -14,6 +14,7 @@ import {
   isPublicSurface,
 } from './auth.js';
 import { normalizeCategories } from './catalog.js';
+import { mutableMagnet } from './mutable.js';
 import { guessKind } from './library.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
@@ -60,6 +61,25 @@ function route(handler) {
  * @param {object} deps.config - Resolved configuration.
  * @returns {import('express').Express} - The configured app.
  */
+/**
+ * A TileJSON URL carrying a magnet in its fragment.
+ * @param {string} category - Which category.
+ * @param {object} newest - Its newest entry.
+ * @param {string} base - Public base URL.
+ * @returns {string} - The URL a style should use.
+ */
+function styleUrlFor(category, newest, base) {
+  const url = `${base}/latest/${category}/tiles.json`;
+  const magnet = newest?.mutable?.publicKey
+    ? mutableMagnet(newest.mutable.publicKey, {
+        salt: newest.mutable.salt ?? category,
+        name: newest.name,
+        webSeeds: newest.webSeeds,
+      })
+    : newest?.magnet;
+  return magnet ? `${url}#${magnet}` : url;
+}
+
 export function createApp({
   library,
   catalog,
@@ -1703,6 +1723,18 @@ export function createApp({
             servable,
             endpoints: {
               tileJson: servable ? `${base}/latest/${category}/tiles.json` : null,
+              // The same URL with a magnet in the fragment, which is what a
+              // style should carry. A fragment is never sent in a request, so
+              // an ordinary client fetches the TileJSON and ignores it, while
+              // a swarm-aware one has the magnet before it makes any call --
+              // and can therefore still start when this server cannot answer.
+              //
+              // The mutable magnet where there is one, because a category is
+              // precisely where an infohash goes stale: it names the category
+              // and resolves the current build over the DHT. Otherwise the
+              // newest build's own magnet, which pins that build but still
+              // beats a blank map when the fallback is needed at all.
+              styleUrl: servable ? styleUrlFor(category, newest, base) : null,
               torrent: `${base}/latest/${category}/archive.torrent`,
               magnet: `${base}/latest/${category}/magnet`,
               feed: `${base}/feed/${category}.xml`,

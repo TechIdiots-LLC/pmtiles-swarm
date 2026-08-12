@@ -224,3 +224,71 @@ describe('editing the categories on an archive', () => {
     }
   });
 });
+
+describe('the URL a style should point at', () => {
+  const servable = {
+    kind: 'pmtiles',
+    pmtiles: { format: 'pbf', minZoom: 0, maxZoom: 14 },
+    webSeeds: ['https://maps.example.org/planet.pmtiles'],
+  };
+
+  it('carries the magnet in the fragment', async () => {
+    // A fragment is never sent in an HTTP request, so this one string works
+    // for every client: ordinary ones fetch the TileJSON and ignore it, and a
+    // swarm-aware one has the magnet before it makes any call -- which is what
+    // lets it start when this server cannot answer.
+    const api = await serve([
+      entry({ infoHash: 'a'.repeat(40), name: 'planet.pmtiles', categories: ['planet'], ...servable }),
+    ]);
+    try {
+      const [row] = await api.get('/api/categories').then((r) => r.json());
+      const [url, fragment] = row.endpoints.styleUrl.split('#');
+      assert.match(url, /\/latest\/planet\/tiles\.json$/);
+      assert.match(fragment, /^magnet:\?xt=urn:btih:a{40}/);
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('prefers the mutable magnet, which a category needs', async () => {
+    // The whole point for a category: an infohash names one build and goes
+    // stale on the next, while the URL keeps following the category. A BEP 46
+    // magnet names the category and resolves the current build over the DHT.
+    const api = await serve([
+      entry({
+        infoHash: 'b'.repeat(40),
+        name: 'planet.pmtiles',
+        categories: ['openmaptiles'],
+        mutable: { publicKey: 'de'.repeat(32), salt: 'openmaptiles', seq: 9 },
+        ...servable,
+      }),
+    ]);
+    try {
+      const [row] = await api.get('/api/categories').then((r) => r.json());
+      const fragment = row.endpoints.styleUrl.split('#')[1];
+      assert.match(fragment, /^magnet:\?xs=urn:btpk:/);
+      assert.match(fragment, /&s=openmaptiles/);
+      // Carries the web seed, so a client with no peers can still range-read
+      // the archive and derive what it needs.
+      assert.match(fragment, /&ws=https%3A/);
+      assert.doesNotMatch(fragment, /btih/, 'no infohash, so nothing to go stale');
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('is null for an archive that cannot be served as tiles', async () => {
+    const api = await serve([
+      entry({ infoHash: 'c'.repeat(40), name: 'planet.osm.pbf', categories: ['osm'], kind: 'osm-pbf' }),
+    ]);
+    try {
+      const [row] = await api.get('/api/categories').then((r) => r.json());
+      assert.equal(row.endpoints.styleUrl, null);
+      assert.equal(row.endpoints.tileJson, null);
+      // The torrent and feed endpoints still make sense for it.
+      assert.ok(row.endpoints.torrent);
+    } finally {
+      await api.close();
+    }
+  });
+});

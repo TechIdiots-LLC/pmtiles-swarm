@@ -2356,6 +2356,7 @@
             const newest = entry.newest;
             const rows = [
               ['TileJSON', entry.endpoints.tileJson],
+              ['For a style', entry.endpoints.styleUrl],
               ['Torrent', entry.endpoints.torrent],
               ['Magnet', entry.endpoints.magnet],
               ['Feed', entry.endpoints.feed],
@@ -2384,7 +2385,20 @@
                             <td style="width:8rem">${label}</td>
                             <td>${
                               url
-                                ? `<code>${escapeHtml(url)}</code>`
+                                ? `<code>${escapeHtml(
+                                    url.length > 96 ? `${url.slice(0, 96)}…` : url,
+                                  )}</code>${
+                                    label === 'For a style'
+                                      ? `<div class="sub">the magnet rides in the fragment, which is
+                                         never sent to the server — an ordinary client fetches the
+                                         TileJSON and ignores it, a swarm-aware one reads it before
+                                         making any call${
+                                           url.includes('xs=urn:btpk')
+                                             ? ' and follows the category rather than this build'
+                                             : ''
+                                         }</div>`
+                                      : ''
+                                  }`
                                 : '<span class="sub">not a PMTiles archive, so there is no tile endpoint</span>'
                             }</td>
                             <td style="width:11rem">${
@@ -2406,6 +2420,7 @@
           const [index, row] = button.dataset.copy.split('-').map(Number);
           const url = [
             categories[index].endpoints.tileJson,
+            categories[index].endpoints.styleUrl,
             categories[index].endpoints.torrent,
             categories[index].endpoints.magnet,
             categories[index].endpoints.feed,

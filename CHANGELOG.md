@@ -7,6 +7,24 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.14.0
+### ✨ Features and improvements
+- **The Categories page hands you the URL a style should actually use.** A new **For a style** row
+  gives the category's TileJSON URL with a magnet in its fragment, which is the string worth
+  copying — the plain TileJSON row is still there for anything that only speaks HTTP.
+
+  Where a publisher is announcing the category over the DHT, the fragment carries the **mutable**
+  magnet (`xs=urn:btpk:…&s=<category>`), which is the form a category needs: it names the category
+  rather than a build, so it does not go stale on the next one while the URL keeps following it.
+  Without a publisher it falls back to the newest build's own magnet, which pins that build but
+  still beats a blank map on the only occasion it is read at all.
+
+  Also on `GET /api/categories` as `endpoints.styleUrl`, and `null` for a category whose newest
+  archive is not PMTiles — the same rule the tile endpoints already follow.
+
+  The magnet was already available on an individual archive, but a category URL is what a style
+  points at, and that is the page where it was missing.
+
 ## 0.13.1
 ### 🐞 Bug fixes
 - **A node with a secondary engine no longer takes a quarter of an hour to start listening.**
