@@ -291,7 +291,13 @@ TileJSON documents from this server carry a non-standard `torrent` member:
     "torrent": "https://swarm.example.org/archives/913d…/archive.torrent",
     "name": "planet.pmtiles",
     "size": 77242531840,
-    "webseeds": ["https://maps.example.org/planet.pmtiles"]
+    "webseeds": ["https://maps.example.org/planet.pmtiles"],
+    "mutable": {
+      "publicKey": "7680dc95248eb807…",
+      "salt": "openmaptiles",
+      "seq": 1786108931,
+      "magnet": "magnet:?xs=urn:btpk:7680dc95248eb807…&s=openmaptiles&ws=…"
+    }
   }
 }
 ```
@@ -309,10 +315,29 @@ load it. That also means a torrent-aware client gets a working map immediately
 over HTTP while the swarm is still finding peers, rather than staring at an empty
 canvas for the 90 to 240 seconds a cold magnet can take to resolve metadata.
 
-For an archive published as a mutable torrent, the block also carries
-`mutable.publicKey`, so a client that understands BEP 46 can follow updates
-rather than pinning to the version the document was generated from. See
-[publishing](publishing.md).
+### The `mutable` sub-block
+
+Present only when a publisher is announcing this archive's category over the
+DHT. It is the difference between a document describing *this build* and one
+describing *the current build*:
+
+| | |
+| --- | --- |
+| `publicKey` | The identity to resolve against. Public — there is nothing secret in the block |
+| `salt` | The category, so one key can address several |
+| `seq` | The sequence of the record this document was generated beside |
+| `magnet` | Assembled from the above, ready to paste into a style's URL fragment |
+
+`magnet` is built rather than left to the consumer because every node can build
+it — it contains only the public half — so a fleet behind a balancer hands out
+one identical string and none of them can publish. A BEP 46 client resolves it
+and follows updates rather than pinning to the build this document happened to
+describe.
+
+See [a fragment that survives a rebuild](#a-fragment-that-survives-a-rebuild)
+above for how it reaches a style, and
+[security.md](security.md#the-publisher-key-is-not-a-credential) for why the
+private half lives on exactly one machine.
 
 ## Health checks
 
@@ -563,6 +588,13 @@ first tile can be seconds away.
 
 **Raster archives get the raster.** There is nothing to inspect in an image, so
 the panel says so and the map is for checking coverage.
+
+**What it has actually served** is on the archive's detail, as `served`, and
+across the node at `GET /api/stats` — requests, bytes, a breakdown by zoom and
+status, and which client addresses asked. Worth reading beside `reading`: an
+archive being read through the swarm while serving thousands of tiles is a
+different situation from one doing neither. See the
+[README](../README.md#seeing-what-a-node-is-actually-serving).
 
 No symbol layers are drawn and no glyphs are configured, deliberately: an
 archive carries tiles, not fonts, and a preview that needed a font server to
