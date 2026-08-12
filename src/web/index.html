@@ -2894,9 +2894,17 @@
         };
         const [r, g, b] = rgb(accent);
 
-        // Availability is a count, so it shades: the rarer the piece, the
-        // fainter the column. The other two are yes or no.
-        const ceiling = kind === 'availability' ? Math.max(1, ...bytesIn) : 1;
+        // Availability is a count, so it shades by rarity. The other two are
+        // proportions now: a column covers many pieces — 178,000 of them
+        // across a bar a thousand wide on a 698 GiB archive — so "held" is a
+        // fraction of its slice rather than a yes or no. Reduced any other way
+        // the bar only tells the truth at 0% and 100%.
+        //
+        // A sidecar older than pmtiles-torrent 0.4.4 still sends 0 or 1, and
+        // is recognised by nothing exceeding 1: the newer one never rounds a
+        // non-empty bucket below 2, precisely so this test works.
+        const ceiling = kind === 'availability' ? Math.max(1, ...bytesIn) : 255;
+        const proportional = kind !== 'availability' && Math.max(0, ...bytesIn) > 1;
 
         for (let index = 0; index < bytesIn.length; index += 1) {
           const value = bytesIn[index];
@@ -2905,7 +2913,15 @@
             image.data[at + 3] = 0;
             continue;
           }
-          const strength = kind === 'availability' ? 0.35 + 0.65 * (value / ceiling) : 1;
+          // A floor, because a column holding a little is worth seeing: without
+          // one, the first few percent of a download are indistinguishable
+          // from none at all.
+          const strength =
+            kind === 'availability'
+              ? 0.35 + 0.65 * (value / ceiling)
+              : proportional
+                ? Math.max(0.18, value / 255)
+                : 1;
           image.data[at] = r;
           image.data[at + 1] = g;
           image.data[at + 2] = b;

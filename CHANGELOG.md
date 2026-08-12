@@ -7,6 +7,21 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.15.1
+### 🐞 Bug fixes
+- **The downloaded bar showed nothing on an archive that was plainly downloading.** A column on
+  that bar covers many pieces, and the sidecar reduced "held" by `all` — so a column lit only when
+  every piece beneath it had arrived, and an archive 18% complete showed an empty bar. Fixed in
+  pmtiles-torrent 0.4.4, which reports a proportion; the console now shades those columns by it,
+  with a floor so the first few percent of a download are visible rather than indistinguishable
+  from none.
+
+  Peer bars had the opposite fault and are fixed the same way, so a peer holding a little no longer
+  reads as a seed.
+
+  Renders correctly against either sidecar: the newer one never rounds a non-empty column below 2,
+  so values above 1 identify the new encoding.
+
 ## 0.15.0
 ### ✨ Features and improvements
 - **The DHT routing table is remembered between runs**, which is the difference between publishing
