@@ -483,15 +483,32 @@ rather than exiting. Name the interpreter explicitly when the service user's
 
 ## Ports
 
-Four listeners, and only the peer ports want a firewall rule. See
+Five listeners, and only the peer ports want a firewall rule. See
 [ports and reachability](engines.md#ports-and-reachability) for the detail.
 
 | | |
 | --- | --- |
 | `libtorrent.listen` — 6881, TCP and UDP | forward it |
 | `webtorrent.clientOptions.torrentPort` — pin it, or it changes every start | forward it |
+| `mutable.dhtPort` — UDP, ephemeral by default | optional; see below |
 | `port` — 8090 | your proxy or CDN |
 | `adminPort` — 8091, bound to `127.0.0.1` | nothing; that is the point |
+
+`mutable.dhtPort` is the odd one. Publishing works without any forward, because
+a put is outbound and the replies come back on the same socket the way any UDP
+client's do. Pin it and forward it only if you want this to be a *reachable*
+DHT node — which earns a better routing table and contributes back, and is
+worth having on a node that runs continuously.
+
+Pin it to something free: **not** `libtorrent.listen`, which is a DHT of its
+own, and not `torrentPort`. `6883` sits clear of both.
+
+```json
+{ "mutable": { "dhtPort": 6883 } }
+```
+
+Note that each engine runs its own DHT as well, so a node with both engines has
+three UDP participants. Only this one is yours to place.
 
 ## Updating
 
