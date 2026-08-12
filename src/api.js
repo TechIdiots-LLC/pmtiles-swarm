@@ -13,6 +13,7 @@ import {
   isPublicSurface,
 } from './auth.js';
 import { normalizeCategories } from './catalog.js';
+import { guessKind } from './library.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
 import { freeSpace, listLocations } from './locations.js';
@@ -394,6 +395,59 @@ export function createApp({
           console.error(`[restart] ${error.message}`);
         });
       }, 250).unref?.();
+    }),
+  );
+
+  /**
+   * Whether this node should be sent traffic.
+   *
+   * For a load balancer, which needs three things this did not have: no
+   * credential, a cheap answer, and a status code rather than a body to parse.
+   * A balancer checking `/feed.xml` instead — the nearest thing that existed —
+   * gets 200 from a node whose engine is dead, because a feed is built from
+   * the catalog and never touches the swarm.
+   *
+   * Readiness rather than liveness. `engine.list()` is a round trip to the
+   * engine, so a reply means the sidecar is answering and not merely that Node
+   * is; that is the difference worth reporting, since everything that makes
+   * this node useful to a swarm goes through it.
+   *
+   * Cached, because a balancer asks every couple of seconds and an IPC round
+   * trip per check is a cost with nothing to show for it. The window is short
+   * enough that a node which has just died is out of rotation within one more
+   * check than it would have been.
+   */
+  let healthChecked = 0;
+  let healthOk = true;
+  let healthError;
+  const HEALTH_TTL_MS = 2000;
+
+  app.get(
+    '/health',
+    route(async (_req, res) => {
+      const now = Date.now();
+      if (now - healthChecked >= HEALTH_TTL_MS) {
+        healthChecked = now;
+        try {
+          await engine.list();
+          healthOk = true;
+          healthError = undefined;
+        } catch (error) {
+          healthOk = false;
+          healthError = error.message;
+        }
+      }
+
+      // Never cached anywhere. A stale health check is worse than none: it
+      // keeps a dead node in rotation for as long as whatever cached it says.
+      res.setHeader('cache-control', 'no-store');
+      res.setHeader('access-control-allow-origin', '*');
+      res.status(healthOk ? 200 : 503).json({
+        status: healthOk ? 'ok' : 'unavailable',
+        engine: engine.name,
+        version: VERSION,
+        ...(healthOk ? {} : { error: healthError }),
+      });
     }),
   );
 
@@ -1828,6 +1882,95 @@ export function createApp({
   // with authentication configured this answered 401 — to the very callers it
   // exists for, since this is the URL the TileJSON torrent block advertises and
   // the one a syncing peer follows.
+  /**
+   * Whether this node can serve *this* archive yet.
+   *
+   * A different question from `/health`, and answered separately because
+   * nobody asks it per request. `/health` decides whether a node should be
+   * sent traffic at all; this decides whether a newly published archive has
+   * become servable here — which is what you want to know after a build lands
+   * and before pointing anything at it.
+   *
+   * Reports rather than acts. It starts no read and waits for nothing: a probe
+   * that does work on demand is a probe that can be used to make a node do
+   * work on demand. The head warmer is what makes an archive ready; this only
+   * says whether it has.
+   *
+   * The three answers are deliberately different codes, because they call for
+   * different responses from whoever asked. 503 is "not yet, ask again". 415
+   * is "never" — an MBTiles archive is distributed here and cannot be read a
+   * byte range at a time, so waiting for it would be waiting for ever. 404 is
+   * "not here at all".
+   */
+  app.get(
+    '/archives/:infoHash/ready',
+    route(async (req, res) => {
+      const entry = catalog.get(req.params.infoHash);
+      // Never cached. The whole value of this is that it changes.
+      res.setHeader('cache-control', 'no-store');
+      res.setHeader('access-control-allow-origin', '*');
+
+      if (!entry) {
+        return res.status(404).json({ ready: false, reason: 'unknown archive' });
+      }
+
+      const kind = entry.kind ?? guessKind(entry.name ?? '');
+      const shape = {
+        infoHash: entry.infoHash,
+        name: entry.name,
+        kind: kind ?? 'unknown',
+        complete: entry.complete === true,
+      };
+
+      if (kind !== 'pmtiles') {
+        return res.status(415).json({
+          ...shape,
+          ready: false,
+          reason:
+            `this is ${kind ? `a ${kind}` : 'not a PMTiles'} archive, and only ` +
+            'PMTiles can be read a byte range at a time — it will not become ' +
+            'servable by waiting',
+        });
+      }
+
+      const summary = entry.pmtiles;
+      // A summary that names a format is one a header was actually read for.
+      // Anything else is a partial left by a read that did not finish.
+      if (!summary?.format) {
+        return res.status(503).json({
+          ...shape,
+          ready: false,
+          reason: 'its header has not been read yet',
+        });
+      }
+
+      // Vector tiles without their layer list can be served, but nothing can
+      // be styled from them: the TileJSON a map asks for would carry no
+      // vector_layers. The metadata sits wherever the writer put it, which for
+      // planetiler is after every tile, so it routinely arrives long after the
+      // header.
+      if (summary.format === 'pbf' && !summary.vectorLayers) {
+        return res.status(503).json({
+          ...shape,
+          ready: false,
+          format: summary.format,
+          reason: 'its metadata has not been read yet, so it carries no vector layers',
+        });
+      }
+
+      res.json({
+        ...shape,
+        ready: true,
+        format: summary.format,
+        minZoom: summary.minZoom,
+        maxZoom: summary.maxZoom,
+        ...(summary.vectorLayers
+          ? { vectorLayers: summary.vectorLayers.length }
+          : {}),
+      });
+    }),
+  );
+
   app.get(
     '/archives/:infoHash/archive.torrent',
     route(async (req, res) => {

@@ -33,6 +33,9 @@ node src/index.js --config swarm.config.json
   address.
 - **[docs/running-as-a-service.md](docs/running-as-a-service.md)** — a systemd unit, why
   `Restart=always` is required rather than optional, and which ports want a firewall rule.
+- **[docs/haproxy.md](docs/haproxy.md)** — health monitors, what a reverse proxy carries and
+  what it cannot, timeouts long enough for a web seed, and gating a deployment on
+  `/archives/<infohash>/ready`.
 - **[docs/architecture-diagram.md](docs/architecture-diagram.md)** — how a publishing node, a
   serving tier, the swarm and both kinds of client fit together.
 
@@ -626,6 +629,8 @@ matters there is `maxConnections`, since every peer holds a NAT table entry. See
 | `GET` | `/api/catalog` | The whole catalogue, for a peer keeping itself in step |
 | `GET` | `/archives/:infoHash/tiles.json` | TileJSON — **public** |
 | `GET` | `/archives/:infoHash/:z/:x/:y.:ext` | One tile — **public** |
+| `GET` | `/health` | 200 when this node can serve, 503 when its engine cannot — **public**, no credential, for a load balancer |
+| `GET` | `/archives/:infoHash/ready` | Whether this node can serve *this* archive yet: 200 ready, 503 not yet, 415 never — **public** |
 | `GET` | `/archives/:infoHash/archive.torrent` | The `.torrent` a torrent-aware client joins with — **public** |
 | `GET` | `/archives/:infoHash/preview` | Map preview for one archive — admin, not public |
 | `GET` | `/latest/:category/tiles.json`, `/:name.torrent`, `/magnet` | The newest build in a category — **public**. The torrent name is yours to choose, so a link can read `planetiler-openmaptiles-latest.torrent`; it redirects to the immutable URL, which names the download after the build it actually is |

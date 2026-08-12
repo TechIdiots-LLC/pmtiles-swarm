@@ -200,6 +200,85 @@ For an archive published as a mutable torrent, the block also carries
 rather than pinning to the version the document was generated from. See
 [publishing](publishing.md).
 
+## Health checks
+
+```
+GET /health
+```
+
+200 when this node can serve, 503 when it cannot, no credential and no body
+worth parsing — which is what a load balancer needs. It is on the public
+surface, so it answers on the same port the tiles do.
+
+**It asks the engine, not just itself.** A reply means the engine answered a
+round trip, which is the difference worth reporting: a feed is built from the
+catalog and never touches the swarm, so a balancer checking `/feed.xml` gets
+200 from a node whose engine is dead and keeps sending it traffic.
+
+The answer is cached for a couple of seconds, because a balancer asks often and
+each check costs an inter-process round trip. A node that has just died leaves
+rotation one check later than it otherwise would.
+
+It sends `cache-control: no-store`. A stale health check is worse than none —
+it keeps a dead node in rotation for as long as whatever cached it says so.
+
+```
+backend tiles
+    option httpchk GET /health
+    http-check expect status 200
+    server node1 10.0.0.11:8090 check inter 5s
+```
+
+Configured through a form rather than a file, and with the rest of what a proxy
+in front of this needs — timeouts, `X-Forwarded-Proto`, and the ports it cannot
+carry — in [docs/haproxy.md](haproxy.md).
+
+### Whether one archive is servable yet
+
+```
+GET /archives/<infohash>/ready
+```
+
+A different question, and worth keeping apart from the one above. `/health`
+decides whether a node should be sent traffic at all; this says whether a
+newly published archive has become servable *here* — which is what you want
+after a build lands and before pointing anything at it.
+
+| | |
+| --- | --- |
+| **200** | Ready. Its header has been read, and a vector archive has its layers |
+| **503** | Not yet — ask again. The body says which half is missing |
+| **415** | Never. MBTiles is distributed here but cannot be read a byte range at a time, so waiting would be waiting for ever |
+| **404** | Not on this node |
+
+The codes differ because the responses differ: one is "poll me", one is "stop
+polling", and a script that treats them alike either gives up too early or
+waits for something that will never happen.
+
+It **reports rather than acts** — it starts no read and waits for nothing. A
+probe that does work on demand is a probe that can be used to make a node do
+work on demand. Reading the head is the head warmer's job; this only says
+whether it has happened.
+
+So the shape of a deployment check across a serving tier is: publish, then poll
+every node until each answers 200, then move `latest`.
+
+```sh
+for node in 10.0.0.11 10.0.0.12; do
+  until curl -fsS "http://$node:8090/archives/$INFOHASH/ready" >/dev/null; do
+    sleep 10
+  done
+done
+```
+
+`curl -f` fails on 503 and on 415 alike, so treat 415 separately if an MBTiles
+archive could ever reach that loop — otherwise it never ends.
+
+An archive this node holds *completely* can still be read from disk with the
+engine down, so 503 is a statement about the node rather than about every
+request it could answer. That is the right way round for a balancer with
+somewhere else to send the traffic.
+
 ## Caching
 
 Tiles are served `Cache-Control: public, max-age=31536000, immutable`.

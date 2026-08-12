@@ -7,6 +7,36 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.8.0
+### ✨ Features and improvements
+- **`GET /health`**, for a load balancer: 200 when this node can serve, 503 when its engine
+  cannot, no credential and nothing to parse. It asks the engine rather than itself, which is the
+  distinction that makes it worth having — a feed is built from the catalogue and never touches
+  the swarm, so a balancer checking `/feed.xml`, the nearest thing that existed, gets 200 from a
+  node whose engine is dead and keeps sending it traffic. The answer is cached for two seconds,
+  because a balancer asks often and each check is an inter-process round trip, and it is sent
+  `no-store`: a stale health check keeps a dead node in rotation for as long as whatever cached
+  it says so.
+- **`GET /archives/<infohash>/ready`**, which answers a different question — whether a *particular*
+  archive has become servable on this node. 200 once its header and, for vector, its layers have
+  been read; 503 with which half is missing; **415** for an archive that can never be served,
+  since MBTiles is distributed here but cannot be read a byte range at a time and polling it would
+  be polling for ever; 404 when it is not here. It reports rather than acts, starting no read and
+  waiting for nothing — a probe that does work on demand is a probe that can be used to make a
+  node do work on demand.
+- **[docs/haproxy.md](docs/haproxy.md)**, written against the OPNsense plugin: the health monitor
+  field by field, how the check interval trades against failover time, timeouts long enough for a
+  web seed to finish, `X-Forwarded-Proto`, gating a deployment on `/ready` — and a table of what a
+  reverse proxy in front of a BitTorrent node simply cannot carry.
+
+### 🐞 Bug fixes
+- **Head-warming no longer tries to read a PMTiles header out of a `.osm.pbf`.** The guard was
+  `entry.kind && entry.kind !== 'pmtiles'`, and `guessKind` answers `undefined` for anything it
+  does not recognise — so it never fired for exactly the archives it existed to exclude. Every
+  planet dump being mirrored, and every MBTiles archive, was read as though it had a header,
+  failed, and came back on the backoff for ever. The test is positive now: the kind has to *be*
+  PMTiles, taken from the entry where it is known and from the file name where it is not.
+
 ## 0.7.1
 ### 🐞 Bug fixes
 - **A feed no longer deletes its only complete copy.** Retention was written for a watched folder

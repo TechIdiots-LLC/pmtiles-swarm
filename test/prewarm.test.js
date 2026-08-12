@@ -81,13 +81,34 @@ describe('deciding whose head to read', () => {
   });
 
   it('ignores what is not a map archive at all', () => {
-    // A .osm.pbf from a feed is distributed here and has no header to read.
-    const entry = {
-      infoHash: 'e'.repeat(40),
-      name: 'planet-260803.osm.pbf',
-      kind: 'unknown',
-    };
-    assert.equal(warmer([entry]).due(entry), false);
+    // The bug this exists for: the test was `entry.kind && entry.kind !==
+    // 'pmtiles'`, and guessKind answers *undefined* for anything it does not
+    // recognise — so the guard never fired for exactly the archives it was
+    // meant to exclude. Every planet dump being mirrored was read as though it
+    // had a PMTiles header, failed, and came back on the backoff for ever.
+    const cases = [
+      ['planet-260803.osm.pbf', undefined],
+      ['planet-260803.osm.pbf', 'unknown'],
+      ['terrain.mbtiles', undefined],
+      ['terrain.mbtiles', 'mbtiles'],
+    ];
+    for (const [name, kind] of cases) {
+      const entry = { infoHash: 'e'.repeat(40), name, kind };
+      assert.equal(
+        warmer([entry]).due(entry),
+        false,
+        `${name} (kind ${kind ?? 'unset'}) should not be warmed`,
+      );
+    }
+  });
+
+  it('reads the kind from the name when the entry has none', () => {
+    // An archive joined by magnet has no kind until its metadata arrives, and
+    // waiting for that would delay the very read this exists to bring forward.
+    for (const kind of [undefined, 'pmtiles']) {
+      const entry = { infoHash: 'f'.repeat(40), name: 'planet.pmtiles', kind };
+      assert.equal(warmer([entry]).due(entry), true);
+    }
   });
 });
 
