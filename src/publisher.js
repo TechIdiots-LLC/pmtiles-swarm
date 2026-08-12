@@ -138,8 +138,14 @@ export class MutablePublisher {
           );
         }
       } catch (error) {
-        // One category failing must not stop the rest.
-        this.#log(`[mutable] ${category} failed: ${error.message}`);
+        // One category failing must not stop the rest. The node count goes in
+        // the line because "No nodes to query" with an empty table is a
+        // network problem and the same message with a full one is not.
+        const nodes = this.#nodeCount();
+        this.#log(
+          `[mutable] ${category} failed: ${error.message}` +
+            (nodes === null ? '' : ` (${nodes} DHT nodes known)`),
+        );
       }
     }
     if (done.length === 0 && this.#current().size > 0) {
@@ -200,37 +206,68 @@ export class MutablePublisher {
    * @returns {Promise<void>} - Resolves once the first attempt is done.
    */
   async #firstPublish(readyMs) {
-    const bootstrapped = await this.#whenDhtReady(readyMs);
+    const nodes = await this.#whenDhtReady(readyMs);
     if (this.#stopped) return;
-    if (!bootstrapped) {
-      // Said rather than swallowed: a DHT that never bootstraps means UDP is
-      // not getting out, and every failure after this is a consequence of it.
+    if (nodes === 0) {
+      // Named rather than left to be inferred. A routing table that is still
+      // empty after a minute means the bootstrap queries are not being
+      // answered, and every "No nodes to query" after this is that same fact
+      // reported once per category.
       this.#log(
-        `[mutable] the DHT has not found any peers after ${Math.round(readyMs / 1000)}s ` +
-          '— publishing anyway, but check that outbound UDP is not blocked',
+        `[mutable] the DHT found no peers in ${Math.round(readyMs / 1000)}s. Publishing ` +
+          'will fail until it does — check that outbound UDP is not blocked, and that ' +
+          'the bootstrap hosts resolve',
       );
+    } else if (nodes) {
+      this.#log(`[mutable] DHT ready with ${nodes} nodes`);
     }
     await this.publishAll({ force: true });
   }
 
   /**
-   * Resolves once the DHT reports itself ready, or the wait runs out.
+   * Waits for the DHT to have somewhere to send a query.
+   *
+   * `ready` alone is not enough: it fires when the bootstrap lookup finishes,
+   * whether or not that lookup found anything, so a node with no UDP path
+   * reports itself ready and then fails every put with "No nodes to query".
+   * What matters is the size of the routing table.
    * @param {number} timeoutMs - How long to wait.
-   * @returns {Promise<boolean>} - Whether it became ready.
+   * @returns {Promise<number | null>} - Nodes found, or null if unknowable.
    */
-  #whenDhtReady(timeoutMs) {
-    if (this.#dht?.ready) return Promise.resolve(true);
-    // A stand-in without an event emitter is ready by definition.
-    if (typeof this.#dht?.once !== 'function') return Promise.resolve(true);
+  async #whenDhtReady(timeoutMs) {
+    const deadline = Date.now() + timeoutMs;
 
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => resolve(false), timeoutMs);
-      timer.unref?.();
-      this.#dht.once('ready', () => {
-        clearTimeout(timer);
-        resolve(true);
+    if (typeof this.#dht?.once === 'function' && !this.#dht.ready) {
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, timeoutMs);
+        timer.unref?.();
+        this.#dht.once('ready', () => {
+          clearTimeout(timer);
+          resolve();
+        });
       });
-    });
+    }
+
+    let count = this.#nodeCount();
+    while (count === 0 && Date.now() < deadline && !this.#stopped) {
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, 1000);
+        timer.unref?.();
+      });
+      count = this.#nodeCount();
+    }
+    return count;
+  }
+
+  /**
+   * How many nodes the DHT currently knows, where it can say.
+   * @returns {number | null} - The count, or null for a stand-in that has none.
+   */
+  #nodeCount() {
+    const count = this.#dht?.nodes?.count?.();
+    if (typeof count === 'number') return count;
+    const listed = this.#dht?.toJSON?.().nodes?.length;
+    return typeof listed === 'number' ? listed : null;
   }
 
   /**

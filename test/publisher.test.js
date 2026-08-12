@@ -222,13 +222,20 @@ describe('waiting for the DHT before publishing', () => {
   function bootstrapping() {
     const puts = [];
     const listeners = [];
-    return {
+    const dht = {
       puts,
       becomeReady() {
         this.ready = true;
+        this.found = 1;
         for (const fn of listeners.splice(0)) fn();
       },
       ready: false,
+      // The routing table, which is the thing that actually decides whether a
+      // put can go anywhere. `ready` fires when the bootstrap lookup finishes
+      // whether or not it found anything, which is exactly how a node with no
+      // UDP path reports itself ready and then fails every put.
+      found: 0,
+      nodes: { count: () => dht.found },
       once(event, fn) {
         if (event === 'ready') listeners.push(fn);
       },
@@ -243,9 +250,10 @@ describe('waiting for the DHT before publishing', () => {
         setImmediate(() => callback(null, Buffer.alloc(20, 1), 8));
       },
     };
+    return dht;
   }
 
-  it('holds off until the DHT says it has peers', async () => {
+  it('holds off until the DHT has somewhere to send a query', async () => {
     // The bug: a fixed fifteen-second delay was a bet on how long
     // bootstrapping takes, and it lost -- every category failed with
     // "No nodes to query" before the routing table had anything in it.
@@ -283,10 +291,16 @@ describe('waiting for the DHT before publishing', () => {
     await new Promise((resolve) => setTimeout(resolve, 120));
 
     assert.ok(
-      logs.some((line) => line.includes('has not found any peers')),
+      logs.some((line) => line.includes('found no peers')),
       'named the cause',
     );
     assert.ok(logs.some((line) => line.includes('UDP')), 'and what to check');
+    // And the per-category failures carry the count, because the same message
+    // with a populated table would mean something entirely different.
+    assert.ok(
+      logs.some((line) => line.includes('No nodes to query') && line.includes('0 DHT nodes')),
+      'said how empty the table was',
+    );
     publisher.stop();
   });
 

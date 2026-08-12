@@ -7,6 +7,25 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.14.2
+### 🐞 Bug fixes
+- **Waiting for the DHT's `ready` event was not enough.** It fires when the bootstrap lookup
+  *finishes*, whether or not that lookup found anything — so a node with no working UDP path
+  reports itself ready and then fails every put with "No nodes to query", and the warning added in
+  0.14.1 never fired because nothing had gone wrong by its measure.
+
+  It now waits for the routing table to have something in it, and says how empty it is when it
+  gives up:
+
+  ```
+  [mutable] DHT ready with 42 nodes
+  [mutable] the DHT found no peers in 60s. Publishing will fail until it does — check that
+            outbound UDP is not blocked, and that the bootstrap hosts resolve
+  ```
+
+  Per-category failures carry the count too, because "No nodes to query" with an empty table is a
+  network problem and the same message with a populated one is not.
+
 ## 0.14.1
 ### 🐞 Bug fixes
 - **The publisher waited a fixed fifteen seconds for the DHT and then published into an empty
