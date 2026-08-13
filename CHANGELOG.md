@@ -2,6 +2,12 @@
 
 ## master
 ### ✨ Features and improvements
+- **The default trackers now include WebSocket ones.** They were two `udp://` entries, so an
+  archive created with stock configuration was undiscoverable from a browser — healthy in a
+  desktop client, invisible from a page, with nothing in either to say why. A browser speaks
+  WebRTC only and has no DHT, PeX or local discovery to fall back on, so `wss://` is not
+  redundancy with the rest of the list, it is the whole of that path. Two are listed because it
+  has no backstop. Every entry was checked for a completed handshake before being added.
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes

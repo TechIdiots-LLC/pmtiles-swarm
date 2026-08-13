@@ -285,31 +285,31 @@ load becomes swarm capacity instead of passing through the same pipe.
 This is a configuration requirement, not an automatic one, and it is easy to miss because
 everything looks healthy without it.
 
-The default trackers are UDP:
-
-```json
-"trackers": [
-  "udp://tracker.opentrackr.org:1337/announce",
-  "udp://tracker.torrent.eu.org:451/announce"
-]
-```
-
-**A browser cannot use either of those, and cannot use the DHT.** Both need UDP sockets and raw
-TCP, which a page does not have. A browser's only route to discovery is a `wss://` tracker — so a
-torrent announcing to UDP trackers alone is one no browser can find a peer for, however many
-WebTorrent nodes are seeding it. WebTorrent's own default WebSocket trackers do not fill this gap
-either: they are compiled into its **browser** bundle, and a Node client adds nothing.
-
-To actually reach browser peers, announce to at least one WebSocket tracker as well:
+The default list carries both kinds:
 
 ```json
 "trackers": [
   "udp://tracker.opentrackr.org:1337/announce",
   "udp://tracker.torrent.eu.org:451/announce",
+  "udp://tracker-udp.gbitt.info:80/announce",
   "wss://tracker.openwebtorrent.com",
   "wss://tracker.webtorrent.dev"
 ]
 ```
+
+**A browser cannot use the UDP ones, and cannot use the DHT.** Both need UDP sockets and raw
+TCP, which a page does not have. A browser's only route to discovery is a `wss://` tracker — so a
+torrent announcing to UDP trackers alone is one no browser can find a peer for, however many
+WebTorrent nodes are seeding it. WebTorrent's own default WebSocket trackers do not fill this gap
+either: they are compiled into its **browser** bundle, and a Node client adds nothing.
+
+Two `wss://` entries are listed rather than one because that path has no backstop: when the UDP
+side loses a tracker there are still the others, the DHT, PeX and local discovery, and when the
+WebSocket side loses one a browser has nothing left.
+
+If you replace this list, keep at least one `wss://` entry — and check it answers, rather than
+copying one from a list. Public WebSocket trackers come and go, and a dead one fails in exactly
+the way this section describes: silently, and only for browsers.
 
 Trackers live outside the torrent's `info` dictionary, so adding them **does not change the
 infohash** — but it only applies to torrents created after the change. An existing archive keeps

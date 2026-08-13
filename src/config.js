@@ -236,10 +236,27 @@ const DEFAULTS = {
    *
    * Only applies to torrents created here. Joining an existing one uses the
    * trackers that torrent already carries.
+   *
+   * The `wss://` entries are not redundancy with the others — they are the
+   * only ones a browser can use. A page speaks WebRTC and nothing else: it
+   * cannot reach a UDP or HTTP tracker, and it has no DHT, PeX or local
+   * discovery to fall back on. An archive announced only to `udp://` trackers
+   * is perfectly healthy in a desktop client and invisible from a browser,
+   * with nothing in either to say why. Two are listed because that single
+   * path has no backstop.
+   *
+   * Keep this list short and answering. A tracker that no longer resolves
+   * costs an announce attempt per interval per torrent and finds nobody —
+   * unlike one that is merely unreachable from here, which can still
+   * introduce peers on networks that can reach it, since the list travels
+   * with the torrent.
    */
   trackers: [
     'udp://tracker.opentrackr.org:1337/announce',
     'udp://tracker.torrent.eu.org:451/announce',
+    'udp://tracker-udp.gbitt.info:80/announce',
+    'wss://tracker.openwebtorrent.com',
+    'wss://tracker.webtorrent.dev',
   ],
   /**
    * Copy every .torrent we create into this directory as well.
