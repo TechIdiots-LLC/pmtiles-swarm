@@ -2,6 +2,14 @@
 
 ## master
 ### ✨ Features and improvements
+- **A watched folder can ask for its stable name to be a hard link.**
+  `latestLinkType: "hard"` reverses the order the two kinds are attempted in,
+  for a folder whose archives are read *through* that name rather than followed
+  to see where it points. A hard link still resolves after the build it names
+  is retired; a symlink is left pointing at nothing, which a tile endpoint
+  reports as a missing archive while the bytes are still on the disk. The other
+  kind remains the fallback in both directions, and the log now always says
+  which was made rather than only mentioning the unexpected one.
 - **The default trackers now include WebSocket ones.** They were two `udp://` entries, so an
   archive created with stock configuration was undiscoverable from a browser — healthy in a
   desktop client, invisible from a page, with nothing in either to say why. A browser speaks

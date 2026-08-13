@@ -214,6 +214,10 @@ export class WatchManager {
           target: entry.retainedAt ?? path.join(entry.savePath, entry.name),
           name: folder.latestLink,
           label: `[watch] ${folder.path}`,
+          // Per folder: a folder whose archives are opened through this
+          // name wants a hard link, one that is only a convenience for a
+          // person browsing the directory does not care.
+          type: folder.latestLinkType,
         });
       }
 

@@ -20,21 +20,35 @@ import path from 'node:path';
  * this names is eventually deleted: a symlink is left dangling, while a hard
  * link keeps the bytes alive until it too is gone. Retention never removes the
  * newest build, so neither case arises from this node's own housekeeping.
+ *
+ * `type` chooses which is preferred, because which one is better depends on
+ * what opens the name. Something reading the archive through this link — a
+ * tile endpoint, say — is better served by a hard link: if the build it names
+ * is removed before the name is repointed, a hard link still resolves to the
+ * bytes while a symlink resolves to nothing. The other order is the default
+ * only because it is what has always happened here.
  * @param {object} options - What to link and how to say so.
  * @param {string} options.target - The build the name should resolve to.
  * @param {string} options.name - The stable name, absolute or beside the target.
  * @param {string} options.label - How to name the caller in the log.
+ * @param {string} [options.type] - 'symbolic' (default), 'hard', or 'auto'.
  * @returns {Promise<string|undefined>} - The link made, or undefined on failure.
  */
-export async function linkLatest({ target, name, label }) {
+export async function linkLatest({ target, name, label, type = 'symbolic' }) {
   const link = linkPathFor(target, name);
 
-  const attempts = [
+  const symbolic = [
     // The type is autodetected from the target on Windows and ignored
     // everywhere else, which is right: the target is always a file here.
-    ['symlink', () => fs.symlink(target, link)],
-    ['hard link', () => fs.link(target, link)],
+    'symlink',
+    () => fs.symlink(target, link),
   ];
+  const hard = ['hard link', () => fs.link(target, link)];
+
+  // Both orders keep the other as a fallback rather than failing outright:
+  // Windows refuses symlinks without elevation, and a hard link cannot cross a
+  // filesystem. Whichever is asked for, the name still gets made.
+  const attempts = type === 'hard' ? [hard, symbolic] : [symbolic, hard];
 
   for (const [kind, make] of attempts) {
     try {
@@ -42,10 +56,10 @@ export async function linkLatest({ target, name, label }) {
       // per build and the name by definition already exists after the first.
       await fs.rm(link, { force: true });
       await make();
-      console.log(
-        `${label} latest -> ${path.basename(target)}` +
-          (kind === 'symlink' ? '' : ` (${kind})`),
-      );
+      // Always says which kind. Reporting only the unexpected one meant the
+      // common case was silent, and the only way to learn what you had was to
+      // list the directory and read the mode bits.
+      console.log(`${label} latest -> ${path.basename(target)} (${kind})`);
       return link;
     } catch (error) {
       // Try the next kind rather than giving up on the first refusal; only the

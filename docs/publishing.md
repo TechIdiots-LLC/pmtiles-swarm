@@ -377,6 +377,24 @@ A new `.pmtiles` appearing in a watched folder is imported automatically.
 
 Editable in **Settings → Monitored folders** as a table, rather than by hand.
 
+### What kind of link the stable name is
+
+`latestLink` is made as a symlink by default. Set `latestLinkType: "hard"` on
+the folder when something reads the archive *through* that name — a tile
+server, or anything else that opens it rather than following it to see where it
+points.
+
+The difference only shows when the build the name refers to goes away. A hard
+link is another name for the same bytes, so it still resolves; a symlink is
+left pointing at nothing. Retention repoints the name as it retires a build, so
+neither case arises from ordinary housekeeping — but a rebuild that fails
+between the two steps leaves a reader working in one arrangement and broken in
+the other.
+
+The other kind stays the fallback either way: Windows refuses symlinks without
+elevation, and a hard link cannot cross a filesystem, so the name is still made
+whichever was asked for. The log says which it got.
+
 ### One folder, several kinds of build
 
 Categories and retention are decided per entry, not per directory. A generator

@@ -613,6 +613,15 @@ const DEFAULTS = {
    * ever touch archives this same folder imported, and never remove the
    * newest build however old it gets.
    *
+   * `latestLinkType` picks how `latestLink` is made: `symbolic` (the default),
+   * or `hard` for a name something reads the archive through. A hard link
+   * still resolves after the build it names is retired, where a symlink is
+   * left pointing at nothing — so a tile endpoint opening that name keeps
+   * working across a rebuild either way, and only one of them keeps working if
+   * the rebuild fails halfway. The other kind stays the fallback in both
+   * directions, since Windows refuses symlinks without elevation and a hard
+   * link cannot cross a filesystem.
+   *
    * `match` is a glob tested against the filename, for a folder holding more
    * than one kind of build. Categories are decided per entry, so several
    * entries can watch one folder and each take only its own archives:
