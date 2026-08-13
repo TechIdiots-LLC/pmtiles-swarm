@@ -595,6 +595,12 @@ const DEFAULTS = {
    * that it takes the torrent with the data. Both are off unless set, only
    * ever touch archives this same folder imported, and never remove the
    * newest build however old it gets.
+   *
+   * `match` is a glob tested against the filename, for a folder holding more
+   * than one kind of build. Categories are decided per entry, so several
+   * entries can watch one folder and each take only its own archives:
+   * `{ path: '/out/pmtiles', match: 'monthly-*.pmtiles', categories: ['monthly'] }`.
+   * Without it every entry imports every archive, once under each category.
    */
   watch: [],
   /**

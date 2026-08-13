@@ -7,6 +7,21 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.17.0
+### ✨ Features and improvements
+- **A monitored folder can filter by filename.** `match` takes a glob, so one directory can be
+  described by several entries and each take only its own archives — which is what a generator
+  writing `monthly-20260813.pmtiles` and `10yrplus-20260813.pmtiles` side by side needs, since
+  categories and retention are decided per entry. Without it every entry claimed every archive,
+  and because imports are deduplicated by path the file landed under whichever entry won the
+  race: not a duplicate, which would at least have been visible, but one import under an
+  arbitrary category.
+
+### 🐞 Bug fixes
+- **Entries sharing a directory now share one watcher.** Each previously started its own, and two
+  chokidar instances over one path made ownership a race. They are now grouped, so the first
+  entry whose `match` accepts a name takes it — decided by the order they appear in the config.
+
 ## 0.16.1
 ### 🐞 Bug fixes
 - **Client addresses are recorded without the IPv4-mapped prefix.** A dual-stack listener reports

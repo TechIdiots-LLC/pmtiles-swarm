@@ -14,6 +14,30 @@ import { retains, retire } from './retention.js';
  * deliberately generous, because a stalled network copy can pause for a long
  * time mid-file.
  */
+/**
+ * Compiles a shell-style glob into an anchored regular expression.
+ *
+ * Deliberately a glob and not a regular expression: a watch folder's filter is
+ * something an operator writes in a JSON config beside a filename, and
+ * `monthly-*.pmtiles` is what they mean. Every other character is escaped, so
+ * a name containing regex punctuation matches itself rather than becoming a
+ * pattern by accident.
+ *
+ * @param {string} pattern - A glob, matched against the basename.
+ * @returns {RegExp} - Anchored, case-insensitive.
+ */
+export function globToRegExp(pattern) {
+  const body = pattern
+    .split('')
+    .map((character) => {
+      if (character === '*') return '.*';
+      if (character === '?') return '.';
+      return character.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    })
+    .join('');
+  return new RegExp(`^${body}$`, 'i');
+}
+
 export class WatchManager {
   #library;
   #watchers = [];
@@ -33,8 +57,33 @@ export class WatchManager {
    * @returns {void}
    */
   start(folders = []) {
+    // One watcher per directory, not per entry. Several entries describing one
+    // directory is the normal way to give each build its own category, and two
+    // chokidar instances over the same path do not reliably both report a
+    // file — so an archive could go unimported with nothing to say why.
+    // Grouping also makes the choice of entry deterministic: the first whose
+    // `match` accepts a name takes it, decided by config order rather than by
+    // whichever watcher fired first.
+    const groups = new Map();
     for (const folder of folders) {
-      const stability = (folder.stabilitySeconds ?? 30) * 1000;
+      if (!groups.has(folder.path)) groups.set(folder.path, []);
+      groups.get(folder.path).push(folder);
+    }
+
+    for (const [directory, entries] of groups) {
+      // The watcher is shared, so its settings have to suit every entry:
+      // the longest stability threshold any of them asked for, and polling if
+      // any of them needs it, at the shortest interval requested.
+      const folder = {
+        ...entries[0],
+        stabilitySeconds: Math.max(...entries.map((e) => e.stabilitySeconds ?? 30)),
+        pollSeconds: Math.min(
+          ...entries.map((e) => e.pollSeconds ?? 0).filter((s) => s > 0),
+          ...(entries.some((e) => (e.pollSeconds ?? 0) > 0) ? [] : [0]),
+        ),
+        path: directory,
+      };
+      const stability = folder.stabilitySeconds * 1000;
 
       // A local directory needs no interval: the filesystem says when
       // something lands and the archive is picked up as it appears. A network
@@ -63,27 +112,44 @@ export class WatchManager {
         },
       });
 
+      const matchers = entries.map((entry) => ({
+        entry,
+        // A directory holding several kinds of build needs one entry each,
+        // because categories are decided per entry. `match` is what tells them
+        // apart; an entry without one takes anything not already claimed.
+        match: entry.match ? globToRegExp(entry.match) : null,
+      }));
+
       watcher.on('add', (file) => {
         if (!/\.pmtiles$/i.test(file)) return;
-        // The folder's own `latestLink`, which is a .pmtiles in a watched
-        // folder like any other and would otherwise be imported as a second
-        // archive — a whole extra torrent for the same bytes under a name that
-        // changes every build. A hard link is indistinguishable from the file
-        // it names, so the name is the only thing that can tell them apart.
-        if (this.#isLatestLink(file, folder)) return;
-        this.#import(file, folder);
+
+        const name = path.basename(file);
+        const owner = matchers.find(({ entry, match }) => {
+          if (match && !match.test(name)) return false;
+          // The entry's own `latestLink`, a .pmtiles like any other that would
+          // otherwise be imported as a second archive — a whole extra torrent
+          // for the same bytes, under a name that changes every build. A hard
+          // link is indistinguishable from the file it names, so the name is
+          // the only thing that can tell them apart.
+          return !this.#isLatestLink(file, entry);
+        });
+
+        if (owner) this.#import(file, owner.entry);
       });
       watcher.on('error', (error) => {
-        console.error(`[watch] ${folder.path}: ${error.message}`);
+        console.error(`[watch] ${directory}: ${error.message}`);
       });
 
       this.#watchers.push(watcher);
-      const tags = normalizeCategories(folder);
-      console.log(
-        `[watch] watching ${folder.path}` +
-          (tags.length > 0 ? ` as "${tags.join('", "')}"` : '') +
-          (pollSeconds > 0 ? ` (polling every ${pollSeconds}s)` : ''),
-      );
+      for (const entry of entries) {
+        const tags = normalizeCategories(entry);
+        console.log(
+          `[watch] watching ${directory}` +
+            (entry.match ? ` matching ${entry.match}` : '') +
+            (tags.length > 0 ? ` as "${tags.join('", "')}"` : '') +
+            (pollSeconds > 0 ? ` (polling every ${pollSeconds}s)` : ''),
+        );
+      }
     }
   }
 

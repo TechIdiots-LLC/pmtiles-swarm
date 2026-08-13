@@ -272,7 +272,9 @@ Three ways in, all editable from the Settings screen:
 - **Monitored folders** (`watch`) — a directory scanned for new archives, the way a torrent client
   watches for `.torrent` files. `publishDir` moves each one into the directory a web server serves
   before the torrent is built, and `webSeedBase` is the URL that directory answers on, so a
-  brand-new archive has a working web seed before any peer holds a copy.
+  brand-new archive has a working web seed before any peer holds a copy. `match` is a filename
+  glob, for a generator that writes several kinds of build into one directory: give the folder an
+  entry per kind, each matching its own names, and each gets its own categories and retention.
 - **A URL template** (`sources[].url`) — for an upstream that publishes at a predictable address,
   like `https://build.protomaps.com/{YYYYMMDD}.pmtiles`. Expanded per candidate date and probed
   with a `HEAD`. The more reliable of the two web options: it asks a direct question, and needs the
