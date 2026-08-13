@@ -3408,6 +3408,11 @@
                 ...(config.locations ?? []).map((entry) => [entry.path, entry.name]),
               ],
             },
+            {
+              field: 'match',
+              label: 'Only files matching',
+              placeholder: 'everything',
+            },
             { field: 'publishDir', label: 'Publish to', placeholder: '/var/www/pmtiles' },
             { field: 'webSeedBase', label: 'Web seed base', placeholder: 'https://…/files' },
             {

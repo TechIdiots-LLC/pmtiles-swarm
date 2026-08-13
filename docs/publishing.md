@@ -377,6 +377,44 @@ A new `.pmtiles` appearing in a watched folder is imported automatically.
 
 Editable in **Settings → Monitored folders** as a table, rather than by hand.
 
+### One folder, several kinds of build
+
+Categories and retention are decided per entry, not per directory. A generator
+that writes more than one kind of archive into one place therefore needs an
+entry per kind, and `match` — a filename glob — is what tells them apart:
+
+```json
+{
+  "watch": [
+    {
+      "path": "/srv/out/pmtiles",
+      "match": "monthly-*.pmtiles",
+      "categories": ["monthly"],
+      "latestLink": "monthly.pmtiles",
+      "keep": 1
+    },
+    {
+      "path": "/srv/out/pmtiles",
+      "match": "10yrplus-*.pmtiles",
+      "categories": ["10yrplus"],
+      "latestLink": "10yrplus.pmtiles",
+      "keep": 1
+    }
+  ]
+}
+```
+
+The glob is matched against the filename, is anchored at both ends — so
+`monthly-*` does not claim `cell_monthly-*` — and treats `.` and other regex
+punctuation as literal text. An entry with no `match` takes anything the
+entries above it have not already claimed, and the first entry whose glob
+accepts a name is the one that imports it, so config order decides.
+
+Leaving `match` off where several entries share a directory does not produce
+duplicates, which would at least be visible. Imports are deduplicated by path,
+so each archive is imported exactly once — under whichever entry got to it
+first, with nothing in the config or the log saying which.
+
 `comment` goes into every torrent this folder produces, and is where the attribution and
 licence belong — it is the one field a torrent carries that says what the thing is, and
 it reaches anyone who opens the file in any client:
