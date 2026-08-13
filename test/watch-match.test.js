@@ -114,6 +114,50 @@ describe('several watch entries over one folder', () => {
     }
   });
 
+  it('retires only within its own glob', async () => {
+    // The bug this guards, seen in production: retention built its family from
+    // the directory alone, so sixteen entries over one folder were one family.
+    // Importing monthly retired 10yrplus under keep:1 -- and took its data.
+    const dir = await fs.mkdtemp(path.join(workspace, 'folder-'));
+    const removed = [];
+    const held = (name) => ({
+      infoHash: name.padEnd(40, '0'),
+      name,
+      createdAt: new Date(Date.now() - 86400000).toISOString(),
+      source: { type: 'file', location: `${dir}/${name}`, watch: dir },
+    });
+
+    const library = {
+      // Newest first: retire() bails out unless family[0] is the entry it
+      // was given, so the wrong order makes this test pass vacuously.
+      catalog: { list: () => [entry, held('10yrplus-20260101.pmtiles')] },
+      addLocalArchive: async (file, options) => {
+        entry.source.watch = options.watch;
+        return entry;
+      },
+      remove: async (infoHash) => removed.push(infoHash),
+    };
+    const entry = {
+      infoHash: 'm'.repeat(40),
+      name: 'monthly-20260813.pmtiles',
+      createdAt: new Date().toISOString(),
+      source: { type: 'file', location: `${dir}/monthly-20260813.pmtiles` },
+    };
+
+    const manager = new WatchManager(library);
+    manager.start([
+      { path: dir, stabilitySeconds: 0.05, match: 'monthly-*.pmtiles',
+        categories: ['wifidb-monthly'], keep: 1 },
+      { path: dir, stabilitySeconds: 0.05, match: '10yrplus-*.pmtiles',
+        categories: ['wifidb-10yrplus'], keep: 1 },
+    ]);
+    await fs.writeFile(path.join(dir, 'monthly-20260813.pmtiles'), 'x');
+    await new Promise((resolve) => setTimeout(resolve, 2600));
+    await manager.stop();
+
+    assert.deepEqual(removed, [], 'another bucket must not be retired');
+  });
+
   it('an archive matching nothing is left alone', async () => {
     const imports = await dropMany(
       [{ match: 'monthly-*.pmtiles', categories: ['wifidb-monthly'] }],

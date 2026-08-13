@@ -11,7 +11,11 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **Retention no longer reaches across a folder's other entries.** A watched folder's family was
+  built from the directory alone, so several entries sharing one — which `match` exists to make
+  possible — were treated as a single family. With `keep: 1`, importing this week's `monthly`
+  retired `10yrplus` and deleted its data. The family is now scoped by the entry's glob as well
+  as its path. Introduced in 0.17.0; anything affected must be regenerated.
 
 ## 0.17.0
 ### ✨ Features and improvements

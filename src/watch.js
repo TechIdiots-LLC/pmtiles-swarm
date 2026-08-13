@@ -134,7 +134,7 @@ export class WatchManager {
           return !this.#isLatestLink(file, entry);
         });
 
-        if (owner) this.#import(file, owner.entry);
+        if (owner) this.#import(file, owner.entry, owner.match);
       });
       watcher.on('error', (error) => {
         console.error(`[watch] ${directory}: ${error.message}`);
@@ -172,9 +172,10 @@ export class WatchManager {
    * Imports one archive, guarding against overlapping imports of the same file.
    * @param {string} file - Path to the archive.
    * @param {object} folder - The watch-folder configuration.
+   * @param {RegExp|null} [match] - The entry's filename filter, if it has one.
    * @returns {Promise<void>} - Resolves once imported or skipped.
    */
-  async #import(file, folder) {
+  async #import(file, folder, match = null) {
     if (this.#importing.has(file)) return;
     this.#importing.add(file);
     try {
@@ -223,9 +224,20 @@ export class WatchManager {
       if (!retains(folder)) return;
       await retire({
         library: this.#library,
+        // Scoped by the entry, not just by the directory. Several entries
+        // describing one directory is the whole point of `match`, and a family
+        // built from the path alone puts every bucket in one: importing
+        // this week's `monthly` would retire `10yrplus` under keep:1, deleting
+        // an archive that has nothing to do with it. Re-applying the glob is
+        // what splits one directory back into the families the config
+        // describes.
         family: this.#library.catalog
           .list()
-          .filter((candidate) => candidate.source?.watch === folder.path),
+          .filter(
+            (candidate) =>
+              candidate.source?.watch === folder.path &&
+              (!match || match.test(path.basename(candidate.name ?? ''))),
+          ),
         entry,
         keep: folder.keep,
         keepDays: folder.keepDays,
