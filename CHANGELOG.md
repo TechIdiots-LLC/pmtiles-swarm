@@ -245,6 +245,31 @@
   `bittorrent-dht` and could be reused to save a socket; that is a deliberate choice rather than an
   oversight, taken to keep one code path that behaves the same whichever engine is configured.
 
+### 📚 Documentation
+- **The image exposes 6883/udp** for the BEP 46 publisher's DHT, and the entrypoint's own messages
+  now go to stderr rather than stdout — so `docker run … publisher-key > publisher.pem` writes a
+  key rather than a key with `[docker]` lines through the middle of it. Publishing needs no inbound
+  port; the port is there for a container that wants to be a reachable DHT node rather than merely
+  a participating one.
+- **A Docker image**, `wifidb/pmtiles-swarm`, for amd64 and arm64. Nothing in the package changed;
+  this is a way to run what was already there.
+
+  One mount matters. `/data` holds the configuration, and the configuration is written entirely in
+  relative paths — which works because pmtiles-swarm resolves paths against the configuration file
+  rather than the working directory, so everything lands inside whatever was mounted and the file
+  says nothing about containers. A missing configuration is written on first start, so
+  `docker run -v somewhere:/data` is enough to get a node. An existing one is never touched.
+
+  The documentation is blunt about the two things that are not the usual Docker questions.
+  Networking: this is a BitTorrent peer, and bridge NAT breaks incoming connections, makes the DHT
+  advertise an unreachable address, and points UPnP at the wrong device — so host networking is
+  usually right, and that is a real trade rather than a default worth copying. And one peer port
+  *per engine*, TCP and UDP both, since uTP and the DHT are not TCP; WebRTC needs no port at all,
+  being outbound-only through a `wss://` tracker.
+
+  Images build on a published release, in their own workflow. An image failing must not be able to
+  fail a publish that already succeeded, or strand a release that cannot be re-run because npm
+  already has the version.
 ## 0.12.0
 ### ✨ Features and improvements
 - **A category can now be addressed without a server at all.** A node that builds can publish a
