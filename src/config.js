@@ -3,15 +3,19 @@ import { hashPassword } from './auth.js';
 import path from 'node:path';
 
 /**
- * Defaults. Every one of these can be overridden in the config file, and a few
- * of the deployment-specific ones by environment variables.
+ * Defaults, and the list of settings the API will accept — an undeclared key is
+ * refused as "unknown setting", so a setting has to appear here even when its
+ * default is undefined.
+ *
+ * Every setting is documented in docs/configuration.md. Comments here say only
+ * what a value is; why it is what it is belongs in the document.
  */
 const DEFAULTS = {
   port: 8090,
   host: '0.0.0.0',
   /** Where the catalog, generated .torrent files and keys live. */
   dataDir: './data',
-  /** Which SeedEngine to use: 'webtorrent' or 'qbittorrent'. */
+  /** Which SeedEngine to use: 'webtorrent', 'libtorrent' or 'qbittorrent'. */
   engine: 'webtorrent',
   qbittorrent: {
     url: 'http://127.0.0.1:8080',
@@ -19,17 +23,9 @@ const DEFAULTS = {
     password: undefined,
   },
   /**
-   * Settings for the libtorrent engine.
-   *
-   * Declared here even though every field is undefined, because DEFAULTS is
-   * also the list of what the API will accept: an undeclared key is refused as
-   * "unknown setting", and the console posts back every key it was given. So a
-   * libtorrent node could not save *any* setting until this existed — and the
-   * key was already named in RESTART_REQUIRED, which is to say it was known
-   * everywhere except where it was checked.
-   *
-   * `savePath` is folded into the node-level one at load; the rest are passed
-   * to the sidecar. Unset means libtorrent's own default.
+   * Settings for the libtorrent engine. `savePath` is folded into the
+   * node-level one at load; the rest are passed to the sidecar, where unset
+   * means libtorrent's own default.
    */
   libtorrent: {
     savePath: undefined,
@@ -45,211 +41,76 @@ const DEFAULTS = {
     downloadLimit: undefined,
   },
   /**
-   * Where archive data lives.
-   *
-   * One path for the node, not one per engine, and that is not a
-   * simplification — it is the only arrangement that works. Two engines
-   * running together are seeding *the same file*: the secondary is handed an
-   * archive the primary has already finished, and it seeds those exact bytes.
-   * Point them at different directories and the secondary finds nothing where
-   * it was told to look, and starts downloading its own copy of something that
-   * is already on the disk.
-   *
-   * The per-engine `savePath` settings below are still read, for
-   * configurations written before this existed, but they are folded into one
-   * value and a disagreement between them is reported rather than obeyed.
+   * Where archive data lives. One path for the node, not one per engine — see
+   * docs/configuration.md, "One save path, not one per engine". The per-engine
+   * settings below are still read for older configs, but they are folded into
+   * one value and a disagreement between them is reported rather than obeyed.
    */
   savePath: undefined,
   webtorrent: {
     savePath: undefined,
   },
   /**
-   * The marker appended to an archive that is not whole yet.
-   *
-   * Set to an empty string to switch it off, in which case a partial archive is
-   * indistinguishable from a finished one on disk — which matters more here
-   * than for most downloads, because these files get published. A web seed URL
-   * is predictable and goes out before the file exists, so an unmarked partial
-   * in a served directory is a URL that answers with a half-written archive,
-   * and every peer that tries it fails hash verification.
-   *
-   * The rename that drops it is within one directory, so it is atomic and
-   * instant however large the archive is.
+   * The marker appended to an archive that is not whole yet. An empty string
+   * switches it off. See docs/internals.md — "Marking incomplete archives".
    */
   incompleteSuffix: '.incomplete',
   /** How often to look for downloads that have finished and need renaming. */
   completionCheckIntervalSeconds: 15,
   /**
    * Where cache-mode archives keep their pieces, when they should be kept
-   * apart from mirrors.
-   *
-   * Unset by default, so everything shares one save path. That was not always
-   * so: the split existed to tell whole archives from partial ones on disk,
-   * which the name now does, and doing it by directory meant a completed
-   * download had to move — instant only if both paths happen to share a
-   * filesystem, and otherwise a full copy of an archive that may be several
-   * hundred gigabytes.
-   *
-   * It remains available as a placement choice rather than a labelling one:
-   * set it to put on-demand cache pieces on faster disk than the mirrors, or
-   * to keep the cache measurable and clearable as a directory.
+   * apart from mirrors. Unset shares one save path with everything else.
    */
   cacheSavePath: undefined,
   /**
-   * Engines to run alongside the primary, seeding only.
-   *
-   * `["webtorrent"]` beside a libtorrent or qBittorrent primary is the reason
-   * this exists: libtorrent handles a multi-terabyte library and speaks
-   * BitTorrent v2, and WebTorrent is the only one that can talk to a browser.
-   * Running both lets a browser peer fetch from the same swarm without either
-   * engine having to grow the other's abilities.
-   *
-   * Only the primary ever writes. A secondary is handed an archive once it is
-   * complete and never in cache mode, because two clients writing one
-   * incomplete file do not race — they produce a file neither one's bitfield
-   * describes, and then both try to repair it forever.
+   * Engines to run alongside the primary, seeding only. See
+   * docs/internals.md — "Running two engines at once".
    */
   secondaryEngines: [],
   /** How often to look for archives that have become safe to share. */
   secondaryShareIntervalSeconds: 60,
   /**
    * How long a secondary may take to accept an archive it has been handed.
-   *
-   * It is not waiting for metadata — the `.torrent` carries that. It is
-   * hashing every byte of the file against it, which is what any client does
-   * before it will serve a piece it did not download itself. Minutes for tens
-   * of gigabytes, hours for a real library, against the seconds a normal add
-   * is given. An hour by default, because this is background work and the only
-   * cost of waiting is that the browser bridge starts late.
+   * Generous because it is hashing every byte of the file against the
+   * `.torrent`, which is hours for a real library.
    */
   secondaryShareTimeoutSeconds: 3600,
   /**
-   * A separate port for the console and the API.
-   *
-   * Unset, one listener serves everything. Set, and the split is by purpose:
-   * `port` keeps the tiles, the TileJSON, the `.torrent` files, the feeds, the
-   * `latest` endpoints and `/api/catalog` — everything a stranger or a peer is
-   * meant to reach — while `adminPort` gets the console and the rest of the
-   * API.
-   *
-   * The point is what it lets you do with a firewall. The public port can face
-   * the internet while the admin port is bound to `127.0.0.1` or a private
-   * interface, so the thing that can rewrite the configuration is not merely
-   * password-protected but unreachable. On the public listener the admin
-   * surface answers 404, because a 401 would confirm it is there.
+   * A separate port for the console and the API, so the public one can face
+   * the internet while this is bound somewhere unreachable. See
+   * docs/configuration.md — "Splitting the admin surface off".
    */
   adminPort: undefined,
   /** Interface for the admin listener. Defaults to `host`. */
   adminHost: undefined,
   /**
-   * What shape of torrent to create.
-   *
-   *   'hybrid'  v1 and v2 in one torrent. Every existing client sees an
-   *             ordinary torrent; a v2 client also gets per-file merkle trees
-   *             over 16 KiB leaves, so it can verify one small block without
-   *             holding the whole hash list — which is the shape of a tile
-   *             read. Needs libtorrent to be one of the engines, since nothing
-   *             else here can produce one.
-   *   'v1'      the older format only. Always available.
-   *   'v2'      v2 only. Smaller, but invisible to v1 clients.
-   *
-   * Hybrid where it can be, and v1 where it cannot: an engine without a
-   * libtorrent anywhere in it falls back rather than failing, because a
-   * torrent matters more than the format of a torrent.
+   * What shape of torrent to create: 'hybrid', 'v1' or 'v2'. Hybrid needs
+   * libtorrent to be one of the engines and falls back to v1 without it. See
+   * docs/configuration.md — "Creating torrents".
    */
   torrentFormat: 'hybrid',
   /**
-   * Whether a joined archive gets a directory of its own.
-   *
-   *   'flat'      everything in one save path. The filename is the filename,
-   *               which is what makes dropping a finished archive in before
-   *               adding its torrent work, and what keeps a web seed URL
-   *               readable.
-   *   'infohash'  each archive under `<savePath>/<infohash>/`. Two builds of
-   *               the same map are both `planet.pmtiles`, and this is the only
-   *               arrangement in which that can never matter.
-   *
-   * Flat by default, because the collision it avoids is now refused outright
-   * when the second archive is added — so the cost of flat is an error message
-   * at the moment you can still choose somewhere else, rather than two clients
-   * quietly writing into one file.
-   *
-   * Only joined archives are placed. One created here keeps the file it was
-   * made from, wherever that already is, and web seed URLs are built from the
-   * published location rather than from the save path — so neither is affected
-   * by this.
+   * Whether a joined archive gets a directory of its own: 'flat', or
+   * 'infohash' for `<savePath>/<infohash>/`. Only joined archives are placed.
    */
   savePathLayout: 'flat',
-  /**
-   * Named places for archive data to land.
-   *
-   * `[{ name, path }]`. A torrent client usually hangs the save path off the
-   * category; that does not work here, because an archive can carry several
-   * categories on purpose and two of them naming two disks is a question with
-   * no right answer. So a location is chosen when something is added, and
-   * naming them is what makes choosing bearable.
-   *
-   * Only new data is placed. An archive records where it was put and keeps it,
-   * so repointing a location never moves anything that already exists.
-   */
+  /** Named places for archive data to land: `[{ name, path }]`. */
   locations: [],
   /**
-   * Piece length for torrents we create. 4 MiB is a deliberate compromise:
-   * tools default much higher for large files, which is fine for whole-file
-   * downloads but terrible for the random access a tile server does, since
-   * every cold tile costs a whole piece. Smaller pieces cut that, at the cost
-   * of a larger hash list that peers must transfer before any tile is served.
-   *
-   * Overridable per source and per request, so an archive nobody will read
-   * randomly can keep the larger pieces its size would normally suggest.
-   *
-   * Note this has little bearing on load imposed on network equipment: peers
-   * request data in 16 KiB blocks whatever the piece size, so packet volume is
-   * unchanged. What strains a consumer router is the number of simultaneous
-   * connections holding NAT table entries — see maxConnections.
+   * Piece length for torrents we create, overridable per source and per
+   * request. Small because every cold tile costs a whole piece — see
+   * docs/configuration.md — "pieceLength".
    */
   pieceLength: 4 * 1024 * 1024,
   /**
-   * Cap on simultaneous peer connections.
-   *
-   * This is the setting that decides how hard the node leans on a router:
-   * every peer is a NAT table entry, and cheap consumer hardware starts
-   * dropping or stalling connections well before a server would. Lower it if
-   * the network misbehaves while seeding.
+   * Cap on simultaneous peer connections. This is what decides how hard the
+   * node leans on a router, since every peer is a NAT table entry.
    */
   maxConnections: 100,
   /**
-   * Trackers baked into every torrent this node creates.
-   *
-   * These two are the ones the OpenStreetMap community's map torrents use, so
-   * archives published here land in the same swarms people already follow.
-   *
-   * Overridable wherever a torrent is created — per watch folder, per
-   * scheduled source, per request — with two knobs that differ:
-   *
-   *   `trackers`     replaces this list
-   *   `addTrackers`  appends to it
-   *
-   * Append unless you mean to replace. Dropping the public trackers is a
-   * silent change: the torrent still works, it is simply announced to fewer
-   * places than intended, and nothing about it says so.
-   *
-   * Only applies to torrents created here. Joining an existing one uses the
-   * trackers that torrent already carries.
-   *
-   * The `wss://` entries are not redundancy with the others — they are the
-   * only ones a browser can use. A page speaks WebRTC and nothing else: it
-   * cannot reach a UDP or HTTP tracker, and it has no DHT, PeX or local
-   * discovery to fall back on. An archive announced only to `udp://` trackers
-   * is perfectly healthy in a desktop client and invisible from a browser,
-   * with nothing in either to say why. Two are listed because that single
-   * path has no backstop.
-   *
-   * Keep this list short and answering. A tracker that no longer resolves
-   * costs an announce attempt per interval per torrent and finds nobody —
-   * unlike one that is merely unreachable from here, which can still
-   * introduce peers on networks that can reach it, since the list travels
-   * with the torrent.
+   * Trackers baked into every torrent this node creates, overridable wherever
+   * one is created. The `wss://` entries are the only ones a browser can use.
+   * See docs/configuration.md — "Trackers".
    */
   trackers: [
     'udp://tracker.opentrackr.org:1337/announce',
@@ -258,132 +119,46 @@ const DEFAULTS = {
     'wss://tracker.openwebtorrent.com',
     'wss://tracker.webtorrent.dev',
   ],
-  /**
-   * Copy every .torrent we create into this directory as well.
-   *
-   * Most clients, qBittorrent included, can watch a folder and add whatever
-   * appears in it. For the single job of "start seeding this", that is simpler
-   * and more robust than an API, and it works when the client shares a disk but
-   * is not reachable over HTTP.
-   */
+  /** Copy every .torrent we create into this directory as well. */
   torrentDropDir: undefined,
-  /** Rights statement for the RSS channel. */
   /** Title for the RSS feeds. */
   feedTitle: undefined,
+  /** Rights statement for the RSS channel. */
   feedCopyright: undefined,
   /**
-   * Most items to include in a feed, newest first. Zero means no limit.
-   *
-   * Choose it against how often subscribers poll, not how tidy the feed looks:
-   * a feed holding a single item is only safe if everyone polls more often than
-   * you publish. A consumer that was down overnight would otherwise miss that
-   * build entirely, with nothing to indicate it had.
+   * Most items to include in a feed, newest first. Zero means no limit. Choose
+   * it against how often subscribers poll — see docs/configuration.md,
+   * "Feeds".
    */
   feedMaxItems: 50,
   /**
-   * Which categories are published in the feeds at all.
-   *
-   * Unset means everything, which is the right default for a node whose whole
-   * catalogue is meant to be shared. Set it to an allow-list and only archives
-   * in those categories appear in any feed — `/feed.xml` is filtered to them,
-   * and `/feed/<other>.xml` reports 404 rather than confirming the category
-   * exists.
-   *
-   * This is the difference between selective *subscription* and selective
-   * *publication*. A peer choosing to follow `/feed/basemaps.xml` withholds
-   * nothing: they could read `/feed.xml` instead, or guess. Deciding here is
-   * what actually keeps an archive off the wire — which matters when peering
-   * with someone else's node, since everything you publish is something they
-   * may mirror and serve under their own name.
-   *
-   * Archives with no category are excluded whenever this is set: an untagged
-   * archive has not been marked for sharing.
+   * Which categories are published in the feeds at all. Unset means
+   * everything; an allow-list also excludes archives with no category.
    */
   feedCategories: undefined,
   /**
-   * Upstreams that publish a new archive on a schedule.
-   *
-   * Two ways to find it, and an entry gives one or the other:
-   *
-   *   url    a template with the date in it — `{YYYYMMDD}`, `{YYYY-MM-DD}`,
-   *          `{YYYY}`, `{MM}`, `{DD}` — expanded and probed. Prefer this where
-   *          the naming is predictable: it asks a direct question, gets a
-   *          direct answer, and needs the upstream to publish no listing at all.
-   *   index  a directory URL, listed and filtered. For upstreams whose naming
-   *          is not predictable, or where encoding it by hand is not worth it.
-   *
-   * `newest` bounds how many of the listed files an index source will consider,
-   * and defaults to one. That bound is the safety of the whole thing: a
-   * directory holding two years of daily planet builds would otherwise read as
-   * two years of archives to fetch. Raise it only as far as the number of polls
-   * you expect to miss, since each step is another full archive.
-   *
-   * When to look is per source, either way:
-   *
-   *   at          a time of day in UTC, or a list of them — "03:30". For an
-   *               upstream that publishes on a schedule, which is most of
-   *               them. Polling every six hours from whenever the process
-   *               started finds a daily build up to six hours late, and those
-   *               are hours during which nobody could be seeding it.
-   *   everyHours  an interval instead, for an upstream that publishes whenever
-   *               it is ready.
-   *
-   * Neither set falls back to `sourceCheckIntervalHours`. Times are UTC to
-   * match the date tokens: a template on one clock and a schedule on another
-   * would be a confusing thing to work out at four in the morning.
-   *
-   * See sources.js.
+   * Upstreams that publish a new archive on a schedule. See
+   * docs/internals.md — "Scheduled sources", and sources.js.
    */
   sources: [],
   /** Fallback poll interval, in hours, for a source that names no schedule. */
   sourceCheckIntervalHours: 6,
   /**
-   * Publish files that are not recognised as map archives.
-   *
-   * Off by default. "Make a torrent of this path" is otherwise an instruction
-   * to publish any readable file to a public swarm, and the format is checked
-   * by content rather than by extension because the extension is whatever the
-   * caller said it was.
-   *
-   * PMTiles and MBTiles are both recognised. Only PMTiles can have its tiles
-   * served — MBTiles is SQLite, whose pages are scattered rather than
-   * spatially clustered, so on-demand reading over a swarm does not work the
-   * way it does for a flat, Hilbert-ordered file — but both are perfectly good
-   * things to distribute.
+   * Publish files that are not recognised as map archives. Off by default,
+   * because "make a torrent of this path" is otherwise an instruction to
+   * publish any readable file to a public swarm.
    */
   allowUnknownArchives: false,
   /**
-   * Who may administer this node.
-   *
-   * Tiles, TileJSON and the feed are always public — serving them is the point.
-   * Everything under /api/ can create torrents, move files, delete data and
-   * rewrite this configuration, so it is gated whenever anything here is set.
-   *
-   *   apiKey        a bearer token, for scripts and sibling nodes
-   *   username      defaults to "admin"
-   *   password      plaintext; keep the config file readable only by its owner
-   *   passwordHash  a scrypt$salt$hash string, preferred over password
-   *
-   * Setting a password through PATCH /api/config stores the hash rather than
-   * the plaintext.
+   * Who may administer this node. Tiles, TileJSON and the feed are always
+   * public; everything under /api/ is gated whenever anything here is set. See
+   * docs/configuration.md — "Authentication".
    */
   auth: {
     /**
-     * Named tokens, each with a role.
-     *
-     * `apiKey` is one credential and one power: whoever holds it can do
-     * anything. That was fine while the only caller was you, and stopped being
-     * fine as soon as another node wanted to follow this one — "let them
-     * mirror my internal archives" and "let them delete my library" were the
-     * same sentence.
-     *
-     * So: as many as you like, each named, each `admin` or `peer`, and a peer
-     * token optionally narrowed to some categories so different people see
-     * different slices. Only a SHA-256 of each is kept, so a lost token is
-     * replaced rather than recovered.
-     *
-     * Minted through the console or `POST /api/tokens`, which is why these are
-     * written back to this file rather than only being read from it.
+     * Named tokens, each `admin` or `peer`, a peer optionally narrowed to some
+     * categories. Minted through the console or `POST /api/tokens`, which is
+     * why these are written back to this file rather than only read from it.
      */
     tokens: [],
     apiKey: undefined,
@@ -393,103 +168,53 @@ const DEFAULTS = {
     sessionTtlSeconds: 12 * 60 * 60,
   },
   /**
-   * Permit listening on a reachable address with no authentication.
-   *
-   * The node refuses to start otherwise, because that failure is silent: it
-   * works perfectly and looks fine until somebody who is not you finds the
-   * port. Set this only for a genuinely trusted network.
+   * Permit listening on a reachable address with no authentication. The node
+   * refuses to start otherwise, because that failure is silent.
    */
   allowUnauthenticated: false,
   /** Public base URL, used to build absolute links in the RSS feed and TileJSON. */
   publicUrl: undefined,
   /**
    * Trust X-Forwarded-* headers, for running behind a reverse proxy or CDN.
-   *
-   * Takes anything Express accepts: `true`, a hop count, or a subnet list such
-   * as "loopback, 10.0.0.0/8". Off by default, because trusting these headers
-   * from an untrusted client lets it claim any protocol or address it likes.
-   *
-   * Set it when a proxy terminates TLS, or the TileJSON will advertise http://
-   * tile URLs that browsers block as mixed content. Setting `publicUrl`
-   * instead sidesteps the question entirely.
+   * Takes anything Express accepts: `true`, a hop count, or a subnet list.
    */
   trustProxy: false,
   /**
-   * Announcing the current build of each category over the DHT (BEP 46).
-   *
-   * A category is the only stable handle this system has — every archive is
-   * addressed by its infohash, so a style pointing at one goes stale on the
-   * next build. `/latest/<category>/` fixes that with a server; this fixes it
-   * without one, as a signed DHT record naming whichever infohash is current.
-   *
-   * **Only the node that builds needs this.** Serving nodes carry the public
-   * half on the catalog entry and hand it out in the TileJSON; publishing is
-   * the only thing the secret is used for. Two nodes publishing under one key
-   * would fight over the sequence number, so run exactly one publisher.
-   *
-   * The key is a signing key, not a credential: whoever holds it can tell your
-   * subscribers that any archive is the current build, signed. Treat it the way
-   * you would a code-signing key. Generate one with
-   * `pmtiles-swarm publisher-key`.
-   *
-   * Records expire from the DHT after roughly two hours, so this republishes on
-   * a timer. Nothing else keeps them alive.
+   * Announcing the current build of each category over the DHT (BEP 46). Only
+   * the node that builds needs this, and exactly one node may publish under a
+   * key. See docs/internals.md — "Publishing over the DHT".
    */
   mutable: {
     /** Publish records. Off unless a key is configured and this is set. */
     publish: false,
     /** PEM file holding the ed25519 keypair. Never leaves the publisher. */
     keyPath: undefined,
-    /** How often to republish, in seconds. */
+    /** How often to republish, in seconds. Records expire from the DHT. */
     republishSeconds: 1800,
     /**
-     * UDP port for this node's DHT socket. 0 takes an ephemeral one.
-     *
-     * Publishing does not need a forwarded port: a put is outbound, and the
-     * replies come back on the same socket the way any UDP client's do, which
-     * NAT handles. Setting a fixed port and forwarding it makes this a
-     * reachable DHT node, which gives better lookups and contributes back —
-     * but nothing here requires it.
-     *
-     * Do not reuse the libtorrent engine's port. That engine runs a DHT of its
-     * own, and two sockets cannot hold one port.
+     * UDP port for this node's DHT socket. 0 takes an ephemeral one. Do not
+     * reuse the libtorrent engine's port; two sockets cannot hold one port.
      */
     dhtPort: 0,
     /**
-     * Where to remember the DHT routing table between runs.
-     *
-     * Defaults to `dht-nodes.json` in the data directory. Bootstrapping from
-     * hostnames alone is unreliable enough that a node doing it on every start
-     * is gambling each time; libtorrent saves its table for the same reason,
-     * which is why its DHT works on hosts where a fresh socket does not.
+     * Where to remember the DHT routing table between runs. Defaults to
+     * `dht-nodes.json` in the data directory.
      */
     statePath: undefined,
   },
   /**
-   * What this node has served, at `GET /api/stats`.
-   *
-   * Per-archive counters and a fixed ring of recent requests, both in memory,
-   * so the cost does not grow with traffic. Nothing is written to disk: a
-   * restart is how you reset it, and an access log would bring retention and
-   * disk questions this deliberately does not have.
-   *
-   * `recent: 0` keeps the counters and drops the per-request ring. Setting
-   * `tileStats` to `false` turns the whole thing off.
-   *
-   * Note what the client address means behind a proxy: without
-   * `X-Forwarded-For` it is the proxy's own address, which still answers
-   * whether a request arrived directly or through it, but not who sent it.
+   * What this node has served, at `GET /api/stats`. In memory only; `false`
+   * turns the whole thing off.
    */
   tileStats: {
-    /** Recent requests kept for inspection. */
+    /** Recent requests kept for inspection. Zero keeps only the counters. */
     recent: 200,
   },
   /**
-   * Tile serving: a TileJSON endpoint and z/x/y tiles per archive.
-   *
-   * A node holding a complete copy reads its local file. A node in cache mode
-   * reads through the swarm, pulling only the pieces a requested tile lives in
-   * — which is what lets a machine with 10 GiB free serve a 700 GiB planet.
+   * Tile serving: a TileJSON endpoint and z/x/y tiles per archive. A node
+   * holding a complete copy reads its local file; one in cache mode reads
+   * through the swarm. See docs/internals.md — "Reading an archive that is
+   * still arriving".
    */
   tiles: {
     /**
@@ -500,9 +225,8 @@ const DEFAULTS = {
     /** Header and directory cache entries, shared across every archive. */
     directoryCacheEntries: 200,
     /**
-     * Byte budget for the piece cache of one swarm-read archive. Left unset it
-     * is sized from the torrent's piece length, which is the safer default: a
-     * fixed budget is a trap with 16 MiB pieces, since 64 MiB holds only four.
+     * Byte budget for the piece cache of one swarm-read archive. Unset sizes
+     * it from the torrent's piece length, which is safer than a fixed budget.
      */
     pieceCacheBytes: undefined,
     /** How long no read must be in flight before background hydration resumes. */
@@ -512,180 +236,60 @@ const DEFAULTS = {
     /** How long to wait for torrent metadata when opening an archive. */
     readyTimeoutMs: 60000,
     /**
-     * How long a background metadata read may take.
-     *
-     * Much longer than the header timeout, and for a different job. A PMTiles
-     * writer may put the JSON metadata anywhere, and planetiler puts it at the
-     * *end* — past every tile — so reading it out of a swarm means fetching a
-     * piece from the far end of an archive that can be hundreds of gigabytes,
-     * which nobody has asked for and no peer is prioritising. This never
-     * blocks a reply, so it can afford to wait.
+     * How long a background metadata read may take. Long because a PMTiles
+     * writer may put the JSON metadata at the far end of the archive, and this
+     * never blocks a reply.
      */
     metadataTimeoutMs: 120000,
     /**
-     * How long a TileJSON request waits for an archive's header.
-     *
-     * Shorter than the other timeouts on purpose: somebody is waiting on this
-     * one. A cache-mode archive with no web seed and no peers holding it has
-     * nothing to read a header from, and taking a full minute to say so looks
-     * like a hang rather than like "not yet".
+     * How long a TileJSON request waits for an archive's header. Short on
+     * purpose: somebody is waiting on this one.
      */
     headerTimeoutMs: 12000,
     /**
-     * Read the head of a newly joined archive without waiting to be asked.
-     *
-     * A PMTiles archive is useless until its header has been read: it names
-     * where the root directory and the JSON metadata are, and reading it also
-     * raises those to a high piece priority, so the head of the file arrives
-     * out of order rather than whenever a download happens to reach it. Left
-     * to the first request, an archive being mirrored is unservable for hours
-     * while the bytes that would make it servable sit at position zero.
-     *
-     * Off makes sense on a node that only distributes and never serves tiles.
+     * Read the head of a newly joined archive without waiting to be asked. See
+     * docs/internals.md — "Prewarming a freshly joined archive".
      */
     prewarm: true,
     /** How often to look for an archive whose head has not been read. */
     prewarmIntervalSeconds: 30,
-    /**
-     * How long to let the node settle before the first attempt.
-     *
-     * At the moment a node starts, an archive joined by magnet has no metainfo
-     * and the engine has no peers, so a read attempted immediately is certain
-     * to find nothing.
-     */
+    /** How long to let the node settle before the first attempt. */
     prewarmInitialDelaySeconds: 10,
     /**
      * The first wait after an attempt that did not finish the job, doubling up
      * to `prewarmMaxBackoffSeconds`.
-     *
-     * Not finishing is ordinary rather than exceptional here, so this is a
-     * retry interval and not an error budget — and it doubles because the two
-     * ends of the problem want different answers. Just after a start, what is
-     * being waited for is usually seconds away: a peer, a connection, a piece
-     * already in flight. Ten attempts later it is one piece at the far end of
-     * an archive nobody has finished, and asking every fifteen seconds
-     * achieves nothing but log lines.
      */
     prewarmBackoffSeconds: 15,
     /** Where the doubling stops. */
     prewarmMaxBackoffSeconds: 600,
     /**
-     * What a missing tile answers with: true for 404, false for 204.
-     *
-     * This is not cosmetic. MapLibre only overzooms a parent tile when the
-     * child 404s, so a sparse raster-dem answered with 204 renders as holes
-     * where the data simply was not built — which is most of a terrain
-     * dataset covering only land.
-     *
-     * Vector wants the opposite: an empty tile means no features here, and
-     * 404 makes a map log errors while panning past coverage.
-     *
-     * Left unset it defaults per archive by format — 404 for raster, 204 for
-     * vector — and an individual archive can override it with its own
-     * `sparse` field. Same rule and same name as tileserver-gl.
+     * What a missing tile answers with: true for 404, false for 204. Unset
+     * defaults per archive by format, and an archive can override it with its
+     * own `sparse` field. See docs/internals.md — "Answering for a tile that
+     * is not there".
      */
     sparse: undefined,
   },
   /**
-   * Folders scanned for new archives.
-   *
-   * Each entry is `{ path, category, webSeedBase, publishDir, sparse }`.
-   *
-   * `publishDir` moves the archive into the directory a web server serves
-   * before the torrent is built, and `webSeedBase` is the URL that directory
-   * is reachable at. Together they give every imported archive a working web
-   * seed — which is what makes a brand-new archive usable before any peer has
-   * a copy of it, and what turns a cold tile read from tens of seconds into
-   * well under one.
-   *
-   * `webSeedBase` on its own assumes the watched folder is already the web
-   * root, since nothing is moved.
-   *
-   * `latestLink` gives the newest build a stable second name — a symlink, or
-   * a hard link where the platform refuses one. The watcher ignores that name
-   * so the link is never imported as an archive of its own.
-   *
-   * `keep` and `keepDays` retire what the folder has outgrown — the newest N
-   * builds, or a window in days. A folder receiving a daily 137 GB planet
-   * build fills any disk within the week, and this is the `find -mtime +35`
-   * sweep that would otherwise have to sit in the generation script, except
-   * that it takes the torrent with the data. Both are off unless set, only
-   * ever touch archives this same folder imported, and never remove the
-   * newest build however old it gets.
-   *
-   * `latestLinkType` picks how `latestLink` is made: `symbolic` (the default),
-   * or `hard` for a name something reads the archive through. A hard link
-   * still resolves after the build it names is retired, where a symlink is
-   * left pointing at nothing — so a tile endpoint opening that name keeps
-   * working across a rebuild either way, and only one of them keeps working if
-   * the rebuild fails halfway. The other kind stays the fallback in both
-   * directions, since Windows refuses symlinks without elevation and a hard
-   * link cannot cross a filesystem.
-   *
-   * `match` is a glob tested against the filename, for a folder holding more
-   * than one kind of build. Categories are decided per entry, so several
-   * entries can watch one folder and each take only its own archives:
-   * `{ path: '/out/pmtiles', match: 'monthly-*.pmtiles', categories: ['monthly'] }`.
-   * Without it every entry imports every archive, once under each category.
+   * Folders scanned for new archives. Each entry is `{ path, categories,
+   * match, webSeedBase, publishDir, latestLink, latestLinkType, keep,
+   * keepDays, sparse }` — see docs/configuration.md, "Watched folders".
    */
   watch: [],
   /**
-   * Peers to follow.
-   *
-   * `[{ url, mode, category, filter, token, protocol, prune }]`
-   *
-   *   url       an RSS feed, or a peer's /api/catalog
-   *   protocol  'rss' or 'api'; inferred from the URL when omitted
-   *   mode      'mirror' (whole archive) or 'cache' (only what is read)
-   *   token     presented to the peer, which may then publish more than it
-   *             does to the world — see feedCategories
-   *   filter    regex on the archive name
-   *   prune     drop archives this peer no longer lists. Off by default, and
-   *             a new peer should stay that way until you have watched it:
-   *               omitted    nothing is removed, ever
-   *               'report'   logs what it would remove, removes nothing
-   *               true       forgets them, leaves the data
-   *               'delete'   also removes the data
-   *             It only ever considers archives this peer sent — never one
-   *             built here, added by hand, or still listed by another peer —
-   *             and never acts on a filtered or partial view, since absence
-   *             from those means nothing.
-   *
-   * RSS says "here is what is new" and is bounded by the publisher's
-   * feedMaxItems, so a node offline long enough misses things permanently. The
-   * API says "here is everything", which is what makes reconciling possible —
-   * and pruning, which needs to be able to notice an absence.
+   * Peers to follow: `[{ url, protocol, mode, token, filter, prune, keep,
+   * keepDays }]`. See docs/configuration.md — "Subscriptions".
    */
   subscriptions: [],
-  /*
-   * A subscription also takes `keep` and `keepDays`, which are the same rules
-   * a watched folder and a scheduled source retire under and are applied by
-   * the same code.
-   *
-   * They answer a different question from `prune`. Pruning is about the
-   * publisher — it stopped offering this, so let it go — and needs a complete
-   * listing to mean anything, which is why it applies to a catalog and not to
-   * an RSS feed. These are about the disk: a feed publishing weekly leaves a
-   * copy behind every week and goes on listing all of them, and age is age
-   * however short the list is.
-   *
-   * Retirement runs only after something new has landed, and never removes
-   * the newest copy.
-   */
   /**
    * How often to re-check whether the sources archives were built from have
-   * changed, in seconds. Zero disables it. A check is one HEAD request or stat
-   * per archive, so this is cheap; it defaults off only because a node that
-   * merely joins other people's torrents has nothing to check.
+   * changed, in seconds. Zero disables it.
    */
   originCheckIntervalSeconds: 0,
   /**
-   * Rebuild an archive automatically when its source changes.
-   *
-   * Off by default, and guarded when on, because a rebuild re-hashes the
-   * archive and for a remote source re-downloads it — potentially hours of
-   * transfer started by nobody. Enable it for local build outputs, where the
-   * cost is a local read; think harder before enabling it for http sources.
+   * Rebuild an archive automatically when its source changes. Off by default,
+   * and guarded when on, because a rebuild re-hashes the archive and for a
+   * remote source re-downloads it.
    */
   autoRebuild: {
     enabled: false,
@@ -697,28 +301,9 @@ const DEFAULTS = {
     stabilitySeconds: 300,
   },
   /**
-   * Seeding limits: how long an archive stays before it is let go.
-   *
-   * The same shape a torrent client uses, because it is the same decision.
-   * Either threshold is enough — "share it enough, or hold it long enough" is
-   * a sentence people mean, and requiring both would keep a well-shared
-   * archive for a month it did not need.
-   *
-   *   ratio    stop once uploaded/size reaches this
-   *   minutes  stop after this long seeding a complete copy
-   *   then     'stop' keeps everything and stops offering it
-   *            'remove' forgets the archive but leaves the data
-   *            'delete' removes the data too
-   *
-   * Unset, or `forever: true`, means never. An individual archive can override
-   * this with its own `seeding`, and `seeding: false` on an archive means it
-   * stays whatever the default says — which is the point of a per-archive
-   * override, so a global policy must not quietly undo it.
-   *
-   * Only ever applies to a complete copy. A cache-mode archive holds a few
-   * pieces on purpose and has not been "seeding" in the sense a ratio
-   * measures; expiring one on a timer would delete a working tile cache for
-   * having existed.
+   * How long an archive stays before it is let go: a `ratio`, a number of
+   * `minutes`, and `then` one of 'stop', 'remove' or 'delete'. Either
+   * threshold is enough. See docs/configuration.md — "Seeding limits".
    */
   seeding: {
     ratio: undefined,
@@ -726,47 +311,23 @@ const DEFAULTS = {
     then: 'stop',
   },
   /**
-   * How many times to resume a download that stops before it is finished.
-   *
-   * A planet archive is hours of transfer, and a connection that drops partway
-   * is ordinary rather than exceptional. Each attempt continues from the bytes
-   * already on disk with an HTTP range request, so the cost of a drop is the
-   * retry delay rather than everything transferred so far — provided the
-   * server honours ranges and offers an ETag or Last-Modified to prove the
-   * file has not changed underneath. Where it does not, the download restarts,
-   * because splicing two builds together produces a torrent for bytes that
-   * never existed.
-   */
-  /**
-   * How often to write resume data, in seconds. Zero disables it.
-   *
-   * Resume data is what lets a restart skip re-hashing the store — on an
-   * 800 GB archive, the difference between instant and half an hour. A clean
-   * stop always writes it; this is for the stops that are not clean, where
-   * everything since the last write has to be checked again.
+   * How often to write resume data, in seconds. Zero disables it. A clean stop
+   * always writes it; this is for the stops that are not clean.
    */
   resumeSaveIntervalSeconds: 300,
+  /**
+   * How many times to resume a download that stops before it is finished. See
+   * docs/internals.md — "Resuming a partial download".
+   */
   fetchAttempts: 10,
   /** How long to wait before resuming a download that stopped. */
   fetchRetrySeconds: 5,
   /** How often to check seeding limits, in seconds. Zero disables it. */
   seedingCheckIntervalSeconds: 3600,
   /**
-   * Global speed limits, and a schedule that swaps in a second set.
-   *
-   * Bytes per second, `0` for unlimited — the console shows and takes KiB/s,
-   * the same as qBittorrent's box, and converts. These are limits for the whole
-   * node rather than per archive: the thing being protected is one uplink.
-   *
-   * The schedule exists because the useful version of "slow down" is almost
-   * never about the archive, it is about the hours when somebody else is using
-   * the line. `days` takes `everyday`, `weekdays`, `weekends`, or a list of
-   * weekday numbers with 0 as Sunday. A window whose end is before its start
-   * wraps past midnight, so 22:00–06:00 means overnight rather than nothing.
-   *
-   * Applied live: changing any of this takes effect without a restart, and the
-   * console's toggle overrides the schedule until the next time the window
-   * itself changes.
+   * Global speed limits in bytes per second, `0` for unlimited, and a schedule
+   * that swaps in the alternative set. Applied live. See
+   * docs/configuration.md — "Speed limits".
    */
   speed: {
     uploadLimit: 0,
@@ -785,61 +346,27 @@ const DEFAULTS = {
   /** How often to re-check which speed limits should be in force, in seconds. */
   speedCheckIntervalSeconds: 60,
   /**
-   * Run something when a download finishes.
-   *
-   * This is what closes the loop for a build pipeline: subscribe to a feed of
-   * source data — planet.openstreetmap.org publishes one for the PBF — let the
-   * swarm fetch it, and start the job that turns it into something worth
-   * publishing back.
-   *
-   *   {
-   *     "command": "/work/scripts/torrent_finished.sh",
-   *     "args": ["%N", "%F", "%I"]
-   *   }
-   *
-   * Placeholders match a torrent client's, so an existing script keeps working:
-   * %N name, %L first category, %G all categories, %F content path, %D save path,
-   * %Z size, %C file count, %I infohash.
-   *
-   * Command and arguments are separate rather than one string a shell pulls
-   * apart. Archive names contain spaces and brackets, and every shell-string
-   * hook eventually meets one and does something surprising; an argument vector
-   * means a filename is a filename however it is spelled.
-   *
-   * `onAdded` fires when an archive enters the catalog, `onComplete` when its
-   * data is whole — the same pair a torrent client offers, and they are
-   * different moments: an archive joined in cache mode is added and will never
-   * be complete, while one built here is both at once.
-   *
-   * **Config file only by default.** A token that manages torrents turning
-   * into a token that runs arbitrary commands as the service user is a large
-   * step to take by accident. Set `allowHooksFromApi` to take it deliberately.
+   * `{ command, args }` to run when an archive enters the catalog, and when
+   * its data is whole. Config file only unless `allowHooksFromApi`. See
+   * docs/configuration.md — "Hooks".
    */
   onAdded: undefined,
   onComplete: undefined,
   /**
-   * Whether the console may edit the two hook commands.
-   *
-   * Off, and settable only here. A hook runs a command as the service user, so
-   * an API token that could choose it would no longer be a token that manages
-   * maps — it would be one that runs code. Turning this on is a decision to
-   * accept that, and it has to be made somewhere a token cannot reach.
+   * Whether the console may edit the two hook commands. Settable only here: a
+   * hook runs a command as the service user, so the decision to hand that
+   * power to a token has to be made somewhere a token cannot reach.
    */
   allowHooksFromApi: false,
   /** How often to look for finished downloads, in seconds. */
   onCompleteCheckIntervalSeconds: 60,
   /**
-   * Whether to follow feeds at all.
-   *
-   * The master switch, separate from the per-feed one: turning it off stops
-   * every feed without editing any of them, which is what you want when a
-   * disk is filling or a run has gone wrong.
+   * Whether to follow feeds at all — the master switch, separate from the
+   * per-feed one.
    */
   subscriptionsEnabled: true,
   /** How often to poll subscribed feeds, in seconds. Zero or less is off. */
   subscriptionIntervalSeconds: 900,
-  /** Republish interval for BEP 46 records, in seconds. DHT items expire. */
-  republishIntervalSeconds: 3600,
 };
 
 /**
@@ -850,13 +377,9 @@ const DEFAULTS = {
  * @returns {object} - The merged config.
  */
 function merge(base, override) {
-  // Copied a level at a time rather than spread, because a spread shares every
-  // nested object with the base — which for DEFAULTS means the loaded config's
-  // `libtorrent` *is* `DEFAULTS.libtorrent` whenever the file does not mention
-  // it. Load then writes the resolved save path back into that object, so the
-  // defaults are permanently altered and the next config loaded in the same
-  // process inherits the previous one's paths. One process loads one config,
-  // so this only ever surfaced in tests — but it is a landmine either way.
+  // Copied a level at a time rather than spread, so the result shares no
+  // nested object with DEFAULTS. Load writes the resolved save path back into
+  // `libtorrent`, which would otherwise alter the defaults themselves.
   const out = {};
   for (const [key, value] of Object.entries(base ?? {})) {
     // eslint-disable-next-line security/detect-object-injection -- keys come from DEFAULTS
@@ -941,9 +464,12 @@ export async function loadConfig(configPath) {
     config.publicUrl = process.env.PMTILES_SWARM_PUBLIC_URL;
   }
 
-  // Resolve paths relative to the config file, so a config can be moved as a
-  // unit with the data it points at.
-  const base = configPath ? path.dirname(path.resolve(configPath)) : process.cwd();
+  // Every path resolves against the config file rather than the working
+  // directory, so a config can be moved as a unit with the data it points at —
+  // and so `./data/resume` does not become `/data/resume` under systemd.
+  const base = configPath
+    ? path.dirname(path.resolve(configPath))
+    : process.cwd();
   config.dataDir = path.resolve(base, config.dataDir);
 
   // Folded to one value here rather than at startup, so everything downstream
@@ -963,37 +489,20 @@ export async function loadConfig(configPath) {
     path: path.resolve(base, entry.path),
   }));
 
-  // Every remaining path, resolved the same way as the rest.
-  //
-  // These two were left relative, which means relative to the working
-  // directory rather than to the file they are written in. Started by hand
-  // from the repository those agree, so it never showed; under systemd the
-  // working directory defaults to `/`, so `./data/resume` becomes
-  // `/data/resume` — somewhere the service almost certainly cannot write, for
-  // a reason nothing in the config hints at.
   config.locations = (config.locations ?? []).map((entry) => ({
     ...entry,
     path: entry.path ? path.resolve(base, entry.path) : entry.path,
   }));
   if (config.libtorrent?.resumeDir) {
-    config.libtorrent.resumeDir = path.resolve(base, config.libtorrent.resumeDir);
+    config.libtorrent.resumeDir = path.resolve(
+      base,
+      config.libtorrent.resumeDir,
+    );
   }
 
   return config;
 }
 
-/**
- * Settings that only take effect on restart.
- *
- * Each of these is bound into something long-lived when the process starts — a
- * listening socket, a libtorrent session, a WebTorrent client, a chokidar
- * watcher. Changing the file changes what the next start does; it cannot change
- * what the current one already built.
- *
- * The distinction is worth surfacing rather than hiding. A settings screen that
- * silently accepted a port change and kept serving on the old one would be
- * worse than one that says plainly it needs a restart.
- */
 /**
  * The one save path every engine must use, and whether the config disagreed.
  *
@@ -1020,6 +529,12 @@ export function resolveSavePath(config) {
   };
 }
 
+/**
+ * Settings that only take effect on restart, because each is bound into
+ * something long-lived when the process starts. Reported back to the caller
+ * rather than accepted silently. See docs/configuration.md — "What takes
+ * effect when".
+ */
 export const RESTART_REQUIRED = new Set([
   // The listening sockets.
   'port',
@@ -1042,12 +557,8 @@ export const RESTART_REQUIRED = new Set([
 ]);
 
 /**
- * Settings applied by restarting one subsystem rather than the process.
- *
- * Changing the watched folders means restarting the watchers; changing a hook
- * means restarting the hook runner. Neither has anything to do with the
- * process, and asking someone to stop a node mid-download in order to add a
- * folder is a poor trade. The value names which subsystem to reload.
+ * Settings applied by restarting one subsystem rather than the process. The
+ * value names which subsystem to reload.
  */
 export const RELOADABLE = new Map([
   // Read when something is added rather than held open, so a change applies to
@@ -1072,20 +583,6 @@ export const RELOADABLE = new Map([
 ]);
 
 /**
- * Settings the API refuses to change.
- *
- * Not secrets — these decide what code the service runs. An operator token is
- * meant to manage archives; letting it also choose a command to execute is a
- * different power, since it turns "can publish a map" into "can run anything
- * as the service user", and one worth having to reach the filesystem for.
- *
- * `allowHooksFromApi` lifts it for the two hooks, deliberately from the config
- * file only: the decision to hand that power to a token has to be made
- * somewhere a token cannot reach.
- * @param {object} config - The resolved configuration.
- * @returns {Set<string>} - The keys the API may not write.
- */
-/**
  * Whether an incoming value is the one already in force.
  *
  * Compared by serialised shape rather than by reference, because everything
@@ -1105,6 +602,12 @@ function unchanged(current, incoming) {
   }
 }
 
+/**
+ * Settings the API refuses to change, because they decide what code the
+ * service runs rather than what it serves.
+ * @param {object} config - The resolved configuration.
+ * @returns {Set<string>} - The keys the API may not write.
+ */
 function fileOnlyFor(config) {
   if (config?.allowHooksFromApi) return new Set(['allowHooksFromApi']);
   return new Set(['onAdded', 'onComplete', 'allowHooksFromApi']);
@@ -1138,9 +641,7 @@ export function redactConfig(config) {
   }
 
   // A peer token is a credential like any other: it is what persuades that
-  // peer to publish more than it publishes to the world. It sat in this
-  // response in plain text, which is exactly what the list above exists to
-  // prevent.
+  // peer to publish more than it publishes to the world.
   for (const subscription of copy.subscriptions ?? []) {
     if (subscription?.token) subscription.token = REDACTED;
   }
@@ -1152,10 +653,9 @@ export function redactConfig(config) {
  * Applies updates to the config file and to the running config.
  *
  * The running object is mutated in place because everything holding it holds
- * the same reference — so a change to a per-request setting such as
- * `tiles.sparse` takes effect on the very next request, with no plumbing.
- * Startup-bound settings are written to the file and reported back as needing a
- * restart.
+ * the same reference, so a change to a per-request setting such as
+ * `tiles.sparse` takes effect on the very next request. Startup-bound settings
+ * are written to the file and reported back as needing a restart.
  * @param {object} config - The live configuration object.
  * @param {object} updates - Partial configuration to apply.
  * @param {string} [configPath] - Where to persist. Omitted means memory only.
@@ -1166,17 +666,13 @@ export async function saveConfig(config, updates, configPath) {
   const restartRequired = [];
   const reloaded = [];
 
-  // Everything is checked before anything is applied.
-  //
-  // This used to reject inside the same loop that assigned, so a save
-  // containing one bad key applied every key before it, then threw — leaving
-  // the running node changed and the file on disk not. A watched location
-  // added that way started polling immediately and vanished from the console,
-  // which is a confusing state to be in and an impossible one to debug from
-  // either side.
+  // Everything is checked before anything is applied, so a save containing one
+  // bad key does not leave the running node changed and the file on disk not.
   const entries = Object.entries(updates ?? {});
   const guarded = fileOnlyFor(config);
-  const changing = entries.filter(([key, value]) => !unchanged(config[key], value));
+  const changing = entries.filter(
+    ([key, value]) => !unchanged(config[key], value),
+  );
 
   for (const [key] of changing) {
     if (!(key in DEFAULTS)) {
@@ -1234,7 +730,10 @@ export async function saveConfig(config, updates, configPath) {
   // An empty update still writes: minting a token mutates `config` directly
   // and then asks for it to be persisted, which is the one change that has to
   // survive a restart without anybody copying anything by hand.
-  if (configPath && (applied.length > 0 || Object.keys(updates ?? {}).length === 0)) {
+  if (
+    configPath &&
+    (applied.length > 0 || Object.keys(updates ?? {}).length === 0)
+  ) {
     // Persist the whole resolved config rather than a diff: the file is meant
     // to be readable and hand-editable, and a file of overrides accumulated
     // over time is neither.

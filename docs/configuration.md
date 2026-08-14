@@ -22,17 +22,24 @@ Some settings only take effect on restart. Those are marked **restart**.
 - [Mutable publishing](#mutable-publishing)
 - [Authentication](#authentication)
 - [Statistics](#statistics)
+- [Checking for changed sources](#checking-for-changed-sources)
+- [Downloading](#downloading)
+- [Seeding limits](#seeding-limits)
+- [Speed limits](#speed-limits)
+- [Hooks](#hooks)
+- [What takes effect when](#what-takes-effect-when)
+- [Environment variables](#environment-variables)
 
 ## Listeners
 
-| setting | default | |
-|---|---|---|
-| `port` | `8090` | **restart** |
-| `host` | `'0.0.0.0'` | **restart** |
-| `adminPort` | unset | a separate port for the console and the API. **restart** |
-| `adminHost` | `host` | interface for the admin listener. **restart** |
-| `publicUrl` | unset | public base URL, for absolute links in the feed and TileJSON |
-| `trustProxy` | `false` | trust `X-Forwarded-*` headers |
+| setting      | default     |                                                              |
+| ------------ | ----------- | ------------------------------------------------------------ |
+| `port`       | `8090`      | **restart**                                                  |
+| `host`       | `'0.0.0.0'` | **restart**                                                  |
+| `adminPort`  | unset       | a separate port for the console and the API. **restart**     |
+| `adminHost`  | `host`      | interface for the admin listener. **restart**                |
+| `publicUrl`  | unset       | public base URL, for absolute links in the feed and TileJSON |
+| `trustProxy` | `false`     | trust `X-Forwarded-*` headers                                |
 
 ### Splitting the admin surface off
 
@@ -60,21 +67,21 @@ the question entirely. See [haproxy.md](haproxy.md).
 
 ## Storage
 
-| setting | default | |
-|---|---|---|
-| `dataDir` | `'./data'` | catalog, generated `.torrent` files and keys |
-| `savePath` | unset | where archive data lives |
-| `cacheSavePath` | unset | separate path for cache-mode pieces |
-| `savePathLayout` | `'flat'` | `'flat'` or `'infohash'` |
-| `locations` | `[]` | named places for data to land: `[{ name, path }]` |
-| `incompleteSuffix` | `'.incomplete'` | marker on an archive that is not whole yet |
-| `completionCheckIntervalSeconds` | `15` | how often to look for finished downloads |
-| `torrentDropDir` | unset | copy every created `.torrent` here as well |
+| setting                          | default         |                                                   |
+| -------------------------------- | --------------- | ------------------------------------------------- |
+| `dataDir`                        | `'./data'`      | catalog, generated `.torrent` files and keys      |
+| `savePath`                       | unset           | where archive data lives                          |
+| `cacheSavePath`                  | unset           | separate path for cache-mode pieces               |
+| `savePathLayout`                 | `'flat'`        | `'flat'` or `'infohash'`                          |
+| `locations`                      | `[]`            | named places for data to land: `[{ name, path }]` |
+| `incompleteSuffix`               | `'.incomplete'` | marker on an archive that is not whole yet        |
+| `completionCheckIntervalSeconds` | `15`            | how often to look for finished downloads          |
+| `torrentDropDir`                 | unset           | copy every created `.torrent` here as well        |
 
 ### One save path, not one per engine
 
 This is not a simplification — it is the only arrangement that works. Two engines
-running together are seeding *the same file*: the secondary is handed an archive
+running together are seeding _the same file_: the secondary is handed an archive
 the primary has already finished, and it seeds those exact bytes. Point them at
 different directories and the secondary finds nothing where it was told to look,
 and starts downloading its own copy of something already on the disk.
@@ -124,18 +131,38 @@ fails hash verification.
 
 See [internals.md](internals.md#marking-incomplete-archives).
 
+### `locations`
+
+Named places for archive data to land, as `[{ name, path }]`. A torrent client
+usually hangs the save path off the category; that does not work here, because an
+archive can carry several categories on purpose and two of them naming two disks
+is a question with no right answer. So a location is chosen when something is
+added, and naming them is what makes choosing bearable.
+
+Only new data is placed. An archive records where it was put and keeps it, so
+repointing a location never moves anything that already exists.
+
+See [internals.md](internals.md#named-save-locations).
+
+### `torrentDropDir`
+
+Most clients, qBittorrent included, can watch a folder and add whatever appears in
+it. For the single job of "start seeding this", that is simpler and more robust
+than an API, and it works when the client shares a disk but is not reachable over
+HTTP.
+
 ## Engines
 
-| setting | default | |
-|---|---|---|
-| `engine` | `'webtorrent'` | `'webtorrent'`, `'libtorrent'` or `'qbittorrent'`. **restart** |
-| `secondaryEngines` | `[]` | engines to run alongside the primary, seeding only. **restart** |
-| `secondaryShareIntervalSeconds` | `60` | how often to look for archives safe to share |
-| `secondaryShareTimeoutSeconds` | `3600` | how long a secondary may take to accept one |
-| `maxConnections` | `100` | cap on simultaneous peer connections |
-| `qbittorrent` | | `{ url, username, password }` |
-| `libtorrent` | | `{ savePath, resumeDir, python, script, listen, dht, lsd, upnp, natpmp, uploadLimit, downloadLimit }` |
-| `webtorrent` | | `{ savePath }` |
+| setting                         | default        |                                                                                                       |
+| ------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------- |
+| `engine`                        | `'webtorrent'` | `'webtorrent'`, `'libtorrent'` or `'qbittorrent'`. **restart**                                        |
+| `secondaryEngines`              | `[]`           | engines to run alongside the primary, seeding only. **restart**                                       |
+| `secondaryShareIntervalSeconds` | `60`           | how often to look for archives safe to share                                                          |
+| `secondaryShareTimeoutSeconds`  | `3600`         | how long a secondary may take to accept one                                                           |
+| `maxConnections`                | `100`          | cap on simultaneous peer connections                                                                  |
+| `qbittorrent`                   |                | `{ url, username, password }`                                                                         |
+| `libtorrent`                    |                | `{ savePath, resumeDir, python, script, listen, dht, lsd, upnp, natpmp, uploadLimit, downloadLimit }` |
+| `webtorrent`                    |                | `{ savePath }`                                                                                        |
 
 See [engines.md](engines.md) for what each engine can do.
 
@@ -166,11 +193,11 @@ seeding.
 
 ## Creating torrents
 
-| setting | default | |
-|---|---|---|
-| `pieceLength` | `4194304` | 4 MiB |
-| `torrentFormat` | `'hybrid'` | `'hybrid'`, `'v1'` or `'v2'` |
-| `allowUnknownArchives` | `false` | publish files not recognised as map archives |
+| setting                | default    |                                              |
+| ---------------------- | ---------- | -------------------------------------------- |
+| `pieceLength`          | `4194304`  | 4 MiB                                        |
+| `torrentFormat`        | `'hybrid'` | `'hybrid'`, `'v1'` or `'v2'`                 |
+| `allowUnknownArchives` | `false`    | publish files not recognised as map archives |
 
 ### `pieceLength`
 
@@ -242,12 +269,12 @@ reach it, since the list travels with the torrent.
 
 ## Feeds
 
-| setting | default | |
-|---|---|---|
-| `feedTitle` | unset | title for the RSS feeds |
-| `feedCopyright` | unset | rights statement for the channel |
-| `feedMaxItems` | `50` | most items per feed, newest first. Zero means no limit |
-| `feedCategories` | unset | allow-list of categories to publish at all |
+| setting          | default |                                                        |
+| ---------------- | ------- | ------------------------------------------------------ |
+| `feedTitle`      | unset   | title for the RSS feeds                                |
+| `feedCopyright`  | unset   | rights statement for the channel                       |
+| `feedMaxItems`   | `50`    | most items per feed, newest first. Zero means no limit |
+| `feedCategories` | unset   | allow-list of categories to publish at all             |
 
 Choose `feedMaxItems` against how often subscribers poll, not how tidy the feed
 looks: a feed holding a single item is only safe if everyone polls more often than
@@ -259,8 +286,8 @@ catalogue is meant to be shared. Set to an allow-list, only archives in those
 categories appear in any feed — `/feed.xml` is filtered to them, and
 `/feed/<other>.xml` reports 404 rather than confirming the category exists.
 
-This is the difference between selective *subscription* and selective
-*publication*. A peer choosing to follow `/feed/basemaps.xml` withholds nothing:
+This is the difference between selective _subscription_ and selective
+_publication_. A peer choosing to follow `/feed/basemaps.xml` withholds nothing:
 they could read `/feed.xml` instead, or guess. Deciding here is what actually
 keeps an archive off the wire — which matters when peering with someone else's
 node, since everything you publish is something they may mirror and serve under
@@ -271,14 +298,14 @@ their own name. Archives with no category are excluded whenever this is set.
 `watch` is a list of `{ path, category, match, webSeedBase, publishDir, sparse,
 latestLink, latestLinkType, keep, keepDays }`.
 
-| field | |
-|---|---|
-| `publishDir` | moves the archive into the directory a web server serves, before the torrent is built |
-| `webSeedBase` | the URL that directory is reachable at |
-| `match` | a glob tested against the filename |
-| `latestLink` | a stable second name for the newest build |
-| `latestLinkType` | `'symbolic'` (default) or `'hard'` |
-| `keep` / `keepDays` | retire what the folder has outgrown |
+| field               |                                                                                       |
+| ------------------- | ------------------------------------------------------------------------------------- |
+| `publishDir`        | moves the archive into the directory a web server serves, before the torrent is built |
+| `webSeedBase`       | the URL that directory is reachable at                                                |
+| `match`             | a glob tested against the filename                                                    |
+| `latestLink`        | a stable second name for the newest build                                             |
+| `latestLinkType`    | `'symbolic'` (default) or `'hard'`                                                    |
+| `keep` / `keepDays` | retire what the folder has outgrown                                                   |
 
 `publishDir` and `webSeedBase` together give every imported archive a working web
 seed, which is what makes a brand-new archive usable before any peer has a copy of
@@ -286,7 +313,7 @@ it, and what turns a cold tile read from tens of seconds into well under one.
 `webSeedBase` on its own assumes the watched folder is already the web root, since
 nothing is moved.
 
-`latestLinkType: 'hard'` is for a name something reads the archive *through*. A
+`latestLinkType: 'hard'` is for a name something reads the archive _through_. A
 hard link still resolves after the build it names is retired, where a symlink is
 left pointing at nothing. The other kind stays the fallback in both directions,
 since Windows refuses symlinks without elevation and a hard link cannot cross a
@@ -296,7 +323,11 @@ filesystem.
 archives:
 
 ```json
-{ "path": "/out/pmtiles", "match": "monthly-*.pmtiles", "categories": ["monthly"] }
+{
+  "path": "/out/pmtiles",
+  "match": "monthly-*.pmtiles",
+  "categories": ["monthly"]
+}
 ```
 
 Without it every entry imports every archive, once under each category.
@@ -312,13 +343,13 @@ remove the newest build however old it gets. See
 `sources` is a list of upstreams that publish a new archive on a schedule. Each
 entry gives either a `url` template or an `index` directory:
 
-| field | |
-|---|---|
-| `url` | a template with the date in it — `{YYYYMMDD}`, `{YYYY-MM-DD}`, `{YYYY}`, `{MM}`, `{DD}` — expanded and probed |
-| `index` | a directory URL, listed and filtered |
-| `newest` | how many listed files an index source will consider. Defaults to 1 |
-| `at` | a time of day in UTC, or a list of them — `"03:30"` |
-| `everyHours` | an interval instead |
+| field        |                                                                                                               |
+| ------------ | ------------------------------------------------------------------------------------------------------------- |
+| `url`        | a template with the date in it — `{YYYYMMDD}`, `{YYYY-MM-DD}`, `{YYYY}`, `{MM}`, `{DD}` — expanded and probed |
+| `index`      | a directory URL, listed and filtered                                                                          |
+| `newest`     | how many listed files an index source will consider. Defaults to 1                                            |
+| `at`         | a time of day in UTC, or a list of them — `"03:30"`                                                           |
+| `everyHours` | an interval instead                                                                                           |
 
 Prefer a template where the naming is predictable: it asks a direct question,
 gets a direct answer, and needs the upstream to publish no listing at all.
@@ -340,14 +371,14 @@ See [internals.md](internals.md#scheduled-sources).
 `subscriptions` is a list of `{ url, mode, category, filter, token, protocol,
 prune, keep, keepDays }`.
 
-| field | |
-|---|---|
-| `url` | an RSS feed, or a peer's `/api/catalog` |
-| `protocol` | `'rss'` or `'api'`; inferred from the URL when omitted |
-| `mode` | `'mirror'` (whole archive) or `'cache'` (only what is read) |
-| `token` | presented to the peer, which may then publish more than it does to the world |
-| `filter` | regex on the archive name |
-| `prune` | drop archives this peer no longer lists |
+| field      |                                                                              |
+| ---------- | ---------------------------------------------------------------------------- |
+| `url`      | an RSS feed, or a peer's `/api/catalog`                                      |
+| `protocol` | `'rss'` or `'api'`; inferred from the URL when omitted                       |
+| `mode`     | `'mirror'` (whole archive) or `'cache'` (only what is read)                  |
+| `token`    | presented to the peer, which may then publish more than it does to the world |
+| `filter`   | regex on the archive name                                                    |
+| `prune`    | drop archives this peer no longer lists                                      |
 
 RSS says "here is what is new" and is bounded by the publisher's `feedMaxItems`,
 so a node offline long enough misses things permanently. The API says "here is
@@ -366,17 +397,17 @@ through the swarm, pulling only the pieces a requested tile lives in — which i
 what lets a machine with 10 GiB free serve a 700 GiB planet. See
 [serving-tiles.md](serving-tiles.md).
 
-| setting | default | |
-|---|---|---|
-| `tiles.maxOpenArchives` | `16` | each holds a descriptor or a torrent reader plus its piece cache |
-| `tiles.directoryCacheEntries` | `200` | header and directory cache, shared across archives |
-| `tiles.pieceCacheBytes` | unset | sized from the torrent's piece length when unset |
-| `tiles.hydrateIdleMs` | unset | idle time before background hydration resumes |
-| `tiles.pieceTimeoutMs` | `120000` | how long to wait for one piece |
-| `tiles.readyTimeoutMs` | `60000` | how long to wait for torrent metadata |
-| `tiles.metadataTimeoutMs` | `120000` | how long a background metadata read may take |
-| `tiles.headerTimeoutMs` | `12000` | how long a TileJSON request waits for a header |
-| `tiles.sparse` | unset | `true` for 404 on a missing tile, `false` for 204 |
+| setting                       | default  |                                                                  |
+| ----------------------------- | -------- | ---------------------------------------------------------------- |
+| `tiles.maxOpenArchives`       | `16`     | each holds a descriptor or a torrent reader plus its piece cache |
+| `tiles.directoryCacheEntries` | `200`    | header and directory cache, shared across archives               |
+| `tiles.pieceCacheBytes`       | unset    | sized from the torrent's piece length when unset                 |
+| `tiles.hydrateIdleMs`         | unset    | idle time before background hydration resumes                    |
+| `tiles.pieceTimeoutMs`        | `120000` | how long to wait for one piece                                   |
+| `tiles.readyTimeoutMs`        | `60000`  | how long to wait for torrent metadata                            |
+| `tiles.metadataTimeoutMs`     | `120000` | how long a background metadata read may take                     |
+| `tiles.headerTimeoutMs`       | `12000`  | how long a TileJSON request waits for a header                   |
+| `tiles.sparse`                | unset    | `true` for 404 on a missing tile, `false` for 204                |
 
 Leave `pieceCacheBytes` unset unless you have a reason. A fixed budget is a trap
 with 16 MiB pieces, since 64 MiB holds only four.
@@ -394,13 +425,13 @@ rule and same name as tileserver-gl.
 
 ### Prewarming
 
-| setting | default | |
-|---|---|---|
-| `tiles.prewarm` | `true` | read the head of a newly joined archive without waiting to be asked |
-| `tiles.prewarmIntervalSeconds` | `30` | |
-| `tiles.prewarmInitialDelaySeconds` | `10` | let the node settle before the first attempt |
-| `tiles.prewarmBackoffSeconds` | `15` | first wait after an attempt that did not finish |
-| `tiles.prewarmMaxBackoffSeconds` | `600` | where the doubling stops |
+| setting                            | default |                                                                     |
+| ---------------------------------- | ------- | ------------------------------------------------------------------- |
+| `tiles.prewarm`                    | `true`  | read the head of a newly joined archive without waiting to be asked |
+| `tiles.prewarmIntervalSeconds`     | `30`    |                                                                     |
+| `tiles.prewarmInitialDelaySeconds` | `10`    | let the node settle before the first attempt                        |
+| `tiles.prewarmBackoffSeconds`      | `15`    | first wait after an attempt that did not finish                     |
+| `tiles.prewarmMaxBackoffSeconds`   | `600`   | where the doubling stops                                            |
 
 Left to the first request, an archive being mirrored is unservable for hours while
 the bytes that would make it servable sit at position zero. Off makes sense on a
@@ -417,13 +448,13 @@ achieves nothing but log lines.
 
 Announcing the current build of each category over the DHT (BEP 46).
 
-| setting | default | |
-|---|---|---|
-| `mutable.publish` | `false` | off unless a key is configured and this is set |
-| `mutable.keyPath` | unset | PEM file holding the ed25519 keypair |
-| `mutable.republishSeconds` | `1800` | |
-| `mutable.dhtPort` | `0` | `0` takes an ephemeral port |
-| `mutable.statePath` | `dataDir/dht-nodes.json` | where to remember the DHT routing table |
+| setting                    | default                  |                                                |
+| -------------------------- | ------------------------ | ---------------------------------------------- |
+| `mutable.publish`          | `false`                  | off unless a key is configured and this is set |
+| `mutable.keyPath`          | unset                    | PEM file holding the ed25519 keypair           |
+| `mutable.republishSeconds` | `1800`                   |                                                |
+| `mutable.dhtPort`          | `0`                      | `0` takes an ephemeral port                    |
+| `mutable.statePath`        | `dataDir/dht-nodes.json` | where to remember the DHT routing table        |
 
 **Only the node that builds needs this.** Serving nodes carry the public half on
 the catalog entry and hand it out in the TileJSON. Two nodes publishing under one
@@ -453,15 +484,15 @@ Tiles, TileJSON and the feed are always public — serving them is the point.
 Everything under `/api/` can create torrents, move files, delete data and rewrite
 this configuration, so it is gated whenever anything here is set.
 
-| setting | default | |
-|---|---|---|
-| `auth.tokens` | `[]` | named tokens, each with a role |
-| `auth.apiKey` | unset | a bearer token, for scripts and sibling nodes |
-| `auth.username` | `'admin'` | |
-| `auth.password` | unset | plaintext; keep the config file readable only by its owner |
-| `auth.passwordHash` | unset | a `scrypt$salt$hash` string, preferred over `password` |
-| `auth.sessionTtlSeconds` | `43200` | 12 hours |
-| `allowUnauthenticated` | `false` | permit a reachable listener with no authentication |
+| setting                  | default   |                                                            |
+| ------------------------ | --------- | ---------------------------------------------------------- |
+| `auth.tokens`            | `[]`      | named tokens, each with a role                             |
+| `auth.apiKey`            | unset     | a bearer token, for scripts and sibling nodes              |
+| `auth.username`          | `'admin'` |                                                            |
+| `auth.password`          | unset     | plaintext; keep the config file readable only by its owner |
+| `auth.passwordHash`      | unset     | a `scrypt$salt$hash` string, preferred over `password`     |
+| `auth.sessionTtlSeconds` | `43200`   | 12 hours                                                   |
+| `allowUnauthenticated`   | `false`   | permit a reachable listener with no authentication         |
 
 Setting a password through `PATCH /api/config` stores the hash rather than the
 plaintext.
@@ -511,3 +542,174 @@ before enabling it for `http` sources.
 
 A changed source does not invalidate the existing torrent. See
 [internals.md](internals.md#rebuilding-produces-a-new-torrent).
+
+## Downloading
+
+| setting                     | default |                                                        |
+| --------------------------- | ------- | ------------------------------------------------------ |
+| `fetchAttempts`             | `10`    | how many times to resume a download that stopped early |
+| `fetchRetrySeconds`         | `5`     | how long to wait before resuming                       |
+| `resumeSaveIntervalSeconds` | `300`   | how often to write resume data. `0` disables it        |
+
+A planet archive is hours of transfer, and a connection that drops partway is
+ordinary rather than exceptional. Each attempt continues from the bytes already on
+disk with an HTTP range request, so the cost of a drop is the retry delay rather
+than everything transferred so far — provided the server honours ranges and offers
+an ETag or Last-Modified to prove the file has not changed underneath. Where it
+does not, the download restarts, because splicing two builds together produces a
+torrent for bytes that never existed.
+
+Resume data is what lets a restart skip re-hashing the store — on an 800 GB
+archive, the difference between instant and half an hour. A clean stop always
+writes it; `resumeSaveIntervalSeconds` is for the stops that are not clean, where
+everything since the last write has to be checked again.
+
+See [internals.md](internals.md#resuming-a-partial-download).
+
+## Seeding limits
+
+How long an archive stays before it is let go — the same shape a torrent client
+uses, because it is the same decision.
+
+| setting                       | default  |                                              |
+| ----------------------------- | -------- | -------------------------------------------- |
+| `seeding.ratio`               | unset    | stop once uploaded/size reaches this         |
+| `seeding.minutes`             | unset    | stop after this long seeding a complete copy |
+| `seeding.then`                | `'stop'` | `'stop'`, `'remove'` or `'delete'`           |
+| `seedingCheckIntervalSeconds` | `3600`   | how often to check. `0` disables it          |
+
+- `'stop'` keeps everything and stops offering it
+- `'remove'` forgets the archive but leaves the data
+- `'delete'` removes the data too
+
+Either threshold is enough. "Share it enough, or hold it long enough" is a
+sentence people mean, and requiring both would keep a well-shared archive for a
+month it did not need.
+
+Unset, or `forever: true`, means never. An individual archive can override this
+with its own `seeding`, and `seeding: false` on an archive means it stays whatever
+the default says — which is the point of a per-archive override, so a global
+policy must not quietly undo it.
+
+Only ever applies to a complete copy. A cache-mode archive holds a few pieces on
+purpose and has not been "seeding" in the sense a ratio measures; expiring one on
+a timer would delete a working tile cache for having existed.
+
+The clock starts when a complete copy is first seen, not when the archive was
+added — a long download must not count as time served.
+
+## Speed limits
+
+| setting                     | default                                |                                         |
+| --------------------------- | -------------------------------------- | --------------------------------------- |
+| `speed.uploadLimit`         | `0`                                    | bytes per second, `0` for unlimited     |
+| `speed.downloadLimit`       | `0`                                    |                                         |
+| `speed.alternative`         | `{ uploadLimit: 0, downloadLimit: 0 }` | the second set                          |
+| `speed.schedule.enabled`    | `false`                                |                                         |
+| `speed.schedule.from`       | `'11:00'`                              |                                         |
+| `speed.schedule.to`         | `'22:00'`                              |                                         |
+| `speed.schedule.days`       | `'weekdays'`                           |                                         |
+| `speedCheckIntervalSeconds` | `60`                                   | how often to re-check which set applies |
+
+The console shows and takes KiB/s, the same as qBittorrent's box, and converts.
+These are limits for the whole node rather than per archive: the thing being
+protected is one uplink.
+
+The schedule exists because the useful version of "slow down" is almost never
+about the archive, it is about the hours when somebody else is using the line.
+`days` takes `everyday`, `weekdays`, `weekends`, or a list of weekday numbers with
+`0` as Sunday. A window whose end is before its start wraps past midnight, so
+22:00–06:00 means overnight rather than nothing.
+
+Applied live: changing any of this takes effect without a restart, and the
+console's toggle overrides the schedule until the next time the window itself
+changes.
+
+## Hooks
+
+Run something when an archive is added or finishes downloading.
+
+| setting                          | default |                                                             |
+| -------------------------------- | ------- | ----------------------------------------------------------- |
+| `onAdded`                        | unset   | `{ command, args }`, run when an archive enters the catalog |
+| `onComplete`                     | unset   | `{ command, args }`, run when its data is whole             |
+| `onCompleteCheckIntervalSeconds` | `60`    | how often to look for finished downloads                    |
+| `allowHooksFromApi`              | `false` | whether the console may edit the two commands               |
+
+This is what closes the loop for a build pipeline: subscribe to a feed of source
+data — planet.openstreetmap.org publishes one for the PBF — let the swarm fetch
+it, and start the job that turns it into something worth publishing back.
+
+```json
+{
+  "command": "/work/scripts/torrent_finished.sh",
+  "args": ["%N", "%F", "%I"]
+}
+```
+
+Placeholders match a torrent client's, so an existing script keeps working: `%N`
+name, `%L` first category, `%G` all categories, `%F` content path, `%D` save path,
+`%Z` size, `%C` file count, `%I` infohash.
+
+Command and arguments are separate rather than one string a shell pulls apart.
+Archive names contain spaces and brackets, and every shell-string hook eventually
+meets one and does something surprising; an argument vector means a filename is a
+filename however it is spelled.
+
+`onAdded` and `onComplete` are different moments — an archive joined in cache mode
+is added and will never be complete, while one built here is both at once.
+
+**Config file only by default.** A hook runs a command as the service user, so a
+token that could choose it would no longer be a token that manages maps — it would
+be one that runs code. `allowHooksFromApi` lifts that, and is itself settable only
+in the config file: the decision to hand that power to a token has to be made
+somewhere a token cannot reach.
+
+## What takes effect when
+
+Most settings apply the moment they are saved. Two groups do not.
+
+**Restart required.** `port`, `host`, `adminPort`, `adminHost`, `savePath`,
+`dataDir`, `engine`, `secondaryEngines`, `secondaryShareIntervalSeconds`,
+`qbittorrent`, `webtorrent`, `libtorrent`, `maxConnections`,
+`allowUnauthenticated`.
+
+Each of these is bound into something long-lived when the process starts — a
+listening socket, a libtorrent session, a WebTorrent client, a chokidar watcher.
+Changing the file changes what the next start does; it cannot change what the
+current one already built. The API says so rather than accepting the change
+silently and going on serving on the old port.
+
+**One subsystem restarts, not the process.** `watch`, `sources`,
+`sourceCheckIntervalHours`, `subscriptions`, `subscriptionIntervalSeconds`,
+`subscriptionsEnabled`, `seeding`, `speed`, `speedCheckIntervalSeconds`,
+`incompleteSuffix`, `completionCheckIntervalSeconds`, and the hooks.
+
+Changing the watched folders restarts the watchers; changing a hook restarts the
+hook runner. Neither has anything to do with the process, and asking someone to
+stop a node mid-download in order to add a folder is a poor trade.
+
+`locations` is in neither group: it is read when something is added rather than
+held open, so a change applies to the next add with nothing to restart.
+
+## Environment variables
+
+For containerised deployments, where a few deployment-specific settings are easier
+to inject than to template into a file. Each overrides whatever the config file
+says.
+
+| variable                     | setting                |
+| ---------------------------- | ---------------------- |
+| `PMTILES_SWARM_PORT`         | `port`                 |
+| `PMTILES_SWARM_DATA_DIR`     | `dataDir`              |
+| `PMTILES_SWARM_ENGINE`       | `engine`               |
+| `PMTILES_SWARM_QBT_URL`      | `qbittorrent.url`      |
+| `PMTILES_SWARM_QBT_USERNAME` | `qbittorrent.username` |
+| `PMTILES_SWARM_QBT_PASSWORD` | `qbittorrent.password` |
+| `PMTILES_SWARM_PUBLIC_URL`   | `publicUrl`            |
+
+Relative paths in the config file resolve against the file's own directory rather
+than the working directory, so a config can be moved as a unit with the data it
+points at. Under systemd the working directory defaults to `/`, which is what
+makes the distinction matter: `./data/resume` would otherwise become
+`/data/resume`.
