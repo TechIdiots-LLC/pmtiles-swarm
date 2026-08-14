@@ -35,10 +35,10 @@ that could never succeed.
 A tile the archive does not hold answers **404 for raster and 204 for vector**,
 and the difference is not cosmetic:
 
-| Status | What MapLibre does |
-| --- | --- |
-| `404` | Treats the tile as absent and **overzooms the parent** |
-| `204` | Treats it as empty but present, and draws nothing |
+| Status | What MapLibre does                                     |
+| ------ | ------------------------------------------------------ |
+| `404`  | Treats the tile as absent and **overzooms the parent** |
+| `204`  | Treats it as empty but present, and draws nothing      |
 
 A sparse raster-dem — Mapterhorn, or any terrain built only where there is land
 — renders as holes if answered 204, because that stops the fallback the dataset
@@ -123,10 +123,10 @@ This is the part that makes serving tiles from a torrent client worth doing at
 all. The endpoint behaves the same either way, but underneath there are two very
 different paths:
 
-| This node | Reads from | Cost |
-| --- | --- | --- |
-| Holds a complete copy | The local file, directly | Disk, no swarm involvement |
-| In cache mode | The swarm, one piece at a time | Only the pieces tiles are actually in |
+| This node             | Reads from                     | Cost                                  |
+| --------------------- | ------------------------------ | ------------------------------------- |
+| Holds a complete copy | The local file, directly       | Disk, no swarm involvement            |
+| In cache mode         | The swarm, one piece at a time | Only the pieces tiles are actually in |
 
 A cache-mode node holds almost none of a 700 GiB planet archive but can still
 answer for any tile in it. The first request for a cold area pulls the pieces
@@ -144,11 +144,11 @@ one piece in already looks complete by size.
 
 Cache-mode reads need piece-level control, which not every engine has:
 
-| Engine | Complete copy | Cache mode |
-| --- | --- | --- |
-| libtorrent | yes | yes — piece deadlines and per-piece priorities |
-| webtorrent | yes | yes — shares the seeding client |
-| qBittorrent | yes | **no** |
+| Engine      | Complete copy | Cache mode                                     |
+| ----------- | ------------- | ---------------------------------------------- |
+| libtorrent  | yes           | yes — piece deadlines and per-piece priorities |
+| webtorrent  | yes           | yes — shares the seeding client                |
+| qBittorrent | yes           | **no**                                         |
 
 qBittorrent's WebUI has per-file priorities but nothing per piece and no way to
 read one back, so there is no honest way to serve a tile from an archive it holds
@@ -162,7 +162,7 @@ libtorrent, one sidecar process.
 
 ## Carrying the magnet in the URL fragment
 
-The `torrent` block below solves the problem *after* the TileJSON has been
+The `torrent` block below solves the problem _after_ the TileJSON has been
 fetched. It does not solve the one before it: a torrent-aware client that cannot
 reach this server has nothing to work with, so the swarm — the part that does
 not depend on any server — is unreachable precisely when the server is down.
@@ -181,11 +181,11 @@ The fix is to put the magnet in the URL **fragment**:
 A fragment is never sent in an HTTP request, so the same string works
 everywhere:
 
-| Client | What happens |
-| --- | --- |
-| maplibre-gl-js, Leaflet, anything | fetches the TileJSON, ignores the fragment |
-| maplibre-native without a plugin | the same |
-| torrent-aware | reads the magnet **before any network call**, and still has it if the fetch fails |
+| Client                            | What happens                                                                      |
+| --------------------------------- | --------------------------------------------------------------------------------- |
+| maplibre-gl-js, Leaflet, anything | fetches the TileJSON, ignores the fragment                                        |
+| maplibre-native without a plugin  | the same                                                                          |
+| torrent-aware                     | reads the magnet **before any network call**, and still has it if the fetch fails |
 
 The console's **Copy TileJSON URL + magnet** button produces exactly this.
 
@@ -247,7 +247,9 @@ chmod 600 /etc/pmtiles-swarm/publisher.pem
 ```
 
 ```json
-{ "mutable": { "publish": true, "keyPath": "/etc/pmtiles-swarm/publisher.pem" } }
+{
+  "mutable": { "publish": true, "keyPath": "/etc/pmtiles-swarm/publisher.pem" }
+}
 ```
 
 The magnet then appears in every TileJSON as `torrent.mutable.magnet`, and the
@@ -318,15 +320,15 @@ canvas for the 90 to 240 seconds a cold magnet can take to resolve metadata.
 ### The `mutable` sub-block
 
 Present only when a publisher is announcing this archive's category over the
-DHT. It is the difference between a document describing *this build* and one
-describing *the current build*:
+DHT. It is the difference between a document describing _this build_ and one
+describing _the current build_:
 
-| | |
-| --- | --- |
+|             |                                                                                |
+| ----------- | ------------------------------------------------------------------------------ |
 | `publicKey` | The identity to resolve against. Public — there is nothing secret in the block |
-| `salt` | The category, so one key can address several |
-| `seq` | The sequence of the record this document was generated beside |
-| `magnet` | Assembled from the above, ready to paste into a style's URL fragment |
+| `salt`      | The category, so one key can address several                                   |
+| `seq`       | The sequence of the record this document was generated beside                  |
+| `magnet`    | Assembled from the above, ready to paste into a style's URL fragment           |
 
 `magnet` is built rather than left to the consumer because every node can build
 it — it contains only the public half — so a fleet behind a balancer hands out
@@ -380,15 +382,15 @@ GET /archives/<infohash>/ready
 
 A different question, and worth keeping apart from the one above. `/health`
 decides whether a node should be sent traffic at all; this says whether a
-newly published archive has become servable *here* — which is what you want
+newly published archive has become servable _here_ — which is what you want
 after a build lands and before pointing anything at it.
 
-| | |
-| --- | --- |
-| **200** | Ready. Its header has been read, and a vector archive has its layers |
-| **503** | Not yet — ask again. The body says which half is missing |
+|         |                                                                                                                    |
+| ------- | ------------------------------------------------------------------------------------------------------------------ |
+| **200** | Ready. Its header has been read, and a vector archive has its layers                                               |
+| **503** | Not yet — ask again. The body says which half is missing                                                           |
 | **415** | Never. MBTiles is distributed here but cannot be read a byte range at a time, so waiting would be waiting for ever |
-| **404** | Not on this node |
+| **404** | Not on this node                                                                                                   |
 
 The codes differ because the responses differ: one is "poll me", one is "stop
 polling", and a script that treats them alike either gives up too early or
@@ -413,7 +415,7 @@ done
 `curl -f` fails on 503 and on 415 alike, so treat 415 separately if an MBTiles
 archive could ever reach that loop — otherwise it never ends.
 
-An archive this node holds *completely* can still be read from disk with the
+An archive this node holds _completely_ can still be read from disk with the
 engine down, so 503 is a statement about the node rather than about every
 request it could answer. That is the right way round for a balancer with
 somewhere else to send the traffic.
@@ -455,12 +457,12 @@ format.
 Four different things get called a cache here, and only three of them are
 bounded:
 
-| Cache | Bounded by | Eviction |
-| --- | --- | --- |
-| Pieces held in memory | `tiles.pieceCacheBytes` | Least recently used |
-| Headers and directories | `tiles.directoryCacheEntries` | Least recently used |
-| Open archives | `tiles.maxOpenArchives` | Least recently used |
-| **Pieces written to disk** | **nothing** | **none** |
+| Cache                      | Bounded by                    | Eviction            |
+| -------------------------- | ----------------------------- | ------------------- |
+| Pieces held in memory      | `tiles.pieceCacheBytes`       | Least recently used |
+| Headers and directories    | `tiles.directoryCacheEntries` | Least recently used |
+| Open archives              | `tiles.maxOpenArchives`       | Least recently used |
+| **Pieces written to disk** | **nothing**                   | **none**            |
 
 The first three do what you would expect: hit the limit, the oldest goes. The
 fourth is the one that actually grows. Every piece fetched to answer a tile is
@@ -611,7 +613,7 @@ preview still works.
 
 A seeding limit can `remove` or `delete` an archive that a style is pointed at.
 The **Ratio** and **Expires** columns exist so that is visible in advance rather
-than discovered by a map going blank; see *Seeding limits* in the README. A
+than discovered by a map going blank; see _Seeding limits_ in the README. A
 cache-mode archive never expires, and an individual archive can be told to seed
 forever from its detail panel.
 

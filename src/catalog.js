@@ -42,9 +42,7 @@ import path from 'node:path';
 export function normalizeCategories(source) {
   const raw = [
     ...(Array.isArray(source?.categories) ? source.categories : []),
-    ...(Array.isArray(source?.category)
-      ? source.category
-      : [source?.category]),
+    ...(Array.isArray(source?.category) ? source.category : [source?.category]),
   ];
   const clean = raw
     .filter((value) => typeof value === 'string')

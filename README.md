@@ -84,10 +84,10 @@ join the swarm directly — one URL serves both. See
 
 The distinction is the point of the project.
 
-| Mode | Disk cost | What it is for |
-| --- | --- | --- |
+| Mode     | Disk cost         | What it is for                                            |
+| -------- | ----------------- | --------------------------------------------------------- |
 | `mirror` | the whole archive | Becoming a full seeder and adding redundancy to the swarm |
-| `cache` | only what is read | Serving tiles from a 700 GiB archive on a small disk |
+| `cache`  | only what is read | Serving tiles from a 700 GiB archive on a small disk      |
 
 Cache mode joins the swarm without downloading anything up front. A tile server reads byte ranges
 on demand through [`pmtiles-torrent`](https://github.com/TechIdiots-LLC/pmtiles-torrent), and the node still
@@ -133,7 +133,9 @@ receive the public half on the catalog entry and hand it out in the TileJSON, wh
 serving tier can be compromised without anyone being able to publish.
 
 ```json
-{ "mutable": { "publish": true, "keyPath": "/etc/pmtiles-swarm/publisher.pem" } }
+{
+  "mutable": { "publish": true, "keyPath": "/etc/pmtiles-swarm/publisher.pem" }
+}
 ```
 
 The routing table is remembered between runs (`dht-nodes.json` in the data directory), which
@@ -208,8 +210,16 @@ merely guarded. See [Two ports](#two-ports).
     }
   ],
   "subscriptions": [
-    { "url": "https://other.example.org/feed.xml", "mode": "cache", "filter": "terrain" },
-    { "url": "https://internal.example.org/api/catalog", "mode": "mirror", "token": "…" }
+    {
+      "url": "https://other.example.org/feed.xml",
+      "mode": "cache",
+      "filter": "terrain"
+    },
+    {
+      "url": "https://internal.example.org/api/catalog",
+      "mode": "mirror",
+      "token": "…"
+    }
   ]
 }
 ```
@@ -250,7 +260,7 @@ data/torrents-data/7fae2931a9269684a7d4ed6e5fdd7d0014e6bcd1/planet.pmtiles
 
 It works from a bare magnet, since the infohash is the one thing a magnet always carries. Flat
 stays the default: it is what makes dropping a finished archive into the save path before adding
-its torrent work, and it keeps a served filename readable. Archives *created* from a local file
+its torrent work, and it keeps a served filename readable. Archives _created_ from a local file
 are unaffected either way — they keep the file they were made from — and web seed URLs are built
 from the published location rather than the save path, so they do not change shape.
 
@@ -293,16 +303,17 @@ Three ways in, all editable from the Settings screen:
   A `{...}` group is read as a date pattern — runs of Y, M and D with separators between them — so
   it spells whatever the upstream spells. Run length decides padding, and case is ignored:
 
-  | | | | |
-  |---|---|---|---|
-  | `{YYYYMMDD}` → `20260807` | `{YYYY-MM-DD}` → `2026-08-07` | `{DD.MM.YYYY}` → `07.08.2026` | `{M}-{D}-{YY}` → `8-7-26` |
-  | `{YYYY}` → `2026` | `{YY}` → `26` | `{MM}` → `08` · `{M}` → `8` | `{DD}` → `07` · `{D}` → `7` |
+  |                           |                               |                               |                             |
+  | ------------------------- | ----------------------------- | ----------------------------- | --------------------------- |
+  | `{YYYYMMDD}` → `20260807` | `{YYYY-MM-DD}` → `2026-08-07` | `{DD.MM.YYYY}` → `07.08.2026` | `{M}-{D}-{YY}` → `8-7-26`   |
+  | `{YYYY}` → `2026`         | `{YY}` → `26`                 | `{MM}` → `08` · `{M}` → `8`   | `{DD}` → `07` · `{D}` → `7` |
 
   A group that is not a date pattern is left exactly as found, so a URL containing `{id}` is not
   quietly rewritten.
+
 - **A directory** (`sources[].index`) — for an upstream whose naming is not predictable. The
   listing is read (HTML autoindex or an S3 `ListBucketResult`), filtered, and the newest match
-  taken. Only links *underneath* the index URL are considered, since a listing is a document from
+  taken. Only links _underneath_ the index URL are considered, since a listing is a document from
   somewhere else and following an off-site link out of one would let that page decide what this
   node downloads and republishes.
 
@@ -321,7 +332,7 @@ For anything finer than an hour, `everyMinutes` — a location a build pipeline 
 checking every few minutes, where a planet build published once a day does not. The tick underneath
 is a minute, so that is the floor.
 
-Monitored *folders* need no schedule: they are watched for filesystem events and pick up an archive
+Monitored _folders_ need no schedule: they are watched for filesystem events and pick up an archive
 as it lands, once it has stopped growing for `stabilitySeconds`. The exception is a **network
 share** — SMB and NFS do not deliver change notifications the way a local filesystem does, so a
 watch on one can sit silent forever while files arrive. Set `pollSeconds` (15–60 suits most) to
@@ -332,7 +343,7 @@ terabyte archives every few seconds costs real I/O to learn nothing.
 matters: a directory holding two years of daily planet builds would otherwise read as two years of
 archives to fetch. Raise it only as far as the number of polls you expect to miss.
 
-`POST /api/sources/preview` reports what a source *would* take without taking any of it — the
+`POST /api/sources/preview` reports what a source _would_ take without taking any of it — the
 **Preview** button in Settings — because a directory URL typed slightly wrong is otherwise
 discovered by watching several hundred gigabytes arrive.
 
@@ -369,7 +380,7 @@ was built on: `port`, `host`, `dataDir`, `engine`, the per-engine blocks, `maxCo
 
 How the node comes back depends on how it is run, and `GET /api/restart` reports which it will do
 before anything happens. Under systemd, Docker, pm2 or Kubernetes it simply stops, because exiting
-*is* the restart there and starting a replacement would leave two processes fighting over one port.
+_is_ the restart there and starting a replacement would leave two processes fighting over one port.
 Started by hand from a terminal it starts a replacement itself, because nothing else would.
 
 ### Seeding limits
@@ -393,7 +404,7 @@ holds, how rare each piece is across the swarm, and what each connected peer has
 
 It earns its place here more than in an ordinary client. A **cache-mode** archive holds a scatter
 of pieces on purpose — the ones some tile request happened to touch — so the bar is a picture of
-what has actually been *viewed*, not a progress indicator.
+what has actually been _viewed_, not a progress indicator.
 
 ```
 GET /api/torrents/{infohash}/pieces?buckets=1000&peers=true
@@ -404,20 +415,20 @@ resolution does not survive the trip: a 698 GiB archive at 4 MiB pieces is 178,0
 byte each is a quarter-megabyte per poll for a bar a thousand pixels wide. Three reductions, each
 chosen for the question its bar answers:
 
-| Bar | A column counts when | Why |
-| --- | --- | --- |
-| Downloaded | **every** piece in it is held | Otherwise a 60%-complete archive paints as almost solid |
-| Availability | the **rarest** piece in it | "Can this still be completed" — one piece nobody has is the answer, however well supplied its neighbours |
-| Each peer | **any** piece in it is held | "Where could I get this from" — a peer holding part of a column can still serve it |
+| Bar          | A column counts when          | Why                                                                                                      |
+| ------------ | ----------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Downloaded   | **every** piece in it is held | Otherwise a 60%-complete archive paints as almost solid                                                  |
+| Availability | the **rarest** piece in it    | "Can this still be completed" — one piece nobody has is the answer, however well supplied its neighbours |
+| Each peer    | **any** piece in it is held   | "Where could I get this from" — a peer holding part of a column can still serve it                       |
 
-`distributedCopies` is qBittorrent's *Availability: 1.603* — how many whole copies the swarm holds
+`distributedCopies` is qBittorrent's _Availability: 1.603_ — how many whole copies the swarm holds
 between it. Below 1.0 means no complete copy is reachable from the peers currently connected.
 
 Per-file piece ranges are on `/content` instead, as `firstPiece` and `pieceCount`. They need no
 engine at all: a torrent is one byte stream cut into equal pieces, so a file's offset and length
 already say which it occupies — which means they work for an archive nothing currently holds.
 
-Supported by **libtorrent** and **WebTorrent**. qBittorrent's API reports piece *states* but
+Supported by **libtorrent** and **WebTorrent**. qBittorrent's API reports piece _states_ but
 neither availability nor per-peer maps, so the tab is refused there rather than half-drawn. On
 WebTorrent, availability is counted from connected wires rather than read from a field, so it sees
 a smaller sample than libtorrent's — the same shape over fewer peers.
@@ -434,7 +445,12 @@ is about the hours somebody else is using the line.
     "uploadLimit": 20480000,
     "downloadLimit": 40960000,
     "alternative": { "uploadLimit": 2048000, "downloadLimit": 20480000 },
-    "schedule": { "enabled": true, "from": "11:00", "to": "22:00", "days": "weekdays" }
+    "schedule": {
+      "enabled": true,
+      "from": "11:00",
+      "to": "22:00",
+      "days": "weekdays"
+    }
   }
 }
 ```
@@ -444,7 +460,7 @@ setting one thinks in, and the one qBittorrent's boxes use — and converts.
 
 `days` takes `everyday`, `weekdays`, `weekends`, or a list of weekday numbers with 0 as Sunday. **A
 window whose end is before its start wraps past midnight**, so `22:00`–`06:00` is one overnight
-window rather than an empty one; on those, `days` picks the night the window *opens*, so a weekday
+window rather than an empty one; on those, `days` picks the night the window _opens_, so a weekday
 overnight window covers Friday night into Saturday morning and does not open again on Saturday.
 
 The switch in the console header forces one set or the other, and hands control back to the
@@ -501,10 +517,10 @@ while the only caller is you, and stops being fine the moment another node wants
 
 So there are named tokens, minted in **Settings → Access tokens** or at `POST /api/tokens`:
 
-| role | can |
-|---|---|
-| `peer` | read this node — its catalogue, feeds, tiles and `.torrent` files. What another swarm node needs to follow it, and nothing else. |
-| `admin` | everything the console can do. |
+| role    | can                                                                                                                              |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `peer`  | read this node — its catalogue, feeds, tiles and `.torrent` files. What another swarm node needs to follow it, and nothing else. |
+| `admin` | everything the console can do.                                                                                                   |
 
 One per person or node, so any of them can be revoked without disturbing the rest. A peer token can
 also be narrowed to a list of categories, and then sees exactly those — not even what this node
@@ -594,7 +610,7 @@ directory is a URL that answers with a half-written archive, and every peer that
 hash verification. With the marker, the URL 404s until the exact moment the file is real.
 
 The rename is within one directory, so it is atomic and instant however large the archive is.
-Keeping incomplete files in a *different* directory would mean a completed download had to move,
+Keeping incomplete files in a _different_ directory would mean a completed download had to move,
 which is instant only when both paths share a filesystem and otherwise copies the whole archive.
 `cacheSavePath` remains available for anyone who wants cache-mode pieces on separate disk, but it
 is now a placement choice rather than how completeness is recorded, and it ships unset.
@@ -679,8 +695,16 @@ curl -s -H "authorization: Bearer $KEY" http://172.16.1.49:8091/api/stats | jq
     }
   },
   "recent": [
-    { "at": "…", "ip": "172.16.1.41", "z": 14, "x": 4823, "y": 6155,
-      "status": 200, "bytes": 41221, "ms": 2 }
+    {
+      "at": "…",
+      "ip": "172.16.1.41",
+      "z": 14,
+      "x": 4823,
+      "y": 6155,
+      "status": 200,
+      "bytes": 41221,
+      "ms": 2
+    }
   ]
 }
 ```
@@ -711,51 +735,51 @@ which the endpoint answers 501.
 
 ## API
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/api/status` | Engine health, counts, watched folders, save locations and free space |
-| `GET` | `/api/torrents` | Catalog joined with live swarm state and what is left of each seeding limit |
-| `POST` | `/api/torrents` | Add via `{path}`, `{url}`, `{magnet}`, `{torrentUrl}`, or a raw `.torrent` body |
-| `DELETE` | `/api/torrents/:infoHash` | Remove (`?deleteData=true` to delete data too) |
-| `GET` | `/api/torrents/:infoHash` | One archive, with disk usage and how it is being read |
-| `GET` | `/api/torrents/:infoHash/file`, `/magnet` | Download the `.torrent`, or its magnet URI |
-| `GET` | `/api/torrents/:infoHash/peers`, `/trackers`, `/content` | Per-peer, per-tracker and per-file detail |
-| `GET` | `/api/torrents/:infoHash/pieces` | Which pieces are held, how rare each is, and what peers hold |
-| `PATCH` | `/api/torrents/:infoHash/mode` | Switch between mirror and cache |
-| `PATCH` | `/api/torrents/:infoHash/categories` | Set, add or remove categories |
-| `PATCH` | `/api/torrents/:infoHash/seeding` | Per-archive seeding limit, or "use the global one" |
-| `PATCH` `GET` | `/api/torrents/:infoHash/location` | Move the data; poll the move |
-| `POST` | `/api/torrents/:infoHash/pause`, `/resume` | Stop offering it, without forgetting it |
-| `POST` | `/api/torrents/:infoHash/webseeds` | Add web seeds — does not change the infohash |
-| `POST` | `/api/torrents/:infoHash/warm` | Pre-fetch a region (`GET` for progress, `DELETE` to cancel) |
-| `DELETE` | `/api/torrents/:infoHash/cache` | Reclaim cached pieces, keep the archive |
-| `POST` | `/api/torrents/:infoHash/check` | Has the source changed since the torrent was made? |
-| `POST` | `/api/torrents/:infoHash/rebuild` | Rebuild from the current source (mints a new infohash) |
-| `POST` | `/api/check-origins` | Check every archive with a watchable source |
-| `GET` `DELETE` | `/api/adds` | Downloads still in flight, and cancelling one by URL |
-| `GET` `POST` | `/api/speed` | Which speed limits are in force, and the manual switch between the two sets |
-| `GET` | `/api/categories` | Every category, with the endpoints resolving to its newest build |
-| `POST` | `/api/adopt`, `/api/adopt/candidates` | Take over what an engine or another node holds |
-| `POST` | `/api/sources/preview` | What a watched web location would take, without taking it |
-| `POST` | `/api/subscriptions/preview` | Whether a peer is reachable and what it offers |
-| `POST` | `/api/subscriptions/refresh` | Poll subscribed feeds now |
-| `POST` | `/api/sources/check` | Check scheduled sources now, rather than at the next due time |
-| `POST` | `/api/torrents/:infoHash/hooks/complete` | Run the completion hook again for one archive |
-| `GET` `POST` `DELETE` | `/api/tokens`, `/api/tokens/:id` | Mint, list and revoke access tokens |
-| `GET` `POST` | `/api/restart` | What a restart would do, and doing it |
-| `GET` `DELETE` | `/api/stats` | What this node has served — per-archive counters and the last N requests; `DELETE` clears them |
-| `GET` `PATCH` | `/api/config` | Read and change settings |
-| `POST` | `/api/login`, `/api/logout` | Console sign-in |
-| `GET` | `/api/session` | Who this request is, and whether a credential is needed at all |
-| `GET` | `/api/catalog` | The whole catalogue, for a peer keeping itself in step |
-| `GET` | `/archives/:infoHash/tiles.json` | TileJSON — **public** |
-| `GET` | `/archives/:infoHash/:z/:x/:y.:ext` | One tile — **public** |
-| `GET` | `/health` | 200 when this node can serve, 503 when its engine cannot — **public**, no credential, for a load balancer |
-| `GET` | `/archives/:infoHash/ready` | Whether this node can serve *this* archive yet: 200 ready, 503 not yet, 415 never — **public** |
-| `GET` | `/archives/:infoHash/archive.torrent` | The `.torrent` a torrent-aware client joins with — **public** |
-| `GET` | `/archives/:infoHash/preview` | Map preview for one archive — admin, not public |
-| `GET` | `/latest/:category/tiles.json`, `/:name.torrent`, `/magnet` | The newest build in a category — **public**. The torrent name is yours to choose, so a link can read `planetiler-openmaptiles-latest.torrent`; it redirects to the immutable URL, which names the download after the build it actually is |
-| `GET` | `/feed.xml`, `/feed/:category.xml`, `/latest/:category.xml` | RSS — **public** |
+| Method                | Path                                                        | Purpose                                                                                                                                                                                                                                   |
+| --------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET`                 | `/api/status`                                               | Engine health, counts, watched folders, save locations and free space                                                                                                                                                                     |
+| `GET`                 | `/api/torrents`                                             | Catalog joined with live swarm state and what is left of each seeding limit                                                                                                                                                               |
+| `POST`                | `/api/torrents`                                             | Add via `{path}`, `{url}`, `{magnet}`, `{torrentUrl}`, or a raw `.torrent` body                                                                                                                                                           |
+| `DELETE`              | `/api/torrents/:infoHash`                                   | Remove (`?deleteData=true` to delete data too)                                                                                                                                                                                            |
+| `GET`                 | `/api/torrents/:infoHash`                                   | One archive, with disk usage and how it is being read                                                                                                                                                                                     |
+| `GET`                 | `/api/torrents/:infoHash/file`, `/magnet`                   | Download the `.torrent`, or its magnet URI                                                                                                                                                                                                |
+| `GET`                 | `/api/torrents/:infoHash/peers`, `/trackers`, `/content`    | Per-peer, per-tracker and per-file detail                                                                                                                                                                                                 |
+| `GET`                 | `/api/torrents/:infoHash/pieces`                            | Which pieces are held, how rare each is, and what peers hold                                                                                                                                                                              |
+| `PATCH`               | `/api/torrents/:infoHash/mode`                              | Switch between mirror and cache                                                                                                                                                                                                           |
+| `PATCH`               | `/api/torrents/:infoHash/categories`                        | Set, add or remove categories                                                                                                                                                                                                             |
+| `PATCH`               | `/api/torrents/:infoHash/seeding`                           | Per-archive seeding limit, or "use the global one"                                                                                                                                                                                        |
+| `PATCH` `GET`         | `/api/torrents/:infoHash/location`                          | Move the data; poll the move                                                                                                                                                                                                              |
+| `POST`                | `/api/torrents/:infoHash/pause`, `/resume`                  | Stop offering it, without forgetting it                                                                                                                                                                                                   |
+| `POST`                | `/api/torrents/:infoHash/webseeds`                          | Add web seeds — does not change the infohash                                                                                                                                                                                              |
+| `POST`                | `/api/torrents/:infoHash/warm`                              | Pre-fetch a region (`GET` for progress, `DELETE` to cancel)                                                                                                                                                                               |
+| `DELETE`              | `/api/torrents/:infoHash/cache`                             | Reclaim cached pieces, keep the archive                                                                                                                                                                                                   |
+| `POST`                | `/api/torrents/:infoHash/check`                             | Has the source changed since the torrent was made?                                                                                                                                                                                        |
+| `POST`                | `/api/torrents/:infoHash/rebuild`                           | Rebuild from the current source (mints a new infohash)                                                                                                                                                                                    |
+| `POST`                | `/api/check-origins`                                        | Check every archive with a watchable source                                                                                                                                                                                               |
+| `GET` `DELETE`        | `/api/adds`                                                 | Downloads still in flight, and cancelling one by URL                                                                                                                                                                                      |
+| `GET` `POST`          | `/api/speed`                                                | Which speed limits are in force, and the manual switch between the two sets                                                                                                                                                               |
+| `GET`                 | `/api/categories`                                           | Every category, with the endpoints resolving to its newest build                                                                                                                                                                          |
+| `POST`                | `/api/adopt`, `/api/adopt/candidates`                       | Take over what an engine or another node holds                                                                                                                                                                                            |
+| `POST`                | `/api/sources/preview`                                      | What a watched web location would take, without taking it                                                                                                                                                                                 |
+| `POST`                | `/api/subscriptions/preview`                                | Whether a peer is reachable and what it offers                                                                                                                                                                                            |
+| `POST`                | `/api/subscriptions/refresh`                                | Poll subscribed feeds now                                                                                                                                                                                                                 |
+| `POST`                | `/api/sources/check`                                        | Check scheduled sources now, rather than at the next due time                                                                                                                                                                             |
+| `POST`                | `/api/torrents/:infoHash/hooks/complete`                    | Run the completion hook again for one archive                                                                                                                                                                                             |
+| `GET` `POST` `DELETE` | `/api/tokens`, `/api/tokens/:id`                            | Mint, list and revoke access tokens                                                                                                                                                                                                       |
+| `GET` `POST`          | `/api/restart`                                              | What a restart would do, and doing it                                                                                                                                                                                                     |
+| `GET` `DELETE`        | `/api/stats`                                                | What this node has served — per-archive counters and the last N requests; `DELETE` clears them                                                                                                                                            |
+| `GET` `PATCH`         | `/api/config`                                               | Read and change settings                                                                                                                                                                                                                  |
+| `POST`                | `/api/login`, `/api/logout`                                 | Console sign-in                                                                                                                                                                                                                           |
+| `GET`                 | `/api/session`                                              | Who this request is, and whether a credential is needed at all                                                                                                                                                                            |
+| `GET`                 | `/api/catalog`                                              | The whole catalogue, for a peer keeping itself in step                                                                                                                                                                                    |
+| `GET`                 | `/archives/:infoHash/tiles.json`                            | TileJSON — **public**                                                                                                                                                                                                                     |
+| `GET`                 | `/archives/:infoHash/:z/:x/:y.:ext`                         | One tile — **public**                                                                                                                                                                                                                     |
+| `GET`                 | `/health`                                                   | 200 when this node can serve, 503 when its engine cannot — **public**, no credential, for a load balancer                                                                                                                                 |
+| `GET`                 | `/archives/:infoHash/ready`                                 | Whether this node can serve _this_ archive yet: 200 ready, 503 not yet, 415 never — **public**                                                                                                                                            |
+| `GET`                 | `/archives/:infoHash/archive.torrent`                       | The `.torrent` a torrent-aware client joins with — **public**                                                                                                                                                                             |
+| `GET`                 | `/archives/:infoHash/preview`                               | Map preview for one archive — admin, not public                                                                                                                                                                                           |
+| `GET`                 | `/latest/:category/tiles.json`, `/:name.torrent`, `/magnet` | The newest build in a category — **public**. The torrent name is yours to choose, so a link can read `planetiler-openmaptiles-latest.torrent`; it redirects to the immutable URL, which names the download after the build it actually is |
+| `GET`                 | `/feed.xml`, `/feed/:category.xml`, `/latest/:category.xml` | RSS — **public**                                                                                                                                                                                                                          |
 
 Everything under `/api/` is guarded once a credential is configured; tiles, TileJSON and the feeds
 never are. A `peer` token may read but not change, and may be narrowed to some categories. See

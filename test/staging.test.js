@@ -26,7 +26,11 @@ describe('filing a download once it has an infohash', () => {
     const { root, staging } = await staged('planet.pmtiles');
     const savePath = path.join(root, 'a'.repeat(40));
 
-    const at = await settleFromStaging({ staging, savePath, name: 'planet.pmtiles' });
+    const at = await settleFromStaging({
+      staging,
+      savePath,
+      name: 'planet.pmtiles',
+    });
 
     assert.equal(at, path.join(savePath, 'planet.pmtiles'));
     assert.equal(await fs.readFile(at, 'utf8'), 'archive bytes');
@@ -40,7 +44,10 @@ describe('filing a download once it has an infohash', () => {
       name: 'planet.pmtiles',
     });
 
-    await assert.rejects(() => fs.stat(staging), 'the staging directory is gone');
+    await assert.rejects(
+      () => fs.stat(staging),
+      'the staging directory is gone',
+    );
     // And the incoming root itself is left, since another download may be in it.
     assert.ok((await fs.stat(path.join(root, INCOMING))).isDirectory());
   });
@@ -52,7 +59,10 @@ describe('filing a download once it has an infohash', () => {
     // collide while downloading either.
     const root = await fs.mkdtemp(path.join(workspace, 'shared-'));
 
-    for (const [id, bytes] of [['a'.repeat(40), 'first build'], ['b'.repeat(40), 'second build']]) {
+    for (const [id, bytes] of [
+      ['a'.repeat(40), 'first build'],
+      ['b'.repeat(40), 'second build'],
+    ]) {
       const staging = path.join(root, INCOMING, id.slice(0, 8));
       await fs.mkdir(staging, { recursive: true });
       await fs.writeFile(path.join(staging, 'planet.pmtiles'), bytes);
@@ -64,11 +74,17 @@ describe('filing a download once it has an infohash', () => {
     }
 
     assert.equal(
-      await fs.readFile(path.join(root, 'a'.repeat(40), 'planet.pmtiles'), 'utf8'),
+      await fs.readFile(
+        path.join(root, 'a'.repeat(40), 'planet.pmtiles'),
+        'utf8',
+      ),
       'first build',
     );
     assert.equal(
-      await fs.readFile(path.join(root, 'b'.repeat(40), 'planet.pmtiles'), 'utf8'),
+      await fs.readFile(
+        path.join(root, 'b'.repeat(40), 'planet.pmtiles'),
+        'utf8',
+      ),
       'second build',
     );
   });
@@ -129,7 +145,10 @@ describe('clearing staging at startup', () => {
 
     assert.equal(await library.sweepIncoming(), 1);
     await assert.rejects(() => fs.stat(orphan));
-    assert.equal(await fs.readFile(path.join(kept, 'planet.pmtiles'), 'utf8'), 'whole');
+    assert.equal(
+      await fs.readFile(path.join(kept, 'planet.pmtiles'), 'utf8'),
+      'whole',
+    );
   });
 
   it('is quiet when there is nothing to clear', async () => {
@@ -159,7 +178,10 @@ describe('two requests for one URL', () => {
     let requests = 0;
     const server = http.createServer(async (_req, res) => {
       requests += 1;
-      res.writeHead(200, { 'content-length': String(body.length), etag: '"x"' });
+      res.writeHead(200, {
+        'content-length': String(body.length),
+        etag: '"x"',
+      });
       await new Promise((resolve) => setTimeout(resolve, 200));
       res.end(body);
     });
@@ -217,7 +239,11 @@ describe('two requests for one URL', () => {
         library.addRemoteArchive(server.url, {}),
       ]);
 
-      assert.equal(first.infoHash, second.infoHash, 'both get the same archive');
+      assert.equal(
+        first.infoHash,
+        second.infoHash,
+        'both get the same archive',
+      );
       assert.equal(catalog.list().length, 1);
 
       // Measured against what one add costs, rather than against a guess at
@@ -242,7 +268,10 @@ describe('two requests for one URL', () => {
       // the same and so is the infohash.
       const dirs = (await fs.readdir(data)).filter((name) => name !== INCOMING);
       assert.deepEqual(dirs, [first.infoHash]);
-      assert.deepEqual(await fs.readdir(path.join(data, INCOMING)).catch(() => []), []);
+      assert.deepEqual(
+        await fs.readdir(path.join(data, INCOMING)).catch(() => []),
+        [],
+      );
     } finally {
       await server.close();
     }
@@ -260,7 +289,11 @@ describe('two requests for one URL', () => {
       assert.equal(again.infoHash, first.infoHash);
       const afterFirst = server.requests();
       await library.addRemoteArchive(server.url, {});
-      assert.equal(server.requests(), afterFirst, 'the catalog answered, unfetched');
+      assert.equal(
+        server.requests(),
+        afterFirst,
+        'the catalog answered, unfetched',
+      );
     } finally {
       await server.close();
     }

@@ -55,7 +55,7 @@ restoring go through, so it cannot drift out of step with the truth.
 
 ### Unknown is not the same as incomplete
 
-Only an archive *known* to be partial is marked. A catalog entry with no
+Only an archive _known_ to be partial is marked. A catalog entry with no
 `complete` field predates markers, so its data is on disk under its plain name
 whatever state it is in. Reading "unknown" as "incomplete" sends the engine
 looking for a file that does not exist, which it answers by downloading the
@@ -87,7 +87,7 @@ is a situation to report, not to resolve by guessing which one matters.
 ## Where archive data goes
 
 One directory by default, for both mirrors and caches. What a partial archive
-needs is to be *distinguishable*, not to be somewhere else, and the marker in
+needs is to be _distinguishable_, not to be somewhere else, and the marker in
 its name achieves that without a finished download having to move between
 filesystems. `cacheSavePath` remains for anyone who wants the separation as a
 placement decision — cache on a faster disk, say.
@@ -165,7 +165,7 @@ The origin's mtime therefore travels in the feed as `<pmtiles:mtime>`, alongside
 the infohash, magnet and checksum already carried there, and the subscriber
 restores it when the download completes. It is republished as it arrived rather
 than restated from the local file: a mirror-of-a-mirror has to pass on the
-timestamp of the node that *built* the archive, or it decays to a local download
+timestamp of the node that _built_ the archive, or it decays to a local download
 time one hop out and the chain stops agreeing.
 
 Only a timestamp a peer actually published is restored. An archive that arrives
@@ -213,8 +213,8 @@ raster-dem — Mapterhorn, or any terrain built only where there is land —
 therefore renders as holes if told 204, because that means "empty but present"
 and stops the fallback.
 
-Vector is the other way round: an empty tile legitimately means *no features
-here*, and 404 would make a map log errors while panning past the edge of
+Vector is the other way round: an empty tile legitimately means _no features
+here_, and 404 would make a map log errors while panning past the edge of
 coverage.
 
 So this defaults by format and is overridable per archive and globally, which is
@@ -227,7 +227,7 @@ for a partial archive that is the normal case rather than the unlucky one.
 
 The two are nowhere near each other in the file. The header is the first 127
 bytes; the JSON metadata is wherever the writer put it, and planetiler puts it at
-the *end* — measured at byte 77,139,967,368 of a 77 GB archive, after every tile.
+the _end_ — measured at byte 77,139,967,368 of a 77 GB archive, after every tile.
 Probing a file that is 10% downloaded therefore reads a perfectly good header and
 1,528 zero bytes where the metadata should be. Everything looks right except the
 one field vector rendering needs: with no `vector_layers`, maplibre-gl-inspect
@@ -263,11 +263,11 @@ has just died leaves rotation within one more check than it otherwise would.
 
 Used for absolute links in the feed and in TileJSON. Three behaviours, in order:
 
-| | |
-|---|---|
-| `publicUrl` set | one canonical URL, whatever the request said |
+|                  |                                                                                                                                 |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `publicUrl` set  | one canonical URL, whatever the request said                                                                                    |
 | `trustProxy` set | derived per request from `X-Forwarded-Proto` and `X-Forwarded-Host`, so one node can answer correctly on http and https at once |
-| neither | derived from the connection itself |
+| neither          | derived from the connection itself                                                                                              |
 
 Note `req.host` rather than `req.get('host')`: only the former follows
 `X-Forwarded-Host`. The raw `Host` header behind a proxy is whatever the proxy
@@ -279,7 +279,7 @@ every published tile URL.
 A different shape from the origin checking in `origin.js`, which watches one
 fixed URL for its content changing. An upstream like
 `https://build.protomaps.com/20260806.pmtiles` never changes any given URL: it
-publishes a *new* one every day and yesterday's stays exactly as it was. Watching
+publishes a _new_ one every day and yesterday's stays exactly as it was. Watching
 for change would never fire; what is needed is to work out today's URL and see
 whether it exists yet.
 
@@ -298,11 +298,11 @@ answer.
 A `{...}` group is read as a date pattern — runs of Y, M and D with separators
 between them — rather than matched against a fixed list of spellings:
 
-| | | | |
-|---|---|---|---|
-| `{YYYYMMDD}` | 20260807 | `{YYYY-MM-DD}` | 2026-08-07 |
-| `{YY}` | 26 | `{M}-{D}-{YY}` | 8-7-26 |
-| `{DD.MM.YYYY}` | 07.08.2026 | `{YYYY}/{MM}` | 2026/08 |
+|                |            |                |            |
+| -------------- | ---------- | -------------- | ---------- |
+| `{YYYYMMDD}`   | 20260807   | `{YYYY-MM-DD}` | 2026-08-07 |
+| `{YY}`         | 26         | `{M}-{D}-{YY}` | 8-7-26     |
+| `{DD.MM.YYYY}` | 07.08.2026 | `{YYYY}/{MM}`  | 2026/08    |
 
 A run's length decides padding: `MM` is zero-padded, `M` is not, which is what an
 upstream naming files `8-7-26.pmtiles` needs. Year is the exception, since an
@@ -338,7 +338,7 @@ the number of polls you expect to miss.
 ### When a source is due
 
 Two ways to say when, because upstreams come in two shapes. A build published at
-a known hour wants a *time*: checking every six hours from whenever the process
+a known hour wants a _time_: checking every six hours from whenever the process
 happened to start finds it up to six hours late, which for a daily archive is
 most of a day during which nobody could seed it. Anything else wants an interval.
 
@@ -353,7 +353,7 @@ the week, and older builds are rarely wanted — the point of a dated build is t
 a newer one replaces it. `keep: 1` holds only the newest; `keepDays: 35` holds
 five weeks.
 
-The family is the archives this same *named* source imported, and nothing else.
+The family is the archives this same _named_ source imported, and nothing else.
 One added by hand, adopted from a client, or taken from a peer is never touched,
 even in the same directory.
 
@@ -457,7 +457,7 @@ bytes being hashed.
 ### Why the MD5 is opt-in
 
 Not for integrity — the torrent already covers that, and better, since it
-verifies per piece and so says *where* something went wrong rather than only that
+verifies per piece and so says _where_ something went wrong rather than only that
 it did. The MD5 is for the quick manual check people actually do, and for tooling
 that expects a checksum file next to a download.
 
@@ -515,17 +515,17 @@ peer's to retract:
 - everything, if the peer's document was partial — a filtered view is not
   evidence of absence.
 
-| setting | effect |
-|---|---|
-| omitted | nothing is ever removed. The default, and where a new peer should stay until you have watched it for a while |
-| `'report'` | logs what it would remove and removes nothing |
-| `true` | forgets the archive and stops seeding, leaving the data |
-| `'delete'` | also removes the files |
+| setting    | effect                                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------------ |
+| omitted    | nothing is ever removed. The default, and where a new peer should stay until you have watched it for a while |
+| `'report'` | logs what it would remove and removes nothing                                                                |
+| `true`     | forgets the archive and stops seeding, leaving the data                                                      |
+| `'delete'` | also removes the files                                                                                       |
 
 ## The public listener
 
 When the console and the API are given a port of their own, what is left on the
-other one is the surface a stranger or a peer is *meant* to reach. Everything
+other one is the surface a stranger or a peer is _meant_ to reach. Everything
 else stops existing there — answered 404 rather than 401, because a 401 tells
 whoever asked that there is something behind it.
 
@@ -561,7 +561,7 @@ not:
   but there is no method to start one. Checked against 2.0.13 — worth re-checking
   if a later binding adds them, since a sidecar op would then be tidier for a
   libtorrent-only node.
-- **WebTorrent's** DHT *is* `bittorrent-dht`, reachable as `client.dht`, so
+- **WebTorrent's** DHT _is_ `bittorrent-dht`, reachable as `client.dht`, so
   reusing it is possible and would save a socket. Not done, to keep one code path
   that behaves the same whichever engine is configured.
 
@@ -587,7 +587,7 @@ replaced are no longer where anyone is being sent. Deleting before that would
 break the very URL the feed is advertising.
 
 That rule also covers the case which makes this necessary at all: an import run
-taking several builds takes them newest first, so an *older* one can be the most
+taking several builds takes them newest first, so an _older_ one can be the most
 recent import. It has superseded nothing and must retire nothing.
 
 The torrent goes with the data. Leaving a catalog entry whose file is gone would
@@ -599,7 +599,7 @@ would fail.
 A PMTiles archive is useless until its header has been read. The header is the
 first 127 bytes and names where the root directory and the JSON metadata live;
 without it there is no TileJSON, no vector layers, and a preview that renders
-black. Reading it also *prioritises* what it found — the root directory as
+black. Reading it also _prioritises_ what it found — the root directory as
 critical, the metadata as high — so the head of the file arrives out of order
 rather than whenever the download happens to reach it.
 

@@ -95,7 +95,7 @@ the peer rejected that token
 API, 1 archive (a partial view — pruning is disabled for it)
 ```
 
-It counts what this node could actually *take*, not what the feed lists: an item with no
+It counts what this node could actually _take_, not what the feed lists: an item with no
 magnet and no `.torrent` would produce nothing if followed, so reporting it would be a
 lie.
 
@@ -132,12 +132,12 @@ The catalogue API can say "here is everything", which is the only way a
 consumer can notice an absence. `prune` acts on that, and it is deliberately
 cautious:
 
-| `prune` | What happens |
-| --- | --- |
-| *omitted* | **Nothing is ever removed.** The default. |
-| `"report"` | Logs what it would remove. Removes nothing. |
-| `true` | Forgets the archive and stops seeding. Leaves the data. |
-| `"delete"` | Also removes the files. |
+| `prune`    | What happens                                            |
+| ---------- | ------------------------------------------------------- |
+| _omitted_  | **Nothing is ever removed.** The default.               |
+| `"report"` | Logs what it would remove. Removes nothing.             |
+| `true`     | Forgets the archive and stops seeding. Leaves the data. |
+| `"delete"` | Also removes the files.                                 |
 
 **Start at `"report"` and leave it there for a while.** It prints exactly what
 it would have done, so you find out whether you agree with it before it can act:
@@ -165,7 +165,7 @@ sent it, and only that subscription can ever propose removing it.
 
 ## Sharing only what you categorise
 
-Category feeds let a *subscriber* narrow what it takes. They do not narrow what
+Category feeds let a _subscriber_ narrow what it takes. They do not narrow what
 you publish: `/feed.xml` carries the whole catalogue, so a peer who could follow
 `/feed/basemaps.xml` could equally read the main feed, or guess a category name.
 
@@ -241,10 +241,10 @@ the second ever reaches the wire.
 
 The choice that decides what a subscriber costs.
 
-| Mode | Disk | The node becomes |
-| --- | --- | --- |
-| `mirror` | the whole archive | A full seeder — redundancy for the swarm |
-| `cache` | only what is read | A tile server that pays for what people look at |
+| Mode     | Disk              | The node becomes                                |
+| -------- | ----------------- | ----------------------------------------------- |
+| `mirror` | the whole archive | A full seeder — redundancy for the swarm        |
+| `cache`  | only what is read | A tile server that pays for what people look at |
 
 **Cache mode is the interesting one.** The node joins the swarm and downloads nothing.
 A tile server reads byte ranges from it on demand through `pmtiles-torrent`, so disk use
@@ -263,8 +263,16 @@ One feed can serve subscribers with different appetites:
 ```json
 {
   "subscriptions": [
-    { "url": "https://maps.example.org/feed.xml", "mode": "mirror", "filter": "europe" },
-    { "url": "https://maps.example.org/feed.xml", "mode": "cache", "category": "planet" }
+    {
+      "url": "https://maps.example.org/feed.xml",
+      "mode": "mirror",
+      "filter": "europe"
+    },
+    {
+      "url": "https://maps.example.org/feed.xml",
+      "mode": "cache",
+      "category": "planet"
+    }
   ]
 }
 ```
@@ -307,7 +315,7 @@ empty your disk.
 
 The items are `.osm.pbf`, not map archives, and that is fine: joining an
 existing torrent does not require the content to be anything in particular —
-only *creating* one does. The archive simply is not servable as tiles, and
+only _creating_ one does. The archive simply is not servable as tiles, and
 nothing tries.
 
 `enabled: false` switches one feed off without deleting it, and
@@ -396,13 +404,17 @@ Generic clients ignore the namespace and still work.
 
 A rebuilt archive is a different torrent, because the infohash is a hash of its content.
 BEP 46 adds a level of indirection: an ed25519-signed record in the DHT whose value names
-the *current* infohash, addressed by public key. Subscribers follow the key and are
+the _current_ infohash, addressed by public key. Subscribers follow the key and are
 carried across rebuilds.
 
 ```js
-import { generatePublisherKey, mutableMagnet, publishInfoHash } from 'pmtiles-swarm/mutable';
+import {
+  generatePublisherKey,
+  mutableMagnet,
+  publishInfoHash,
+} from 'pmtiles-swarm/mutable';
 
-const key = generatePublisherKey();      // back this up — it is the archive's identity
+const key = generatePublisherKey(); // back this up — it is the archive's identity
 const magnet = mutableMagnet(key.publicKey, { name: 'planet.pmtiles' });
 // magnet:?xs=urn:btpk:200d26e8…  — note: no infohash
 
@@ -414,10 +426,10 @@ never be moved forward again.
 
 RSS and BEP 46 fail in opposite ways, which is the argument for publishing both:
 
-| | Needs | Fails when |
-| --- | --- | --- |
-| RSS | a server that stays up | the server goes away |
-| BEP 46 | periodic republishing | the record expires (hours, not days) |
+|        | Needs                  | Fails when                           |
+| ------ | ---------------------- | ------------------------------------ |
+| RSS    | a server that stays up | the server goes away                 |
+| BEP 46 | periodic republishing  | the record expires (hours, not days) |
 
 **This is built in.** The code above is what a host application would call; a node only
 needs a key and a setting:
@@ -428,7 +440,9 @@ chmod 400 /etc/pmtiles-swarm/publisher.pem
 ```
 
 ```json
-{ "mutable": { "publish": true, "keyPath": "/etc/pmtiles-swarm/publisher.pem" } }
+{
+  "mutable": { "publish": true, "keyPath": "/etc/pmtiles-swarm/publisher.pem" }
+}
 ```
 
 It then announces the newest archive in each category, salted by category name so one key

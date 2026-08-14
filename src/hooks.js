@@ -123,7 +123,9 @@ export class ProgramHooks {
       console.log(`[hook] will run ${this.#config.onAdded.command} on add`);
     }
     if (this.#config.onComplete?.command) {
-      console.log(`[hook] will run ${this.#config.onComplete.command} on completion`);
+      console.log(
+        `[hook] will run ${this.#config.onComplete.command} on completion`,
+      );
     }
   }
 

@@ -113,8 +113,8 @@ function renderItem(entry, baseUrl) {
       <pubDate>${new Date(entry.createdAt).toUTCString()}</pubDate>
       <description>${xml(map?.description ?? summary)}</description>
 ${(entry.categories ?? (entry.category ? [entry.category] : []))
-        .map((name) => `      <category>${xml(name)}</category>`)
-        .join('\n')}
+  .map((name) => `      <category>${xml(name)}</category>`)
+  .join('\n')}
       <enclosure url="${xml(torrentUrl)}" length="${xml(entry.size)}" type="application/x-bittorrent"/>
       <pmtiles:infohash>${xml(entry.infoHash)}</pmtiles:infohash>
       <pmtiles:magnet>${xml(entry.magnet)}</pmtiles:magnet>
@@ -233,10 +233,7 @@ function isoDate(value) {
  * @returns {string | undefined} - Decoded text, if found.
  */
 function tag(block, name) {
-  const pattern = new RegExp(
-    `<${name}\\b[^>]*>([\\s\\S]*?)</${name}>`,
-    'i',
-  );
+  const pattern = new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)</${name}>`, 'i');
   const match = pattern.exec(block);
   if (!match) return undefined;
   return decode(match[1].trim());

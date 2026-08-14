@@ -56,7 +56,10 @@ export function generateToken() {
  * @returns {string} - Hex digest.
  */
 export function hashToken(token) {
-  return crypto.createHash('sha256').update(String(token), 'utf8').digest('hex');
+  return crypto
+    .createHash('sha256')
+    .update(String(token), 'utf8')
+    .digest('hex');
 }
 
 /**
@@ -211,9 +214,9 @@ export function createAuth(config) {
   const auth = settings();
   const enabled = Boolean(
     auth.apiKey ||
-      auth.password ||
-      auth.passwordHash ||
-      (auth.tokens ?? []).length > 0,
+    auth.password ||
+    auth.passwordHash ||
+    (auth.tokens ?? []).length > 0,
   );
   const ttlMs = (auth.sessionTtlSeconds ?? DEFAULT_SESSION_SECONDS) * 1000;
 

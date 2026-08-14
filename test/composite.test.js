@@ -24,7 +24,8 @@ function recording(name, held = []) {
       calls.push(['add', request]);
       return request.magnet?.slice(20, 60) ?? 'a'.repeat(40);
     },
-    remove: async (infoHash, options) => calls.push(['remove', infoHash, options]),
+    remove: async (infoHash, options) =>
+      calls.push(['remove', infoHash, options]),
     list: async () => held,
     get: async (infoHash) => held.find((t) => t.infoHash === infoHash) ?? null,
     peers: async () => [{ address: `${name}-peer` }],
@@ -117,7 +118,9 @@ describe('running two engines over one library', () => {
   it('hands over an archive once the primary finishes it', async () => {
     // The trigger a download needs: it belongs to the primary alone until it
     // is whole.
-    const primary = recording('libtorrent', [status({ progress: 0.4, state: 'downloading' })]);
+    const primary = recording('libtorrent', [
+      status({ progress: 0.4, state: 'downloading' }),
+    ]);
     const secondary = recording('webtorrent');
     const engine = new CompositeEngine({ primary, secondaries: [secondary] });
 
@@ -175,10 +178,12 @@ describe('running two engines over one library', () => {
 });
 
 describe('what the composite reports', () => {
-  it('adds up peers and speeds but keeps the primary\'s progress', async () => {
+  it("adds up peers and speeds but keeps the primary's progress", async () => {
     // Only the primary downloads, so only its idea of how much is held means
     // anything. A peer is a peer whichever client found it.
-    const primary = recording('libtorrent', [status({ progress: 0.5, peers: 3, uploadSpeed: 100 })]);
+    const primary = recording('libtorrent', [
+      status({ progress: 0.5, peers: 3, uploadSpeed: 100 }),
+    ]);
     const secondary = recording('webtorrent', [
       status({ progress: 1, peers: 2, seeds: 4, uploadSpeed: 900 }),
     ]);
@@ -268,14 +273,12 @@ describe('when a secondary is not there', () => {
 
     await engine.remove('a'.repeat(40), { deleteData: true });
 
-    assert.deepEqual(
-      secondary.calls.find(([kind]) => kind === 'remove')[2],
-      { deleteData: false },
-    );
-    assert.deepEqual(
-      primary.calls.find(([kind]) => kind === 'remove')[2],
-      { deleteData: true },
-    );
+    assert.deepEqual(secondary.calls.find(([kind]) => kind === 'remove')[2], {
+      deleteData: false,
+    });
+    assert.deepEqual(primary.calls.find(([kind]) => kind === 'remove')[2], {
+      deleteData: true,
+    });
   });
 });
 
@@ -340,7 +343,10 @@ describe('reading tiles while two engines are running', () => {
 
     const failure = await store.summarize(infoHash).catch((error) => error);
     assert.equal(failure.status, 501);
-    assert.match(failure.message, /qbittorrent engine cannot read pieces on demand/);
+    assert.match(
+      failure.message,
+      /qbittorrent engine cannot read pieces on demand/,
+    );
     // Named for the engine that actually cannot, not for the composite.
     assert.doesNotMatch(failure.message, /\+/);
   });
@@ -387,9 +393,17 @@ describe('what a secondary is allowed to be handed', () => {
       secondaries: [secondary],
     });
 
-    await engine.add({ torrentFile: new Uint8Array([1]), seedOnly: true, mode: 'mirror' });
+    await engine.add({
+      torrentFile: new Uint8Array([1]),
+      seedOnly: true,
+      mode: 'mirror',
+    });
     await engine.whenShared();
-    assert.deepEqual(secondary.added, [], 'nothing should have been handed over');
+    assert.deepEqual(
+      secondary.added,
+      [],
+      'nothing should have been handed over',
+    );
   });
 
   it('hands over one the primary has finished', async () => {
@@ -399,7 +413,11 @@ describe('what a secondary is allowed to be handed', () => {
       secondaries: [secondary],
     });
 
-    await engine.add({ torrentFile: new Uint8Array([1]), seedOnly: true, mode: 'mirror' });
+    await engine.add({
+      torrentFile: new Uint8Array([1]),
+      seedOnly: true,
+      mode: 'mirror',
+    });
     await engine.whenShared();
     assert.equal(secondary.added.length, 1);
   });
@@ -416,7 +434,11 @@ describe('what a secondary is allowed to be handed', () => {
       shareTimeoutSeconds: 1800,
     });
 
-    await engine.add({ torrentFile: new Uint8Array([1]), seedOnly: true, mode: 'mirror' });
+    await engine.add({
+      torrentFile: new Uint8Array([1]),
+      seedOnly: true,
+      mode: 'mirror',
+    });
     await engine.whenShared();
     assert.equal(secondary.added[0].readyTimeoutMs, 1800000);
   });
@@ -431,7 +453,11 @@ describe('what a secondary is allowed to be handed', () => {
       secondaries: [secondary],
     });
 
-    await engine.add({ torrentFile: new Uint8Array([1]), seedOnly: true, mode: 'mirror' });
+    await engine.add({
+      torrentFile: new Uint8Array([1]),
+      seedOnly: true,
+      mode: 'mirror',
+    });
     await engine.whenShared();
     assert.equal(secondary.added.length, 1);
   });
@@ -445,8 +471,9 @@ describe('persisting resume data across engines', () => {
     // archive seeding since it was added re-hashed its whole store on every
     // start.
     const primary = recording('libtorrent');
-    primary.saveResume = async (infoHash) => primary.calls.push(['saveResume', infoHash]);
-    const secondary = recording('webtorrent');       // keeps none, offers none
+    primary.saveResume = async (infoHash) =>
+      primary.calls.push(['saveResume', infoHash]);
+    const secondary = recording('webtorrent'); // keeps none, offers none
 
     const engine = new CompositeEngine({
       primary,
@@ -454,10 +481,18 @@ describe('persisting resume data across engines', () => {
       config: {},
     });
 
-    assert.equal(typeof engine.saveResume, 'function', 'the timer checks for this');
+    assert.equal(
+      typeof engine.saveResume,
+      'function',
+      'the timer checks for this',
+    );
     await engine.saveResume();
     assert.deepEqual(primary.calls, [['saveResume', undefined]]);
-    assert.deepEqual(secondary.calls, [], 'an engine without one is skipped, not called');
+    assert.deepEqual(
+      secondary.calls,
+      [],
+      'an engine without one is skipped, not called',
+    );
   });
 
   it('carries on when one engine refuses', async () => {
@@ -523,7 +558,11 @@ describe('handing archives to a secondary without blocking on it', () => {
 
     const finished = await Promise.race([
       engine
-        .add({ torrentFile: new Uint8Array([1]), seedOnly: true, mode: 'mirror' })
+        .add({
+          torrentFile: new Uint8Array([1]),
+          seedOnly: true,
+          mode: 'mirror',
+        })
         .then(() => 'added'),
       new Promise((resolve) => setTimeout(() => resolve('still waiting'), 200)),
     ]);
@@ -605,4 +644,3 @@ describe('handing archives to a secondary without blocking on it', () => {
     assert.equal(seen.length, 2, 'the second was still attempted');
   });
 });
-

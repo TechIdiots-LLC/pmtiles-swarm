@@ -88,7 +88,6 @@ function createOneEngine(name, config) {
   }
 }
 
-
 /**
  * Starts the daemon.
  * @returns {Promise<void>} - Resolves once listening.
@@ -138,7 +137,8 @@ PMTILES_SWARM_PUBLIC_URL
   }
 
   if (positionals[0] === 'publisher-key') {
-    const { generatePublisherKey, publisherKeyToPem } = await import('./mutable.js');
+    const { generatePublisherKey, publisherKeyToPem } =
+      await import('./mutable.js');
     const key = generatePublisherKey();
     // The PEM on stdout so it can be redirected to a file; everything else on
     // stderr so that redirect stays clean.
@@ -147,7 +147,9 @@ PMTILES_SWARM_PUBLIC_URL
     console.error(`public key: ${Buffer.from(key.publicKey).toString('hex')}`);
     console.error('Save the PEM where only this node can read it, and point');
     console.error('mutable.keyPath at it. It signs what your subscribers');
-    console.error('believe is the current build, so treat it as a signing key.');
+    console.error(
+      'believe is the current build, so treat it as a signing key.',
+    );
     return;
   }
 
@@ -181,7 +183,11 @@ PMTILES_SWARM_PUBLIC_URL
   // connected an engine and restored half a library by the time it says so.
   await assertPortsFree(config);
   const lock = await claimDataDir(config);
-  stoppers.unshift({ label: 'data directory lock', stop: () => lock.release(), ms: 2000 });
+  stoppers.unshift({
+    label: 'data directory lock',
+    stop: () => lock.release(),
+    ms: 2000,
+  });
 
   await fs.mkdir(config.dataDir, { recursive: true });
 
@@ -240,9 +246,13 @@ PMTILES_SWARM_PUBLIC_URL
 
   // Before anything else touches the save path: a download interrupted by a
   // kill leaves a partial archive somewhere nothing will look again.
-  await library.sweepIncoming().catch((error) =>
-    console.warn(`[library] could not clear unfinished downloads: ${error.message}`),
-  );
+  await library
+    .sweepIncoming()
+    .catch((error) =>
+      console.warn(
+        `[library] could not clear unfinished downloads: ${error.message}`,
+      ),
+    );
 
   const catalogued = catalog.list().length;
   if (catalogued > 0) {
@@ -267,11 +277,12 @@ PMTILES_SWARM_PUBLIC_URL
   let publisher;
   if (config.mutable?.publish && config.mutable?.keyPath) {
     try {
-      const [{ publisherKeyFromPem }, { MutablePublisher }, DHT] = await Promise.all([
-        import('./mutable.js'),
-        import('./publisher.js'),
-        import('bittorrent-dht').then((m) => m.default),
-      ]);
+      const [{ publisherKeyFromPem }, { MutablePublisher }, DHT] =
+        await Promise.all([
+          import('./mutable.js'),
+          import('./publisher.js'),
+          import('bittorrent-dht').then((m) => m.default),
+        ]);
       const pem = await fs.readFile(config.mutable.keyPath, 'utf8');
       // A factory rather than an instance, so the publisher can replace a
       // socket that proves unable to reach the DHT. Bound explicitly rather
@@ -310,9 +321,7 @@ PMTILES_SWARM_PUBLIC_URL
       // that finds a good table is often the one that is later killed rather
       // than stopped, and a table nobody wrote down is a table nobody keeps.
       const saveTable = setInterval(() => {
-        publisher
-          .saveTable((dht) => saveNodes(statePath, dht))
-          .catch(() => {});
+        publisher.saveTable((dht) => saveNodes(statePath, dht)).catch(() => {});
       }, 5 * 60_000);
       saveTable.unref?.();
 
@@ -432,9 +441,10 @@ PMTILES_SWARM_PUBLIC_URL
   const server = app.listen(config.port, config.host, () => {
     // 0.0.0.0 is a bind address, not a destination — browsers reject it with
     // ERR_ADDRESS_INVALID. Print something that can actually be opened.
-    const reachable = config.host === '0.0.0.0' || config.host === '::'
-      ? 'localhost'
-      : config.host;
+    const reachable =
+      config.host === '0.0.0.0' || config.host === '::'
+        ? 'localhost'
+        : config.host;
     const bound = reachable === config.host ? '' : ` (bound to ${config.host})`;
     console.log(
       `[http] ${config.adminPort ? 'public surface' : 'listening'} on ` +
@@ -465,7 +475,9 @@ PMTILES_SWARM_PUBLIC_URL
     resumeTimer = setInterval(() => {
       engine
         .saveResume()
-        .catch((error) => console.warn(`[resume] could not save: ${error.message}`));
+        .catch((error) =>
+          console.warn(`[resume] could not save: ${error.message}`),
+        );
     }, resumeSeconds * 1000);
     resumeTimer.unref?.();
   }
@@ -505,17 +517,29 @@ PMTILES_SWARM_PUBLIC_URL
   }
 
   stoppers.unshift(
-    { label: 'resume timer', stop: () => resumeTimer && clearInterval(resumeTimer), ms: 500 },
-    { label: 'origin checks', stop: () => originTimer && clearInterval(originTimer), ms: 500 },
-    { label: 'schedulers', stop: () => {
-      sources.stop();
-      seeding.stop();
-      hooks.stop();
-      completion.stop();
-      subscriptions.stop();
-      warm.stop();
-      headWarmer.stop();
-    }, ms: 1000 },
+    {
+      label: 'resume timer',
+      stop: () => resumeTimer && clearInterval(resumeTimer),
+      ms: 500,
+    },
+    {
+      label: 'origin checks',
+      stop: () => originTimer && clearInterval(originTimer),
+      ms: 500,
+    },
+    {
+      label: 'schedulers',
+      stop: () => {
+        sources.stop();
+        seeding.stop();
+        hooks.stop();
+        completion.stop();
+        subscriptions.stop();
+        warm.stop();
+        headWarmer.stop();
+      },
+      ms: 1000,
+    },
     { label: 'watchers', stop: () => watch.stop() },
     {
       label: 'http server',
@@ -532,9 +556,11 @@ main().catch((error) => {
   // A refusal to start is not a crash. Printing a stack trace for one buries
   // the explanation under frames that cannot help the reader.
   console.error(
-    error.isConfigurationError ? `
+    error.isConfigurationError
+      ? `
 ${error.message}
-` : (error.stack ?? error.message),
+`
+      : (error.stack ?? error.message),
   );
   process.exit(1);
 });

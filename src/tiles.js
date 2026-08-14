@@ -135,7 +135,8 @@ export class TileStore {
     // from, and finding that out takes as long as the swarm timeout — long
     // enough that a browser gives up first and the answer looks like a hang
     // rather than like "not yet".
-    const timeoutMs = options.timeoutMs ?? this.#config.tiles?.headerTimeoutMs ?? 12000;
+    const timeoutMs =
+      options.timeoutMs ?? this.#config.tiles?.headerTimeoutMs ?? 12000;
     const deadline = new Promise((_resolve, reject) =>
       setTimeout(
         () =>
@@ -289,7 +290,8 @@ export class TileStore {
     //
     // No status at all means the engine does not know this torrent — the file
     // may still be a plain local archive that was added and never seeded.
-    const file = onDiskPath(entry, this.#config) ?? path.join(entry.savePath, entry.name);
+    const file =
+      onDiskPath(entry, this.#config) ?? path.join(entry.savePath, entry.name);
     try {
       const stat = await fs.stat(file);
       if (!stat.isFile()) return null;

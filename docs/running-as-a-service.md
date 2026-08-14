@@ -207,7 +207,7 @@ lock a hook run holds. Have hooks log somewhere real.
 
 ## The two lines that matter
 
-**`Restart=always`, not `on-failure`.** The console's *Save & Restart* applies
+**`Restart=always`, not `on-failure`.** The console's _Save & Restart_ applies
 settings a running process cannot take — the port, the data directory, the
 torrent client. Under a supervisor the node does not relaunch itself: it shuts
 down and **exits 0**, expecting to be brought back.
@@ -308,18 +308,18 @@ thought for the mode — without it a new file is `0644` and the other account c
 delete it but not modify it.
 
 Split by type rather than using `chmod -R`. On a **directory** the execute bit
-is the search bit: it permits resolving a path *through* the directory, so
+is the search bit: it permits resolving a path _through_ the directory, so
 removing it leaves a folder whose contents you can list and not one of which you
 can open. Files should lose it; directories must not.
 
 Three features want write, and it is worth knowing which, because a read-only
 folder is a perfectly reasonable way to run:
 
-| | |
-| --- | --- |
-| `latestLink` | Creates and replaces a name in the folder |
-| `keep`, `keepDays` | Deletes retired builds |
-| `onComplete` | Whatever the script does, since it runs as this account |
+|                    |                                                         |
+| ------------------ | ------------------------------------------------------- |
+| `latestLink`       | Creates and replaces a name in the folder               |
+| `keep`, `keepDays` | Deletes retired builds                                  |
+| `onComplete`       | Whatever the script does, since it runs as this account |
 
 Renaming and deleting need write on the **directory**, not on the file — which is
 why the directory bits are the ones that matter, and why a build written under a
@@ -429,7 +429,7 @@ ephemeral UDP port (`mutable.dhtPort: 0`). That is enough to publish: a put is
 outbound — find nodes, then send — and the replies come back on the same
 socket the way any UDP client's do, which NAT handles without help.
 
-Setting a fixed port and forwarding it makes this a *reachable* DHT node, which
+Setting a fixed port and forwarding it makes this a _reachable_ DHT node, which
 means better lookups and contributing back to the network. Worth doing if this
 node is long-lived, but nothing here requires it.
 
@@ -486,17 +486,17 @@ rather than exiting. Name the interpreter explicitly when the service user's
 Five listeners, and only the peer ports want a firewall rule. See
 [ports and reachability](engines.md#ports-and-reachability) for the detail.
 
-| | |
-| --- | --- |
-| `libtorrent.listen` — 6881, TCP and UDP | forward it |
-| `webtorrent.clientOptions.torrentPort` — pin it, or it changes every start | forward it |
-| `mutable.dhtPort` — UDP, ephemeral by default | optional; see below |
-| `port` — 8090 | your proxy or CDN |
-| `adminPort` — 8091, bound to `127.0.0.1` | nothing; that is the point |
+|                                                                            |                            |
+| -------------------------------------------------------------------------- | -------------------------- |
+| `libtorrent.listen` — 6881, TCP and UDP                                    | forward it                 |
+| `webtorrent.clientOptions.torrentPort` — pin it, or it changes every start | forward it                 |
+| `mutable.dhtPort` — UDP, ephemeral by default                              | optional; see below        |
+| `port` — 8090                                                              | your proxy or CDN          |
+| `adminPort` — 8091, bound to `127.0.0.1`                                   | nothing; that is the point |
 
 `mutable.dhtPort` is the odd one. Publishing works without any forward, because
 a put is outbound and the replies come back on the same socket the way any UDP
-client's do. Pin it and forward it only if you want this to be a *reachable*
+client's do. Pin it and forward it only if you want this to be a _reachable_
 DHT node — which earns a better routing table and contributes back, and is
 worth having on a node that runs continuously.
 
@@ -558,9 +558,9 @@ journalctl -u pmtiles-swarm -f
 A healthy start says which engine came up, how many archives were handed back
 to it, and which ports it is listening on. Two lines are worth reading for:
 
-* `could not listen on … port` — something else holds it, most often a previous
+- `could not listen on … port` — something else holds it, most often a previous
   run that has not finished stopping.
-* `data directory is already in use by pid …` — one node per data directory,
+- `data directory is already in use by pid …` — one node per data directory,
   enforced with a lock file. Under `Restart=always` this usually means the old
   process outlived `TimeoutStopSec`; raise it rather than removing the lock.
 
@@ -598,10 +598,10 @@ grep -E '^Groups' /proc/$(systemctl show -p MainPID --value pmtiles-swarm)/statu
 Two things that go wrong quietly rather than loudly, and are worth confirming
 once rather than diagnosing later:
 
-* An archive that re-hashes its whole store on every start means resume data is
+- An archive that re-hashes its whole store on every start means resume data is
   not being written. There should be one file per torrent in `resumeDir` within
   `resumeSaveIntervalSeconds` of a start.
-* A hook that never seems to run. It logs what it launched and why it stopped —
+- A hook that never seems to run. It logs what it launched and why it stopped —
   `journalctl -u pmtiles-swarm | grep -i onComplete` — and a hook redirecting its
   own output to a file will have nothing for the journal to show, which is not
   the same as not having run.

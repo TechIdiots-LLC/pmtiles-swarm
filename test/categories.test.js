@@ -6,7 +6,9 @@ import { after, describe, it } from 'node:test';
 import { createApp } from '../src/api.js';
 import { Catalog } from '../src/catalog.js';
 
-const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-categories-'));
+const workspace = await fs.mkdtemp(
+  path.join(os.tmpdir(), 'pmtiles-categories-'),
+);
 after(() => fs.rm(workspace, { recursive: true, force: true }));
 
 /**
@@ -92,7 +94,10 @@ describe('category endpoints', () => {
       assert.equal(basemaps.archives, 2);
       // Newest, not first: this is the whole point of the endpoint.
       assert.equal(basemaps.newest.name, 'planet-new.pmtiles');
-      assert.match(basemaps.endpoints.tileJson, /\/latest\/basemaps\/tiles\.json$/);
+      assert.match(
+        basemaps.endpoints.tileJson,
+        /\/latest\/basemaps\/tiles\.json$/,
+      );
       assert.match(basemaps.endpoints.feed, /\/feed\/basemaps\.xml$/);
       assert.match(basemaps.endpoints.latestFeed, /\/latest\/basemaps\.xml$/);
 
@@ -146,7 +151,9 @@ describe('editing the categories on an archive', () => {
    * @returns {Promise<object>} - The harness.
    */
   const oneArchive = () =>
-    serve([entry({ infoHash, name: 'planet.pmtiles', categories: ['basemaps'] })]);
+    serve([
+      entry({ infoHash, name: 'planet.pmtiles', categories: ['basemaps'] }),
+    ]);
 
   it('adds a tag without disturbing the others', async () => {
     // The moment an archive is added is the wrong time to have to know its
@@ -159,7 +166,10 @@ describe('editing the categories on an archive', () => {
         { add: 'weekly' },
       );
       assert.equal(response.status, 200);
-      assert.deepEqual((await response.json()).categories, ['basemaps', 'weekly']);
+      assert.deepEqual((await response.json()).categories, [
+        'basemaps',
+        'weekly',
+      ]);
     } finally {
       await server.close();
     }
@@ -172,7 +182,9 @@ describe('editing the categories on an archive', () => {
         add: ['terrain', 'dem'],
       });
       let body = await (
-        await server.patch(`/api/torrents/${infoHash}/categories`, { remove: 'dem' })
+        await server.patch(`/api/torrents/${infoHash}/categories`, {
+          remove: 'dem',
+        })
       ).json();
       assert.deepEqual(body.categories, ['basemaps', 'terrain']);
 
@@ -199,7 +211,9 @@ describe('editing the categories on an archive', () => {
     // the catalog deletes on write that made them look lost.
     const server = await oneArchive();
     try {
-      await server.patch(`/api/torrents/${infoHash}/categories`, { add: 'weekly' });
+      await server.patch(`/api/torrents/${infoHash}/categories`, {
+        add: 'weekly',
+      });
       assert.deepEqual(server.catalog.get(infoHash).categories, [
         'basemaps',
         'weekly',
@@ -238,7 +252,12 @@ describe('the URL a style should point at', () => {
     // swarm-aware one has the magnet before it makes any call -- which is what
     // lets it start when this server cannot answer.
     const api = await serve([
-      entry({ infoHash: 'a'.repeat(40), name: 'planet.pmtiles', categories: ['planet'], ...servable }),
+      entry({
+        infoHash: 'a'.repeat(40),
+        name: 'planet.pmtiles',
+        categories: ['planet'],
+        ...servable,
+      }),
     ]);
     try {
       const [row] = await api.get('/api/categories').then((r) => r.json());
@@ -271,7 +290,11 @@ describe('the URL a style should point at', () => {
       // Carries the web seed, so a client with no peers can still range-read
       // the archive and derive what it needs.
       assert.match(fragment, /&ws=https%3A/);
-      assert.doesNotMatch(fragment, /btih/, 'no infohash, so nothing to go stale');
+      assert.doesNotMatch(
+        fragment,
+        /btih/,
+        'no infohash, so nothing to go stale',
+      );
     } finally {
       await api.close();
     }
@@ -279,7 +302,12 @@ describe('the URL a style should point at', () => {
 
   it('is null for an archive that cannot be served as tiles', async () => {
     const api = await serve([
-      entry({ infoHash: 'c'.repeat(40), name: 'planet.osm.pbf', categories: ['osm'], kind: 'osm-pbf' }),
+      entry({
+        infoHash: 'c'.repeat(40),
+        name: 'planet.osm.pbf',
+        categories: ['osm'],
+        kind: 'osm-pbf',
+      }),
     ]);
     try {
       const [row] = await api.get('/api/categories').then((r) => r.json());

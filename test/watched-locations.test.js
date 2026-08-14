@@ -78,14 +78,20 @@ describe('choosing what to take from a listing', () => {
   });
 
   it('can be asked for more, newest first', () => {
-    assert.deepEqual(ScheduledSourceManager.select(AUTOINDEX, { ...source, newest: 2 }), [
-      'https://build.protomaps.com/20260807.pmtiles',
-      'https://build.protomaps.com/20260806.pmtiles',
-    ]);
+    assert.deepEqual(
+      ScheduledSourceManager.select(AUTOINDEX, { ...source, newest: 2 }),
+      [
+        'https://build.protomaps.com/20260807.pmtiles',
+        'https://build.protomaps.com/20260806.pmtiles',
+      ],
+    );
   });
 
   it('ignores files that are not archives', () => {
-    const urls = ScheduledSourceManager.select(AUTOINDEX, { ...source, newest: 99 });
+    const urls = ScheduledSourceManager.select(AUTOINDEX, {
+      ...source,
+      newest: 99,
+    });
     assert.ok(!urls.some((url) => url.endsWith('checksums.txt')));
   });
 
@@ -200,7 +206,10 @@ describe('previewing a source before it downloads anything', () => {
     try {
       const response = await server.post({ name: 'nothing useful' });
       assert.equal(response.status, 400);
-      assert.match((await response.json()).error, /url template or an index url/);
+      assert.match(
+        (await response.json()).error,
+        /url template or an index url/,
+      );
     } finally {
       await server.close();
     }
@@ -259,9 +268,15 @@ describe('when a source is looked at', () => {
   const at = (hour, minute = 0) => new Date(Date.UTC(2026, 7, 8, hour, minute));
 
   it('finds the most recent occurrence of a time of day', () => {
-    assert.equal(lastScheduled(['03:30'], now).toISOString(), '2026-08-08T03:30:00.000Z');
+    assert.equal(
+      lastScheduled(['03:30'], now).toISOString(),
+      '2026-08-08T03:30:00.000Z',
+    );
     // Not reached yet today, so the most recent one was yesterday.
-    assert.equal(lastScheduled(['06:00'], now).toISOString(), '2026-08-07T06:00:00.000Z');
+    assert.equal(
+      lastScheduled(['06:00'], now).toISOString(),
+      '2026-08-07T06:00:00.000Z',
+    );
   });
 
   it('takes the latest of several times', () => {
@@ -292,13 +307,25 @@ describe('when a source is looked at', () => {
   });
 
   it('falls back to an interval when no time is named', () => {
-    assert.equal(isDue({}, new Date(now - 3 * 3600e3), { defaultHours: 6, now }), false);
-    assert.equal(isDue({}, new Date(now - 7 * 3600e3), { defaultHours: 6, now }), true);
+    assert.equal(
+      isDue({}, new Date(now - 3 * 3600e3), { defaultHours: 6, now }),
+      false,
+    );
+    assert.equal(
+      isDue({}, new Date(now - 7 * 3600e3), { defaultHours: 6, now }),
+      true,
+    );
   });
 
   it('lets one source poll more often than the rest', () => {
-    assert.equal(isDue({ everyHours: 1 }, new Date(now - 2 * 3600e3), { now }), true);
-    assert.equal(isDue({ everyHours: 24 }, new Date(now - 2 * 3600e3), { now }), false);
+    assert.equal(
+      isDue({ everyHours: 1 }, new Date(now - 2 * 3600e3), { now }),
+      true,
+    );
+    assert.equal(
+      isDue({ everyHours: 24 }, new Date(now - 2 * 3600e3), { now }),
+      false,
+    );
   });
 
   it('only polls what is due, and does not repeat it', async () => {
@@ -312,8 +339,16 @@ describe('when a source is looked at', () => {
       {
         sourceCheckIntervalHours: 6,
         sources: [
-          { name: 'hourly', url: 'https://x.example/{YYYYMMDD}.pmtiles', everyHours: 1 },
-          { name: 'daily', url: 'https://y.example/{YYYYMMDD}.pmtiles', everyHours: 24 },
+          {
+            name: 'hourly',
+            url: 'https://x.example/{YYYYMMDD}.pmtiles',
+            everyHours: 1,
+          },
+          {
+            name: 'daily',
+            url: 'https://y.example/{YYYYMMDD}.pmtiles',
+            everyHours: 24,
+          },
         ],
       },
     );
@@ -410,7 +445,9 @@ describe('publishing a watched location as a web seed', () => {
   });
 
   it('carries a separate public URL where one is given', async () => {
-    const options = await importWith({ webSeeds: ['https://cdn.example/a.pmtiles'] });
+    const options = await importWith({
+      webSeeds: ['https://cdn.example/a.pmtiles'],
+    });
     assert.deepEqual(options.webSeeds, ['https://cdn.example/a.pmtiles']);
   });
 });
@@ -482,7 +519,11 @@ describe('a long import does not come back due the moment it ends', () => {
       // A tick immediately after it finished. Under the old bookkeeping this
       // was already four hours overdue.
       await node.manager.sweep(node.now());
-      assert.equal(node.attempts.length, 1, 'it must not restart straight away');
+      assert.equal(
+        node.attempts.length,
+        1,
+        'it must not restart straight away',
+      );
 
       // And it does come back, once the interval has really passed.
       const later = new Date(node.now().getTime() + 16 * 60 * 1000);
@@ -535,7 +576,11 @@ describe('a long import does not come back due the moment it ends', () => {
     try {
       await manager.sweep(clock);
       await manager.sweep(clock);
-      assert.equal(attempts.length, 1, 'a failure must not be retried instantly');
+      assert.equal(
+        attempts.length,
+        1,
+        'a failure must not be retried instantly',
+      );
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }
@@ -723,7 +768,12 @@ describe('pointing "latest" at the newest build', () => {
           const name = url.split('/').pop();
           const real = path.join(dir, name);
           await fs.writeFile(real, 'archive bytes');
-          return { infoHash: 'a'.repeat(40), name, savePath: dir, retainedAt: real };
+          return {
+            infoHash: 'a'.repeat(40),
+            name,
+            savePath: dir,
+            retainedAt: real,
+          };
         },
       },
       { findBySource: () => null },
@@ -788,7 +838,10 @@ describe('the hint about candidate dates', () => {
   }
 
   it('offers it when neither knob is set', async () => {
-    assert.match(await saidWhenEmpty({}), /Neither offsetDays nor lookbackDays/);
+    assert.match(
+      await saidWhenEmpty({}),
+      /Neither offsetDays nor lookbackDays/,
+    );
   });
 
   it('stays quiet when offsetDays says which day to ask for', async () => {
@@ -846,7 +899,9 @@ describe('retiring older builds from a source', () => {
         },
         remove: async (infoHash, options) => {
           removed.push({ infoHash, ...options });
-          const at = held.findIndex((candidate) => candidate.infoHash === infoHash);
+          const at = held.findIndex(
+            (candidate) => candidate.infoHash === infoHash,
+          );
           if (at >= 0) held.splice(at, 1);
           return true;
         },
@@ -896,7 +951,11 @@ describe('retiring older builds from a source', () => {
   });
 
   it('keeps the count it was given', async () => {
-    const { removed } = await importOneMore({ keep: 3 }, [build(1), build(2), build(3)]);
+    const { removed } = await importOneMore({ keep: 3 }, [
+      build(1),
+      build(2),
+      build(3),
+    ]);
     // The new one plus the two newest old ones is three; the oldest goes.
     assert.deepEqual(
       removed.map((call) => call.infoHash),
@@ -907,7 +966,10 @@ describe('retiring older builds from a source', () => {
   it('never touches an archive this source did not import', async () => {
     // Something added by hand, adopted from a client, or taken from a peer is
     // not this source's to delete, however alike it looks.
-    const stranger = { ...build(9), source: { type: 'file', location: '/somewhere' } };
+    const stranger = {
+      ...build(9),
+      source: { type: 'file', location: '/somewhere' },
+    };
     const adopted = { ...build(8), source: undefined };
     const { removed } = await importOneMore({ keep: 1 }, [stranger, adopted]);
     assert.deepEqual(removed, []);
@@ -1058,10 +1120,21 @@ describe('a watched folder can describe what it produces', () => {
 
   it('is offered in the console, not only in the config file', async () => {
     const page = await fs.readFile(
-      path.join(path.dirname(new URL(import.meta.url).pathname).replace(/^\/([A-Za-z]:)/, '$1'), '..', 'src', 'web', 'index.html'),
+      path.join(
+        path
+          .dirname(new URL(import.meta.url).pathname)
+          .replace(/^\/([A-Za-z]:)/, '$1'),
+        '..',
+        'src',
+        'web',
+        'index.html',
+      ),
       'utf8',
     );
-    const watch = page.slice(page.indexOf("key: 'watch'"), page.indexOf("key: 'sources'"));
+    const watch = page.slice(
+      page.indexOf("key: 'watch'"),
+      page.indexOf("key: 'sources'"),
+    );
     assert.match(watch, /field: 'comment'/);
   });
 });

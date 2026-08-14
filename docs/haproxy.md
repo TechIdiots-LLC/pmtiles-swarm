@@ -9,14 +9,14 @@ configuration is shown alongside so the same thing can be written by hand.
 This is the first thing to get straight, because a reverse proxy in front of a
 BitTorrent node carries less than it looks like it does.
 
-| | Through HAProxy? |
-| --- | --- |
-| Tiles, TileJSON, feeds, `.torrent` files, health checks | **Yes** — ordinary HTTP on 8090 |
-| The console and API on 8091 | **No.** Do not publish it |
-| BitTorrent peers on 6881 | **No.** Not HTTP; needs its own forward |
-| WebRTC to browser peers | **No.** Outbound only, and needs nothing |
+|                                                         | Through HAProxy?                         |
+| ------------------------------------------------------- | ---------------------------------------- |
+| Tiles, TileJSON, feeds, `.torrent` files, health checks | **Yes** — ordinary HTTP on 8090          |
+| The console and API on 8091                             | **No.** Do not publish it                |
+| BitTorrent peers on 6881                                | **No.** Not HTTP; needs its own forward  |
+| WebRTC to browser peers                                 | **No.** Outbound only, and needs nothing |
 
-A node reachable *only* through HAProxy has no incoming peers at all. It will
+A node reachable _only_ through HAProxy has no incoming peers at all. It will
 still seed to peers it connects to, and still serve tiles, but it is half a
 member of the swarm. 6881 wants a firewall rule of its own, straight to the
 node, TCP **and** UDP.
@@ -25,18 +25,18 @@ node, TCP **and** UDP.
 
 **Services → HAProxy → Settings → Health Monitors → Add**
 
-| Field | Value |
-| --- | --- |
-| Name | `pmtiles-swarm` |
-| Check type | `HTTP` |
-| Check interval | `2s` or `5s` — see below |
-| Port to check | *empty*, so it uses the real server's port |
-| HTTP method | `GET` |
-| Request URI | `/health` |
-| HTTP version | `HTTP/1.1` |
-| HTTP host | anything; `localhost` is fine |
+| Field                          | Value                                       |
+| ------------------------------ | ------------------------------------------- |
+| Name                           | `pmtiles-swarm`                             |
+| Check type                     | `HTTP`                                      |
+| Check interval                 | `2s` or `5s` — see below                    |
+| Port to check                  | _empty_, so it uses the real server's port  |
+| HTTP method                    | `GET`                                       |
+| Request URI                    | `/health`                                   |
+| HTTP version                   | `HTTP/1.1`                                  |
+| HTTP host                      | anything; `localhost` is fine               |
 | Custom HTTP check → Expression | exact string match for the HTTP status code |
-| Custom HTTP check → Value | `200` |
+| Custom HTTP check → Value      | `200`                                       |
 
 `HTTP/1.1` requires a `Host` header, which is why the field is there. The node
 does not route by it, so its value only matters if something in front of it
@@ -69,16 +69,16 @@ What the interval buys is failover speed, and it is the interval multiplied by
 HAProxy's `fall` count, which defaults to 3:
 
 | Check interval | Marked down after |
-| --- | --- |
-| `2s` | about 6 seconds |
-| `5s` | about 15 seconds |
+| -------------- | ----------------- |
+| `2s`           | about 6 seconds   |
+| `5s`           | about 15 seconds  |
 
 Neither is wrong. Six seconds is worth having if a node dying mid-request
 matters; fifteen is worth having if it does not, and costs the node less. What
 is not worth having is a sub-second interval, which only asks a cached answer
 more often.
 
-Note also that the node comes *back* on `rise` successful checks — 2 by
+Note also that the node comes _back_ on `rise` successful checks — 2 by
 default — so a flapping node re-enters rotation quickly whichever you choose.
 
 ## The backend pool
@@ -116,7 +116,7 @@ cost with no benefit.
 
 ### HTTP/2
 
-Enable it on the frontend and leave *HTTP/2 without TLS* unchecked: the client
+Enable it on the frontend and leave _HTTP/2 without TLS_ unchecked: the client
 gets HTTP/2, the node is spoken to over HTTP/1.1, which is what it speaks.
 Balancing in HTTP mode is per request rather than per connection, so a client
 multiplexing a hundred tile requests over one HTTP/2 connection still has them
@@ -187,7 +187,7 @@ rather than a timeout.
 ## Deploying a new build
 
 `/health` says whether a node should be sent traffic. It says nothing about
-whether a *particular* archive has become servable there, which is the question
+whether a _particular_ archive has become servable there, which is the question
 worth asking after a build lands.
 
 ```sh
@@ -201,7 +201,7 @@ done
 ```
 
 Ask each node **directly**, not through the balancer — through it you learn that
-*some* node is ready, which is not the same thing and is exactly the wrong
+_some_ node is ready, which is not the same thing and is exactly the wrong
 answer when deciding whether to move traffic.
 
 `/ready` answers 415 for an archive that can never be served, so a loop like the

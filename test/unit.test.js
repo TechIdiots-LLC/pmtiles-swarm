@@ -43,8 +43,14 @@ describe('feed rendering', () => {
     const count = (xml) => (xml.match(/<item>/g) ?? []).length;
 
     assert.strictEqual(count(renderFeed(entries, options)), 5);
-    assert.strictEqual(count(renderFeed(entries, { ...options, maxItems: 2 })), 2);
-    assert.strictEqual(count(renderFeed(entries, { ...options, maxItems: 0 })), 5);
+    assert.strictEqual(
+      count(renderFeed(entries, { ...options, maxItems: 2 })),
+      2,
+    );
+    assert.strictEqual(
+      count(renderFeed(entries, { ...options, maxItems: 0 })),
+      5,
+    );
     // Entries arrive newest first, so a cap must keep the newest.
     const capped = renderFeed(entries, { ...options, maxItems: 1 });
     assert.match(capped, /build-1\.pmtiles/);
@@ -54,7 +60,10 @@ describe('feed rendering', () => {
   it('carries a torrent enclosure that generic readers understand', () => {
     const xml = renderFeed([entry(1)], options);
     assert.match(xml, /type="application\/x-bittorrent"/);
-    assert.match(xml, /<enclosure url="https:\/\/maps\.example\.org\/api\/torrents\/1{40}\/file"/);
+    assert.match(
+      xml,
+      /<enclosure url="https:\/\/maps\.example\.org\/api\/torrents\/1{40}\/file"/,
+    );
   });
 
   it('describes the map when the archive has been probed', () => {
@@ -235,7 +244,10 @@ describe('catalog', () => {
     await catalog.load();
     const first = await catalog.put(entry(3));
     await new Promise((resolve) => setTimeout(resolve, 10));
-    const second = await catalog.put({ infoHash: entry(3).infoHash, stale: true });
+    const second = await catalog.put({
+      infoHash: entry(3).infoHash,
+      stale: true,
+    });
 
     assert.strictEqual(second.createdAt, first.createdAt);
     assert.notStrictEqual(second.updatedAt, first.updatedAt);

@@ -135,9 +135,14 @@ export class MutablePublisher {
       // build has moved. `force` only decides whether it is worth saying.
       const changed = this.#published.get(category) !== entry.infoHash;
       try {
-        const result = await publishInfoHash(this.#dht, this.#key, entry.infoHash, {
-          salt: category,
-        });
+        const result = await publishInfoHash(
+          this.#dht,
+          this.#key,
+          entry.infoHash,
+          {
+            salt: category,
+          },
+        );
         this.#published.set(category, entry.infoHash);
         done.push({ category, infoHash: entry.infoHash, ...result });
 
@@ -145,7 +150,11 @@ export class MutablePublisher {
         // identity without any endpoint needing to know a publisher exists.
         await this.#catalog.put({
           infoHash: entry.infoHash,
-          mutable: { publicKey: this.publicKeyHex, salt: category, seq: result.seq },
+          mutable: {
+            publicKey: this.publicKeyHex,
+            salt: category,
+            seq: result.seq,
+          },
         });
 
         if (changed || options.force) {
@@ -209,7 +218,10 @@ export class MutablePublisher {
     // bet on how long bootstrapping takes -- one this lost in the field, where
     // fifteen seconds was not enough and every category failed on the first
     // attempt.
-    this.#firstPublish(options.readyMs ?? DEFAULT_READY_MS, options.retryMs).catch((error) =>
+    this.#firstPublish(
+      options.readyMs ?? DEFAULT_READY_MS,
+      options.retryMs,
+    ).catch((error) =>
       this.#log(`[mutable] first publish failed: ${error.message}`),
     );
 
@@ -280,7 +292,12 @@ export class MutablePublisher {
     // it -- so this holds until there are a few, saying so as it goes.
     let count = this.#nodeCount();
     let lastSaid = Date.now();
-    while (count !== null && count < MINIMUM_NODES && Date.now() < deadline && !this.#stopped) {
+    while (
+      count !== null &&
+      count < MINIMUM_NODES &&
+      Date.now() < deadline &&
+      !this.#stopped
+    ) {
       if (Date.now() - lastSaid >= WAITING_LOG_MS) {
         lastSaid = Date.now();
         this.#log(
@@ -293,7 +310,10 @@ export class MutablePublisher {
       // and the behaviour hard to test.
       const remaining = deadline - Date.now();
       await new Promise((resolve) => {
-        const timer = setTimeout(resolve, Math.max(10, Math.min(2000, remaining)));
+        const timer = setTimeout(
+          resolve,
+          Math.max(10, Math.min(2000, remaining)),
+        );
         timer.unref?.();
       });
       count = this.#nodeCount();
@@ -378,7 +398,8 @@ export class MutablePublisher {
     this.#dht = await this.#createDht();
     this.#failedCycles = 0;
     const found = await this.#whenDhtReady(DEFAULT_READY_MS);
-    if (found !== null) this.#log(`[mutable] new DHT socket has ${found} nodes`);
+    if (found !== null)
+      this.#log(`[mutable] new DHT socket has ${found} nodes`);
   }
 
   /**

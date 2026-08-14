@@ -76,7 +76,9 @@ export class WatchManager {
       // any of them needs it, at the shortest interval requested.
       const folder = {
         ...entries[0],
-        stabilitySeconds: Math.max(...entries.map((e) => e.stabilitySeconds ?? 30)),
+        stabilitySeconds: Math.max(
+          ...entries.map((e) => e.stabilitySeconds ?? 30),
+        ),
         pollSeconds: Math.min(
           ...entries.map((e) => e.pollSeconds ?? 0).filter((s) => s > 0),
           ...(entries.some((e) => (e.pollSeconds ?? 0) > 0) ? [] : [0]),
@@ -165,7 +167,10 @@ export class WatchManager {
     // pointing somewhere else entirely does not silently exclude a real build
     // that happens to share its name.
     const target = path.join(folder.path, 'any.pmtiles');
-    return path.resolve(file) === path.resolve(linkPathFor(target, folder.latestLink));
+    return (
+      path.resolve(file) ===
+      path.resolve(linkPathFor(target, folder.latestLink))
+    );
   }
 
   /**

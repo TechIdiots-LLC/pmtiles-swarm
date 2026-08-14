@@ -61,7 +61,11 @@ describe('listing peers', () => {
   it('reports the peers an engine finds', async () => {
     const node = await serving(
       engineThat('libtorrent', [
-        { address: '203.0.113.7:51413', client: 'qBittorrent/5.0', downloadSpeed: 10e6 },
+        {
+          address: '203.0.113.7:51413',
+          client: 'qBittorrent/5.0',
+          downloadSpeed: 10e6,
+        },
       ]),
     );
     try {
@@ -79,7 +83,9 @@ describe('listing peers', () => {
     // bare `[]`, which the console rendered as "Nothing to show" — identical to
     // a swarm nobody is in. An archive pulling 10 MiB/s said it had no peers
     // and nothing anywhere said otherwise.
-    const node = await serving(engineThat('libtorrent', new Error('utp_socket')));
+    const node = await serving(
+      engineThat('libtorrent', new Error('utp_socket')),
+    );
     try {
       const { status, body } = await node.get();
       assert.equal(status, 200, 'still not a client error');
@@ -93,7 +99,9 @@ describe('listing peers', () => {
   it('labels each peer with the engine that found it', async () => {
     const engine = new CompositeEngine({
       primary: engineThat('libtorrent', [{ address: '203.0.113.7:51413' }]),
-      secondaries: [engineThat('webtorrent', [{ address: '198.51.100.4:6881' }])],
+      secondaries: [
+        engineThat('webtorrent', [{ address: '198.51.100.4:6881' }]),
+      ],
     });
     const node = await serving(engine);
     try {

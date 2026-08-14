@@ -92,7 +92,12 @@ describe('writing down what a magnet did not carry', () => {
     const { torrentFile, parsed } = await realTorrent();
     const node = await holding({
       torrentFile,
-      entry: { infoHash: parsed.infoHash, name: parsed.infoHash, size: 0, mode: 'cache' },
+      entry: {
+        infoHash: parsed.infoHash,
+        name: parsed.infoHash,
+        size: 0,
+        mode: 'cache',
+      },
     });
 
     assert.ok(await node.library.captureMetadata(parsed.infoHash));
@@ -145,7 +150,12 @@ describe('writing down what a magnet did not carry', () => {
     const { torrentFile } = await realTorrent();
     const node = await holding({
       torrentFile,
-      entry: { infoHash: 'f'.repeat(40), name: 'f'.repeat(40), size: 0, mode: 'cache' },
+      entry: {
+        infoHash: 'f'.repeat(40),
+        name: 'f'.repeat(40),
+        size: 0,
+        mode: 'cache',
+      },
     });
 
     assert.equal(await node.library.captureMetadata('f'.repeat(40)), null);
@@ -156,7 +166,12 @@ describe('writing down what a magnet did not carry', () => {
     // a magnet joined into a quiet swarm may wait a long time for one.
     const node = await holding({
       torrentFile: null,
-      entry: { infoHash: 'a'.repeat(40), name: 'a'.repeat(40), size: 0, mode: 'cache' },
+      entry: {
+        infoHash: 'a'.repeat(40),
+        name: 'a'.repeat(40),
+        size: 0,
+        mode: 'cache',
+      },
     });
     assert.equal(await node.library.captureMetadata('a'.repeat(40)), null);
   });
@@ -165,7 +180,12 @@ describe('writing down what a magnet did not carry', () => {
     const node = await holding({
       torrentFile: undefined,
       engineName: 'libtorrent',
-      entry: { infoHash: 'b'.repeat(40), name: 'b'.repeat(40), size: 0, mode: 'cache' },
+      entry: {
+        infoHash: 'b'.repeat(40),
+        name: 'b'.repeat(40),
+        size: 0,
+        mode: 'cache',
+      },
     });
     assert.equal(await node.library.captureMetadata('b'.repeat(40)), null);
   });
@@ -192,7 +212,8 @@ describe('a magnet carries the web seeds the torrent carries', () => {
           name: 'planet.pmtiles',
           urlList: ['https://maps.example.org/files/planet.pmtiles'],
         },
-        (error, result) => (error ? reject(error) : resolve(new Uint8Array(result))),
+        (error, result) =>
+          error ? reject(error) : resolve(new Uint8Array(result)),
       ),
     );
   }
@@ -277,7 +298,10 @@ describe('a magnet carries the web seeds the torrent carries', () => {
     );
 
     const { library } = await node();
-    const entry = await library.addExistingTorrent({ torrentFile }, { mode: 'mirror' });
+    const entry = await library.addExistingTorrent(
+      { torrentFile },
+      { mode: 'mirror' },
+    );
     assert.deepEqual(seedsIn(entry.magnet), []);
   });
 });

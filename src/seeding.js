@@ -96,12 +96,12 @@ export function remaining(entry, status, globalLimit, now = Date.now()) {
  * @returns {object} - A complete one, or forever when it constrains nothing.
  */
 function normalize(limit) {
-  const ratio = Number.isFinite(limit.ratio) && limit.ratio > 0
-    ? limit.ratio
-    : undefined;
-  const minutes = Number.isFinite(limit.minutes) && limit.minutes > 0
-    ? limit.minutes
-    : undefined;
+  const ratio =
+    Number.isFinite(limit.ratio) && limit.ratio > 0 ? limit.ratio : undefined;
+  const minutes =
+    Number.isFinite(limit.minutes) && limit.minutes > 0
+      ? limit.minutes
+      : undefined;
 
   // A limit that names no threshold is not a limit.
   if (ratio === undefined && minutes === undefined) return FOREVER;

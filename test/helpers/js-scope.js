@@ -145,7 +145,8 @@ export function declarationDepths(source) {
   const depths = new Map();
   let depth = 0;
 
-  const pattern = /(?:^|[^.\w])(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g;
+  const pattern =
+    /(?:^|[^.\w])(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g;
   const positions = [...code.matchAll(pattern)].map((match) => ({
     name: match[1],
     at: match.index,

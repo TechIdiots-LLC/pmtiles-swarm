@@ -72,14 +72,14 @@ about reachability:
 }
 ```
 
-| listener | serves |
-| --- | --- |
-| `port` | tiles, TileJSON, `.torrent` files, the feeds, the `latest` endpoints, and `/api/catalog` — everything a stranger or a peer is meant to reach |
-| `adminPort` | the console and the rest of the API, plus all of the above |
+| listener    | serves                                                                                                                                       |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `port`      | tiles, TileJSON, `.torrent` files, the feeds, the `latest` endpoints, and `/api/catalog` — everything a stranger or a peer is meant to reach |
+| `adminPort` | the console and the rest of the API, plus all of the above                                                                                   |
 
 The public port can then face the internet while the admin port is bound to
 loopback or a private interface, so the thing that can rewrite the
-configuration is not password-protected — it is *unreachable*. That is a much
+configuration is not password-protected — it is _unreachable_. That is a much
 stronger statement, and it is the one a firewall can enforce.
 
 On the public listener the admin surface answers **404, not 403**. A refusal
@@ -91,7 +91,7 @@ header is something the caller controls.
 `/api/catalog` is public on purpose: it is how another node keeps itself in
 step, so it has to be reachable from outside. What it publishes is already
 decided by `feedCategories` and by whatever token was presented. The map
-preview is *not* public — it is part of the console, and it loads MapLibre from
+preview is _not_ public — it is part of the console, and it loads MapLibre from
 `/vendor`, which is not published either, so serving it would serve a page that
 cannot render.
 
@@ -109,10 +109,10 @@ same sentence.
 So there are named tokens, minted in **Settings → Access tokens** or at
 `POST /api/tokens`:
 
-| role | may |
-| --- | --- |
-| `peer` | read this node — the catalogue, the feeds, tiles and `.torrent` files. What another swarm node needs in order to follow it, and nothing else. |
-| `admin` | everything the console can do. |
+| role    | may                                                                                                                                           |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `peer`  | read this node — the catalogue, the feeds, tiles and `.torrent` files. What another swarm node needs in order to follow it, and nothing else. |
+| `admin` | everything the console can do.                                                                                                                |
 
 One per person or node, so any of them can be revoked without disturbing the
 rest, and each records when it was last used — which is what makes retiring an
@@ -145,8 +145,13 @@ A `peer` token may carry a category list, and then sees exactly those:
 {
   "auth": {
     "tokens": [
-      { "id": "…", "name": "partner org", "role": "peer",
-        "hash": "…", "categories": ["internal"] }
+      {
+        "id": "…",
+        "name": "partner org",
+        "role": "peer",
+        "hash": "…",
+        "categories": ["internal"]
+      }
     ]
   }
 }
@@ -190,7 +195,7 @@ Three ways past it, in order of preference:
 
 ## The publisher key is not a credential
 
-Everything above guards *this node*: who may read the API, who may change
+Everything above guards _this node_: who may read the API, who may change
 settings, who may add an archive. The publisher key is a different kind of
 secret, and the difference is worth stating plainly because the habits do not
 carry over.
@@ -199,12 +204,12 @@ carry over.
 DHT entries that say which archive is the current build of a category. It is a
 **signing key**, closer to a code-signing certificate than to an API token.
 
-| | An access credential (`apiKey`, a token, `password`) | The publisher key |
-| --- | --- | --- |
-| What it grants | access to one node | authority over what your subscribers believe |
-| If it leaks | that node is compromised | anyone can sign a record pointing your subscribers at any archive |
-| If you lose it | mint another | every style pointing at that public key breaks, permanently |
-| Rotation | revoke and reissue | there is none |
+|                | An access credential (`apiKey`, a token, `password`) | The publisher key                                                 |
+| -------------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
+| What it grants | access to one node                                   | authority over what your subscribers believe                      |
+| If it leaks    | that node is compromised                             | anyone can sign a record pointing your subscribers at any archive |
+| If you lose it | mint another                                         | every style pointing at that public key breaks, permanently       |
+| Rotation       | revoke and reissue                                   | there is none                                                     |
 
 That third row is the one people are unprepared for. A public key **is** the
 identity: there is no registry to update and no way to tell a subscriber that a
@@ -236,7 +241,7 @@ Practically:
 
 Generate one with `pmtiles-swarm publisher-key`. Setup detail is in
 [running-as-a-service.md](running-as-a-service.md#the-publisher-key); what it is
-*for* is in [serving-tiles.md](serving-tiles.md#a-fragment-that-survives-a-rebuild).
+_for_ is in [serving-tiles.md](serving-tiles.md#a-fragment-that-survives-a-rebuild).
 
 ## What this is not
 

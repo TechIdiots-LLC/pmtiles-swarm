@@ -59,11 +59,15 @@ async function poll(subscription = {}) {
   const fetched = [];
   const server = http.createServer((req, res) => {
     if (req.url.endsWith('.xml')) {
-      res.writeHead(200, { 'content-type': 'application/rss+xml' }).end(planetFeed(base));
+      res
+        .writeHead(200, { 'content-type': 'application/rss+xml' })
+        .end(planetFeed(base));
       return;
     }
     fetched.push(req.url);
-    res.writeHead(200, { 'content-type': 'application/x-bittorrent' }).end(torrent);
+    res
+      .writeHead(200, { 'content-type': 'application/x-bittorrent' })
+      .end(torrent);
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -77,7 +81,10 @@ async function poll(subscription = {}) {
     {
       addExistingTorrent: async (input, options) => {
         asked.push({ input, options, from: fetched.at(-1) });
-        return { infoHash: `${asked.length}`.padStart(40, 'a'), name: 'planet.osm.pbf' };
+        return {
+          infoHash: `${asked.length}`.padStart(40, 'a'),
+          name: 'planet.osm.pbf',
+        };
       },
     },
     {
@@ -140,7 +147,10 @@ describe('following an ordinary RSS feed', () => {
   });
 
   it('files them where the feed says', async () => {
-    const asked = await poll({ categories: ['osm-planet'], savePath: '/mnt/pbf' });
+    const asked = await poll({
+      categories: ['osm-planet'],
+      savePath: '/mnt/pbf',
+    });
     assert.deepEqual(asked[0].options.categories, ['osm-planet']);
     assert.equal(asked[0].options.savePath, '/mnt/pbf');
   });
@@ -159,11 +169,15 @@ describe('polling the same feed again', () => {
     const fetched = [];
     const server = http.createServer((req, res) => {
       if (req.url.endsWith('.xml')) {
-        res.writeHead(200, { 'content-type': 'application/rss+xml' }).end(planetFeed(base));
+        res
+          .writeHead(200, { 'content-type': 'application/rss+xml' })
+          .end(planetFeed(base));
         return;
       }
       fetched.push(req.url);
-      res.writeHead(200, { 'content-type': 'application/x-bittorrent' }).end(torrent);
+      res
+        .writeHead(200, { 'content-type': 'application/x-bittorrent' })
+        .end(torrent);
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     base = `http://127.0.0.1:${server.address().port}`;
@@ -174,7 +188,10 @@ describe('polling the same feed again', () => {
         addExistingTorrent: async () => {
           if (options.failing) throw new Error('the torrent is briefly a 404');
           asked.push(fetched.at(-1));
-          return { infoHash: `${asked.length}`.padStart(40, 'a'), name: 'planet' };
+          return {
+            infoHash: `${asked.length}`.padStart(40, 'a'),
+            name: 'planet',
+          };
         },
       },
       {
@@ -237,7 +254,9 @@ describe('the master switch', () => {
     const instance = new SubscriptionManager(
       { addExistingTorrent: async (input) => asked.push(input) },
       {
-        subscriptions: [{ url: 'http://127.0.0.1:1/feed.xml', protocol: 'rss' }],
+        subscriptions: [
+          { url: 'http://127.0.0.1:1/feed.xml', protocol: 'rss' },
+        ],
         ...config,
       },
     );
@@ -308,7 +327,11 @@ describe('keeping a feed from filling the disk', () => {
   it('is off unless asked for, like everywhere else it appears', async () => {
     const { retains } = await import('../src/retention.js');
     assert.equal(retains({}), false);
-    assert.equal(retains({ prune: 'delete' }), false, 'pruning is not retention');
+    assert.equal(
+      retains({ prune: 'delete' }),
+      false,
+      'pruning is not retention',
+    );
   });
 });
 
@@ -321,29 +344,46 @@ describe('keeping only the last complete copy', () => {
     const { retire } = await import('../src/retention.js');
 
     const family = (newestComplete) => [
-      { infoHash: 'new', name: 'planet-260810.osm.pbf', complete: newestComplete },
+      {
+        infoHash: 'new',
+        name: 'planet-260810.osm.pbf',
+        complete: newestComplete,
+      },
       { infoHash: 'old', name: 'planet-260803.osm.pbf', complete: true },
     ];
 
     const removals = [];
     const library = {
-      remove: async (infoHash, options) => removals.push({ infoHash, ...options }),
+      remove: async (infoHash, options) =>
+        removals.push({ infoHash, ...options }),
     };
 
     const downloading = family(false);
     await retire({
-      library, family: downloading, entry: downloading[0],
-      keep: 1, label: '[t]', requireComplete: true,
+      library,
+      family: downloading,
+      entry: downloading[0],
+      keep: 1,
+      label: '[t]',
+      requireComplete: true,
     });
-    assert.deepEqual(removals, [], 'nothing goes while the new copy is partial');
+    assert.deepEqual(
+      removals,
+      [],
+      'nothing goes while the new copy is partial',
+    );
 
     const finished = family(true);
     const log = console.log;
     console.log = () => {};
     try {
       await retire({
-        library, family: finished, entry: finished[0],
-        keep: 1, label: '[t]', requireComplete: true,
+        library,
+        family: finished,
+        entry: finished[0],
+        keep: 1,
+        label: '[t]',
+        requireComplete: true,
       });
     } finally {
       console.log = log;

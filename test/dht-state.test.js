@@ -12,7 +12,10 @@ const table = (nodes) => ({ toJSON: () => ({ nodes }) });
 
 describe('remembering a DHT routing table', () => {
   it('starts from bootstrap hosts when nothing is saved', async () => {
-    assert.deepEqual(await loadNodes(path.join(workspace, 'absent.json')), BOOTSTRAP);
+    assert.deepEqual(
+      await loadNodes(path.join(workspace, 'absent.json')),
+      BOOTSTRAP,
+    );
     assert.deepEqual(await loadNodes(undefined), BOOTSTRAP);
   });
 
@@ -34,7 +37,11 @@ describe('remembering a DHT routing table', () => {
     await saveNodes(file, table([{ host: '9.9.9.9', port: 6881 }]));
     assert.equal(await saveNodes(file, table([])), 0);
 
-    assert.equal((await loadNodes(file))[0], '9.9.9.9:6881', 'the good table survived');
+    assert.equal(
+      (await loadNodes(file))[0],
+      '9.9.9.9:6881',
+      'the good table survived',
+    );
   });
 
   it('ignores a corrupt file rather than failing to start', async () => {
@@ -63,6 +70,9 @@ describe('remembering a DHT routing table', () => {
     const file = path.join(workspace, 'atomic.json');
     await saveNodes(file, table([{ host: '2.2.2.2', port: 6881 }]));
     const left = await fs.readdir(workspace);
-    assert.ok(!left.some((name) => name.endsWith('.tmp')), 'no temporary left behind');
+    assert.ok(
+      !left.some((name) => name.endsWith('.tmp')),
+      'no temporary left behind',
+    );
   });
 });

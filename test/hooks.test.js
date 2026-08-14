@@ -26,7 +26,7 @@ function libraryOf(entries) {
 }
 
 describe('external program hooks', () => {
-  it('fills a torrent client\'s placeholders', () => {
+  it("fills a torrent client's placeholders", () => {
     // The set matches qBittorrent's so an existing torrent_finished.sh keeps
     // working when a node takes over from one.
     const filled = substitute('%N|%L|%G|%D|%Z|%I', {
@@ -43,7 +43,10 @@ describe('external program hooks', () => {
   });
 
   it('substitutes in one pass, so a value with a percent is left alone', () => {
-    assert.equal(substitute('%N', { name: '50%D discount.pmtiles' }), '50%D discount.pmtiles');
+    assert.equal(
+      substitute('%N', { name: '50%D discount.pmtiles' }),
+      '50%D discount.pmtiles',
+    );
   });
 
   it('treats what is already there as known, not as newly added', async () => {
@@ -51,7 +54,11 @@ describe('external program hooks', () => {
     // an entire existing library, which for a hook that starts a build job is
     // a very bad first impression.
     const library = libraryOf([
-      { infoHash: 'a'.repeat(40), name: 'old.pmtiles', status: { progress: 0.5 } },
+      {
+        infoHash: 'a'.repeat(40),
+        name: 'old.pmtiles',
+        status: { progress: 0.5 },
+      },
     ]);
     const hooks = new ProgramHooks(library, {
       onAdded: { command: 'true' },
@@ -62,7 +69,11 @@ describe('external program hooks', () => {
 
   it('fires for an archive that appears after the first look', async () => {
     const entries = [
-      { infoHash: 'a'.repeat(40), name: 'old.pmtiles', status: { progress: 0.5 } },
+      {
+        infoHash: 'a'.repeat(40),
+        name: 'old.pmtiles',
+        status: { progress: 0.5 },
+      },
     ];
     const library = libraryOf(entries);
     const hooks = new ProgramHooks(library, { onAdded: { command: 'true' } });
@@ -87,9 +98,15 @@ describe('external program hooks', () => {
     // A hook that fails must not be retried every minute for ever — a build
     // taking six hours would otherwise be started six times over.
     const library = libraryOf([
-      { infoHash: 'c'.repeat(40), name: 'done.pmtiles', status: { progress: 1 } },
+      {
+        infoHash: 'c'.repeat(40),
+        name: 'done.pmtiles',
+        status: { progress: 1 },
+      },
     ]);
-    const hooks = new ProgramHooks(library, { onComplete: { command: 'true' } });
+    const hooks = new ProgramHooks(library, {
+      onComplete: { command: 'true' },
+    });
 
     await hooks.sweep();
     assert.equal(library.written.length, 1);
@@ -137,13 +154,15 @@ describe('who may set a hook', () => {
     );
     // The real escalation: off, and asked to be on.
     await assert.rejects(
-      () => saveConfig({ allowHooksFromApi: false }, { allowHooksFromApi: true }),
+      () =>
+        saveConfig({ allowHooksFromApi: false }, { allowHooksFromApi: true }),
       /only be set in the config file/,
     );
     // And it cannot be switched off through the API either, since that is a
     // change to a guarded setting like any other.
     await assert.rejects(
-      () => saveConfig({ allowHooksFromApi: true }, { allowHooksFromApi: false }),
+      () =>
+        saveConfig({ allowHooksFromApi: true }, { allowHooksFromApi: false }),
       /only be set in the config file/,
     );
   });
@@ -171,7 +190,10 @@ describe('who may set a hook', () => {
   it('lets the hooks themselves be echoed back when they are guarded', async () => {
     // Same shape, one level down: with allowHooksFromApi off, onAdded and
     // onComplete are guarded too, and the console still sends them.
-    const config = { onComplete: { command: '/usr/local/bin/build.sh' }, watch: [] };
+    const config = {
+      onComplete: { command: '/usr/local/bin/build.sh' },
+      watch: [],
+    };
     await saveConfig(config, {
       onComplete: { command: '/usr/local/bin/build.sh' },
       watch: [{ path: '/mnt/maps' }],
@@ -192,13 +214,22 @@ describe('a save that is refused changes nothing', () => {
     await assert.rejects(
       () =>
         saveConfig(config, {
-          sources: [{ name: 'protomaps', url: 'https://build.example/{YYYYMMDD}.pmtiles' }],
+          sources: [
+            {
+              name: 'protomaps',
+              url: 'https://build.example/{YYYYMMDD}.pmtiles',
+            },
+          ],
           notARealSetting: true,
         }),
       /unknown setting/,
     );
 
-    assert.deepEqual(config.sources, [], 'the good key must not have been applied');
+    assert.deepEqual(
+      config.sources,
+      [],
+      'the good key must not have been applied',
+    );
   });
 
   it('applies nothing when a guarded key is genuinely changed', async () => {
@@ -228,9 +259,9 @@ describe('a hook that says a great deal', () => {
       script,
       [
         // Comfortably past the 4 MiB this used to allow.
-        "for (var i = 0; i < 200000; i += 1) {",
+        'for (var i = 0; i < 200000; i += 1) {',
         "  process.stdout.write('tile batch ' + i + String.fromCharCode(10));",
-        "}",
+        '}',
         "process.stdout.write('WROTE planet.pmtiles' + String.fromCharCode(10));",
       ].join(String.fromCharCode(10)),
     );
@@ -255,7 +286,8 @@ describe('a hook that says a great deal', () => {
     // Scoped to this archive. console.log is process-global and the other
     // tests in this file run alongside it, so an unqualified "finished"
     // resolves this the moment any of them does.
-    const mine = (line) => line.includes(entry.name) || line.startsWith('[onComplete]   ');
+    const mine = (line) =>
+      line.includes(entry.name) || line.startsWith('[onComplete]   ');
     console.log = (...parts) => {
       const line = parts.join(' ');
       if (mine(line)) said.push(line);
@@ -316,7 +348,10 @@ describe('a hook whose command is not there', () => {
       },
     };
     const hooks = new ProgramHooks(library, {
-      onComplete: { command: '/does/not/exist/torrent_finished.sh', args: ['%N'] },
+      onComplete: {
+        command: '/does/not/exist/torrent_finished.sh',
+        args: ['%N'],
+      },
     });
 
     const realWarn = console.warn;
@@ -326,7 +361,11 @@ describe('a hook whose command is not there', () => {
     try {
       await hooks.sweep();
       // The clear happens once the spawn has failed, which is a tick or two.
-      for (let waited = 0; waited < 2000 && entry.completedAt !== null; waited += 25) {
+      for (
+        let waited = 0;
+        waited < 2000 && entry.completedAt !== null;
+        waited += 25
+      ) {
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
     } finally {
@@ -404,8 +443,13 @@ describe('running the completion hook on demand', () => {
 
   it('says so when the archive is not here', async () => {
     const { library } = oneArchive();
-    const hooks = new ProgramHooks(library, { onComplete: { command: 'true' } });
-    await assert.rejects(() => hooks.runComplete('f'.repeat(40)), /unknown archive/);
+    const hooks = new ProgramHooks(library, {
+      onComplete: { command: 'true' },
+    });
+    await assert.rejects(
+      () => hooks.runComplete('f'.repeat(40)),
+      /unknown archive/,
+    );
   });
 
   it('refuses to start a second run over a first', async () => {
@@ -413,7 +457,10 @@ describe('running the completion hook on demand', () => {
     // waiting.
     const { library } = oneArchive();
     const hooks = new ProgramHooks(library, {
-      onComplete: { command: process.execPath, args: ['-e', 'setTimeout(()=>{}, 3000)'] },
+      onComplete: {
+        command: process.execPath,
+        args: ['-e', 'setTimeout(()=>{}, 3000)'],
+      },
     });
 
     const log = console.log;

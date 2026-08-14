@@ -34,7 +34,8 @@ function fakeCatalog(entries) {
   return {
     written,
     categories: () => [...new Set(entries.flatMap((e) => e.categories ?? []))],
-    byCategory: (category) => entries.filter((e) => (e.categories ?? []).includes(category)),
+    byCategory: (category) =>
+      entries.filter((e) => (e.categories ?? []).includes(category)),
     put: async (patch) => {
       written.push(patch);
       const target = entries.find((e) => e.infoHash === patch.infoHash);
@@ -127,7 +128,11 @@ describe('announcing the current build of a category', () => {
     const { publisher, dht } = build([entry('a'.repeat(40), ['openmaptiles'])]);
     await publisher.publishAll();
     await publisher.publishAll();
-    assert.equal(dht.puts.length, 2, 'published again despite nothing changing');
+    assert.equal(
+      dht.puts.length,
+      2,
+      'published again despite nothing changing',
+    );
   });
 
   it('keeps quiet about an unchanged build, and says so when it moves', async () => {
@@ -148,12 +153,19 @@ describe('announcing the current build of a category', () => {
   it('carries on when one category fails', async () => {
     // A DHT put can fail for reasons that have nothing to do with the others.
     const { publisher, logs } = build(
-      [entry('a'.repeat(40), ['openmaptiles']), entry('c'.repeat(40), ['terrain'])],
+      [
+        entry('a'.repeat(40), ['openmaptiles']),
+        entry('c'.repeat(40), ['terrain']),
+      ],
       { failing: true },
     );
     const done = await publisher.publishAll();
     assert.deepEqual(done, []);
-    assert.equal(logs.filter((l) => l.includes('failed')).length, 2, 'both reported');
+    assert.equal(
+      logs.filter((l) => l.includes('failed')).length,
+      2,
+      'both reported',
+    );
   });
 });
 
@@ -298,11 +310,17 @@ describe('waiting for the DHT before publishing', () => {
       logs.some((line) => line.includes('found only')),
       'named the cause',
     );
-    assert.ok(logs.some((line) => line.includes('UDP')), 'and what to check');
+    assert.ok(
+      logs.some((line) => line.includes('UDP')),
+      'and what to check',
+    );
     // And the per-category failures carry the count, because the same message
     // with a populated table would mean something entirely different.
     assert.ok(
-      logs.some((line) => line.includes('No nodes to query') && line.includes('0 DHT nodes')),
+      logs.some(
+        (line) =>
+          line.includes('No nodes to query') && line.includes('0 DHT nodes'),
+      ),
       'said how empty the table was',
     );
     publisher.stop();
@@ -322,7 +340,10 @@ describe('waiting for the DHT before publishing', () => {
 
     // Ready, but the first attempt fails; the retry should still come quickly.
     dht.ready = true;
-    const failing = { ...dht, put: (v, cb) => setImmediate(() => cb(new Error('nope'))) };
+    const failing = {
+      ...dht,
+      put: (v, cb) => setImmediate(() => cb(new Error('nope'))),
+    };
     const first = new MutablePublisher({
       catalog: fakeCatalog([entry('a'.repeat(40), ['openmaptiles'])]),
       dht: failing,
@@ -404,7 +425,8 @@ describe('replacing a DHT socket that never finds peers', () => {
     // A working socket must not be thrown away because a put failed for its
     // own reasons — that would trade a good socket for a fresh gamble.
     const healthy = socket(30);
-    healthy.put = (value, callback) => setImmediate(() => callback(new Error('rejected')));
+    healthy.put = (value, callback) =>
+      setImmediate(() => callback(new Error('rejected')));
     let created = 0;
     const publisher = new MutablePublisher({
       catalog: fakeCatalog([entry('a'.repeat(40), ['openmaptiles'])]),

@@ -4,12 +4,12 @@ How an archive gets into the swarm, and the decisions that matter when it does.
 
 ## The four ways in
 
-| Input | What happens | Hashes? |
-| --- | --- | --- |
-| Local `.pmtiles` path | A torrent is created; the data stays where it is | Yes |
-| Remote `.pmtiles` URL | Streamed past the hasher; origin becomes a web seed | Yes |
-| Magnet or `.torrent` | Joined — nothing is created | No |
-| `POST /api/adopt` | What something else already holds is taken over | No |
+| Input                 | What happens                                        | Hashes? |
+| --------------------- | --------------------------------------------------- | ------- |
+| Local `.pmtiles` path | A torrent is created; the data stays where it is    | Yes     |
+| Remote `.pmtiles` URL | Streamed past the hasher; origin becomes a web seed | Yes     |
+| Magnet or `.torrent`  | Joined — nothing is created                         | No      |
+| `POST /api/adopt`     | What something else already holds is taken over     | No      |
 
 Publishers create; everyone else joins. `adopt` is the migration path for an existing
 library — it re-hashes nothing, so bringing across 50 torrents is instant.
@@ -112,21 +112,21 @@ your download manager:
 
 The feed's items are `.osm.pbf`, not map archives — that is fine. Joining an
 existing torrent does not require it to be anything in particular; only
-*creating* one does. The archive simply is not servable, and nothing tries.
+_creating_ one does. The archive simply is not servable, and nothing tries.
 
 When the download finishes, the command runs. Placeholders match a torrent
 client's, so an existing `torrent_finished.sh` keeps working:
 
-| | |
-| --- | --- |
-| `%N` | Archive name |
-| `%F` | Content path |
-| `%D` | Save path |
-| `%I` | Infohash |
-| `%L` | First category |
+|      |                                 |
+| ---- | ------------------------------- |
+| `%N` | Archive name                    |
+| `%F` | Content path                    |
+| `%D` | Save path                       |
+| `%I` | Infohash                        |
+| `%L` | First category                  |
 | `%G` | All categories, comma separated |
-| `%Z` | Size in bytes |
-| `%C` | File count |
+| `%Z` | Size in bytes                   |
+| `%C` | File count                      |
 
 Point the script's output at a watch folder and the loop closes: source arrives,
 the build runs, the result is published as a torrent with its own feed, and
@@ -212,10 +212,10 @@ curl -X POST localhost:8090/api/torrents -H 'content-type: application/json' \
   -d '{"url": "https://maps.example.org/files/planet.pmtiles", "retain": false}'
 ```
 
-| | Disk | Bandwidth | Result |
-| --- | --- | --- | --- |
-| **keep** (default) | full archive | full archive, once | A real seeder immediately |
-| **discard** | none | full archive, once | A torrent this node cannot seed |
+|                    | Disk         | Bandwidth          | Result                          |
+| ------------------ | ------------ | ------------------ | ------------------------------- |
+| **keep** (default) | full archive | full archive, once | A real seeder immediately       |
+| **discard**        | none         | full archive, once | A torrent this node cannot seed |
 
 Discard is legitimate when you already host the archive and only want to publish a
 torrent for it — the web seed carries the swarm until a peer completes a copy. But it is
@@ -241,11 +241,11 @@ far.
 **Only when it is provably safe.** Three things are checked before a single byte is
 appended, and any of them failing restarts the download instead:
 
-| Check | Why |
-| --- | --- |
-| The response is **206**, not 200 | A server that ignores `Range` answers with the whole file; appending that gives a file that is part duplicate |
-| The **ETag** or **Last-Modified** is unchanged | Resuming across a new build splices the head of one onto the tail of another |
-| **Content-Range** begins where it was asked to | It is the server's own account of what it sent; believing the request instead drops bytes |
+| Check                                          | Why                                                                                                           |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| The response is **206**, not 200               | A server that ignores `Range` answers with the whole file; appending that gives a file that is part duplicate |
+| The **ETag** or **Last-Modified** is unchanged | Resuming across a new build splices the head of one onto the tail of another                                  |
+| **Content-Range** begins where it was asked to | It is the server's own account of what it sent; believing the request instead drops bytes                     |
 
 A server offering neither validator is treated as unable to prove anything, so the
 download restarts. That is deliberate: fetching a planet archive twice is expensive, and
@@ -282,7 +282,7 @@ curl -X POST localhost:8090/api/torrents -H 'content-type: application/json' \
   -d '{"path": "/mnt/maps/planet.pmtiles", "pieceLength": 16777216}'
 ```
 
-This only matters if the archive will be read *randomly*, as a tile server does. An
+This only matters if the archive will be read _randomly_, as a tile server does. An
 archive that will only ever be downloaded whole is fine with the 16 MiB other tools
 default to, and pays a smaller hash list for it.
 
@@ -317,7 +317,7 @@ that tries it fails hash verification against it. With the marker, the URL 404s 
 exact moment the file is real, then starts working.
 
 The rename is within one directory, so it is atomic and instant however large the archive
-is. Keeping incomplete files in a *different* directory would mean a completed download had
+is. Keeping incomplete files in a _different_ directory would mean a completed download had
 to move, which is instant only when both paths share a filesystem and otherwise copies the
 whole archive — an hour and twice the disk for a 700 GiB build.
 
@@ -338,13 +338,13 @@ ordinary torrent and notice nothing. Neither `mktorrent` nor `create-torrent` ca
 
 Verified against libtorrent 2.0.13, the same archive through each arrangement:
 
-| Engines | Torrent |
-| --- | --- |
-| webtorrent alone | v1 only, 300 B |
-| libtorrent alone | **hybrid v1+v2**, 392 B |
-| libtorrent primary + webtorrent | **hybrid v1+v2**, 392 B |
+| Engines                                | Torrent                 |
+| -------------------------------------- | ----------------------- |
+| webtorrent alone                       | v1 only, 300 B          |
+| libtorrent alone                       | **hybrid v1+v2**, 392 B |
+| libtorrent primary + webtorrent        | **hybrid v1+v2**, 392 B |
 | webtorrent primary + libtorrent second | **hybrid v1+v2**, 392 B |
-| any, with `"torrentFormat": "v1"` | v1 only, 300 B |
+| any, with `"torrentFormat": "v1"`      | v1 only, 300 B          |
 
 `torrentFormat` takes `hybrid` (the default), `v1` or `v2`. A node with no libtorrent falls
 back to v1 rather than failing, because a torrent matters more than the format of a torrent
@@ -380,7 +380,7 @@ Editable in **Settings → Monitored folders** as a table, rather than by hand.
 ### What kind of link the stable name is
 
 `latestLink` is made as a symlink by default. Set `latestLinkType: "hard"` on
-the folder when something reads the archive *through* that name — a tile
+the folder when something reads the archive _through_ that name — a tile
 server, or anything else that opens it rather than following it to see where it
 points.
 
@@ -456,7 +456,7 @@ a local folder it is pure waste: stat-ing a directory of terabyte archives every
 seconds costs real I/O to learn nothing.
 
 `savePath` names where the data should end up, and can be a **named location** instead —
-see *Where the data lands* in the README. Changing any of this applies immediately; the
+see _Where the data lands_ in the README. Changing any of this applies immediately; the
 watchers are restarted rather than the node.
 
 ## Scheduled upstreams
@@ -490,9 +490,9 @@ today's URL and see whether it exists yet:
 ```
 
 `url`
-    A template with the date in it. A `{...}` group is read as a date *pattern* — runs of
-    Y, M and D with separators between them — so it can spell whatever the upstream
-    spells, without each variant having to be supported here first:
+A template with the date in it. A `{...}` group is read as a date _pattern_ — runs of
+Y, M and D with separators between them — so it can spell whatever the upstream
+spells, without each variant having to be supported here first:
 
     | | | |
     | --- | --- | --- |
@@ -508,20 +508,20 @@ today's URL and see whether it exists yet:
     date in it and click a token — it replaces the selection.
 
 `filename`
-    What to call it locally. Upstreams often publish under a bare date; this renames it to
-    something self-describing without touching the URL.
+What to call it locally. Upstreams often publish under a bare date; this renames it to
+something self-describing without touching the URL.
 
 `offsetDays`
-    Most builds land the day after the date they are named for; `-1` looks for yesterday.
+Most builds land the day after the date they are named for; `-1` looks for yesterday.
 
 `lookbackDays`
-    Also check the preceding days. Without it, a poll missed while the daemon was down
-    loses that build permanently.
+Also check the preceding days. Without it, a poll missed while the daemon was down
+loses that build permanently.
 
 `latestLink`
-    A stable name pointing at the newest build — `planetiler-protomaps-latest.pmtiles`.
-    The dated file stays the real one, so it remains seedable under its own torrent while
-    a page links to a name that does not change. **Off unless set.**
+A stable name pointing at the newest build — `planetiler-protomaps-latest.pmtiles`.
+The dated file stays the real one, so it remains seedable under its own torrent while
+a page links to a name that does not change. **Off unless set.**
 
     A symlink where the platform allows one, and a hard link where it does not: Windows
     refuses symlinks with `EPERM` unless the process is elevated or the machine is in
@@ -538,12 +538,12 @@ today's URL and see whether it exists yet:
     one behind as a file the watcher will then import.
 
 `at`, `everyHours`, `everyMinutes`
-    When to look. `at` is a time of day in UTC — `"03:30"`, or a list of them — for an
-    upstream that publishes on a schedule, which is most of them: polling every six hours
-    from whenever the process started finds a daily build up to six hours late, and those
-    are hours during which nobody could be seeding it. `everyHours` or `everyMinutes` for
-    an upstream that publishes whenever it is ready. Naming none falls back to
-    `sourceCheckIntervalHours`.
+When to look. `at` is a time of day in UTC — `"03:30"`, or a list of them — for an
+upstream that publishes on a schedule, which is most of them: polling every six hours
+from whenever the process started finds a daily build up to six hours late, and those
+are hours during which nobody could be seeding it. `everyHours` or `everyMinutes` for
+an upstream that publishes whenever it is ready. Naming none falls back to
+`sourceCheckIntervalHours`.
 
     Times are UTC to match the date tokens: a template on one clock and a schedule on
     another would be a confusing thing to work out at four in the morning. A source that
@@ -551,10 +551,10 @@ today's URL and see whether it exists yet:
     its scheduled time.
 
 `webSeed`, `webSeeds`
-    Whether to publish the URL the archive came from inside the torrent, and any other
-    URLs to publish alongside it. Unset it is decided for you: **yes**, unless the URL
-    appears to carry credentials, in which case never — a torrent goes out to the swarm
-    and cannot be recalled, so a pre-signed link published once is published for good.
+Whether to publish the URL the archive came from inside the torrent, and any other
+URLs to publish alongside it. Unset it is decided for you: **yes**, unless the URL
+appears to carry credentials, in which case never — a torrent goes out to the swarm
+and cannot be recalled, so a pre-signed link published once is published for good.
 
     Worth setting to `false` for an upstream that **deletes old builds**. A web seed is
     only useful while the file is still there; once it is gone, the URL outlives what it
@@ -566,9 +566,9 @@ today's URL and see whether it exists yet:
     *default* / *yes* / *no*.
 
 `keep`
-    How many builds from this source to hold. Unset keeps every one of them, which is
-    right for archives that are small or occasional and ruinous for a daily planet build:
-    at 137 GB a day, a source kept for ever fills any disk within the week.
+How many builds from this source to hold. Unset keeps every one of them, which is
+right for archives that are small or occasional and ruinous for a daily planet build:
+at 137 GB a day, a source kept for ever fills any disk within the week.
 
     `keep: 1` holds only the newest. It **deletes the data** of the ones it retires, so it
     is off unless you set it, and it is deliberately narrow — it only ever touches
@@ -589,10 +589,10 @@ today's URL and see whether it exists yet:
     imported is then the oldest of them.
 
 `keepDays`
-    The same thing said as a window rather than a count: how many days old a build may
-    get. `keepDays: 35` is the `find -mtime +35` sweep such a script would otherwise run
-    itself, except that this takes the torrent with the data instead of leaving the node
-    advertising an archive that is gone.
+The same thing said as a window rather than a count: how many days old a build may
+get. `keepDays: 35` is the `find -mtime +35` sweep such a script would otherwise run
+itself, except that this takes the torrent with the data instead of leaving the node
+advertising an archive that is gone.
 
     Age is read from the date in the build's name where there is one, and from when this
     node took it otherwise. A build that can be dated neither way is never removed — a
@@ -606,10 +606,10 @@ today's URL and see whether it exists yet:
     goes. `keep: 10, keepDays: 35` holds at most ten builds and at most five weeks.
 
 `seeding`
-    A seeding limit for this source's builds, in the same shape as the global one:
-    `{ "ratio": 2, "minutes": 4320, "then": "stop" }`. Useful where one source's archives
-    deserve different treatment from the rest — a daily build that has done its share is a
-    better candidate for `then: "remove"` than the only copy of something.
+A seeding limit for this source's builds, in the same shape as the global one:
+`{ "ratio": 2, "minutes": 4320, "then": "stop" }`. Useful where one source's archives
+deserve different treatment from the rest — a daily build that has done its share is a
+better candidate for `then: "remove"` than the only copy of something.
 
 Each build becomes its own archive with its own torrent and its own lifetime, which is
 what you want — old builds stay seedable for as long as anyone still wants them, and
@@ -674,7 +674,7 @@ otherwise read as two years of archives to fetch, beginning without anyone askin
 it only as far as the number of polls you expect to miss — each step is another full
 archive.
 
-`POST /api/sources/preview`, behind a **Preview** button, reports what a source *would*
+`POST /api/sources/preview`, behind a **Preview** button, reports what a source _would_
 take without taking any of it. It also refuses a URL that still has a fixed date in it and
 no token, which is the likeliest mistake and a silent one: that source would ask for the
 same build forever, find it every time, already have it, and never notice a new one.
@@ -736,18 +736,18 @@ Hours of transfer started by nobody is not a good default.
 ```
 
 `sources`
-    Which source types may be rebuilt unattended. Defaults to `["file"]` only: a local
-    rebuild costs a disk read, where adding `"http"` means re-downloading the entire
-    archive every time the origin changes.
+Which source types may be rebuilt unattended. Defaults to `["file"]` only: a local
+rebuild costs a disk read, where adding `"http"` means re-downloading the entire
+archive every time the origin changes.
 
 `maxBytes`
-    Skip anything larger. Default 50 GiB; `0` disables the cap. This is the guard that
-    stops a planet archive from quietly consuming a day of I/O.
+Skip anything larger. Default 50 GiB; `0` disables the cap. This is the guard that
+stops a planet archive from quietly consuming a day of I/O.
 
 `stabilitySeconds`
-    The source must be unchanged for this long first. A build still writing its output
-    would otherwise be hashed mid-write — the same hazard watch folders guard against. If
-    the source moves again during the wait, the rebuild is deferred to the next check.
+The source must be unchanged for this long first. A build still writing its output
+would otherwise be hashed mid-write — the same hazard watch folders guard against. If
+the source moves again during the wait, the rebuild is deferred to the next check.
 
 Rebuilds are serialised, so a sweep that finds five changed archives does not start five
 concurrent multi-hour hashes.

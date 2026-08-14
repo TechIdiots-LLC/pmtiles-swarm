@@ -138,7 +138,11 @@ describe('adopting from another swarm node', () => {
 
       assert.equal(result.added, 1);
       const [entry] = result.entries;
-      assert.deepEqual(entry.pmtiles, { format: 'pbf', minZoom: 0, maxZoom: 14 });
+      assert.deepEqual(entry.pmtiles, {
+        format: 'pbf',
+        minZoom: 0,
+        maxZoom: 14,
+      });
       assert.deepEqual(entry.webSeeds, [
         'https://peer.example.org/files/c-planet.pmtiles',
       ]);
@@ -289,7 +293,10 @@ describe('adopting from a torrent client', () => {
     try {
       const listed = await (await mine.post('/api/adopt/candidates')).json();
       assert.deepEqual(
-        listed.candidates.map((candidate) => [candidate.name, candidate.readable]),
+        listed.candidates.map((candidate) => [
+          candidate.name,
+          candidate.readable,
+        ]),
         [
           ['here.pmtiles', true],
           ['faraway.pmtiles', false],
@@ -321,9 +328,17 @@ describe('adopting from a torrent client', () => {
   });
 
   it('skips what is already catalogued', async () => {
-    const mine = await node([published('g')], [
-      { infoHash: 'g'.repeat(40), name: 'g-planet.pmtiles', size: 4096, progress: 1 },
-    ]);
+    const mine = await node(
+      [published('g')],
+      [
+        {
+          infoHash: 'g'.repeat(40),
+          name: 'g-planet.pmtiles',
+          size: 4096,
+          progress: 1,
+        },
+      ],
+    );
     try {
       const listed = await (await mine.post('/api/adopt/candidates')).json();
       assert.deepEqual(listed.candidates, []);
@@ -400,8 +415,12 @@ describe('adopting from a client on another machine', () => {
     return new Promise((resolve, reject) =>
       createTorrent(
         file,
-        { name: 'GEBCO.pmtiles', announceList: [['udp://real-tracker.example:6969']] },
-        (error, result) => (error ? reject(error) : resolve(new Uint8Array(result))),
+        {
+          name: 'GEBCO.pmtiles',
+          announceList: [['udp://real-tracker.example:6969']],
+        },
+        (error, result) =>
+          error ? reject(error) : resolve(new Uint8Array(result)),
       ),
     );
   }
@@ -422,7 +441,10 @@ describe('adopting from a client on another machine', () => {
     });
 
     assert.equal(node.adds.length, 1);
-    assert.ok(node.adds[0].torrentFile, 'should add the .torrent, not a magnet');
+    assert.ok(
+      node.adds[0].torrentFile,
+      'should add the .torrent, not a magnet',
+    );
     assert.equal(node.adds[0].magnet, undefined);
   });
 

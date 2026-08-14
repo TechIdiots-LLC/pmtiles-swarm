@@ -26,14 +26,23 @@ async function dropMany(folders, files) {
   const library = {
     catalog: { list: () => [] },
     addLocalArchive: async (file, options) => {
-      imports.push({ file: path.basename(file), categories: options.categories });
-      return { infoHash: 'a'.repeat(40), name: path.basename(file), source: {} };
+      imports.push({
+        file: path.basename(file),
+        categories: options.categories,
+      });
+      return {
+        infoHash: 'a'.repeat(40),
+        name: path.basename(file),
+        source: {},
+      };
     },
     remove: async () => {},
   };
 
   const manager = new WatchManager(library);
-  manager.start(folders.map((folder) => ({ path: dir, stabilitySeconds: 0.05, ...folder })));
+  manager.start(
+    folders.map((folder) => ({ path: dir, stabilitySeconds: 0.05, ...folder })),
+  );
 
   for (const name of files) {
     await fs.writeFile(path.join(dir, name), 'x');
@@ -48,16 +57,26 @@ async function dropMany(folders, files) {
 
 describe('globToRegExp', () => {
   it('matches what the glob describes', () => {
-    assert.ok(globToRegExp('monthly-*.pmtiles').test('monthly-20260813.pmtiles'));
-    assert.ok(globToRegExp('10yrplus-*.pmtiles').test('10yrplus-20260813.pmtiles'));
+    assert.ok(
+      globToRegExp('monthly-*.pmtiles').test('monthly-20260813.pmtiles'),
+    );
+    assert.ok(
+      globToRegExp('10yrplus-*.pmtiles').test('10yrplus-20260813.pmtiles'),
+    );
     assert.ok(globToRegExp('monthly.pmtiles').test('monthly.pmtiles'));
   });
 
   it('is anchored, so a prefix is not a match', () => {
     // Without anchoring, 'monthly-*' would also claim cell_monthly-*, and a
     // bucket's archives would be imported under two categories.
-    assert.equal(globToRegExp('monthly-*.pmtiles').test('cell_monthly-20260813.pmtiles'), false);
-    assert.equal(globToRegExp('10yrplus-*.pmtiles').test('cell_10yrplus-20260813.pmtiles'), false);
+    assert.equal(
+      globToRegExp('monthly-*.pmtiles').test('cell_monthly-20260813.pmtiles'),
+      false,
+    );
+    assert.equal(
+      globToRegExp('10yrplus-*.pmtiles').test('cell_10yrplus-20260813.pmtiles'),
+      false,
+    );
   });
 
   it('treats regex punctuation as literal text', () => {
@@ -74,7 +93,9 @@ describe('globToRegExp', () => {
   });
 
   it('ignores case, because a filesystem may not preserve it', () => {
-    assert.ok(globToRegExp('Monthly-*.PMTiles').test('monthly-20260813.pmtiles'));
+    assert.ok(
+      globToRegExp('Monthly-*.PMTiles').test('monthly-20260813.pmtiles'),
+    );
   });
 });
 
@@ -88,8 +109,14 @@ describe('several watch entries over one folder', () => {
       ['monthly-20260813.pmtiles', '10yrplus-20260813.pmtiles'],
     );
 
-    assert.equal(imports.length, 2, 'each archive imported exactly once, got ' + JSON.stringify(imports));
-    const byFile = Object.fromEntries(imports.map((i) => [i.file, i.categories]));
+    assert.equal(
+      imports.length,
+      2,
+      'each archive imported exactly once, got ' + JSON.stringify(imports),
+    );
+    const byFile = Object.fromEntries(
+      imports.map((i) => [i.file, i.categories]),
+    );
     assert.deepEqual(byFile['monthly-20260813.pmtiles'], ['wifidb-monthly']);
     assert.deepEqual(byFile['10yrplus-20260813.pmtiles'], ['wifidb-10yrplus']);
   });
@@ -146,10 +173,20 @@ describe('several watch entries over one folder', () => {
 
     const manager = new WatchManager(library);
     manager.start([
-      { path: dir, stabilitySeconds: 0.05, match: 'monthly-*.pmtiles',
-        categories: ['wifidb-monthly'], keep: 1 },
-      { path: dir, stabilitySeconds: 0.05, match: '10yrplus-*.pmtiles',
-        categories: ['wifidb-10yrplus'], keep: 1 },
+      {
+        path: dir,
+        stabilitySeconds: 0.05,
+        match: 'monthly-*.pmtiles',
+        categories: ['wifidb-monthly'],
+        keep: 1,
+      },
+      {
+        path: dir,
+        stabilitySeconds: 0.05,
+        match: '10yrplus-*.pmtiles',
+        categories: ['wifidb-10yrplus'],
+        keep: 1,
+      },
     ]);
     await fs.writeFile(path.join(dir, 'monthly-20260813.pmtiles'), 'x');
     await new Promise((resolve) => setTimeout(resolve, 2600));
@@ -163,21 +200,29 @@ describe('several watch entries over one folder', () => {
       [{ match: 'monthly-*.pmtiles', categories: ['wifidb-monthly'] }],
       ['monthly-20260813.pmtiles', 'heatmap-20260813.pmtiles'],
     );
-    assert.deepEqual(imports.map((i) => i.file), ['monthly-20260813.pmtiles']);
+    assert.deepEqual(
+      imports.map((i) => i.file),
+      ['monthly-20260813.pmtiles'],
+    );
   });
 
-  it('still ignores the folder\'s own latest link', async () => {
+  it("still ignores the folder's own latest link", async () => {
     // The link's name matches the glob as readily as a build does, so the two
     // rules have to hold together: a hard link is indistinguishable from the
     // file it names except by that name.
     const imports = await dropMany(
-      [{
-        match: 'monthly*.pmtiles',
-        categories: ['wifidb-monthly'],
-        latestLink: 'monthly.pmtiles',
-      }],
+      [
+        {
+          match: 'monthly*.pmtiles',
+          categories: ['wifidb-monthly'],
+          latestLink: 'monthly.pmtiles',
+        },
+      ],
       ['monthly-20260813.pmtiles', 'monthly.pmtiles'],
     );
-    assert.deepEqual(imports.map((i) => i.file), ['monthly-20260813.pmtiles']);
+    assert.deepEqual(
+      imports.map((i) => i.file),
+      ['monthly-20260813.pmtiles'],
+    );
   });
 });

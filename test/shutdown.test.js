@@ -102,7 +102,10 @@ describe('closing the http server', () => {
 
     const started = Date.now();
     await closeServer(server, 200);
-    assert.ok(Date.now() - started < 3000, 'should stop waiting on a stuck request');
+    assert.ok(
+      Date.now() - started < 3000,
+      'should stop waiting on a stuck request',
+    );
     held.destroy();
   });
 });
@@ -123,7 +126,11 @@ describe('signal handling', () => {
     });
 
     // Only now does there turn out to be anything to stop.
-    stoppers.push({ label: 'engine', stop: () => stopped.push('engine'), ms: 200 });
+    stoppers.push({
+      label: 'engine',
+      stop: () => stopped.push('engine'),
+      ms: 200,
+    });
 
     fake.emit('SIGINT');
     await new Promise((resolve) => setTimeout(resolve, 300));
@@ -135,23 +142,33 @@ describe('signal handling', () => {
   it('exits immediately on a second interrupt', async () => {
     const fake = new EventEmitter();
     const codes = [];
-    installSignalHandlers([{ label: 'slow', stop: () => new Promise(() => {}), ms: 5000 }], {
-      process: fake,
-      exit: (code) => codes.push(code),
-    });
+    installSignalHandlers(
+      [{ label: 'slow', stop: () => new Promise(() => {}), ms: 5000 }],
+      {
+        process: fake,
+        exit: (code) => codes.push(code),
+      },
+    );
 
     fake.emit('SIGINT');
     await new Promise((resolve) => setTimeout(resolve, 50));
     fake.emit('SIGINT');
     await new Promise((resolve) => setTimeout(resolve, 50));
 
-    assert.deepEqual(codes, [1], 'the second one should not wait for the first');
+    assert.deepEqual(
+      codes,
+      [1],
+      'the second one should not wait for the first',
+    );
   });
 
   it('answers SIGTERM the same way', async () => {
     const fake = new EventEmitter();
     const codes = [];
-    installSignalHandlers([], { process: fake, exit: (code) => codes.push(code) });
+    installSignalHandlers([], {
+      process: fake,
+      exit: (code) => codes.push(code),
+    });
 
     fake.emit('SIGTERM');
     await new Promise((resolve) => setTimeout(resolve, 50));

@@ -20,7 +20,10 @@ describe('what is left of a seeding limit', () => {
     assert.equal(left.forever, false);
     assert.equal(left.msLeft, 23 * 60 * MINUTE);
     assert.equal(left.then, 'stop');
-    assert.equal(left.expiresAt, new Date(NOW + 23 * 60 * MINUTE).toISOString());
+    assert.equal(
+      left.expiresAt,
+      new Date(NOW + 23 * 60 * MINUTE).toISOString(),
+    );
   });
 
   it('never goes negative once the limit has passed', () => {
@@ -105,6 +108,9 @@ describe('what is left of a seeding limit', () => {
   });
 
   it('is forever when nothing is configured at all', () => {
-    assert.equal(remaining({ mode: 'mirror' }, {}, undefined, NOW).forever, true);
+    assert.equal(
+      remaining({ mode: 'mirror' }, {}, undefined, NOW).forever,
+      true,
+    );
   });
 });

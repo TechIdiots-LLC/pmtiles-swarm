@@ -34,7 +34,13 @@ describe('moving a file', () => {
 
     assert.equal(await moveFile(from, to), 'renamed');
     assert.equal(await fs.readFile(to, 'utf8'), 'bytes');
-    assert.equal(await fs.stat(from).then(() => true, () => false), false);
+    assert.equal(
+      await fs.stat(from).then(
+        () => true,
+        () => false,
+      ),
+      false,
+    );
   });
 
   it('copies across filesystems, reporting progress', async () => {
@@ -51,7 +57,13 @@ describe('moving a file', () => {
     await copyOver(from, to, (bytes) => seen.push(bytes));
 
     assert.ok(payload.equals(await fs.readFile(to)));
-    assert.equal(await fs.stat(from).then(() => true, () => false), false);
+    assert.equal(
+      await fs.stat(from).then(
+        () => true,
+        () => false,
+      ),
+      false,
+    );
     assert.ok(seen.length > 0, 'progress should be reported');
     assert.equal(seen.at(-1), payload.length);
   });
@@ -145,7 +157,10 @@ describe('moving an archive', () => {
     );
     assert.equal(node.catalog.get(node.infoHash).savePath, node.other);
     assert.equal(
-      await fs.stat(path.join(node.home, 'planet.pmtiles')).then(() => true, () => false),
+      await fs.stat(path.join(node.home, 'planet.pmtiles')).then(
+        () => true,
+        () => false,
+      ),
       false,
     );
   });
@@ -166,12 +181,18 @@ describe('moving an archive', () => {
     // Its file is planet.pmtiles.incomplete, not planet.pmtiles.
     const node = await holding({ complete: false });
     await fs.rm(path.join(node.home, 'planet.pmtiles'));
-    await fs.writeFile(path.join(node.home, 'planet.pmtiles.incomplete'), 'part');
+    await fs.writeFile(
+      path.join(node.home, 'planet.pmtiles.incomplete'),
+      'part',
+    );
 
     await node.library.moveArchive(node.infoHash, { location: 'other disk' });
     assert.equal((await settled(node.library, node.infoHash)).state, 'done');
     assert.equal(
-      await fs.readFile(path.join(node.other, 'planet.pmtiles.incomplete'), 'utf8'),
+      await fs.readFile(
+        path.join(node.other, 'planet.pmtiles.incomplete'),
+        'utf8',
+      ),
       'part',
     );
   });
@@ -181,7 +202,10 @@ describe('moving an archive', () => {
     // guessing which one matters.
     const node = await holding();
     await fs.mkdir(node.other, { recursive: true });
-    await fs.writeFile(path.join(node.other, 'planet.pmtiles'), 'the other one');
+    await fs.writeFile(
+      path.join(node.other, 'planet.pmtiles'),
+      'the other one',
+    );
 
     await assert.rejects(
       () => node.library.moveArchive(node.infoHash, { location: 'other disk' }),
@@ -229,7 +253,8 @@ describe('moving an archive', () => {
   it('404s an archive it does not have', async () => {
     const node = await holding();
     await assert.rejects(
-      () => node.library.moveArchive('f'.repeat(40), { location: 'other disk' }),
+      () =>
+        node.library.moveArchive('f'.repeat(40), { location: 'other disk' }),
       /unknown archive/,
     );
   });

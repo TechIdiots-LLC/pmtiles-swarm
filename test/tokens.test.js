@@ -30,7 +30,10 @@ async function guarded(auth = {}, extra = {}) {
     ...extra.config,
   };
   const app = createApp({
-    library: { listWithStatus: async () => [], adoptFromEngine: async () => [] },
+    library: {
+      listWithStatus: async () => [],
+      adoptFromEngine: async () => [],
+    },
     catalog,
     engine: { name: 'webtorrent', list: async () => [] },
     subscriptions: {},
@@ -66,14 +69,20 @@ describe('minting tokens', () => {
     const node = await guarded({ apiKey: 'admin-key' });
     try {
       const created = await (
-        await node.call('/api/tokens', { method: 'POST', body: { name: 'peer one' } }, 'admin-key')
+        await node.call(
+          '/api/tokens',
+          { method: 'POST', body: { name: 'peer one' } },
+          'admin-key',
+        )
       ).json();
 
       assert.ok(created.token, 'the token itself comes back on creation');
       assert.equal(created.role, 'peer');
       assert.match(created.hint, /^…/);
 
-      const listed = await (await node.call('/api/tokens', {}, 'admin-key')).json();
+      const listed = await (
+        await node.call('/api/tokens', {}, 'admin-key')
+      ).json();
       assert.equal(listed.tokens.length, 1);
       assert.equal(listed.tokens[0].token, undefined, 'never listed again');
       assert.equal(listed.tokens[0].hash, undefined, 'nor its hash');
@@ -91,10 +100,17 @@ describe('minting tokens', () => {
     const node = await guarded({ apiKey: 'admin-key' });
     try {
       const created = await (
-        await node.call('/api/tokens', { method: 'POST', body: { name: 'fresh' } }, 'admin-key')
+        await node.call(
+          '/api/tokens',
+          { method: 'POST', body: { name: 'fresh' } },
+          'admin-key',
+        )
       ).json();
 
-      assert.equal((await node.call('/api/catalog', {}, created.token)).status, 200);
+      assert.equal(
+        (await node.call('/api/catalog', {}, created.token)).status,
+        200,
+      );
     } finally {
       await node.close();
     }
@@ -106,7 +122,11 @@ describe('minting tokens', () => {
     const node = await guarded({ apiKey: 'admin-key' });
     try {
       const peer = await (
-        await node.call('/api/tokens', { method: 'POST', body: { name: 'p' } }, 'admin-key')
+        await node.call(
+          '/api/tokens',
+          { method: 'POST', body: { name: 'p' } },
+          'admin-key',
+        )
       ).json();
       const admin = await (
         await node.call(
@@ -131,7 +151,13 @@ describe('minting tokens', () => {
     const node = await guarded({ apiKey: 'admin-key' });
     try {
       assert.equal(
-        (await node.call('/api/tokens', { method: 'POST', body: {} }, 'admin-key')).status,
+        (
+          await node.call(
+            '/api/tokens',
+            { method: 'POST', body: {} },
+            'admin-key',
+          )
+        ).status,
         400,
       );
       assert.equal(
@@ -156,7 +182,10 @@ describe('minting tokens', () => {
     try {
       const response = await node.call(
         '/api/tokens',
-        { method: 'POST', body: { name: 'x', role: 'admin', categories: ['a'] } },
+        {
+          method: 'POST',
+          body: { name: 'x', role: 'admin', categories: ['a'] },
+        },
         'admin-key',
       );
       assert.equal(response.status, 400);
@@ -170,25 +199,50 @@ describe('minting tokens', () => {
     const node = await guarded({ apiKey: 'admin-key' });
     try {
       const first = await (
-        await node.call('/api/tokens', { method: 'POST', body: { name: 'a' } }, 'admin-key')
+        await node.call(
+          '/api/tokens',
+          { method: 'POST', body: { name: 'a' } },
+          'admin-key',
+        )
       ).json();
-      await node.call('/api/tokens', { method: 'POST', body: { name: 'b' } }, 'admin-key');
+      await node.call(
+        '/api/tokens',
+        { method: 'POST', body: { name: 'b' } },
+        'admin-key',
+      );
 
       assert.equal(
-        (await node.call(`/api/tokens/${first.id}`, { method: 'DELETE' }, 'admin-key')).status,
+        (
+          await node.call(
+            `/api/tokens/${first.id}`,
+            { method: 'DELETE' },
+            'admin-key',
+          )
+        ).status,
         200,
       );
 
-      const left = await (await node.call('/api/tokens', {}, 'admin-key')).json();
+      const left = await (
+        await node.call('/api/tokens', {}, 'admin-key')
+      ).json();
       assert.deepEqual(
         left.tokens.map((token) => token.name),
         ['b'],
       );
 
       // And it stops working immediately.
-      assert.equal((await node.call('/api/catalog', {}, first.token)).status, 401);
       assert.equal(
-        (await node.call(`/api/tokens/${first.id}`, { method: 'DELETE' }, 'admin-key')).status,
+        (await node.call('/api/catalog', {}, first.token)).status,
+        401,
+      );
+      assert.equal(
+        (
+          await node.call(
+            `/api/tokens/${first.id}`,
+            { method: 'DELETE' },
+            'admin-key',
+          )
+        ).status,
         404,
       );
     } finally {
@@ -228,8 +282,14 @@ describe('what a peer token may do', () => {
   it('reads the catalogue', async () => {
     const node = await withPeer();
     try {
-      assert.equal((await node.call('/api/catalog', {}, node.token)).status, 200);
-      assert.equal((await node.call('/api/torrents', {}, node.token)).status, 200);
+      assert.equal(
+        (await node.call('/api/catalog', {}, node.token)).status,
+        200,
+      );
+      assert.equal(
+        (await node.call('/api/torrents', {}, node.token)).status,
+        200,
+      );
     } finally {
       await node.close();
     }
@@ -246,9 +306,20 @@ describe('what a peer token may do', () => {
         ['/api/adopt', 'POST'],
         ['/api/torrents/abc', 'DELETE'],
       ]) {
-        const response = await node.call(route, { method, body: {} }, node.token);
-        assert.equal(response.status, 403, `${method} ${route} should be refused`);
-        assert.match((await response.json()).error, /can read this node but not change it/);
+        const response = await node.call(
+          route,
+          { method, body: {} },
+          node.token,
+        );
+        assert.equal(
+          response.status,
+          403,
+          `${method} ${route} should be refused`,
+        );
+        assert.match(
+          (await response.json()).error,
+          /can read this node but not change it/,
+        );
       }
     } finally {
       await node.close();
@@ -259,9 +330,18 @@ describe('what a peer token may do', () => {
     // It would say who else holds a credential for this node.
     const node = await withPeer();
     try {
-      assert.equal((await node.call('/api/tokens', {}, node.token)).status, 403);
       assert.equal(
-        (await node.call('/api/tokens/peer-1', { method: 'DELETE' }, node.token)).status,
+        (await node.call('/api/tokens', {}, node.token)).status,
+        403,
+      );
+      assert.equal(
+        (
+          await node.call(
+            '/api/tokens/peer-1',
+            { method: 'DELETE' },
+            node.token,
+          )
+        ).status,
         403,
       );
     } finally {
@@ -274,21 +354,33 @@ describe('what a peer token may do', () => {
       { categories: ['internal'] },
       {
         entries: [
-          { infoHash: 'a'.repeat(40), name: 'internal.pmtiles', categories: ['internal'] },
-          { infoHash: 'b'.repeat(40), name: 'public.pmtiles', categories: ['basemaps'] },
+          {
+            infoHash: 'a'.repeat(40),
+            name: 'internal.pmtiles',
+            categories: ['internal'],
+          },
+          {
+            infoHash: 'b'.repeat(40),
+            name: 'public.pmtiles',
+            categories: ['basemaps'],
+          },
           { infoHash: 'c'.repeat(40), name: 'untagged.pmtiles' },
         ],
       },
     );
     try {
-      const body = await (await node.call('/api/catalog', {}, node.token)).json();
+      const body = await (
+        await node.call('/api/catalog', {}, node.token)
+      ).json();
       assert.deepEqual(
         body.archives.map((archive) => archive.name),
         ['internal.pmtiles'],
       );
 
       // An admin still sees everything.
-      const all = await (await node.call('/api/catalog', {}, 'admin-key')).json();
+      const all = await (
+        await node.call('/api/catalog', {}, 'admin-key')
+      ).json();
       assert.equal(all.archives.length, 3);
     } finally {
       await node.close();
@@ -312,10 +404,18 @@ describe('the original apiKey', () => {
     // It predates named tokens; nothing that worked should stop working.
     const node = await guarded({ apiKey: 'admin-key' });
     try {
-      assert.equal((await node.call('/api/config', {}, 'admin-key')).status, 200);
       assert.equal(
-        (await node.call('/api/tokens', { method: 'POST', body: { name: 'x' } }, 'admin-key'))
-          .status,
+        (await node.call('/api/config', {}, 'admin-key')).status,
+        200,
+      );
+      assert.equal(
+        (
+          await node.call(
+            '/api/tokens',
+            { method: 'POST', body: { name: 'x' } },
+            'admin-key',
+          )
+        ).status,
         201,
       );
     } finally {
@@ -326,7 +426,9 @@ describe('the original apiKey', () => {
   it('is reported as present but not listed', async () => {
     const node = await guarded({ apiKey: 'admin-key' });
     try {
-      const body = await (await node.call('/api/tokens', {}, 'admin-key')).json();
+      const body = await (
+        await node.call('/api/tokens', {}, 'admin-key')
+      ).json();
       assert.equal(body.apiKey, true);
       assert.deepEqual(body.tokens, []);
     } finally {
@@ -344,7 +446,9 @@ describe('the original apiKey', () => {
 
     const token = generateToken();
     const closed = await guarded({
-      tokens: [{ id: 'x', name: 'only token', role: 'peer', hash: hashToken(token) }],
+      tokens: [
+        { id: 'x', name: 'only token', role: 'peer', hash: hashToken(token) },
+      ],
     });
     try {
       assert.equal((await closed.call('/api/config')).status, 401);

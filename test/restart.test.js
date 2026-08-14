@@ -16,25 +16,22 @@ describe('what actually needs the process to stop', () => {
     // The listening socket, the data directory, and the torrent client. Asking
     // someone to stop a node mid-download in order to add a watched folder is
     // a poor trade, and it used to be the answer.
-    assert.deepEqual(
-      [...RESTART_REQUIRED].sort(),
-      [
-        'adminHost',
-        'adminPort',
-        'allowUnauthenticated',
-        'dataDir',
-        'engine',
-        'host',
-        'libtorrent',
-        'maxConnections',
-        'port',
-        'qbittorrent',
-        'savePath',
-        'secondaryEngines',
-        'secondaryShareIntervalSeconds',
-        'webtorrent',
-      ],
-    );
+    assert.deepEqual([...RESTART_REQUIRED].sort(), [
+      'adminHost',
+      'adminPort',
+      'allowUnauthenticated',
+      'dataDir',
+      'engine',
+      'host',
+      'libtorrent',
+      'maxConnections',
+      'port',
+      'qbittorrent',
+      'savePath',
+      'secondaryEngines',
+      'secondaryShareIntervalSeconds',
+      'webtorrent',
+    ]);
   });
 
   it('applies the rest by restarting one subsystem', () => {

@@ -72,7 +72,9 @@ export async function assertWritable(target) {
   try {
     await fs.mkdir(resolved, { recursive: true });
   } catch (error) {
-    const failure = new Error(`${resolved} cannot be created: ${error.message}`);
+    const failure = new Error(
+      `${resolved} cannot be created: ${error.message}`,
+    );
     failure.status = 400;
     throw failure;
   }

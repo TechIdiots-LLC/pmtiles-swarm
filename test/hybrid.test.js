@@ -31,8 +31,11 @@ function creating(name) {
       // A minimal but real torrent, so the caller's parse is a real parse.
       const { default: createTorrent } = await import('create-torrent');
       const torrentFile = await new Promise((resolve, reject) =>
-        createTorrent(filePath, { name: path.basename(filePath) }, (error, out) =>
-          error ? reject(error) : resolve(new Uint8Array(out)),
+        createTorrent(
+          filePath,
+          { name: path.basename(filePath) },
+          (error, out) =>
+            error ? reject(error) : resolve(new Uint8Array(out)),
         ),
       );
       return { torrentFile, format: options.format };

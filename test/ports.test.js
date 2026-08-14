@@ -4,7 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { createApp } from '../src/api.js';
-import { assertSafeToListen, createAuth, isPublicSurface } from '../src/auth.js';
+import {
+  assertSafeToListen,
+  createAuth,
+  isPublicSurface,
+} from '../src/auth.js';
 import { Catalog } from '../src/catalog.js';
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-ports-'));
@@ -125,9 +129,18 @@ describe('two listeners', () => {
     // 404 rather than 403: a refusal would confirm there is something there.
     const node = await split();
     try {
-      for (const route of ['/', '/api/torrents', '/api/config', '/api/tokens']) {
+      for (const route of [
+        '/',
+        '/api/torrents',
+        '/api/config',
+        '/api/tokens',
+      ]) {
         const response = await node.onPublic(route);
-        assert.equal(response.status, 404, `${route} should not exist publicly`);
+        assert.equal(
+          response.status,
+          404,
+          `${route} should not exist publicly`,
+        );
       }
     } finally {
       await node.close();
@@ -180,7 +193,8 @@ describe('what the safety check looks at', () => {
 
   it('still refuses when the admin port is the exposed one', () => {
     assert.throws(
-      () => unguarded({ host: '127.0.0.1', adminPort: 8092, adminHost: '0.0.0.0' }),
+      () =>
+        unguarded({ host: '127.0.0.1', adminPort: 8092, adminHost: '0.0.0.0' }),
       /Refusing to listen on 0\.0\.0\.0/,
     );
   });

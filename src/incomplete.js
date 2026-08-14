@@ -188,9 +188,7 @@ export class CompletionWatcher {
       // ask, and it stops after the first success because the entry then has a
       // torrentPath.
       if (!entry.torrentPath) {
-        await this.#library
-          .captureMetadata?.(entry.infoHash)
-          .catch(() => null);
+        await this.#library.captureMetadata?.(entry.infoHash).catch(() => null);
       }
 
       if (entry.complete) continue;

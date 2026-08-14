@@ -119,11 +119,14 @@ describe('a stable name in a watched folder', () => {
   });
 
   it('moves to the newer build', async () => {
-    const { dir, imported } = await run({ latestLink: 'planet-latest.pmtiles' }, [
+    const { dir, imported } = await run(
+      { latestLink: 'planet-latest.pmtiles' },
+      ['planet-260803.pmtiles', 'planet-260810.pmtiles'],
+    );
+    assert.deepEqual(imported, [
       'planet-260803.pmtiles',
       'planet-260810.pmtiles',
     ]);
-    assert.deepEqual(imported, ['planet-260803.pmtiles', 'planet-260810.pmtiles']);
     assert.equal(
       await fs.readFile(path.join(dir, 'planet-latest.pmtiles'), 'utf8'),
       `${CONTENT}: planet-260810.pmtiles`,

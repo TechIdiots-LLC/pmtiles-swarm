@@ -17,7 +17,7 @@ One node publishes, any number serve, everything meets in the swarm.
 **"Primary" and "secondary" are roles, not node types.** The only thing that makes
 a node primary is that it creates torrents and owns the catalog others subscribe
 to. It can sit in the load-balanced pool alongside everything else — it holds
-complete copies, so it is the *best* tile server in the fleet, not an exception
+complete copies, so it is the _best_ tile server in the fleet, not an exception
 to it. The diagram separates them only to keep the arrows legible.
 
 Likewise **mirror and cache are per-archive choices, not node identities.** A
@@ -74,7 +74,7 @@ graph LR
 ```
 
 **Key points:** **orange = BitTorrent, green = RSS distribution, plain = HTTP.**
-The publisher is the only node that *creates* torrents; the rest learn about
+The publisher is the only node that _creates_ torrents; the rest learn about
 archives from its feed and join the swarm, each choosing per archive whether to
 mirror it or cache it.
 
@@ -147,7 +147,7 @@ A node holding a complete copy skips all of this and reads its local file.
 
 ## 3. What a torrent-aware client does
 
-The server-side path above is what an *ordinary* client triggers. A torrent-aware
+The server-side path above is what an _ordinary_ client triggers. A torrent-aware
 client does something different: it takes over the archive reading itself, and
 stops needing the tile endpoint at all.
 
@@ -206,7 +206,7 @@ Three consequences worth being clear about:
 - **HTTP is never fully abandoned.** It is the fallback for anything the swarm
   cannot answer quickly, and the only path until the swarm is connected.
 - **The client becomes a seeder.** Every piece it pulls, it serves — so a popular
-  region gets *faster* as more clients view it, which is the opposite of how a
+  region gets _faster_ as more clients view it, which is the opposite of how a
   tile server behaves under load.
 - **Prefer the `.torrent` over the magnet.** A magnet carries only an infohash, so
   the client must find peers and complete a metadata exchange before it knows
@@ -255,7 +255,7 @@ remember where it had got to.
 
 ### Bootstrapping without the server
 
-A torrent-aware client still has to *learn* the magnet from somewhere, and until
+A torrent-aware client still has to _learn_ the magnet from somewhere, and until
 it does, the swarm — the part that depends on no server — is unreachable
 precisely when the server is down. The fix is that the magnet travels in the
 **fragment** of the TileJSON URL a style already carries:
@@ -277,11 +277,11 @@ string does not go stale on the next build either. See
 **Decide how absolute URLs get built.** TileJSON and the RSS feed both contain
 absolute URLs, and there are three ways to arrive at them:
 
-| Config | Behaviour | Use when |
-| --- | --- | --- |
-| `publicUrl` set | One canonical URL, whatever the request said | There is a single public name |
+| Config           | Behaviour                                                    | Use when                                     |
+| ---------------- | ------------------------------------------------------------ | -------------------------------------------- |
+| `publicUrl` set  | One canonical URL, whatever the request said                 | There is a single public name                |
 | `trustProxy` set | Per request, from `X-Forwarded-Proto` and `X-Forwarded-Host` | One node answers on several names or schemes |
-| neither | From the connection itself | Direct access, no proxy |
+| neither          | From the connection itself                                   | Direct access, no proxy                      |
 
 ```json
 {
@@ -317,7 +317,7 @@ between them.
 ```
 
 Bound to loopback like that, the thing that can rewrite configuration is
-*unreachable* rather than merely guarded, and the pool in front of the public
+_unreachable_ rather than merely guarded, and the pool in front of the public
 port carries no route to it at all. **Peer traffic never touches the balancer** —
 neither BitTorrent nor WebRTC — so size it for tiles alone, and see
 [ports and reachability](engines.md#ports-and-reachability) for the peer ports,
@@ -334,14 +334,14 @@ noticing.
 reads its local file and is fast from the first request. If every serving node
 mirrors, this section does not apply to you at all.
 
-Where nodes *do* run in cache mode, each warms its own piece cache, so scattering
+Where nodes _do_ run in cache mode, each warms its own piece cache, so scattering
 requests for one region across N nodes costs N first-fetches rather than one.
 Three things reduce that, in order of effect:
 
 1. **The CDN absorbs repeats.** Tiles are immutable, so the second request for a
    tile never reaches any node.
 2. **The nodes are peers in the same swarm.** A node fetching a piece a sibling
-   already holds gets it *from that sibling*, usually over the LAN. Local service
+   already holds gets it _from that sibling_, usually over the LAN. Local service
    discovery is on by default, so same-subnet nodes find each other without
    configuration. The cost is one external fetch plus N−1 local ones, not N
    external ones.

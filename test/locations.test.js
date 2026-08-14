@@ -15,7 +15,9 @@ import {
   sameFilesystem,
 } from '../src/locations.js';
 
-const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-locations-'));
+const workspace = await fs.mkdtemp(
+  path.join(os.tmpdir(), 'pmtiles-locations-'),
+);
 after(() => fs.rm(workspace, { recursive: true, force: true }));
 
 describe('naming a save location', () => {
@@ -37,7 +39,10 @@ describe('naming a save location', () => {
 
   it('resolves a name, a literal path, or neither', () => {
     assert.equal(resolveLocation(config, { location: 'bulk' }), 'M:/archives');
-    assert.equal(resolveLocation(config, { savePath: '/tmp/here' }), '/tmp/here');
+    assert.equal(
+      resolveLocation(config, { savePath: '/tmp/here' }),
+      '/tmp/here',
+    );
     assert.equal(resolveLocation(config, {}), undefined);
   });
 
@@ -139,7 +144,9 @@ describe('choosing where an add lands', () => {
   it('uses the default when nothing is chosen', async () => {
     const server = await node();
     try {
-      const entry = await (await server.post('/api/torrents', { magnet })).json();
+      const entry = await (
+        await server.post('/api/torrents', { magnet })
+      ).json();
       assert.equal(entry.savePath, server.fallback);
     } finally {
       await server.close();
@@ -238,7 +245,10 @@ describe('room at the destination', () => {
     // It is the parent that decides which filesystem the directory will be
     // created on.
     assert.equal(
-      await sameFilesystem(workspace, path.join(workspace, 'not', 'made', 'yet')),
+      await sameFilesystem(
+        workspace,
+        path.join(workspace, 'not', 'made', 'yet'),
+      ),
       true,
     );
   });

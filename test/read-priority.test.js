@@ -25,7 +25,7 @@ describe('what a hint asks libtorrent for', () => {
       ]),
     );
 
-    assert.equal(priority.critical, 7, 'critical is libtorrent\'s highest');
+    assert.equal(priority.critical, 7, "critical is libtorrent's highest");
     assert.ok(
       priority.high > 4,
       `high must beat the default of 4, got ${priority.high}`,

@@ -24,16 +24,23 @@ describe('the sample configuration', () => {
     // A sample naming a key the code does not read is worse than no sample:
     // it looks authoritative, does nothing, and is refused by the API with
     // "unknown setting" the first time anyone saves from the console.
-    const source = await fs.readFile(path.join(here, '..', 'src', 'config.js'), 'utf8');
+    const source = await fs.readFile(
+      path.join(here, '..', 'src', 'config.js'),
+      'utf8',
+    );
     const block = source.slice(
       source.indexOf('const DEFAULTS = {'),
       source.indexOf('\n};'),
     );
     const known = new Set(
-      [...block.matchAll(/^ {2}([a-zA-Z][A-Za-z0-9]*):/gm)].map(([, key]) => key),
+      [...block.matchAll(/^ {2}([a-zA-Z][A-Za-z0-9]*):/gm)].map(
+        ([, key]) => key,
+      ),
     );
 
-    const unknown = Object.keys(JSON.parse(sampleText)).filter((key) => !known.has(key));
+    const unknown = Object.keys(JSON.parse(sampleText)).filter(
+      (key) => !known.has(key),
+    );
     assert.deepEqual(unknown, []);
   });
 
@@ -74,7 +81,10 @@ describe('the sample configuration', () => {
     const suspicious = [...sampleText.matchAll(/[A-Za-z0-9+/=_-]{32,}/g)]
       .map(([match]) => match)
       .filter((value) => !/REPLACE/i.test(value))
-      .filter((value) => /[a-z]/.test(value) && /[A-Z]/.test(value) && /\d/.test(value));
+      .filter(
+        (value) =>
+          /[a-z]/.test(value) && /[A-Z]/.test(value) && /\d/.test(value),
+      );
     assert.deepEqual(suspicious, [], 'these look like real credentials');
   });
 
@@ -85,9 +95,13 @@ describe('the sample configuration', () => {
     const { promisify } = await import('node:util');
     const run = promisify(execFile);
 
-    const ignored = await run('git', ['check-ignore', 'swarm.config.json.sample'], {
-      cwd: path.join(here, '..'),
-    }).then(
+    const ignored = await run(
+      'git',
+      ['check-ignore', 'swarm.config.json.sample'],
+      {
+        cwd: path.join(here, '..'),
+      },
+    ).then(
       () => true,
       () => false,
     );
@@ -165,7 +179,10 @@ describe('the sample ships with the package', () => {
       path.join(here, '..', 'docs', 'running-as-a-service.md'),
       'utf8',
     );
-    assert.match(doc, /node_modules\/pmtiles-swarm\/swarm\.config\.json\.sample/);
+    assert.match(
+      doc,
+      /node_modules\/pmtiles-swarm\/swarm\.config\.json\.sample/,
+    );
     // And the unit must start the binary from the same installed tree, or the
     // two halves of the instructions describe different installations.
     assert.match(doc, /node_modules\/\.bin\/pmtiles-swarm/);

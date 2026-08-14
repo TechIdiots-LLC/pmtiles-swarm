@@ -12,7 +12,9 @@ import {
 } from '../src/incomplete.js';
 import { Library } from '../src/library.js';
 
-const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-incomplete-'));
+const workspace = await fs.mkdtemp(
+  path.join(os.tmpdir(), 'pmtiles-incomplete-'),
+);
 after(() => fs.rm(workspace, { recursive: true, force: true }));
 
 describe('marking incomplete archives', () => {
@@ -21,7 +23,10 @@ describe('marking incomplete archives', () => {
       onDiskName({ name: 'a.pmtiles', complete: false }, {}),
       'a.pmtiles.incomplete',
     );
-    assert.equal(onDiskName({ name: 'a.pmtiles', complete: true }, {}), 'a.pmtiles');
+    assert.equal(
+      onDiskName({ name: 'a.pmtiles', complete: true }, {}),
+      'a.pmtiles',
+    );
   });
 
   it('leaves an entry from before markers existed alone', () => {
@@ -35,11 +40,17 @@ describe('marking incomplete archives', () => {
 
   it('can be switched off, and can be spelled differently', () => {
     assert.equal(
-      onDiskName({ name: 'a.pmtiles', complete: false }, { incompleteSuffix: '' }),
+      onDiskName(
+        { name: 'a.pmtiles', complete: false },
+        { incompleteSuffix: '' },
+      ),
       'a.pmtiles',
     );
     assert.equal(
-      onDiskName({ name: 'a.pmtiles', complete: false }, { incompleteSuffix: '.!qB' }),
+      onDiskName(
+        { name: 'a.pmtiles', complete: false },
+        { incompleteSuffix: '.!qB' },
+      ),
       'a.pmtiles.!qB',
     );
   });
@@ -49,16 +60,28 @@ describe('marking incomplete archives', () => {
     await fs.writeFile(path.join(dir, 'held.pmtiles'), Buffer.alloc(2048, 1));
 
     assert.equal(
-      await alreadyComplete({ savePath: dir, name: 'held.pmtiles', size: 2048 }),
+      await alreadyComplete({
+        savePath: dir,
+        name: 'held.pmtiles',
+        size: 2048,
+      }),
       true,
     );
     // A file of the wrong length is a different file, or a half-written one.
     assert.equal(
-      await alreadyComplete({ savePath: dir, name: 'held.pmtiles', size: 4096 }),
+      await alreadyComplete({
+        savePath: dir,
+        name: 'held.pmtiles',
+        size: 4096,
+      }),
       false,
     );
     assert.equal(
-      await alreadyComplete({ savePath: dir, name: 'gone.pmtiles', size: 2048 }),
+      await alreadyComplete({
+        savePath: dir,
+        name: 'gone.pmtiles',
+        size: 2048,
+      }),
       false,
     );
   });
@@ -92,7 +115,10 @@ describe('marking incomplete archives', () => {
     const dir = await fs.mkdtemp(path.join(workspace, 'native-'));
     await fs.writeFile(path.join(dir, 'y.pmtiles'), 'whole');
     assert.equal(
-      await promote(path.join(dir, 'y.pmtiles.incomplete'), path.join(dir, 'y.pmtiles')),
+      await promote(
+        path.join(dir, 'y.pmtiles.incomplete'),
+        path.join(dir, 'y.pmtiles'),
+      ),
       'already',
     );
   });
@@ -148,7 +174,9 @@ describe('promoting a finished download', () => {
 
     assert.equal(updated.complete, true);
     assert.equal(catalog.get(infoHash).complete, true);
-    const archives = (await fs.readdir(dir)).filter((n) => n.includes('pmtiles'));
+    const archives = (await fs.readdir(dir)).filter((n) =>
+      n.includes('pmtiles'),
+    );
     assert.deepEqual(archives, ['planet.pmtiles']);
     // Re-added without a marker, or the engine writes to the old name again.
     assert.equal(adds.at(-1).incompleteSuffix, undefined);
@@ -183,7 +211,12 @@ describe('promoting a finished download', () => {
     });
     await fs.writeFile(path.join(dir, 'swept.pmtiles.incomplete'), 'whole');
     library.listWithStatus = async () => [
-      { infoHash, name: 'swept.pmtiles', complete: false, status: { progress: 1 } },
+      {
+        infoHash,
+        name: 'swept.pmtiles',
+        complete: false,
+        status: { progress: 1 },
+      },
       { infoHash: 'd'.repeat(40), complete: false, status: { progress: 0.4 } },
     ];
 
@@ -243,8 +276,14 @@ describe('two files for one archive', () => {
       magnet: `magnet:?xt=urn:btih:${infoHash}`,
       mode: 'mirror',
     });
-    await fs.writeFile(path.join(node.dir, 'GEBCO.pmtiles'), Buffer.alloc(2048, 1));
-    await fs.writeFile(path.join(node.dir, 'GEBCO.pmtiles.incomplete'), Buffer.alloc(900, 2));
+    await fs.writeFile(
+      path.join(node.dir, 'GEBCO.pmtiles'),
+      Buffer.alloc(2048, 1),
+    );
+    await fs.writeFile(
+      path.join(node.dir, 'GEBCO.pmtiles.incomplete'),
+      Buffer.alloc(900, 2),
+    );
 
     const settled = await node.library.finalize(infoHash);
 

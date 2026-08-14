@@ -125,10 +125,11 @@ export class HeadWarmer {
    */
   #backoffFor(infoHash) {
     const base =
-      (this.#config.tiles?.prewarmBackoffSeconds ?? DEFAULT_BACKOFF_SECONDS) * 1000;
-    const ceiling =
-      (this.#config.tiles?.prewarmMaxBackoffSeconds ?? DEFAULT_MAX_BACKOFF_SECONDS) *
+      (this.#config.tiles?.prewarmBackoffSeconds ?? DEFAULT_BACKOFF_SECONDS) *
       1000;
+    const ceiling =
+      (this.#config.tiles?.prewarmMaxBackoffSeconds ??
+        DEFAULT_MAX_BACKOFF_SECONDS) * 1000;
     const attempts = this.#attempts.get(infoHash) ?? 0;
     return Math.min(base * 2 ** Math.max(0, attempts - 1), ceiling);
   }

@@ -92,7 +92,9 @@ export function formatStatus({ status, torrents }) {
   const engine = status?.engine;
   lines.push(
     `engine  ${engine?.name ?? 'unknown'}` +
-      (engine?.ok === false ? `  UNAVAILABLE — ${engine.error ?? ''}` : '  ready'),
+      (engine?.ok === false
+        ? `  UNAVAILABLE — ${engine.error ?? ''}`
+        : '  ready'),
   );
   if (status?.version) lines.push(`version ${status.version}`);
 

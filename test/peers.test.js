@@ -35,12 +35,18 @@ describe('peer credentials', () => {
     // placeholder back. Saving that would break the peer's access the first
     // time anyone touched an unrelated setting.
     const config = {
-      subscriptions: [{ url: 'https://peer.example/feed.xml', token: 'sekrit' }],
+      subscriptions: [
+        { url: 'https://peer.example/feed.xml', token: 'sekrit' },
+      ],
     };
 
     await saveConfig(config, {
       subscriptions: [
-        { url: 'https://peer.example/feed.xml', token: '********', mode: 'mirror' },
+        {
+          url: 'https://peer.example/feed.xml',
+          token: '********',
+          mode: 'mirror',
+        },
       ],
     });
 
@@ -61,7 +67,9 @@ describe('peer credentials', () => {
   it('drops the token when a peer that never had one is saved', async () => {
     const config = { subscriptions: [] };
     await saveConfig(config, {
-      subscriptions: [{ url: 'https://open.example/feed.xml', token: '********' }],
+      subscriptions: [
+        { url: 'https://open.example/feed.xml', token: '********' },
+      ],
     });
     assert.equal(config.subscriptions[0].token, undefined);
   });
@@ -95,11 +103,14 @@ describe('checking a peer before trusting it', () => {
     return {
       url: `http://127.0.0.1:${peer.address().port}`,
       post: (body) =>
-        fetch(`http://127.0.0.1:${server.address().port}/api/subscriptions/preview`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-        }),
+        fetch(
+          `http://127.0.0.1:${server.address().port}/api/subscriptions/preview`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+          },
+        ),
       close: async () => {
         await new Promise((resolve) => server.close(resolve));
         await new Promise((resolve) => peer.close(resolve));
@@ -125,7 +136,9 @@ describe('checking a peer before trusting it', () => {
       res.end(FEED);
     });
     try {
-      const body = await (await server.post({ url: `${server.url}/feed.xml` })).json();
+      const body = await (
+        await server.post({ url: `${server.url}/feed.xml` })
+      ).json();
       assert.equal(body.protocol, 'rss');
       assert.equal(body.count, 2);
       assert.deepEqual(body.names, [
@@ -148,7 +161,9 @@ describe('checking a peer before trusting it', () => {
       </channel></rss>`);
     });
     try {
-      const body = await (await server.post({ url: `${server.url}/feed.xml` })).json();
+      const body = await (
+        await server.post({ url: `${server.url}/feed.xml` })
+      ).json();
       assert.equal(body.count, 0);
     } finally {
       await server.close();
@@ -158,10 +173,17 @@ describe('checking a peer before trusting it', () => {
   it('reads a catalog URL as the API, without being told', async () => {
     const server = await harness((_req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ archives: [{ name: 'planet.pmtiles' }], partial: true }));
+      res.end(
+        JSON.stringify({
+          archives: [{ name: 'planet.pmtiles' }],
+          partial: true,
+        }),
+      );
     });
     try {
-      const body = await (await server.post({ url: `${server.url}/api/catalog` })).json();
+      const body = await (
+        await server.post({ url: `${server.url}/api/catalog` })
+      ).json();
       assert.equal(body.protocol, 'api');
       assert.equal(body.count, 1);
       // Worth surfacing: a partial view is one pruning must never act on.
@@ -186,11 +208,17 @@ describe('checking a peer before trusting it', () => {
       assert.equal(response.status, 401);
       assert.match((await response.json()).error, /wants a token/);
 
-      response = await server.post({ url: `${server.url}/feed.xml`, token: 'wrong' });
+      response = await server.post({
+        url: `${server.url}/feed.xml`,
+        token: 'wrong',
+      });
       assert.equal(response.status, 401);
       assert.match((await response.json()).error, /rejected that token/);
 
-      response = await server.post({ url: `${server.url}/feed.xml`, token: 'good' });
+      response = await server.post({
+        url: `${server.url}/feed.xml`,
+        token: 'good',
+      });
       assert.equal(response.status, 200);
     } finally {
       await server.close();
@@ -210,7 +238,10 @@ describe('checking a peer before trusting it', () => {
     );
     try {
       // The configured peer has to carry the real URL for the lookup to match.
-      const response = await server.post({ url: 'PLACEHOLDER', token: '********' });
+      const response = await server.post({
+        url: 'PLACEHOLDER',
+        token: '********',
+      });
       // The URL is not fetchable, but the token lookup is what is under test:
       // a 502 means it tried, where a 401 would mean it sent nothing.
       assert.notEqual(response.status, 401);
@@ -222,7 +253,9 @@ describe('checking a peer before trusting it', () => {
   it('explains an unreachable peer', async () => {
     const server = await harness((_req, res) => res.end());
     try {
-      const response = await server.post({ url: 'http://127.0.0.1:1/feed.xml' });
+      const response = await server.post({
+        url: 'http://127.0.0.1:1/feed.xml',
+      });
       assert.equal(response.status, 502);
       assert.match((await response.json()).error, /could not reach/);
     } finally {
@@ -295,7 +328,9 @@ describe('following a node with a token it issued', () => {
       config: { dataDir: dir, webtorrent: { savePath: dir }, trackers: [] },
     });
 
-    const config = { subscriptions: [{ ...subscription, url: `${url}${subscription.path}` }] };
+    const config = {
+      subscriptions: [{ ...subscription, url: `${url}${subscription.path}` }],
+    };
     const manager = new SubscriptionManager(library, config);
     await manager.refresh();
 
@@ -332,18 +367,27 @@ describe('following a node with a token it issued', () => {
         seen.push([req.url.split('?')[0], req.headers.authorization ?? null]);
         if (req.url.startsWith('/api/catalog')) {
           res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(JSON.stringify(CATALOG(`http://127.0.0.1:${req.socket.localPort}`)));
+          res.end(
+            JSON.stringify(CATALOG(`http://127.0.0.1:${req.socket.localPort}`)),
+          );
           return;
         }
         // A real .torrent is not needed; that it was asked for with the token
         // is the point.
         res.writeHead(404).end();
       },
-      { path: '/api/catalog', protocol: 'api', mode: 'cache', token: 'issued-to-us' },
+      {
+        path: '/api/catalog',
+        protocol: 'api',
+        mode: 'cache',
+        token: 'issued-to-us',
+      },
     );
 
     try {
-      const torrentRequest = seen.find(([route]) => route.endsWith('archive.torrent'));
+      const torrentRequest = seen.find(([route]) =>
+        route.endsWith('archive.torrent'),
+      );
       assert.ok(torrentRequest, 'it should have tried the .torrent');
       assert.equal(torrentRequest[1], 'Bearer issued-to-us');
     } finally {
@@ -359,7 +403,9 @@ describe('following a node with a token it issued', () => {
       (req, res) => {
         if (req.url.startsWith('/api/catalog')) {
           res.writeHead(200, { 'content-type': 'application/json' });
-          res.end(JSON.stringify(CATALOG(`http://127.0.0.1:${req.socket.localPort}`)));
+          res.end(
+            JSON.stringify(CATALOG(`http://127.0.0.1:${req.socket.localPort}`)),
+          );
           return;
         }
         res.writeHead(404).end();

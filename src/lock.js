@@ -142,7 +142,11 @@ export function portInUse(port, host) {
  */
 export async function assertPortsFree(config) {
   const wanted = [
-    { port: config.port, host: config.host ?? '0.0.0.0', what: 'the public port' },
+    {
+      port: config.port,
+      host: config.host ?? '0.0.0.0',
+      what: 'the public port',
+    },
   ];
   if (config.adminPort) {
     wanted.push({

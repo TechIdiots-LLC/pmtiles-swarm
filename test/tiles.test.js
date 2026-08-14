@@ -35,7 +35,9 @@ import { TileStore } from '../src/tiles.js';
 import { WarmRunner, countTiles, tilesInBounds } from '../src/warm.js';
 import { TILE_TYPE, buildArchive, writeArchive } from './pmtiles-fixture.js';
 
-const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-swarm-tiles-'));
+const workspace = await fs.mkdtemp(
+  path.join(os.tmpdir(), 'pmtiles-swarm-tiles-'),
+);
 after(() => fs.rm(workspace, { recursive: true, force: true }));
 
 const INFOHASH = 'a1b2c3d4'.repeat(5);
@@ -130,7 +132,10 @@ describe('tilejson', () => {
     assert.match(magnet, /&s=planet/);
     // Carries the web seed, so a client with no peers can still range-read the
     // archive over HTTP and derive everything it needs.
-    assert.match(magnet, /&ws=https%3A%2F%2Fmaps\.example\.org%2Ffixture\.pmtiles/);
+    assert.match(
+      magnet,
+      /&ws=https%3A%2F%2Fmaps\.example\.org%2Ffixture\.pmtiles/,
+    );
     // And no infohash, which is the entire point: an infohash is what goes
     // stale on the next build.
     assert.doesNotMatch(magnet, /btih/);
@@ -184,7 +189,9 @@ describe('tile store', () => {
       minZoom: 0,
       maxZoom: 1,
     });
-    const catalog = { get: (hash) => (hash === archive.infoHash ? archive : null) };
+    const catalog = {
+      get: (hash) => (hash === archive.infoHash ? archive : null),
+    };
     const store = new TileStore({
       catalog,
       engine: completeEngine,
@@ -197,10 +204,7 @@ describe('tile store', () => {
     const { store } = await makeStore();
     const tile = await store.getTile(INFOHASH, 0, 0, 0);
     assert.ok(tile);
-    assert.equal(
-      zlib.gunzipSync(tile.data).toString(),
-      'tile-000-'.repeat(40),
-    );
+    assert.equal(zlib.gunzipSync(tile.data).toString(), 'tile-000-'.repeat(40));
   });
 
   it('gzips vector tiles, which pmtiles hands back uncompressed', async () => {
@@ -256,7 +260,9 @@ describe('tile store', () => {
       entries.push(archive);
     }
     const store = new TileStore({
-      catalog: { get: (hash) => entries.find((e) => e.infoHash === hash) ?? null },
+      catalog: {
+        get: (hash) => entries.find((e) => e.infoHash === hash) ?? null,
+      },
       engine: completeEngine,
       config: { tiles: { maxOpenArchives: 2 } },
     });
@@ -284,11 +290,14 @@ describe('tile store', () => {
       engine: { name: 'qbittorrent', get: async () => ({ progress: 0.5 }) },
       config: { tiles: {} },
     });
-    await assert.rejects(() => store.getTile(INFOHASH, 0, 0, 0), (error) => {
-      assert.equal(error.status, 501);
-      assert.match(error.message, /cannot read pieces on demand/);
-      return true;
-    });
+    await assert.rejects(
+      () => store.getTile(INFOHASH, 0, 0, 0),
+      (error) => {
+        assert.equal(error.status, 501);
+        assert.match(error.message, /cannot read pieces on demand/);
+        return true;
+      },
+    );
   });
 });
 
@@ -532,15 +541,12 @@ describe('tile http endpoints', () => {
   it('rewrites protocol and host from a trusted proxy', async () => {
     const { base, close } = await serve({ trustProxy: true });
     try {
-      const response = await fetch(
-        `${base}/archives/${INFOHASH}/tiles.json`,
-        {
-          headers: {
-            'x-forwarded-proto': 'https',
-            'x-forwarded-host': 'maps.example.org',
-          },
+      const response = await fetch(`${base}/archives/${INFOHASH}/tiles.json`, {
+        headers: {
+          'x-forwarded-proto': 'https',
+          'x-forwarded-host': 'maps.example.org',
         },
-      );
+      });
       const doc = await response.json();
       // Mixed content otherwise: an https page cannot load http:// tiles. And
       // the raw Host behind a proxy is an internal address, which would
@@ -589,10 +595,9 @@ describe('tile http endpoints', () => {
       publicUrl: 'https://canonical.example.org/',
     });
     try {
-      const response = await fetch(
-        `${base}/archives/${INFOHASH}/tiles.json`,
-        { headers: { 'x-forwarded-host': 'someone-else.example.org' } },
-      );
+      const response = await fetch(`${base}/archives/${INFOHASH}/tiles.json`, {
+        headers: { 'x-forwarded-host': 'someone-else.example.org' },
+      });
       const doc = await response.json();
       // A configured canonical URL outranks whatever a proxy claims, and the
       // trailing slash does not double up.
@@ -608,10 +613,9 @@ describe('tile http endpoints', () => {
   it('ignores forwarded headers when no proxy is trusted', async () => {
     const { base, close } = await serve();
     try {
-      const response = await fetch(
-        `${base}/archives/${INFOHASH}/tiles.json`,
-        { headers: { 'x-forwarded-proto': 'https' } },
-      );
+      const response = await fetch(`${base}/archives/${INFOHASH}/tiles.json`, {
+        headers: { 'x-forwarded-proto': 'https' },
+      });
       const doc = await response.json();
       assert.ok(doc.tiles[0].startsWith('http://'));
     } finally {
@@ -640,7 +644,9 @@ describe('tile http endpoints', () => {
   it('404s an archive it does not have', async () => {
     const { base, close } = await serve();
     try {
-      const response = await fetch(`${base}/archives/${'e'.repeat(40)}/tiles.json`);
+      const response = await fetch(
+        `${base}/archives/${'e'.repeat(40)}/tiles.json`,
+      );
       assert.equal(response.status, 404);
     } finally {
       await close();
@@ -712,7 +718,11 @@ describe('region warming', () => {
   it('fetches every tile in the region and reports progress', async () => {
     const store = fakeStore();
     const runner = new WarmRunner(store);
-    runner.start(entry(), { bounds: [-180, -85, 180, 85], minZoom: 0, maxZoom: 1 });
+    runner.start(entry(), {
+      bounds: [-180, -85, 180, 85],
+      minZoom: 0,
+      maxZoom: 1,
+    });
 
     const job = await settle(runner, INFOHASH);
     assert.equal(job.state, 'complete');
@@ -725,13 +735,21 @@ describe('region warming', () => {
 
   it('refuses a second warm while one is running', () => {
     const runner = new WarmRunner(fakeStore());
-    runner.start(deep(), { bounds: [-180, -85, 180, 85], minZoom: 0, maxZoom: 6 });
+    runner.start(deep(), {
+      bounds: [-180, -85, 180, 85],
+      minZoom: 0,
+      maxZoom: 6,
+    });
     assert.throws(() => runner.start(deep()), { status: 409 });
   });
 
   it('can be cancelled', async () => {
     const runner = new WarmRunner(fakeStore());
-    runner.start(deep(), { bounds: [-180, -85, 180, 85], minZoom: 0, maxZoom: 8 });
+    runner.start(deep(), {
+      bounds: [-180, -85, 180, 85],
+      minZoom: 0,
+      maxZoom: 8,
+    });
     assert.equal(runner.cancel(INFOHASH), true);
     const job = await settle(runner, INFOHASH);
     assert.equal(job.state, 'cancelled');
@@ -740,7 +758,11 @@ describe('region warming', () => {
 
   it('gives up on an archive where nothing succeeds', async () => {
     const runner = new WarmRunner(fakeStore({ alwaysThrow: true }));
-    runner.start(deep(), { bounds: [-180, -85, 180, 85], minZoom: 0, maxZoom: 8 });
+    runner.start(deep(), {
+      bounds: [-180, -85, 180, 85],
+      minZoom: 0,
+      maxZoom: 8,
+    });
     const job = await settle(runner, INFOHASH);
     assert.equal(job.state, 'failed');
     assert.match(job.error, /unreadable/);
@@ -753,7 +775,11 @@ describe('region warming', () => {
     const runner = new WarmRunner(store);
     // The fixture stops at z1, so asking for z8 must not enumerate z2 upwards
     // — those tiles do not exist and fetching them is wasted swarm traffic.
-    runner.start(entry(), { bounds: [-180, -85, 180, 85], minZoom: 0, maxZoom: 8 });
+    runner.start(entry(), {
+      bounds: [-180, -85, 180, 85],
+      minZoom: 0,
+      maxZoom: 8,
+    });
     const job = await settle(runner, INFOHASH);
     assert.equal(job.maxZoom, 1);
     assert.equal(job.total, 5);
@@ -797,7 +823,11 @@ describe('missing tile status', () => {
     await catalog.load();
     await catalog.put(archive);
 
-    const tiles = new TileStore({ catalog, engine: completeEngine, config: { tiles: {} } });
+    const tiles = new TileStore({
+      catalog,
+      engine: completeEngine,
+      config: { tiles: {} },
+    });
     const app = createApp({
       library: { listWithStatus: async () => [] },
       catalog,
@@ -843,7 +873,10 @@ describe('missing tile status', () => {
       204,
     );
     assert.equal(
-      await missingTileStatus({ entry: { sparse: true }, pmtiles: { format: 'pbf' } }),
+      await missingTileStatus({
+        entry: { sparse: true },
+        pmtiles: { format: 'pbf' },
+      }),
       404,
     );
   });
@@ -959,7 +992,10 @@ describe('cache accounting', () => {
     const { library, dir, entry: archive } = await makeLibrary();
     await fs.writeFile(path.join(dir, archive.name), 'x'.repeat(500));
     // Engines leave part files beside the archive; they are cache too.
-    await fs.writeFile(path.join(dir, `${archive.name}.parts`), 'y'.repeat(250));
+    await fs.writeFile(
+      path.join(dir, `${archive.name}.parts`),
+      'y'.repeat(250),
+    );
     // Something unrelated in the same directory must not be counted.
     await fs.writeFile(path.join(dir, 'unrelated.txt'), 'z'.repeat(999));
 
@@ -1080,7 +1116,9 @@ describe('retrofitting web seeds', () => {
 
   it('records the seeds on the catalog entry, so TileJSON advertises them', async () => {
     const { library, catalog, entry: archive } = await makeLibrary();
-    await library.addWebSeeds(archive.infoHash, ['https://a.example.org/p.pmtiles']);
+    await library.addWebSeeds(archive.infoHash, [
+      'https://a.example.org/p.pmtiles',
+    ]);
     assert.deepEqual(catalog.get(archive.infoHash).webSeeds, [
       'https://a.example.org/p.pmtiles',
     ]);
@@ -1097,7 +1135,9 @@ describe('retrofitting web seeds', () => {
 
   it('merges with existing seeds, and does not duplicate them', async () => {
     const { library, entry: archive } = await makeLibrary();
-    await library.addWebSeeds(archive.infoHash, ['https://a.example.org/p.pmtiles']);
+    await library.addWebSeeds(archive.infoHash, [
+      'https://a.example.org/p.pmtiles',
+    ]);
     const result = await library.addWebSeeds(archive.infoHash, [
       'https://a.example.org/p.pmtiles',
       'https://b.example.org/p.pmtiles',
@@ -1110,7 +1150,9 @@ describe('retrofitting web seeds', () => {
 
   it('replaces the list when asked', async () => {
     const { library, entry: archive } = await makeLibrary();
-    await library.addWebSeeds(archive.infoHash, ['https://a.example.org/p.pmtiles']);
+    await library.addWebSeeds(archive.infoHash, [
+      'https://a.example.org/p.pmtiles',
+    ]);
     const result = await library.addWebSeeds(
       archive.infoHash,
       ['https://b.example.org/p.pmtiles'],
@@ -1168,7 +1210,9 @@ describe('what may be published', () => {
   it('identifies a real archive on disk', async () => {
     const dir = await fs.mkdtemp(path.join(workspace, 'identify-'));
     const file = path.join(dir, 'real.pmtiles');
-    await writeArchive(file, { tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('t') }] });
+    await writeArchive(file, {
+      tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('t') }],
+    });
     assert.equal((await identifyFile(file)).kind, 'pmtiles');
   });
 
@@ -1179,9 +1223,12 @@ describe('what may be published', () => {
   it('refuses to publish an unrecognised file', () => {
     // The sharp edge this closes: without it, "make a torrent of this path"
     // publishes any readable file to a public swarm.
-    assert.throws(() => assertPublishable(identifyBytes(Buffer.from('root:x:0:0'))), {
-      status: 400,
-    });
+    assert.throws(
+      () => assertPublishable(identifyBytes(Buffer.from('root:x:0:0'))),
+      {
+        status: 400,
+      },
+    );
   });
 
   it('allows both map formats through', () => {
@@ -1212,9 +1259,17 @@ describe('authentication', () => {
       statusCode: null,
       payload: null,
       headers: {},
-      status(code) { res.statusCode = code; return res; },
-      json(body) { res.payload = body; return res; },
-      setHeader(name, value) { res.headers[name.toLowerCase()] = value; },
+      status(code) {
+        res.statusCode = code;
+        return res;
+      },
+      json(body) {
+        res.payload = body;
+        return res;
+      },
+      setHeader(name, value) {
+        res.headers[name.toLowerCase()] = value;
+      },
     };
     return res;
   };
@@ -1252,7 +1307,9 @@ describe('authentication', () => {
     assert.equal(auth.enabled, false);
 
     let passed = false;
-    auth.middleware(request(), response(), () => { passed = true; });
+    auth.middleware(request(), response(), () => {
+      passed = true;
+    });
     assert.ok(passed, 'an unconfigured node must keep working as before');
   });
 
@@ -1260,7 +1317,9 @@ describe('authentication', () => {
     const auth = createAuth({ auth: { apiKey: 'secret' } });
     const res = response();
     let passed = false;
-    auth.middleware(request(), res, () => { passed = true; });
+    auth.middleware(request(), res, () => {
+      passed = true;
+    });
 
     assert.ok(!passed);
     assert.equal(res.statusCode, 401);
@@ -1269,21 +1328,32 @@ describe('authentication', () => {
   it('accepts a correct bearer token and refuses a wrong one', () => {
     const auth = createAuth({ auth: { apiKey: 'secret' } });
     assert.ok(
-      auth.isAuthenticated(request({ headers: { authorization: 'Bearer secret' } })),
+      auth.isAuthenticated(
+        request({ headers: { authorization: 'Bearer secret' } }),
+      ),
     );
     assert.ok(
-      !auth.isAuthenticated(request({ headers: { authorization: 'Bearer wrong' } })),
+      !auth.isAuthenticated(
+        request({ headers: { authorization: 'Bearer wrong' } }),
+      ),
     );
     // A prefix of the real token must not be enough.
     assert.ok(
-      !auth.isAuthenticated(request({ headers: { authorization: 'Bearer sec' } })),
+      !auth.isAuthenticated(
+        request({ headers: { authorization: 'Bearer sec' } }),
+      ),
     );
   });
 
   it('issues a session cookie for a correct password', () => {
-    const auth = createAuth({ auth: { username: 'andrew', password: 'hunter2' } });
+    const auth = createAuth({
+      auth: { username: 'andrew', password: 'hunter2' },
+    });
     const res = response();
-    const ok = auth.login(request({ body: { username: 'andrew', password: 'hunter2' } }), res);
+    const ok = auth.login(
+      request({ body: { username: 'andrew', password: 'hunter2' } }),
+      res,
+    );
 
     assert.ok(ok);
     const cookie = res.headers['set-cookie'];
@@ -1297,18 +1367,36 @@ describe('authentication', () => {
     // Marking it Secure on a LAN deployment would stop it working entirely.
     const auth = createAuth({ auth: { password: 'x' } });
     const res = response();
-    auth.login(request({ body: { username: 'admin', password: 'x' }, secure: false }), res);
+    auth.login(
+      request({ body: { username: 'admin', password: 'x' }, secure: false }),
+      res,
+    );
     assert.ok(!/Secure/.test(res.headers['set-cookie']));
 
     const secureRes = response();
-    auth.login(request({ body: { username: 'admin', password: 'x' }, secure: true }), secureRes);
+    auth.login(
+      request({ body: { username: 'admin', password: 'x' }, secure: true }),
+      secureRes,
+    );
     assert.match(secureRes.headers['set-cookie'], /Secure/);
   });
 
   it('refuses a wrong password and a wrong username alike', () => {
-    const auth = createAuth({ auth: { username: 'andrew', password: 'hunter2' } });
-    assert.ok(!auth.login(request({ body: { username: 'andrew', password: 'no' } }), response()));
-    assert.ok(!auth.login(request({ body: { username: 'someone', password: 'hunter2' } }), response()));
+    const auth = createAuth({
+      auth: { username: 'andrew', password: 'hunter2' },
+    });
+    assert.ok(
+      !auth.login(
+        request({ body: { username: 'andrew', password: 'no' } }),
+        response(),
+      ),
+    );
+    assert.ok(
+      !auth.login(
+        request({ body: { username: 'someone', password: 'hunter2' } }),
+        response(),
+      ),
+    );
   });
 
   it('accepts the session it issued, and stops after a logout', () => {
@@ -1344,8 +1432,18 @@ describe('authentication', () => {
     const auth = createAuth({
       auth: { username: 'andrew', passwordHash: hashPassword('hunter2') },
     });
-    assert.ok(auth.login(request({ body: { username: 'andrew', password: 'hunter2' } }), response()));
-    assert.ok(!auth.login(request({ body: { username: 'andrew', password: 'nope' } }), response()));
+    assert.ok(
+      auth.login(
+        request({ body: { username: 'andrew', password: 'hunter2' } }),
+        response(),
+      ),
+    );
+    assert.ok(
+      !auth.login(
+        request({ body: { username: 'andrew', password: 'nope' } }),
+        response(),
+      ),
+    );
   });
 
   it('refuses to listen on a reachable address with no credential', () => {
@@ -1412,7 +1510,10 @@ describe('authentication', () => {
   it('allows loopback, a credential, or an explicit opt-out', () => {
     assertSafeToListen({ host: '127.0.0.1' }, createAuth({}));
     assertSafeToListen({ host: '::1' }, createAuth({}));
-    assertSafeToListen({ host: '0.0.0.0' }, createAuth({ auth: { apiKey: 'k' } }));
+    assertSafeToListen(
+      { host: '0.0.0.0' },
+      createAuth({ auth: { apiKey: 'k' } }),
+    );
     assertSafeToListen(
       { host: '0.0.0.0', allowUnauthenticated: true },
       createAuth({}),
@@ -1445,13 +1546,23 @@ describe('when the source URL may be published as a web seed', () => {
   });
 
   it('recognises the other major object stores', () => {
-    assert.ok(carriesCredentials('https://x.blob.core.windows.net/a.pmtiles?sig=abc&se=2024'));
-    assert.ok(carriesCredentials('https://storage.googleapis.com/a.pmtiles?X-Goog-Signature=abc'));
+    assert.ok(
+      carriesCredentials(
+        'https://x.blob.core.windows.net/a.pmtiles?sig=abc&se=2024',
+      ),
+    );
+    assert.ok(
+      carriesCredentials(
+        'https://storage.googleapis.com/a.pmtiles?X-Goog-Signature=abc',
+      ),
+    );
     assert.ok(carriesCredentials('https://x.org/a.pmtiles?token=abc'));
   });
 
   it('recognises credentials in the userinfo', () => {
-    assert.ok(carriesCredentials('https://andrew:hunter2@maps.internal/planet.pmtiles'));
+    assert.ok(
+      carriesCredentials('https://andrew:hunter2@maps.internal/planet.pmtiles'),
+    );
   });
 
   it('treats something unparseable as ordinary rather than throwing', () => {
@@ -1461,12 +1572,23 @@ describe('when the source URL may be published as a web seed', () => {
 
 describe('signing in to a token-only node', () => {
   const KEY = 'a-long-random-api-token-value-goes-here';
-  const request = (body) => ({ path: '/api/login', headers: {}, body, secure: false });
+  const request = (body) => ({
+    path: '/api/login',
+    headers: {},
+    body,
+    secure: false,
+  });
   const response = () => ({
     headers: {},
-    status() { return this; },
-    json() { return this; },
-    setHeader(name, value) { this.headers[name.toLowerCase()] = value; },
+    status() {
+      return this;
+    },
+    json() {
+      return this;
+    },
+    setHeader(name, value) {
+      this.headers[name.toLowerCase()] = value;
+    },
   });
 
   it('reports that password sign-in is unavailable', () => {
@@ -1496,9 +1618,19 @@ describe('signing in to a token-only node', () => {
       auth: { apiKey: KEY, username: 'andrew', password: 'hunter2' },
     });
     assert.equal(auth.passwordLoginEnabled, true);
-    assert.ok(auth.login(request({ username: 'andrew', password: 'hunter2' }), response()));
+    assert.ok(
+      auth.login(
+        request({ username: 'andrew', password: 'hunter2' }),
+        response(),
+      ),
+    );
     assert.ok(auth.login(request({ password: KEY }), response()));
-    assert.ok(!auth.login(request({ username: 'andrew', password: 'wrong' }), response()));
+    assert.ok(
+      !auth.login(
+        request({ username: 'andrew', password: 'wrong' }),
+        response(),
+      ),
+    );
   });
 
   it('does not accept an empty password on a node with no credentials at all', () => {
@@ -1520,9 +1652,27 @@ describe('publishing only what is tagged for sharing', () => {
     const dir = await fs.mkdtemp(path.join(workspace, 'feeds-'));
     const catalog = new Catalog(dir);
     await catalog.load();
-    await catalog.put(entry({ infoHash: 'a'.repeat(40), name: 'world.pmtiles', category: 'public' }));
-    await catalog.put(entry({ infoHash: 'b'.repeat(40), name: 'staff.pmtiles', category: 'internal' }));
-    await catalog.put(entry({ infoHash: 'c'.repeat(40), name: 'loose.pmtiles', category: undefined }));
+    await catalog.put(
+      entry({
+        infoHash: 'a'.repeat(40),
+        name: 'world.pmtiles',
+        category: 'public',
+      }),
+    );
+    await catalog.put(
+      entry({
+        infoHash: 'b'.repeat(40),
+        name: 'staff.pmtiles',
+        category: 'internal',
+      }),
+    );
+    await catalog.put(
+      entry({
+        infoHash: 'c'.repeat(40),
+        name: 'loose.pmtiles',
+        category: undefined,
+      }),
+    );
 
     const app = createApp({
       library: { listWithStatus: async () => [] },
@@ -1628,9 +1778,27 @@ describe('one feed, two audiences', () => {
     const dir = await fs.mkdtemp(path.join(workspace, 'audiences-'));
     const catalog = new Catalog(dir);
     await catalog.load();
-    await catalog.put(entry({ infoHash: 'a'.repeat(40), name: 'world.pmtiles', category: 'public' }));
-    await catalog.put(entry({ infoHash: 'b'.repeat(40), name: 'staff.pmtiles', category: 'internal' }));
-    await catalog.put(entry({ infoHash: 'c'.repeat(40), name: 'loose.pmtiles', category: undefined }));
+    await catalog.put(
+      entry({
+        infoHash: 'a'.repeat(40),
+        name: 'world.pmtiles',
+        category: 'public',
+      }),
+    );
+    await catalog.put(
+      entry({
+        infoHash: 'b'.repeat(40),
+        name: 'staff.pmtiles',
+        category: 'internal',
+      }),
+    );
+    await catalog.put(
+      entry({
+        infoHash: 'c'.repeat(40),
+        name: 'loose.pmtiles',
+        category: undefined,
+      }),
+    );
 
     const app = createApp({
       library: { listWithStatus: async () => [] },
@@ -1650,8 +1818,10 @@ describe('one feed, two audiences', () => {
     const { port } = server.address();
     const base = `http://127.0.0.1:${port}`;
     return {
-      feed: async (headers = {}) => (await fetch(`${base}/feed.xml`, { headers })).text(),
-      category: (name, headers = {}) => fetch(`${base}/feed/${name}.xml`, { headers }),
+      feed: async (headers = {}) =>
+        (await fetch(`${base}/feed.xml`, { headers })).text(),
+      category: (name, headers = {}) =>
+        fetch(`${base}/feed/${name}.xml`, { headers }),
       close: () => new Promise((resolve) => server.close(resolve)),
     };
   }
@@ -1711,7 +1881,13 @@ describe('one feed, two audiences', () => {
     const dir = await fs.mkdtemp(path.join(workspace, 'noauth-'));
     const catalog = new Catalog(dir);
     await catalog.load();
-    await catalog.put(entry({ infoHash: 'd'.repeat(40), name: 'staff.pmtiles', category: 'internal' }));
+    await catalog.put(
+      entry({
+        infoHash: 'd'.repeat(40),
+        name: 'staff.pmtiles',
+        category: 'internal',
+      }),
+    );
 
     const app = createApp({
       library: { listWithStatus: async () => [] },
@@ -1725,7 +1901,9 @@ describe('one feed, two audiences', () => {
     await new Promise((resolve) => server.once('listening', resolve));
     const { port } = server.address();
     try {
-      const xml = await (await fetch(`http://127.0.0.1:${port}/feed.xml`)).text();
+      const xml = await (
+        await fetch(`http://127.0.0.1:${port}/feed.xml`)
+      ).text();
       assert.ok(!xml.includes('staff.pmtiles'));
     } finally {
       await new Promise((resolve) => server.close(resolve));
@@ -1735,10 +1913,15 @@ describe('one feed, two audiences', () => {
 
 describe('tagging archives', () => {
   it('reads however categories were supplied into one shape', () => {
-    assert.deepEqual(normalizeCategories({ categories: ['b', 'a'] }), ['a', 'b']);
+    assert.deepEqual(normalizeCategories({ categories: ['b', 'a'] }), [
+      'a',
+      'b',
+    ]);
     // The older single-string field, so catalogues written before tagging keep
     // working rather than losing their grouping.
-    assert.deepEqual(normalizeCategories({ category: 'basemaps' }), ['basemaps']);
+    assert.deepEqual(normalizeCategories({ category: 'basemaps' }), [
+      'basemaps',
+    ]);
     assert.deepEqual(
       normalizeCategories({ category: 'a', categories: ['b'] }),
       ['a', 'b'],
@@ -1759,8 +1942,12 @@ describe('tagging archives', () => {
     const dir = await fs.mkdtemp(path.join(workspace, 'tags-'));
     const catalog = new Catalog(dir);
     await catalog.load();
-    await catalog.put(entry({ infoHash: 'a'.repeat(40), categories: ['basemaps', 'weekly'] }));
-    await catalog.put(entry({ infoHash: 'b'.repeat(40), categories: ['terrain'] }));
+    await catalog.put(
+      entry({ infoHash: 'a'.repeat(40), categories: ['basemaps', 'weekly'] }),
+    );
+    await catalog.put(
+      entry({ infoHash: 'b'.repeat(40), categories: ['terrain'] }),
+    );
 
     assert.equal(catalog.byCategory('basemaps').length, 1);
     assert.equal(catalog.byCategory('weekly').length, 1);
@@ -1776,7 +1963,11 @@ describe('tagging archives', () => {
     const stored = await catalog.put(entry({ category: 'basemaps' }));
 
     assert.deepEqual(stored.categories, ['basemaps']);
-    assert.equal(stored.category, undefined, 'the old field is folded in, not kept alongside');
+    assert.equal(
+      stored.category,
+      undefined,
+      'the old field is folded in, not kept alongside',
+    );
   });
 });
 
@@ -1790,14 +1981,20 @@ describe('choosing trackers', () => {
   async function resolve(globals, options) {
     const dir = await fs.mkdtemp(path.join(workspace, 'trk-'));
     const file = path.join(dir, 'a.pmtiles');
-    await writeArchive(file, { tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('t') }] });
+    await writeArchive(file, {
+      tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('t') }],
+    });
 
     const catalog = new Catalog(dir);
     await catalog.load();
     const library = new Library({
       catalog,
       engine: { name: 'x', add: async () => {} },
-      config: { dataDir: dir, webtorrent: { savePath: dir }, trackers: globals },
+      config: {
+        dataDir: dir,
+        webtorrent: { savePath: dir },
+        trackers: globals,
+      },
     });
 
     const created = await library.addLocalArchive(file, options);
@@ -1808,7 +2005,10 @@ describe('choosing trackers', () => {
     return (parsed.announce ?? []).sort();
   }
 
-  const PUBLIC = ['udp://a.example.org:1337/announce', 'udp://b.example.org:451/announce'];
+  const PUBLIC = [
+    'udp://a.example.org:1337/announce',
+    'udp://b.example.org:451/announce',
+  ];
 
   it('uses the configured defaults when nothing is asked for', async () => {
     assert.deepEqual(await resolve(PUBLIC, {}), [...PUBLIC].sort());
@@ -1820,7 +2020,10 @@ describe('choosing trackers', () => {
     const got = await resolve(PUBLIC, {
       addTrackers: ['udp://private.example.org:6969/announce'],
     });
-    assert.deepEqual(got, [...PUBLIC, 'udp://private.example.org:6969/announce'].sort());
+    assert.deepEqual(
+      got,
+      [...PUBLIC, 'udp://private.example.org:6969/announce'].sort(),
+    );
   });
 
   it('replaces them when replacement is what was meant', async () => {
@@ -1848,7 +2051,9 @@ describe('matching an existing mktorrent workflow', () => {
     // noisier thing than what the script asked for.
     const dir = await fs.mkdtemp(path.join(workspace, 'tiers-'));
     const file = path.join(dir, 'planet.pmtiles');
-    await writeArchive(file, { tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('t') }] });
+    await writeArchive(file, {
+      tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('t') }],
+    });
 
     const catalog = new Catalog(dir);
     await catalog.load();
@@ -1860,13 +2065,18 @@ describe('matching an existing mktorrent workflow', () => {
         webtorrent: { savePath: dir },
         trackers: [
           'udp://tracker.opentrackr.org:1337',
-          ['udp://a.example.org:6969/announce', 'http://a.example.org:6969/announce'],
+          [
+            'udp://a.example.org:6969/announce',
+            'http://a.example.org:6969/announce',
+          ],
           'http://retracker.local/announce',
         ],
       },
     });
 
-    const created = await library.addLocalArchive(file, { pieceLength: 1 << 24 });
+    const created = await library.addLocalArchive(file, {
+      pieceLength: 1 << 24,
+    });
     const bencode = (await import('bencode')).default;
     const decoded = bencode.decode(await fs.readFile(created.torrentPath));
     const tiers = decoded['announce-list'].map((tier) =>
@@ -1874,10 +2084,14 @@ describe('matching an existing mktorrent workflow', () => {
     );
 
     assert.equal(tiers.length, 3, 'one tier per entry');
-    assert.deepEqual(tiers[1], [
-      'udp://a.example.org:6969/announce',
-      'http://a.example.org:6969/announce',
-    ], 'a grouped entry stays one tier');
+    assert.deepEqual(
+      tiers[1],
+      [
+        'udp://a.example.org:6969/announce',
+        'http://a.example.org:6969/announce',
+      ],
+      'a grouped entry stays one tier',
+    );
   });
 
   it('honours a 16 MiB piece length, as mktorrent -l 24 produces', async () => {
@@ -1886,7 +2100,9 @@ describe('matching an existing mktorrent workflow', () => {
     // producing those should be able to say so.
     const dir = await fs.mkdtemp(path.join(workspace, 'piece-'));
     const file = path.join(dir, 'planet.pmtiles');
-    await writeArchive(file, { tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('t') }] });
+    await writeArchive(file, {
+      tiles: [{ z: 0, x: 0, y: 0, data: Buffer.from('t') }],
+    });
 
     const catalog = new Catalog(dir);
     await catalog.load();
@@ -1922,13 +2138,23 @@ describe('seeding limits', () => {
 
   it('does nothing when no limit is configured', () => {
     assert.equal(evaluate(seeded(), { ratio: 99 }, undefined).reached, false);
-    assert.equal(evaluate(seeded(), { ratio: 99 }, { forever: true }).reached, false);
+    assert.equal(
+      evaluate(seeded(), { ratio: 99 }, { forever: true }).reached,
+      false,
+    );
     // A limit naming no threshold is not a limit.
-    assert.equal(evaluate(seeded(), { ratio: 99 }, { then: 'delete' }).reached, false);
+    assert.equal(
+      evaluate(seeded(), { ratio: 99 }, { then: 'delete' }).reached,
+      false,
+    );
   });
 
   it('stops at the ratio', () => {
-    const verdict = evaluate(seeded({ seedingSince: new Date().toISOString() }), { ratio: 2.5 }, GLOBAL);
+    const verdict = evaluate(
+      seeded({ seedingSince: new Date().toISOString() }),
+      { ratio: 2.5 },
+      GLOBAL,
+    );
     assert.equal(verdict.reached, true);
     assert.match(verdict.reason, /ratio/);
     assert.equal(verdict.then, 'delete');
@@ -1957,7 +2183,11 @@ describe('seeding limits', () => {
     const strict = seeded({ seeding: { ratio: 0.1, then: 'stop' } });
     const verdict = evaluate(strict, { ratio: 0.5 }, GLOBAL);
     assert.equal(verdict.reached, true);
-    assert.equal(verdict.then, 'stop', 'the archive its own action, not the global one');
+    assert.equal(
+      verdict.then,
+      'stop',
+      'the archive its own action, not the global one',
+    );
   });
 
   it('never expires a cache-mode archive', () => {
@@ -1981,14 +2211,22 @@ describe('seeding limits', () => {
 
   it('rejects an action it does not understand rather than inventing one', () => {
     const odd = seeded({ seeding: { minutes: 1, then: 'incinerate' } });
-    assert.equal(limitFor(odd, GLOBAL).then, 'stop', 'falls back to the safe action');
+    assert.equal(
+      limitFor(odd, GLOBAL).then,
+      'stop',
+      'falls back to the safe action',
+    );
   });
 
   it('treats your qBittorrent settings the same way qBittorrent does', () => {
     // 64800 minutes, no ratio limit, then remove with data — the screenshot.
     const limit = { minutes: 64800, then: 'delete' };
-    const old = seeded({ seedingSince: new Date(Date.now() - 46 * 86400000).toISOString() });
-    const young = seeded({ seedingSince: new Date(Date.now() - 44 * 86400000).toISOString() });
+    const old = seeded({
+      seedingSince: new Date(Date.now() - 46 * 86400000).toISOString(),
+    });
+    const young = seeded({
+      seedingSince: new Date(Date.now() - 44 * 86400000).toISOString(),
+    });
 
     assert.equal(evaluate(old, { ratio: 0 }, limit).reached, true);
     assert.equal(evaluate(young, { ratio: 0 }, limit).reached, false);
@@ -2023,11 +2261,13 @@ describe('a stable handle for the current build', () => {
       torrentPath,
     });
     await catalog.put(newer);
-    await catalog.put(entry({
-      infoHash: 'c'.repeat(40),
-      name: 'terrain.pmtiles',
-      categories: ['terrain'],
-    }));
+    await catalog.put(
+      entry({
+        infoHash: 'c'.repeat(40),
+        name: 'terrain.pmtiles',
+        categories: ['terrain'],
+      }),
+    );
 
     const app = createApp({
       library: { listWithStatus: async () => [] },
@@ -2157,7 +2397,9 @@ describe('a stable handle for the current build', () => {
     // proxy in front of this can serve the download without touching the node.
     const s = await serve();
     try {
-      const response = await s.get(`/archives/${'b'.repeat(40)}/archive.torrent`);
+      const response = await s.get(
+        `/archives/${'b'.repeat(40)}/archive.torrent`,
+      );
       assert.equal(response.status, 200);
       assert.match(response.headers.get('cache-control'), /immutable/);
     } finally {
@@ -2314,16 +2556,27 @@ describe('optional MD5', () => {
       [entry({ md5: 'd7d470adeaf9954e5a8e3ce2ce749795' })],
       { title: 'x', baseUrl: 'https://x.org' },
     );
-    assert.match(withDigest, /<pmtiles:md5>d7d470adeaf9954e5a8e3ce2ce749795<\/pmtiles:md5>/);
+    assert.match(
+      withDigest,
+      /<pmtiles:md5>d7d470adeaf9954e5a8e3ce2ce749795<\/pmtiles:md5>/,
+    );
 
-    const without = renderFeed([entry()], { title: 'x', baseUrl: 'https://x.org' });
+    const without = renderFeed([entry()], {
+      title: 'x',
+      baseUrl: 'https://x.org',
+    });
     assert.ok(!without.includes('pmtiles:md5'));
   });
 
   it('reads a digest back out of a feed', () => {
     // So a subscriber can carry it forward rather than losing it on the hop.
     const xml = renderFeed(
-      [entry({ md5: 'd7d470adeaf9954e5a8e3ce2ce749795', torrentPath: '/x.torrent' })],
+      [
+        entry({
+          md5: 'd7d470adeaf9954e5a8e3ce2ce749795',
+          torrentPath: '/x.torrent',
+        }),
+      ],
       { title: 'x', baseUrl: 'https://x.org' },
     );
     const [item] = parseFeed(xml);
@@ -2339,7 +2592,9 @@ describe('torrent detail', () => {
   async function serve() {
     const dir = await fs.mkdtemp(path.join(workspace, 'detail-'));
     const file = path.join(dir, 'planet.pmtiles');
-    await writeArchive(file, { tiles: [{ z: 0, x: 0, y: 0, data: Buffer.alloc(2048, 3) }] });
+    await writeArchive(file, {
+      tiles: [{ z: 0, x: 0, y: 0, data: Buffer.alloc(2048, 3) }],
+    });
 
     const catalog = new Catalog(dir);
     await catalog.load();
@@ -2351,7 +2606,10 @@ describe('torrent detail', () => {
         webtorrent: { savePath: dir },
         trackers: [
           'udp://one.example.org:1337',
-          ['udp://two.example.org:6969/announce', 'http://two.example.org:6969/announce'],
+          [
+            'udp://two.example.org:6969/announce',
+            'http://two.example.org:6969/announce',
+          ],
           'udp://three.example.org:451',
         ],
       },
@@ -2385,7 +2643,9 @@ describe('torrent detail', () => {
     // this reads the bencode — showing them flat would hide real structure.
     const s = await serve();
     try {
-      const { tiers } = await (await s.get(`/api/torrents/${s.hash}/trackers`)).json();
+      const { tiers } = await (
+        await s.get(`/api/torrents/${s.hash}/trackers`)
+      ).json();
       assert.equal(tiers.length, 3);
       assert.deepEqual(tiers[0].urls, ['udp://one.example.org:1337']);
       assert.deepEqual(tiers[1].urls, [
@@ -2401,9 +2661,14 @@ describe('torrent detail', () => {
   it('reports the files, piece geometry and comment', async () => {
     const s = await serve();
     try {
-      const content = await (await s.get(`/api/torrents/${s.hash}/content`)).json();
+      const content = await (
+        await s.get(`/api/torrents/${s.hash}/content`)
+      ).json();
       assert.equal(content.files.length, 1);
-      assert.equal(content.files[0].name ?? content.files[0].path, 'planet.pmtiles');
+      assert.equal(
+        content.files[0].name ?? content.files[0].path,
+        'planet.pmtiles',
+      );
       assert.ok(content.pieceLength > 0);
       assert.equal(content.createdBy, 'pmtiles-swarm');
       assert.equal(content.comment, 'Planetiler openmaptiles data export');
@@ -2427,8 +2692,14 @@ describe('torrent detail', () => {
   it('404s an archive it does not hold', async () => {
     const s = await serve();
     try {
-      assert.equal((await s.get(`/api/torrents/${'f'.repeat(40)}/trackers`)).status, 404);
-      assert.equal((await s.get(`/api/torrents/${'f'.repeat(40)}/content`)).status, 404);
+      assert.equal(
+        (await s.get(`/api/torrents/${'f'.repeat(40)}/trackers`)).status,
+        404,
+      );
+      assert.equal(
+        (await s.get(`/api/torrents/${'f'.repeat(40)}/content`)).status,
+        404,
+      );
     } finally {
       await s.close();
     }
@@ -2442,7 +2713,11 @@ describe('switching between mirror and cache', () => {
    */
   async function joined() {
     const dir = await fs.mkdtemp(path.join(workspace, 'mode-'));
-    const archive = entry({ mode: 'cache', savePath: dir, torrentPath: undefined });
+    const archive = entry({
+      mode: 'cache',
+      savePath: dir,
+      torrentPath: undefined,
+    });
     const catalog = new Catalog(dir);
     await catalog.load();
     await catalog.put(archive);
@@ -2494,7 +2769,11 @@ describe('switching between mirror and cache', () => {
 
     await library.setMode(archive.infoHash, 'mirror');
     assert.equal(calls[0].op, 'remove');
-    assert.equal(calls[0].deleteData, false, 'nothing downloaded is thrown away');
+    assert.equal(
+      calls[0].deleteData,
+      false,
+      'nothing downloaded is thrown away',
+    );
     assert.equal(calls[1].op, 'add');
     assert.equal(calls[1].mode, 'mirror');
   });
@@ -2507,7 +2786,9 @@ describe('switching between mirror and cache', () => {
 
   it('rejects a mode that is not one of the two', async () => {
     const { library, hash } = await joined();
-    await assert.rejects(() => library.setMode(hash, 'sideways'), { status: 400 });
+    await assert.rejects(() => library.setMode(hash, 'sideways'), {
+      status: 400,
+    });
   });
 
   it('reports an unknown archive', async () => {
@@ -2529,8 +2810,12 @@ describe('surviving a restart', () => {
 
     const catalog = new Catalog(dir);
     await catalog.load();
-    await catalog.put(entry({ infoHash: 'a'.repeat(40), torrentPath, mode: 'mirror' }));
-    await catalog.put(entry({ infoHash: 'b'.repeat(40), torrentPath, mode: 'cache' }));
+    await catalog.put(
+      entry({ infoHash: 'a'.repeat(40), torrentPath, mode: 'mirror' }),
+    );
+    await catalog.put(
+      entry({ infoHash: 'b'.repeat(40), torrentPath, mode: 'cache' }),
+    );
 
     const added = [];
     const library = new Library({
@@ -2551,8 +2836,16 @@ describe('surviving a restart', () => {
     const catalog = new Catalog(dir);
     await catalog.load();
     // Neither a stored .torrent nor a magnet: nothing to hand over.
-    await catalog.put(entry({ infoHash: 'c'.repeat(40), torrentPath: undefined, magnet: undefined }));
-    await catalog.put(entry({ infoHash: 'd'.repeat(40), magnet: 'magnet:?xt=urn:btih:dddd' }));
+    await catalog.put(
+      entry({
+        infoHash: 'c'.repeat(40),
+        torrentPath: undefined,
+        magnet: undefined,
+      }),
+    );
+    await catalog.put(
+      entry({ infoHash: 'd'.repeat(40), magnet: 'magnet:?xt=urn:btih:dddd' }),
+    );
 
     const library = new Library({
       catalog,
@@ -2640,7 +2933,11 @@ describe('reading a joined archive on demand', () => {
     const app = createApp({
       library: { listWithStatus: async () => [] },
       catalog,
-      engine: { name: 'qbittorrent', list: async () => [], get: async () => ({ progress: 0.1 }) },
+      engine: {
+        name: 'qbittorrent',
+        list: async () => [],
+        get: async () => ({ progress: 0.1 }),
+      },
       subscriptions: {},
       tiles: new TileStore({
         catalog,
@@ -2671,7 +2968,11 @@ describe('reading a joined archive on demand', () => {
     // give out — and offering one produces a URL that fails later, somewhere
     // less obvious.
     const dir = await fs.mkdtemp(path.join(workspace, 'mbtiles-'));
-    const archive = entry({ savePath: dir, pmtiles: undefined, kind: 'mbtiles' });
+    const archive = entry({
+      savePath: dir,
+      pmtiles: undefined,
+      kind: 'mbtiles',
+    });
     const catalog = new Catalog(dir);
     await catalog.load();
     await catalog.put(archive);
@@ -2681,7 +2982,9 @@ describe('reading a joined archive on demand', () => {
       catalog,
       engine: { name: 'webtorrent', list: async () => [] },
       subscriptions: {},
-      tiles: { summarize: async () => assert.fail('should not read the archive') },
+      tiles: {
+        summarize: async () => assert.fail('should not read the archive'),
+      },
       config: { watch: [], subscriptions: [] },
     });
     const server = app.listen(0);
@@ -2734,7 +3037,11 @@ describe('reading a joined archive on demand', () => {
       assert.equal((await fetch(url)).status, 415);
       assert.equal(catalog.get(archive.infoHash).kind, 'unknown');
       assert.equal((await fetch(url)).status, 415);
-      assert.equal(reads, 1, 'the swarm should be asked once, not on every retry');
+      assert.equal(
+        reads,
+        1,
+        'the swarm should be asked once, not on every retry',
+      );
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }

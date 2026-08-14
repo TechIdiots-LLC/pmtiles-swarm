@@ -91,10 +91,16 @@ export async function createTorrentFromUrl(url, options = {}) {
     // verify. The marker means the URL 404s until the moment it is real.
     const target = path.join(options.retainPath, name);
     const marker = options.incompleteSuffix ?? DEFAULT_SUFFIX;
-    await downloadTo(url, `${target}${marker}`, options.onProgress, options.signal, {
-      attempts: options.fetchAttempts,
-      retryDelayMs: options.fetchRetryDelayMs,
-    });
+    await downloadTo(
+      url,
+      `${target}${marker}`,
+      options.onProgress,
+      options.signal,
+      {
+        attempts: options.fetchAttempts,
+        retryDelayMs: options.fetchRetryDelayMs,
+      },
+    );
     if (marker) await fs.rename(`${target}${marker}`, target);
     const created = await createTorrentFromFile(target, {
       ...options,
@@ -423,9 +429,7 @@ async function buildTorrent(input, name, size, options) {
       };
     } catch (error) {
       // A torrent is more important than the format of a torrent.
-      console.warn(
-        `[create] ${error.message}; falling back to a v1 torrent`,
-      );
+      console.warn(`[create] ${error.message}; falling back to a v1 torrent`);
     }
   }
 

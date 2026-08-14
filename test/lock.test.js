@@ -25,7 +25,13 @@ describe('claiming the data directory', () => {
     assert.equal(held.port, 8090);
 
     await lock.release();
-    assert.equal(await fs.stat(lock.file).then(() => true, () => false), false);
+    assert.equal(
+      await fs.stat(lock.file).then(
+        () => true,
+        () => false,
+      ),
+      false,
+    );
   });
 
   it('refuses a second claim while a live process holds it', async () => {
@@ -76,7 +82,10 @@ describe('claiming the data directory', () => {
     // theirs — releasing ours must not delete it.
     const dir = await dataDir();
     const lock = await claimDataDir({ dataDir: dir, port: 8090 });
-    await fs.writeFile(lock.file, JSON.stringify({ pid: 999_999, host: 'other' }));
+    await fs.writeFile(
+      lock.file,
+      JSON.stringify({ pid: 999_999, host: 'other' }),
+    );
 
     await lock.release();
     assert.ok(await fs.stat(lock.file), 'the other node keeps its lock');
@@ -107,7 +116,9 @@ describe('checking a port before binding', () => {
     await new Promise((resolve) => probe.close(resolve));
 
     assert.equal(await portInUse(port, '127.0.0.1'), null);
-    await assert.doesNotReject(() => assertPortsFree({ port, host: '127.0.0.1' }));
+    await assert.doesNotReject(() =>
+      assertPortsFree({ port, host: '127.0.0.1' }),
+    );
   });
 
   it('checks the admin port too, and names which one it is', async () => {

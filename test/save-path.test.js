@@ -111,7 +111,9 @@ describe('what the API will accept', () => {
       source.indexOf('\n};'),
     );
     const declared = new Set(
-      [...block.matchAll(/^ {2}([a-zA-Z][A-Za-z0-9]*):/gm)].map(([, key]) => key),
+      [...block.matchAll(/^ {2}([a-zA-Z][A-Za-z0-9]*):/gm)].map(
+        ([, key]) => key,
+      ),
     );
 
     // Added after load rather than configured, so not settable.
@@ -134,7 +136,9 @@ describe('what the API will accept', () => {
       source.indexOf('\n};'),
     );
     const declared = new Set(
-      [...block.matchAll(/^ {2}([a-zA-Z][A-Za-z0-9]*):/gm)].map(([, key]) => key),
+      [...block.matchAll(/^ {2}([a-zA-Z][A-Za-z0-9]*):/gm)].map(
+        ([, key]) => key,
+      ),
     );
     const { RESTART_REQUIRED, RELOADABLE } = await import('../src/config.js');
     for (const key of [...RESTART_REQUIRED, ...RELOADABLE.keys()]) {
@@ -207,7 +211,9 @@ describe('paths resolve against the config file, not the working directory', () 
   it('leaves an absolute path exactly as written', async () => {
     // Resolving must not rewrite a path somebody chose deliberately.
     const absolute = path.join(path.parse(process.cwd()).root, 'mnt', 'bulk');
-    const config = await loaded({ locations: [{ name: 'bulk', path: absolute }] });
+    const config = await loaded({
+      locations: [{ name: 'bulk', path: absolute }],
+    });
     assert.equal(config.locations[0].path, absolute);
   });
 });

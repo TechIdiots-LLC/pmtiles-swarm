@@ -45,7 +45,9 @@ export class CompositeEngine {
     this.#secondaries = secondaries.filter(Boolean);
     this.shareIntervalMs = Math.max(5, shareIntervalSeconds) * 1000;
     this.shareTimeoutMs = Math.max(60, shareTimeoutSeconds) * 1000;
-    this.name = [primary.name, ...this.#secondaries.map((e) => e.name)].join('+');
+    this.name = [primary.name, ...this.#secondaries.map((e) => e.name)].join(
+      '+',
+    );
     // The primary is the one that writes the file. A secondary only ever
     // receives an archive that is already whole, so it never marks anything.
     this.marksIncomplete = primary.marksIncomplete ?? false;
@@ -101,7 +103,9 @@ export class CompositeEngine {
     // the secondaries were ready.
     const sweep = () =>
       this.shareComplete().catch((error) =>
-        console.error(`[engine] could not share with secondaries: ${error.message}`),
+        console.error(
+          `[engine] could not share with secondaries: ${error.message}`,
+        ),
       );
     this.#timer = setInterval(sweep, this.shareIntervalMs);
     this.#timer.unref?.();
@@ -160,12 +164,16 @@ export class CompositeEngine {
    */
   #queueShare(infoHash, request) {
     this.#shareChain = this.#shareChain
-      .then(() => (this.#stopping ? undefined : this.#shareOne(infoHash, request)))
+      .then(() =>
+        this.#stopping ? undefined : this.#shareOne(infoHash, request),
+      )
       // #shareOne already swallows an engine refusing the archive; this is the
       // last resort, so one failure cannot break the chain for everything
       // queued behind it.
       .catch((error) =>
-        console.warn(`[engine] could not hand over ${infoHash}: ${error.message}`),
+        console.warn(
+          `[engine] could not hand over ${infoHash}: ${error.message}`,
+        ),
       );
   }
 
@@ -235,7 +243,9 @@ export class CompositeEngine {
           // primary either way, and a browser bridge that could not take it is
           // a smaller problem than an add that failed.
           this.#shared.delete(infoHash);
-          console.warn(`[engine] ${engine.name} would not take ${infoHash}: ${error.message}`);
+          console.warn(
+            `[engine] ${engine.name} would not take ${infoHash}: ${error.message}`,
+          );
         });
     }
   }
@@ -296,7 +306,9 @@ export class CompositeEngine {
   async list() {
     if (this.#stopping) return [];
     const primary = await this.#primary.list();
-    const merged = new Map(primary.map((status) => [status.infoHash, { ...status }]));
+    const merged = new Map(
+      primary.map((status) => [status.infoHash, { ...status }]),
+    );
 
     for (const engine of this.#secondaries) {
       const held = await engine.list().catch(() => []);
@@ -339,7 +351,8 @@ export class CompositeEngine {
    * @returns {Promise<object>} - The piece map.
    */
   async pieces(infoHash, options) {
-    if (!this.#primary.pieces) throw new Error(`${this.#primary.name} cannot report pieces`);
+    if (!this.#primary.pieces)
+      throw new Error(`${this.#primary.name} cannot report pieces`);
     return this.#primary.pieces(infoHash, options);
   }
 
@@ -523,7 +536,8 @@ export class CompositeEngine {
     let taken = false;
     for (const engine of [this.#primary, ...this.#secondaries]) {
       if (!engine.addWebSeed) continue;
-      taken = (await engine.addWebSeed(infoHash, url).catch(() => false)) || taken;
+      taken =
+        (await engine.addWebSeed(infoHash, url).catch(() => false)) || taken;
     }
     return taken;
   }
@@ -538,9 +552,11 @@ export class CompositeEngine {
     this.#timer = undefined;
 
     for (const engine of this.#secondaries) {
-      await engine.destroy().catch((error) =>
-        console.error(`[engine] ${engine.name}: ${error.message}`),
-      );
+      await engine
+        .destroy()
+        .catch((error) =>
+          console.error(`[engine] ${engine.name}: ${error.message}`),
+        );
     }
     await this.#primary.destroy();
   }

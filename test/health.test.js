@@ -158,7 +158,12 @@ describe('whether one archive can be served yet', () => {
         name: 'planet.pmtiles',
         kind: 'pmtiles',
         complete: true,
-        pmtiles: { format: 'pbf', minZoom: 0, maxZoom: 14, vectorLayers: [{ id: 'water' }] },
+        pmtiles: {
+          format: 'pbf',
+          minZoom: 0,
+          maxZoom: 14,
+          vectorLayers: [{ id: 'water' }],
+        },
       },
     ]);
     try {
@@ -235,8 +240,15 @@ describe('whether one archive can be served yet', () => {
     try {
       for (const c of ['e', 'f']) {
         const response = await node.ready(hash(c));
-        assert.equal(response.status, 415, `${c} should be refused, not deferred`);
-        assert.match((await response.json()).reason, /will not become servable/);
+        assert.equal(
+          response.status,
+          415,
+          `${c} should be refused, not deferred`,
+        );
+        assert.match(
+          (await response.json()).reason,
+          /will not become servable/,
+        );
       }
     } finally {
       await node.close();

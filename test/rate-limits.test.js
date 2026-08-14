@@ -74,13 +74,19 @@ describe('the alternative-limits window', () => {
   });
 
   it('treats a zero-length window as off, not as always', () => {
-    assert.equal(withinSchedule({ from: '11:00', to: '11:00' }, at(MONDAY, 11)), false);
+    assert.equal(
+      withinSchedule({ from: '11:00', to: '11:00' }, at(MONDAY, 11)),
+      false,
+    );
   });
 
   it('is off when the times do not parse', () => {
     // Better than throwing during a scheduled tick, and better than defaulting
     // to on: a typo should not silently throttle the node.
-    assert.equal(withinSchedule({ from: 'lunchtime', to: '22:00' }, at(MONDAY, 14)), false);
+    assert.equal(
+      withinSchedule({ from: 'lunchtime', to: '22:00' }, at(MONDAY, 14)),
+      false,
+    );
     assert.equal(withinSchedule(undefined, at(MONDAY, 14)), false);
   });
 });
@@ -99,13 +105,19 @@ describe('turning limits into rates', () => {
   });
 
   it('keeps a real rate', () => {
-    const limits = normalise({ uploadLimit: 20000 * KiB, downloadLimit: 40000 * KiB });
+    const limits = normalise({
+      uploadLimit: 20000 * KiB,
+      downloadLimit: 40000 * KiB,
+    });
     assert.equal(limits.upload, 20480000);
     assert.equal(limits.download, 40960000);
   });
 
   it('reads a negative rate as unlimited rather than as a cap', () => {
-    assert.deepEqual(normalise({ uploadLimit: -5 }), { download: -1, upload: -1 });
+    assert.deepEqual(normalise({ uploadLimit: -5 }), {
+      download: -1,
+      upload: -1,
+    });
   });
 });
 
@@ -133,12 +145,20 @@ describe('which limits are in force', () => {
   });
 
   it('ignores the window when the schedule is off', () => {
-    const off = { speed: { ...config.speed, schedule: { ...config.speed.schedule, enabled: false } } };
+    const off = {
+      speed: {
+        ...config.speed,
+        schedule: { ...config.speed.schedule, enabled: false },
+      },
+    };
     assert.equal(activeLimits(off, { now: at(MONDAY, 14) }).mode, 'global');
   });
 
   it('lets a manual choice win', () => {
-    const forced = activeLimits(config, { now: at(MONDAY, 9), override: 'alternative' });
+    const forced = activeLimits(config, {
+      now: at(MONDAY, 9),
+      override: 'alternative',
+    });
     assert.equal(forced.mode, 'alternative');
     // But still reports what the schedule thinks, so the console can say the
     // override is an override rather than showing it as the normal state.
@@ -150,7 +170,11 @@ describe('applying limits to an engine', () => {
   /** An engine that records what it was told. */
   const recording = () => {
     const calls = [];
-    return { name: 'test', calls, setRateLimits: async (limits) => calls.push(limits) };
+    return {
+      name: 'test',
+      calls,
+      setRateLimits: async (limits) => calls.push(limits),
+    };
   };
 
   const config = {
@@ -167,7 +191,7 @@ describe('applying limits to an engine', () => {
     // A schedule that reapplied every minute would log every minute, and would
     // fight anything else that had legitimately set a rate.
     const engine = recording();
-    let clock = at(MONDAY, 9);
+    const clock = at(MONDAY, 9);
     const speed = new SpeedLimits(engine, config, { now: () => clock });
 
     await speed.apply();
@@ -230,7 +254,9 @@ describe('applying limits to an engine', () => {
   it('does not fall over on an engine that cannot throttle', async () => {
     // qBittorrent-as-secondary, or any future engine. A limit nobody can
     // enforce is worth reporting, not worth crashing over.
-    const speed = new SpeedLimits({ name: 'plain' }, config, { now: () => at(MONDAY, 9) });
+    const speed = new SpeedLimits({ name: 'plain' }, config, {
+      now: () => at(MONDAY, 9),
+    });
     const state = await speed.apply();
     assert.equal(state.engineEnforced, false);
     assert.equal(state.mode, 'global');
@@ -269,7 +295,16 @@ describe('what the console is told', () => {
       { now: () => at(MONDAY, 14) },
     );
     const state = speed.current();
-    for (const key of ['mode', 'scheduled', 'download', 'upload', 'downLabel', 'upLabel', 'override', 'engineEnforced']) {
+    for (const key of [
+      'mode',
+      'scheduled',
+      'download',
+      'upload',
+      'downLabel',
+      'upLabel',
+      'override',
+      'engineEnforced',
+    ]) {
       assert.ok(key in state, `${key} is missing`);
     }
     assert.equal(state.mode, 'alternative');
@@ -280,7 +315,9 @@ describe('what the console is told', () => {
 
   it('says when no engine can enforce a limit', async () => {
     // The switch hides rather than pretending to work.
-    const speed = new SpeedLimits({ name: 'plain' }, config, { now: () => at(MONDAY, 14) });
+    const speed = new SpeedLimits({ name: 'plain' }, config, {
+      now: () => at(MONDAY, 14),
+    });
     assert.equal(speed.current().engineEnforced, false);
   });
 });

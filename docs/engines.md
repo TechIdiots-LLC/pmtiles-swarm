@@ -7,16 +7,16 @@ of it.
 
 Three exist. Pick by what the node is for.
 
-| | libtorrent | qBittorrent | WebTorrent |
-| --- | --- | --- | --- |
-| Runs as | sidecar process | your existing instance | in-process |
-| Extra install | `python3-libtorrent` | qBittorrent | none |
-| BitTorrent v2 | yes | yes | **no** |
-| Creates hybrid v1+v2 | yes | via its own UI | no |
-| Piece-level control | yes | **no** | yes |
-| Proper cache mode | yes | approximated | yes |
-| Serves browser peers | no | no | **yes** |
-| Bulk seeding at TB scale | yes | yes | weaker |
+|                          | libtorrent           | qBittorrent            | WebTorrent |
+| ------------------------ | -------------------- | ---------------------- | ---------- |
+| Runs as                  | sidecar process      | your existing instance | in-process |
+| Extra install            | `python3-libtorrent` | qBittorrent            | none       |
+| BitTorrent v2            | yes                  | yes                    | **no**     |
+| Creates hybrid v1+v2     | yes                  | via its own UI         | no         |
+| Piece-level control      | yes                  | **no**                 | yes        |
+| Proper cache mode        | yes                  | approximated           | yes        |
+| Serves browser peers     | no                   | no                     | **yes**    |
+| Bulk seeding at TB scale | yes                  | yes                    | weaker     |
 
 ## libtorrent (recommended)
 
@@ -113,10 +113,10 @@ fixes the call site.
 Joining a torrent defaults to `cache`, not `mirror`: committing a disk to a copy of
 something that may be hundreds of gigabytes should be a decision, not a side effect.
 
-| Mode | Disk | Purpose |
-| --- | --- | --- |
-| `mirror` | the whole archive | Full seeder, adds redundancy |
-| `cache` | only what is read | Serving tiles from a huge archive on a small disk |
+| Mode     | Disk              | Purpose                                           |
+| -------- | ----------------- | ------------------------------------------------- |
+| `mirror` | the whole archive | Full seeder, adds redundancy                      |
+| `cache`  | only what is read | Serving tiles from a huge archive on a small disk |
 
 Implementing cache mode correctly is subtler than it looks. Two bugs found while testing
 the libtorrent engine, both of which would have silently broken it:
@@ -146,8 +146,8 @@ The engines are good at different things, and `secondaryEngines` lets one node h
 ```
 
 `savePath` is one setting for the node, and both engines use it. That is not a
-simplification — it is the only arrangement that works. The two engines are seeding *the
-same file*: the secondary is handed an archive the primary has already finished and seeds
+simplification — it is the only arrangement that works. The two engines are seeding _the
+same file_: the secondary is handed an archive the primary has already finished and seeds
 those exact bytes. Point them at different directories and the secondary finds nothing where
 it was told to look, and answers that by downloading its own copy of something that is
 already on the disk. Older configs naming `libtorrent.savePath` or `webtorrent.savePath` are
@@ -171,15 +171,15 @@ second client would see a mostly-missing file and start filling it in.
 
 What follows:
 
-| | |
-| --- | --- |
-| adding a download | primary only, until it finishes |
-| adding a complete archive | both |
-| switching to cache | withdrawn from secondaries first |
-| removing | both, but only the primary may delete data |
-| pause, resume, web seeds | both |
-| progress and state | the primary's — it is the only one that downloads |
-| peers, seeds, speeds | added together, since a peer is a peer whichever client found it — each row says which engine found it |
+|                           |                                                                                                        |
+| ------------------------- | ------------------------------------------------------------------------------------------------------ |
+| adding a download         | primary only, until it finishes                                                                        |
+| adding a complete archive | both                                                                                                   |
+| switching to cache        | withdrawn from secondaries first                                                                       |
+| removing                  | both, but only the primary may delete data                                                             |
+| pause, resume, web seeds  | both                                                                                                   |
+| progress and state        | the primary's — it is the only one that downloads                                                      |
+| peers, seeds, speeds      | added together, since a peer is a peer whichever client found it — each row says which engine found it |
 
 A secondary that will not start is a warning, not a failure. It is an addition to what the primary
 already does, and losing the browser bridge should not take the node down.
@@ -208,17 +208,17 @@ with a cache-mode archive correctly withheld from the secondary.
 
 Four listeners, and only one of them wants forwarding.
 
-| What | Port | Reach it from |
-| --- | --- | --- |
-| libtorrent peers | `libtorrent.listen`, e.g. `0.0.0.0:6881` — TCP **and** UDP | the internet: **forward it** |
-| WebTorrent peers | `webtorrent.clientOptions.torrentPort` — **random unless you set it** | the internet, if you pin and forward it |
-| WebRTC (browser peers) | no listening port at all | nothing to forward — see below |
-| HTTP: tiles, feeds, `.torrent` | `port`, e.g. 8090 | your load balancer or CDN |
-| HTTP: console and `/api/` | `adminPort`, e.g. 8091 | loopback. Never forward this |
+| What                           | Port                                                                  | Reach it from                           |
+| ------------------------------ | --------------------------------------------------------------------- | --------------------------------------- |
+| libtorrent peers               | `libtorrent.listen`, e.g. `0.0.0.0:6881` — TCP **and** UDP            | the internet: **forward it**            |
+| WebTorrent peers               | `webtorrent.clientOptions.torrentPort` — **random unless you set it** | the internet, if you pin and forward it |
+| WebRTC (browser peers)         | no listening port at all                                              | nothing to forward — see below          |
+| HTTP: tiles, feeds, `.torrent` | `port`, e.g. 8090                                                     | your load balancer or CDN               |
+| HTTP: console and `/api/`      | `adminPort`, e.g. 8091                                                | loopback. Never forward this            |
 
 **The peer port is the one that matters**, and it is the same decision you already made for
-qBittorrent. Forwarded, other clients can open connections *to* you; unforwarded, you can still
-only dial *out*, which works but halves the swarm you can reach — two peers both behind
+qBittorrent. Forwarded, other clients can open connections _to_ you; unforwarded, you can still
+only dial _out_, which works but halves the swarm you can reach — two peers both behind
 unforwarded NAT can never connect to each other, so the ones that need you most are the ones you
 cannot serve. UPnP and NAT-PMP are on by default in both engines and will often open it for you;
 a router with either disabled will not say so.
@@ -253,7 +253,7 @@ too.
 **Running two engines means two peer ports.** libtorrent takes the one you name; WebTorrent
 defaults to `torrentPort: 0`, meaning a fresh OS-assigned port on every start — fine behind UPnP,
 useless for a static forwarding rule, and never the same port twice. Pin it if you want it
-reachable, and pin it to something *other* than libtorrent's:
+reachable, and pin it to something _other_ than libtorrent's:
 
 ```json
 {
@@ -268,7 +268,7 @@ It does not go through any of the HTTP listeners. A browser peer is connected in
 neither is a port you open:
 
 1. **Signalling** happens over a `wss://` tracker. Both the browser and this node connect
-   *outward* to it, and the tracker relays the offer and answer between them.
+   _outward_ to it, and the tracker relays the offer and answer between them.
 2. **The data path** is ICE — ephemeral UDP ports negotiated per connection, with STUN used to
    punch through both NATs. WebTorrent's defaults are Google's and Twilio's public STUN servers.
 
@@ -321,11 +321,11 @@ An archive that is not whole yet is written under a marked name and renamed when
 it finishes, so a web seed URL 404s until the file is real rather than serving half of
 one. Each engine does it its own way:
 
-| Engine | How |
-| --- | --- |
-| WebTorrent | No rename API — the store is built from the metainfo's file list — but the store itself can be replaced, and that is the only thing deciding where bytes land. A thin wrapper around `fs-chunk-store` rewrites the paths. |
-| qBittorrent | Has this built in as `incomplete_files_ext`, appending `.!qB`. That preference is switched on rather than overridden, so someone looking at that client sees the convention they expect. |
-| libtorrent | **Not marked.** The rename would have to happen in the sidecar, which ships with `pmtiles-torrent` rather than here. |
+| Engine      | How                                                                                                                                                                                                                       |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| WebTorrent  | No rename API — the store is built from the metainfo's file list — but the store itself can be replaced, and that is the only thing deciding where bytes land. A thin wrapper around `fs-chunk-store` rewrites the paths. |
+| qBittorrent | Has this built in as `incomplete_files_ext`, appending `.!qB`. That preference is switched on rather than overridden, so someone looking at that client sees the convention they expect.                                  |
+| libtorrent  | **Not marked.** The rename would have to happen in the sidecar, which ships with `pmtiles-torrent` rather than here.                                                                                                      |
 
 So on the libtorrent engine, do not point a web server at a save path that is also
 serving web seeds. Completion is still recorded correctly — the watcher finds no marked
@@ -339,7 +339,7 @@ catalogued here". That connection is read-only on purpose: the incomplete-files 
 is explicitly not set on it, so looking at somebody's client does not change a setting on
 it as a side effect.
 
-Whether that client's save paths are readable from *this* node is a different question
+Whether that client's save paths are readable from _this_ node is a different question
 from whether it holds the data, and the difference is silent — a catalog entry naming a
 file that is not there looks entirely normal and can never serve a tile. Candidates are
 checked and the unreadable ones are joined by magnet instead.

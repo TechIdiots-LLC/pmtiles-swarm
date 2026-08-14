@@ -16,15 +16,34 @@ describe('reducing pieces to columns', () => {
   it('covers every piece exactly once', () => {
     // The failure this guards is a rounding gap swallowing the last pieces,
     // which shows up as a bar that never reaches the right-hand edge.
-    for (const [total, buckets] of [[1000, 10], [178000, 1000], [7, 3], [999, 1000]]) {
+    for (const [total, buckets] of [
+      [1000, 10],
+      [178000, 1000],
+      [7, 3],
+      [999, 1000],
+    ]) {
       const seen = new Set();
-      bucketise(total, buckets, (piece) => {
-        seen.add(piece);
-        return 1;
-      }, allHeld);
-      assert.equal(seen.size, Math.min(total, buckets * Math.ceil(total / buckets)));
-      assert.ok(seen.has(total - 1), `${total}/${buckets}: the last piece was dropped`);
-      assert.ok(seen.has(0), `${total}/${buckets}: the first piece was dropped`);
+      bucketise(
+        total,
+        buckets,
+        (piece) => {
+          seen.add(piece);
+          return 1;
+        },
+        allHeld,
+      );
+      assert.equal(
+        seen.size,
+        Math.min(total, buckets * Math.ceil(total / buckets)),
+      );
+      assert.ok(
+        seen.has(total - 1),
+        `${total}/${buckets}: the last piece was dropped`,
+      );
+      assert.ok(
+        seen.has(0),
+        `${total}/${buckets}: the first piece was dropped`,
+      );
     }
   });
 
@@ -32,13 +51,21 @@ describe('reducing pieces to columns', () => {
     // Fewer pieces than columns must widen the pieces, not leave gaps.
     const out = bucketise(4, 16, () => 1, allHeld);
     assert.equal(out.length, 16);
-    assert.ok(out.every((value) => value === 1), 'no empty columns');
+    assert.ok(
+      out.every((value) => value === 1),
+      'no empty columns',
+    );
   });
 
   it('calls a bucket held only when all of it is', () => {
     // At a thousand columns over a hundred thousand pieces, "any" would paint
     // a 60%-complete archive as almost solid.
-    const nearlyAll = bucketise(100, 10, (piece) => (piece === 55 ? 0 : 1), allHeld);
+    const nearlyAll = bucketise(
+      100,
+      10,
+      (piece) => (piece === 55 ? 0 : 1),
+      allHeld,
+    );
     assert.equal(nearlyAll[5], 0, 'the bucket holding the gap is not full');
     assert.equal(nearlyAll[4], 1);
   });
@@ -46,7 +73,12 @@ describe('reducing pieces to columns', () => {
   it('calls a peer bucket reachable when any of it is', () => {
     // A peer map answers "where could I get this", and a peer holding part of
     // a bucket can still serve it.
-    const sparse = bucketise(100, 10, (piece) => (piece === 55 ? 1 : 0), anyHeld);
+    const sparse = bucketise(
+      100,
+      10,
+      (piece) => (piece === 55 ? 1 : 0),
+      anyHeld,
+    );
     assert.equal(sparse[5], 1);
     assert.equal(sparse[4], 0);
   });
@@ -55,16 +87,28 @@ describe('reducing pieces to columns', () => {
     // An average would hide the one piece nobody has, which is the entire
     // question an availability bar is asked.
     const values = [9, 9, 9, 1, 9, 9, 9, 9, 9, 9];
-    assert.deepEqual(bucketise(10, 2, (piece) => values[piece], rarest), [1, 9]);
+    assert.deepEqual(
+      bucketise(10, 2, (piece) => values[piece], rarest),
+      [1, 9],
+    );
   });
 
   it('clamps to a byte, since that is how it travels', () => {
-    assert.deepEqual(bucketise(1, 1, () => 5000, rarest), [255]);
-    assert.deepEqual(bucketise(1, 1, () => -3, rarest), [0]);
+    assert.deepEqual(
+      bucketise(1, 1, () => 5000, rarest),
+      [255],
+    );
+    assert.deepEqual(
+      bucketise(1, 1, () => -3, rarest),
+      [0],
+    );
   });
 
   it('answers nothing for an archive with no pieces', () => {
-    assert.deepEqual(bucketise(0, 100, () => 1, allHeld), []);
+    assert.deepEqual(
+      bucketise(0, 100, () => 1, allHeld),
+      [],
+    );
   });
 });
 

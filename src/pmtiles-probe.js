@@ -89,7 +89,9 @@ export function summarize(header, metadata = {}) {
  */
 export async function probePMTiles(location) {
   const isHttp = /^https?:\/\//i.test(location);
-  const source = isHttp ? new FetchSource(location) : new NodeFileSource(location);
+  const source = isHttp
+    ? new FetchSource(location)
+    : new NodeFileSource(location);
 
   try {
     const archive = new PMTiles(source);

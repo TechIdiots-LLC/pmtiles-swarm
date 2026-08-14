@@ -25,7 +25,9 @@ describe('counting what a node has served', () => {
     const stats = new TileStats();
     stats.record(hit());
     stats.record(hit({ bytes: 2048 }));
-    stats.record(hit({ infoHash: 'bbbb', name: 'terrain.pmtiles', bytes: 512 }));
+    stats.record(
+      hit({ infoHash: 'bbbb', name: 'terrain.pmtiles', bytes: 512 }),
+    );
 
     const snap = stats.snapshot();
     assert.equal(snap.requests, 3);
@@ -73,7 +75,9 @@ describe('counting what a node has served', () => {
     stats.record(hit({ ip: '::ffff:172.16.1.2' }));
     stats.record(hit({ ip: '172.16.1.2' }));
 
-    assert.deepEqual(stats.snapshot().archives.aaaa.clients, { '172.16.1.2': 2 });
+    assert.deepEqual(stats.snapshot().archives.aaaa.clients, {
+      '172.16.1.2': 2,
+    });
     assert.equal(stats.recent()[0].ip, '172.16.1.2');
   });
 
@@ -87,7 +91,11 @@ describe('counting what a node has served', () => {
 
     const archive = stats.snapshot().archives.aaaa;
     assert.equal(archive.p50ms, 2);
-    assert.equal(archive.p95ms, 2, 'one slow read in a hundred is not the 95th');
+    assert.equal(
+      archive.p95ms,
+      2,
+      'one slow read in a hundred is not the 95th',
+    );
     assert.ok(archive.requests === 100);
   });
 

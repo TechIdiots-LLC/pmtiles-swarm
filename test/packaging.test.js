@@ -21,7 +21,7 @@ describe('the lock file agrees with the manifest', () => {
     assert.equal(
       lock.packages['']?.version,
       pkg.version,
-      'the lock\'s own root package entry',
+      "the lock's own root package entry",
     );
   });
 

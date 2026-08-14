@@ -251,7 +251,9 @@ describe('the preview imports what the bundles actually export', () => {
 
   it('imports the inspect control as a default, because it has one', () => {
     assert.equal(
-      hasDefault('node_modules/@maplibre/maplibre-gl-inspect/dist/maplibre-gl-inspect.mjs'),
+      hasDefault(
+        'node_modules/@maplibre/maplibre-gl-inspect/dist/maplibre-gl-inspect.mjs',
+      ),
       true,
     );
     assert.match(
@@ -262,7 +264,14 @@ describe('the preview imports what the bundles actually export', () => {
 
   it('only uses names maplibre-gl actually exports', () => {
     const bundle = fsSync.readFileSync(
-      path.join(here, '..', 'node_modules', 'maplibre-gl', 'dist', 'maplibre-gl.mjs'),
+      path.join(
+        here,
+        '..',
+        'node_modules',
+        'maplibre-gl',
+        'dist',
+        'maplibre-gl.mjs',
+      ),
       'utf8',
     );
     const exports = bundle.match(/export\{[^}]*\}/g).at(-1);
@@ -282,7 +291,9 @@ describe('the detail tabs', () => {
     // appears, it highlights when clicked, and nothing happens, because
     // querySelector('[data-pane="…"]') returned null and the renderer bailed.
     // Exactly how the Pieces tab shipped invisible.
-    const tabs = [...page.matchAll(/data-tab="([^"]+)"/g)].map(([, name]) => name);
+    const tabs = [...page.matchAll(/data-tab="([^"]+)"/g)].map(
+      ([, name]) => name,
+    );
     const panes = new Set(
       [...page.matchAll(/data-pane="([^"]+)"/g)].map(([, name]) => name),
     );
@@ -295,10 +306,14 @@ describe('the detail tabs', () => {
   it('has no pane without a tab to reach it', () => {
     // The other direction: a pane nothing can open is dead markup, and a
     // renamed tab leaves one behind.
-    const tabs = new Set([...page.matchAll(/data-tab="([^"]+)"/g)].map(([, n]) => n));
+    const tabs = new Set(
+      [...page.matchAll(/data-tab="([^"]+)"/g)].map(([, n]) => n),
+    );
     // `data-pane` is also matched inside the script that queries it, so only
     // the ones declared as elements count.
-    const declared = [...page.matchAll(/<div data-pane="([^"]+)"/g)].map(([, n]) => n);
+    const declared = [...page.matchAll(/<div data-pane="([^"]+)"/g)].map(
+      ([, n]) => n,
+    );
     const unreachable = declared.filter((name) => !tabs.has(name));
     assert.deepEqual(unreachable, [], 'these panes cannot be opened');
   });
@@ -306,7 +321,9 @@ describe('the detail tabs', () => {
   it('renders each tab it declares', () => {
     // A pane that exists but that fillPane never branches on shows "loading…"
     // for ever.
-    const tabs = [...page.matchAll(/<button data-tab="([^"]+)"/g)].map(([, n]) => n);
+    const tabs = [...page.matchAll(/<button data-tab="([^"]+)"/g)].map(
+      ([, n]) => n,
+    );
     for (const name of tabs) {
       if (name === 'general') continue; // rendered inline, not in fillPane
       assert.ok(
@@ -443,14 +460,26 @@ describe('the footer', () => {
   });
 
   it('fills both in rather than leaving the slots empty', () => {
-    assert.match(page, /\$\('year'\)\.textContent = String\(new Date\(\)\.getFullYear\(\)\)/);
-    assert.match(page, /\$\('version'\)\.textContent = `v\$\{status\.version\}`/);
+    assert.match(
+      page,
+      /\$\('year'\)\.textContent = String\(new Date\(\)\.getFullYear\(\)\)/,
+    );
+    assert.match(
+      page,
+      /\$\('version'\)\.textContent = `v\$\{status\.version\}`/,
+    );
   });
 
   it('takes the version from the package, not from a copy of it', async () => {
     // Two places to write a version down is one place for them to disagree.
-    const api = await fs.readFile(path.join(here, '..', 'src', 'api.js'), 'utf8');
-    assert.match(api, /readFileSync\(path\.join\(here, '\.\.', 'package\.json'\)/);
+    const api = await fs.readFile(
+      path.join(here, '..', 'src', 'api.js'),
+      'utf8',
+    );
+    assert.match(
+      api,
+      /readFileSync\(path\.join\(here, '\.\.', 'package\.json'\)/,
+    );
     assert.match(api, /version: VERSION/);
   });
 });
@@ -560,7 +589,9 @@ describe('the detail panes that change by themselves', () => {
   it('is declared where the refresh loop can reach it', async () => {
     // The same trap the shared-helper test exists for: a helper nested inside
     // another function is a ReferenceError at tick time, not at load time.
-    const script = page.split('<script type="module">')[1].split('</script>')[0];
+    const script = page
+      .split('<script type="module">')[1]
+      .split('</script>')[0];
     assert.equal(declarationDepths(script).get('refreshOpenPane'), 0);
   });
 });
@@ -577,7 +608,10 @@ describe('running a schedule on demand', () => {
 
   it('offers it only where a target was given', () => {
     // Watched folders have no schedule to run early, so no button.
-    assert.match(page, /checkNow\s*\n?\s*\?\s*'<button type="button" data-act="check-now"/);
+    assert.match(
+      page,
+      /checkNow\s*\n?\s*\?\s*'<button type="button" data-act="check-now"/,
+    );
   });
 
   it('offers running the completion hook for one archive', () => {
@@ -612,21 +646,39 @@ describe('feeds and peers as two sections', () => {
   it('appends rather than assigns, so one does not clobber the other', () => {
     // Both write `subscriptions`. Assigning would mean whichever rendered
     // last silently deleted the other section's rows.
-    assert.match(page, /updates\[target\.configKey\] = \[\s*\n\s*\.\.\.\(updates\[target\.configKey\] \?\? \[\]\),/);
+    assert.match(
+      page,
+      /updates\[target\.configKey\] = \[\s*\n\s*\.\.\.\(updates\[target\.configKey\] \?\? \[\]\),/,
+    );
   });
 
   it('offers each section only the fields it reads', () => {
-    const feeds = page.slice(page.indexOf("key: 'feeds'"), page.indexOf("key: 'peers'"));
+    const feeds = page.slice(
+      page.indexOf("key: 'feeds'"),
+      page.indexOf("key: 'peers'"),
+    );
     const peers = page.slice(page.indexOf("key: 'peers'"));
 
-    assert.ok(feeds.includes("field: 'newest'"), 'a feed is bounded, so it caps');
+    assert.ok(
+      feeds.includes("field: 'newest'"),
+      'a feed is bounded, so it caps',
+    );
     assert.ok(!feeds.includes("field: 'prune'"), 'and cannot prune on absence');
 
-    assert.ok(peers.includes("field: 'prune'"), 'a catalogue can notice a removal');
-    assert.ok(!peers.includes("field: 'newest'"), 'and lists everything, so nothing to cap');
+    assert.ok(
+      peers.includes("field: 'prune'"),
+      'a catalogue can notice a removal',
+    );
+    assert.ok(
+      !peers.includes("field: 'newest'"),
+      'and lists everything, so nothing to cap',
+    );
 
     for (const section of [feeds, peers]) {
-      assert.ok(section.includes("field: 'keepDays'"), 'both answer for their own disk');
+      assert.ok(
+        section.includes("field: 'keepDays'"),
+        'both answer for their own disk',
+      );
     }
   });
 

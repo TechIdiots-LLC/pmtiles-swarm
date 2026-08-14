@@ -41,7 +41,8 @@ export function minutesOfDay(value) {
  */
 function daysOf(schedule) {
   const days = schedule?.days ?? 'everyday';
-  if (Array.isArray(days)) return days.map(Number).filter((d) => d >= 0 && d <= 6);
+  if (Array.isArray(days))
+    return days.map(Number).filter((d) => d >= 0 && d <= 6);
   return DAY_SETS[String(days).toLowerCase()] ?? DAY_SETS.everyday;
 }
 
@@ -94,7 +95,10 @@ export function normalise(limits) {
     const rate = Number(value);
     return Number.isFinite(rate) && rate > 0 ? Math.floor(rate) : -1;
   };
-  return { download: one(limits?.downloadLimit), upload: one(limits?.uploadLimit) };
+  return {
+    download: one(limits?.downloadLimit),
+    upload: one(limits?.uploadLimit),
+  };
 }
 
 /**
@@ -107,11 +111,15 @@ export function normalise(limits) {
  * @param {object} [options] - `now` and `override`.
  * @returns {object} - `{ mode, download, upload, scheduled }`.
  */
-export function activeLimits(config, { now = new Date(), override = null } = {}) {
+export function activeLimits(
+  config,
+  { now = new Date(), override = null } = {},
+) {
   const speed = config?.speed ?? {};
-  const scheduled = speed.schedule?.enabled === false
-    ? false
-    : withinSchedule(speed.schedule, now);
+  const scheduled =
+    speed.schedule?.enabled === false
+      ? false
+      : withinSchedule(speed.schedule, now);
 
   const mode = override ?? (scheduled ? 'alternative' : 'global');
   const source = mode === 'alternative' ? (speed.alternative ?? {}) : speed;
@@ -250,8 +258,12 @@ export class SpeedLimits {
     }
     this.#lastScheduled = scheduled;
 
-    const wanted = activeLimits(this.#config, { now, override: this.#override });
-    if (this.#applied && sameLimits(this.#applied, wanted)) return this.current();
+    const wanted = activeLimits(this.#config, {
+      now,
+      override: this.#override,
+    });
+    if (this.#applied && sameLimits(this.#applied, wanted))
+      return this.current();
 
     if (this.#engine?.setRateLimits) {
       await this.#engine.setRateLimits({

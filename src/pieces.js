@@ -25,7 +25,10 @@ export function bucketise(total, buckets, valueAt, reduce) {
   const out = [];
   for (let index = 0; index < buckets; index += 1) {
     const start = Math.floor((index * total) / buckets);
-    const stop = Math.max(start + 1, Math.floor(((index + 1) * total) / buckets));
+    const stop = Math.max(
+      start + 1,
+      Math.floor(((index + 1) * total) / buckets),
+    );
     const values = [];
     for (let piece = start; piece < stop && piece < total; piece += 1) {
       values.push(valueAt(piece));
@@ -65,7 +68,8 @@ export const anyHeld = (values) => (values.some(Boolean) ? 1 : 0);
  * @param {number[]} values - Pieces in the bucket.
  * @returns {number} - The rarest.
  */
-export const rarest = (values) => (values.length === 0 ? 0 : Math.min(...values));
+export const rarest = (values) =>
+  values.length === 0 ? 0 : Math.min(...values);
 
 /**
  * Packs bucket values into base64, one byte each.

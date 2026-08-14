@@ -13,13 +13,21 @@ describe('finding the node from its own configuration', () => {
     // The failure this removes: the API is on adminPort, and guessing the
     // public port gets a connection refused that reads as "the node is down".
     assert.equal(
-      adminUrl({ host: '172.16.1.49', port: 8090, adminHost: '172.16.1.49', adminPort: 8091 }),
+      adminUrl({
+        host: '172.16.1.49',
+        port: 8090,
+        adminHost: '172.16.1.49',
+        adminPort: 8091,
+      }),
       'http://172.16.1.49:8091',
     );
   });
 
   it('falls back to the public listener when there is no separate one', () => {
-    assert.equal(adminUrl({ host: '10.0.0.5', port: 8090 }), 'http://10.0.0.5:8090');
+    assert.equal(
+      adminUrl({ host: '10.0.0.5', port: 8090 }),
+      'http://10.0.0.5:8090',
+    );
   });
 
   it('turns a wildcard bind into an address that can be connected to', () => {
@@ -70,7 +78,10 @@ describe('reporting what a node is doing', () => {
       torrents: rows,
     });
     assert.match(text, /3 archives, 1 the engine does not know about/);
-    assert.match(text, /An archive with no state is one the engine is not holding/);
+    assert.match(
+      text,
+      /An archive with no state is one the engine is not holding/,
+    );
   });
 
   it('shows each archive with its state and progress', () => {
@@ -78,14 +89,23 @@ describe('reporting what a node is doing', () => {
       status: { engine: { name: 'libtorrent', ok: true } },
       torrents: rows,
     });
-    assert.match(text, /planetiler-openmaptiles-260803\.pmtiles\s+87 GiB\s+checking\s+12%/);
+    assert.match(
+      text,
+      /planetiler-openmaptiles-260803\.pmtiles\s+87 GiB\s+checking\s+12%/,
+    );
     assert.match(text, /planet-260803\.osm\.pbf\s+94 GiB\s+downloading\s+25%/);
     assert.match(text, /orphan\.pmtiles\s+1\.0 GiB\s+—\s+—/);
   });
 
   it('says so when the engine itself is down', () => {
     const text = formatStatus({
-      status: { engine: { name: 'libtorrent', ok: false, error: 'sidecar is not running' } },
+      status: {
+        engine: {
+          name: 'libtorrent',
+          ok: false,
+          error: 'sidecar is not running',
+        },
+      },
       torrents: [],
     });
     assert.match(text, /UNAVAILABLE — sidecar is not running/);
@@ -144,7 +164,10 @@ describe('what it does when it cannot ask', () => {
     });
 
     assert.equal(code, 1);
-    assert.match(err.join(''), /refused the credential in this configuration file/);
+    assert.match(
+      err.join(''),
+      /refused the credential in this configuration file/,
+    );
   });
 
   it('fails when the engine is unavailable, so a script can act on it', async () => {
@@ -175,7 +198,13 @@ describe('what it does when it cannot ask', () => {
           json: async () =>
             url.endsWith('/api/status')
               ? { engine: { name: 'libtorrent', ok: true }, version: '0.8.0' }
-              : [{ name: 'planet.pmtiles', size: 1024 ** 3, status: { state: 'seeding', progress: 1 } }],
+              : [
+                  {
+                    name: 'planet.pmtiles',
+                    size: 1024 ** 3,
+                    status: { state: 'seeding', progress: 1 },
+                  },
+                ],
         };
       },
     });
@@ -193,7 +222,9 @@ describe('what it does when it cannot ask', () => {
         ok: true,
         status: 200,
         json: async () =>
-          url.endsWith('/api/status') ? { engine: { name: 'x', ok: true } } : [],
+          url.endsWith('/api/status')
+            ? { engine: { name: 'x', ok: true } }
+            : [],
       }),
     });
 

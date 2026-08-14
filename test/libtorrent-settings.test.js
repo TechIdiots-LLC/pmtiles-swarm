@@ -5,7 +5,9 @@ import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { LibtorrentEngine } from '../src/engines/libtorrent.js';
 
-const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-ltsettings-'));
+const workspace = await fs.mkdtemp(
+  path.join(os.tmpdir(), 'pmtiles-ltsettings-'),
+);
 after(() => fs.rm(workspace, { recursive: true, force: true }));
 
 /**
@@ -67,7 +69,10 @@ describe('what the libtorrent sidecar is told', () => {
   });
 
   it('carries the rate limits', async () => {
-    const settings = await settingsFor({ uploadLimit: 1048576, downloadLimit: 2097152 });
+    const settings = await settingsFor({
+      uploadLimit: 1048576,
+      downloadLimit: 2097152,
+    });
     assert.equal(settings.uploadLimit, 1048576);
     assert.equal(settings.downloadLimit, 2097152);
   });
@@ -76,8 +81,18 @@ describe('what the libtorrent sidecar is told', () => {
     // Absent has to stay absent: the sidecar's own defaults apply, and sending
     // an explicit null or false would silently override them.
     const settings = await settingsFor({});
-    for (const key of ['upnp', 'natpmp', 'dht', 'lsd', 'uploadLimit', 'downloadLimit']) {
-      assert.ok(!(key in settings), `${key} should be absent, got ${settings[key]}`);
+    for (const key of [
+      'upnp',
+      'natpmp',
+      'dht',
+      'lsd',
+      'uploadLimit',
+      'downloadLimit',
+    ]) {
+      assert.ok(
+        !(key in settings),
+        `${key} should be absent, got ${settings[key]}`,
+      );
     }
   });
 

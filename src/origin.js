@@ -130,14 +130,20 @@ export async function checkOrigin(entry) {
     fresh.lastModified &&
     stored.lastModified !== fresh.lastModified
   ) {
-    differences.push(`last-modified ${stored.lastModified} -> ${fresh.lastModified}`);
+    differences.push(
+      `last-modified ${stored.lastModified} -> ${fresh.lastModified}`,
+    );
   }
   if (stored.size && fresh.size && stored.size !== fresh.size) {
     differences.push(`size ${stored.size} -> ${fresh.size}`);
   }
 
   if (differences.length === 0) {
-    return { infoHash: entry.infoHash, status: 'unchanged', fingerprint: fresh };
+    return {
+      infoHash: entry.infoHash,
+      status: 'unchanged',
+      fingerprint: fresh,
+    };
   }
 
   // A modification time that moves while size and ETag stay put is weak
@@ -182,13 +188,7 @@ async function contentLooksDifferent(entry) {
     const fresh = await probePMTiles(entry.source.location);
     const stored = entry.pmtiles;
 
-    const fields = [
-      'tileCount',
-      'minZoom',
-      'maxZoom',
-      'format',
-      'specVersion',
-    ];
+    const fields = ['tileCount', 'minZoom', 'maxZoom', 'format', 'specVersion'];
     for (const field of fields) {
       // eslint-disable-next-line security/detect-object-injection -- field comes from the constant list above
       if (stored[field] !== undefined && stored[field] !== fresh[field]) {
@@ -196,7 +196,8 @@ async function contentLooksDifferent(entry) {
       }
     }
     const sameBounds =
-      JSON.stringify(stored.bounds ?? []) === JSON.stringify(fresh.bounds ?? []);
+      JSON.stringify(stored.bounds ?? []) ===
+      JSON.stringify(fresh.bounds ?? []);
     return !sameBounds;
   } catch {
     // Cannot tell; let the caller fall back to the validator comparison.

@@ -31,7 +31,10 @@ describe('publishing the origin timestamp', () => {
       ],
       { title: 'test', baseUrl: 'https://swarm.example' },
     );
-    assert.match(xml, /<pmtiles:mtime>2026-08-13T19:13:09\.000Z<\/pmtiles:mtime>/);
+    assert.match(
+      xml,
+      /<pmtiles:mtime>2026-08-13T19:13:09\.000Z<\/pmtiles:mtime>/,
+    );
   });
 
   it('leaves the element out entirely when it has none', () => {
@@ -85,13 +88,17 @@ describe('reading a timestamp out of a feed', () => {
 
   it('accepts RFC 822, which is what RSS itself uses for dates', () => {
     assert.equal(
-      item('<pmtiles:mtime>Thu, 13 Aug 2026 19:13:09 GMT</pmtiles:mtime>').mtime,
+      item('<pmtiles:mtime>Thu, 13 Aug 2026 19:13:09 GMT</pmtiles:mtime>')
+        .mtime,
       MTIME,
     );
   });
 
   it('discards one it cannot parse', () => {
-    assert.equal(item('<pmtiles:mtime>last tuesday</pmtiles:mtime>').mtime, undefined);
+    assert.equal(
+      item('<pmtiles:mtime>last tuesday</pmtiles:mtime>').mtime,
+      undefined,
+    );
     assert.equal(item('<pmtiles:mtime></pmtiles:mtime>').mtime, undefined);
   });
 
@@ -190,7 +197,9 @@ describe('restoring it when a download finishes', () => {
 
   it('finishes the download even if the stamp cannot be applied', async () => {
     // A wrong ETag beats an archive stuck at "incomplete" over a timestamp.
-    const { library, catalog, dir } = await harness(seed({ originMtime: MTIME }));
+    const { library, catalog, dir } = await harness(
+      seed({ originMtime: MTIME }),
+    );
     await fs.writeFile(path.join(dir, 'monthly.pmtiles.incomplete'), 'whole');
 
     const realUtimes = fs.utimes.bind(fs);

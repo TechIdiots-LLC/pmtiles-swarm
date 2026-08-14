@@ -117,6 +117,10 @@ describe('retention on a watched folder', () => {
       held('planet-by-hand.pmtiles', 400, undefined),
       held('planet-elsewhere.pmtiles', 400, '/some/other/folder'),
     ]);
-    assert.deepEqual(removed, [], `nothing outside the folder: ${JSON.stringify(removed)}`);
+    assert.deepEqual(
+      removed,
+      [],
+      `nothing outside the folder: ${JSON.stringify(removed)}`,
+    );
   });
 });

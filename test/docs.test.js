@@ -9,7 +9,10 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 /** Every markdown file that is documentation rather than a note in a folder. */
 async function docFiles() {
   const docs = await fs.readdir(path.join(root, 'docs'));
-  return ['README.md', ...docs.filter((n) => n.endsWith('.md')).map((n) => `docs/${n}`)];
+  return [
+    'README.md',
+    ...docs.filter((n) => n.endsWith('.md')).map((n) => `docs/${n}`),
+  ];
 }
 
 /**
@@ -37,8 +40,15 @@ function significantLines(block) {
 function edgeCount(block) {
   let edges = 0;
   for (const line of significantLines(block)) {
-    if (/^(graph|flowchart|subgraph|end|linkStyle|classDef|class |style )/.test(line)) continue;
-    const match = line.match(/^(.*?)\s*(<==>|==>|<-->|-->|-\.->|---|===)\s*(.*)$/);
+    if (
+      /^(graph|flowchart|subgraph|end|linkStyle|classDef|class |style )/.test(
+        line,
+      )
+    )
+      continue;
+    const match = line.match(
+      /^(.*?)\s*(<==>|==>|<-->|-->|-\.->|---|===)\s*(.*)$/,
+    );
     if (!match) continue;
     const sides = [match[1], match[3]].map((side) => side.split('&').length);
     edges += sides[0] * sides[1];
@@ -52,8 +62,14 @@ describe('the architecture diagrams', () => {
     // renders as an error block on GitHub rather than as a diagram. Adding an
     // edge renumbers every edge after it, so this is easy to get wrong and
     // invisible until someone opens the page.
-    const source = await fs.readFile(path.join(root, 'docs/architecture-diagram.md'), 'utf8');
-    const blocks = source.split('```mermaid').slice(1).map((b) => b.split('```')[0]);
+    const source = await fs.readFile(
+      path.join(root, 'docs/architecture-diagram.md'),
+      'utf8',
+    );
+    const blocks = source
+      .split('```mermaid')
+      .slice(1)
+      .map((b) => b.split('```')[0]);
     assert.ok(blocks.length > 0, 'the diagram file should contain diagrams');
 
     for (const [index, block] of blocks.entries()) {
@@ -61,7 +77,9 @@ describe('the architecture diagrams', () => {
       const edges = edgeCount(block);
       const referenced = significantLines(block)
         .filter((line) => line.startsWith('linkStyle'))
-        .flatMap((line) => (line.split('stroke')[0].match(/\d+/g) ?? []).map(Number));
+        .flatMap((line) =>
+          (line.split('stroke')[0].match(/\d+/g) ?? []).map(Number),
+        );
 
       for (const target of referenced) {
         assert.ok(
@@ -74,7 +92,10 @@ describe('the architecture diagrams', () => {
 
   it('styles the edges it says it styles', async () => {
     // The colours carry meaning the prose relies on — "orange = BitTorrent".
-    const source = await fs.readFile(path.join(root, 'docs/architecture-diagram.md'), 'utf8');
+    const source = await fs.readFile(
+      path.join(root, 'docs/architecture-diagram.md'),
+      'utf8',
+    );
     assert.match(source, /orange = BitTorrent/);
     assert.match(source, /linkStyle .* stroke:#F5A623/);
   });
@@ -99,7 +120,8 @@ describe('documentation links', () => {
               .replace(/[^a-z0-9 -]/g, '')
               .replace(/ /g, '-'),
           );
-          if (!slugs.includes(anchor)) broken.push(`${file} -> ${target} (no such heading)`);
+          if (!slugs.includes(anchor))
+            broken.push(`${file} -> ${target} (no such heading)`);
         } catch {
           broken.push(`${file} -> ${target} (no such file)`);
         }
@@ -115,7 +137,9 @@ describe('documentation links', () => {
     const readme = await fs.readFile(path.join(root, 'README.md'), 'utf8');
 
     const routes = new Set(
-      [...api.matchAll(/['"](\/(?:api|archives|latest|feed)[^'"]*)['"]/g)].map(([, r]) => r),
+      [...api.matchAll(/['"](\/(?:api|archives|latest|feed)[^'"]*)['"]/g)].map(
+        ([, r]) => r,
+      ),
     );
 
     const undocumented = [...routes].filter((route) => {
@@ -123,7 +147,11 @@ describe('documentation links', () => {
       const tail = route.split('/').pop();
       return !readme.includes(route) && !readme.includes(`/${tail}`);
     });
-    assert.deepEqual(undocumented, [], 'these routes have no row in the README table');
+    assert.deepEqual(
+      undocumented,
+      [],
+      'these routes have no row in the README table',
+    );
   });
 });
 
@@ -144,11 +172,17 @@ describe('the README configuration example', () => {
       source.indexOf('\n};'),
     );
     const known = new Set(
-      [...block.matchAll(/^ {2}([a-zA-Z][A-Za-z0-9]*):/gm)].map(([, key]) => key),
+      [...block.matchAll(/^ {2}([a-zA-Z][A-Za-z0-9]*):/gm)].map(
+        ([, key]) => key,
+      ),
     );
 
     const unknown = Object.keys(example).filter((key) => !known.has(key));
-    assert.deepEqual(unknown, [], 'the example names settings that do not exist');
+    assert.deepEqual(
+      unknown,
+      [],
+      'the example names settings that do not exist',
+    );
   });
 
   it('says what the admin port does where it first appears', async () => {

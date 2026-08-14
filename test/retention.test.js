@@ -114,7 +114,13 @@ describe('retiring what has outlived them', () => {
     // archive it cannot serve, and every peer that asks fails.
     const family = builds([0, 1, 2]);
     const lib = library();
-    await retire({ library: lib, family, entry: family[0], keep: 1, label: '[t]' });
+    await retire({
+      library: lib,
+      family,
+      entry: family[0],
+      keep: 1,
+      label: '[t]',
+    });
     assert.deepEqual(lib.removed, [
       { infoHash: 'age-1', deleteData: true },
       { infoHash: 'age-2', deleteData: true },
@@ -171,14 +177,25 @@ describe('waiting for the new copy to be whole', () => {
    */
   function library() {
     const removed = [];
-    return { removed, remove: async (infoHash, opts) => removed.push({ infoHash, ...opts }) };
+    return {
+      removed,
+      remove: async (infoHash, opts) => removed.push({ infoHash, ...opts }),
+    };
   }
 
   const copies = (newestComplete) => [
-    { infoHash: 'new', name: 'planet-260810.osm.pbf', complete: newestComplete,
-      buildDate: new Date(NOW).toISOString() },
-    { infoHash: 'old', name: 'planet-260803.osm.pbf', complete: true,
-      buildDate: new Date(NOW - 7 * DAY).toISOString() },
+    {
+      infoHash: 'new',
+      name: 'planet-260810.osm.pbf',
+      complete: newestComplete,
+      buildDate: new Date(NOW).toISOString(),
+    },
+    {
+      infoHash: 'old',
+      name: 'planet-260803.osm.pbf',
+      complete: true,
+      buildDate: new Date(NOW - 7 * DAY).toISOString(),
+    },
   ];
 
   it('keeps the old copy while the new one is still downloading', async () => {
@@ -231,10 +248,20 @@ describe('waiting for the new copy to be whole', () => {
     const log = console.log;
     console.log = () => {};
     try {
-      await retire({ library: lib, family, entry: family[0], keep: 1, label: '[t]' });
+      await retire({
+        library: lib,
+        family,
+        entry: family[0],
+        keep: 1,
+        label: '[t]',
+      });
     } finally {
       console.log = log;
     }
-    assert.equal(lib.removed.length, 1, 'retires without asking about completeness');
+    assert.equal(
+      lib.removed.length,
+      1,
+      'retires without asking about completeness',
+    );
   });
 });

@@ -136,7 +136,9 @@ describe('reading the head', () => {
     // This is a byte range out of a swarm nobody has asked for a piece of yet.
     // The header timeout is for somebody waiting on a reply, and using it here
     // is what made this look permanently broken rather than merely slow.
-    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'p.pmtiles' }]);
+    const catalog = catalogOf([
+      { infoHash: 'a'.repeat(40), name: 'p.pmtiles' },
+    ]);
     const tiles = tilesOf({ format: 'png' });
     const warmer = new HeadWarmer(tiles, catalog, {
       tiles: { headerTimeoutMs: 12000, metadataTimeoutMs: 120000 },
@@ -170,7 +172,11 @@ describe('reading the head', () => {
 
       clock += 121000;
       await warmer.sweep();
-      assert.equal(tiles.asked.length, 2, 'and tries again once the wait is up');
+      assert.equal(
+        tiles.asked.length,
+        2,
+        'and tries again once the wait is up',
+      );
     } finally {
       console.warn = warn;
     }
@@ -200,16 +206,22 @@ describe('reading the head', () => {
 
   it('does nothing on a node with no tile reader', async () => {
     // Distributing archives without serving them is a valid arrangement.
-    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'p.pmtiles' }]);
+    const catalog = catalogOf([
+      { infoHash: 'a'.repeat(40), name: 'p.pmtiles' },
+    ]);
     const warmer = new HeadWarmer({}, catalog, {});
     assert.equal(warmer.enabled, false);
     assert.equal(await warmer.sweep(), null);
   });
 
   it('can be switched off', async () => {
-    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'p.pmtiles' }]);
+    const catalog = catalogOf([
+      { infoHash: 'a'.repeat(40), name: 'p.pmtiles' },
+    ]);
     const tiles = tilesOf({ format: 'png' });
-    const warmer = new HeadWarmer(tiles, catalog, { tiles: { prewarm: false } });
+    const warmer = new HeadWarmer(tiles, catalog, {
+      tiles: { prewarm: false },
+    });
     assert.equal(warmer.enabled, false);
     await warmer.sweep();
     assert.deepEqual(tiles.asked, []);
@@ -249,7 +261,11 @@ describe('an archive whose torrent metadata has not arrived', () => {
       // A second later, not two minutes.
       clock += 1000;
       await warmer.sweep();
-      assert.equal(asked.length, 2, 'tried again without waiting out a backoff');
+      assert.equal(
+        asked.length,
+        2,
+        'tried again without waiting out a backoff',
+      );
 
       ready = true;
       clock += 1000;
@@ -259,11 +275,17 @@ describe('an archive whose torrent metadata has not arrived', () => {
     }
 
     assert.equal(asked.length, 3);
-    assert.equal(catalog.written.length, 1, 'and it lands once the swarm can answer');
+    assert.equal(
+      catalog.written.length,
+      1,
+      'and it lands once the swarm can answer',
+    );
   });
 
   it('says so once rather than on every pass', async () => {
-    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'p.pmtiles' }]);
+    const catalog = catalogOf([
+      { infoHash: 'a'.repeat(40), name: 'p.pmtiles' },
+    ]);
     const tiles = tilesOf(new Error('metadata has not arrived yet'));
     let clock = 1_000_000;
     const warmer = new HeadWarmer(tiles, catalog, {}, () => clock);
@@ -296,7 +318,9 @@ describe('what a partial read is called', () => {
     // tile, so on a 72 GiB archive it is the very end of the file. Calling both
     // "read the head" made a pass that got half of it look complete, and left
     // the repeat every couple of minutes unexplained.
-    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'planet.pmtiles' }]);
+    const catalog = catalogOf([
+      { infoHash: 'a'.repeat(40), name: 'planet.pmtiles' },
+    ]);
     const warmer = new HeadWarmer(tilesOf({ format: 'pbf' }), catalog, {});
 
     const said = [];
@@ -314,9 +338,14 @@ describe('what a partial read is called', () => {
   });
 
   it('says so plainly once both halves are in', async () => {
-    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'planet.pmtiles' }]);
+    const catalog = catalogOf([
+      { infoHash: 'a'.repeat(40), name: 'planet.pmtiles' },
+    ]);
     const warmer = new HeadWarmer(
-      tilesOf({ format: 'pbf', vectorLayers: [{ id: 'water' }, { id: 'roads' }] }),
+      tilesOf({
+        format: 'pbf',
+        vectorLayers: [{ id: 'water' }, { id: 'roads' }],
+      }),
       catalog,
       {},
     );
@@ -341,7 +370,9 @@ describe('how long it waits between tries', () => {
    * @returns {object} - The warmer, its clock and what it asked.
    */
   function neverFinishing(config = {}) {
-    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'planet.pmtiles' }]);
+    const catalog = catalogOf([
+      { infoHash: 'a'.repeat(40), name: 'planet.pmtiles' },
+    ]);
     // Vector, and its metadata never arrives — so every pass succeeds at the
     // header and stays due, which is the case that repeats.
     const tiles = tilesOf({ format: 'pbf' });
@@ -378,7 +409,7 @@ describe('how long it waits between tries', () => {
     const log = console.log;
     console.log = () => {};
     try {
-      await harness.warmer.sweep();          // the first attempt
+      await harness.warmer.sweep(); // the first attempt
       const gaps = [];
       for (let round = 0; round < 4; round += 1) {
         gaps.push(await nextGap(harness));
@@ -413,7 +444,9 @@ describe('when the first attempt happens', () => {
     // At the moment a node starts, an archive joined by magnet has no metainfo
     // and the engine has no peers, so a read attempted immediately is certain
     // to find nothing and exists only to say so.
-    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'p.pmtiles' }]);
+    const catalog = catalogOf([
+      { infoHash: 'a'.repeat(40), name: 'p.pmtiles' },
+    ]);
     const tiles = tilesOf({ format: 'png' });
 
     const scheduled = [];
@@ -487,7 +520,9 @@ describe('a summary that is not really a summary', () => {
     // #running is what stops two reads at once. A read that never returns held
     // it for the life of the process, and every later pass returned at the
     // first line — so the warmer died without saying anything.
-    const catalog = catalogOf([{ infoHash: 'a'.repeat(40), name: 'p.pmtiles' }]);
+    const catalog = catalogOf([
+      { infoHash: 'a'.repeat(40), name: 'p.pmtiles' },
+    ]);
     const asked = [];
     const tiles = {
       asked,
@@ -516,7 +551,7 @@ describe('a summary that is not really a summary', () => {
       await warmer.sweep();
       assert.equal(asked.length, 1, 'still held while the read is plausible');
 
-      clock += 400000;                      // past three metadata timeouts
+      clock += 400000; // past three metadata timeouts
       await warmer.sweep();
       assert.equal(asked.length, 2, 'abandoned, and tried again');
       assert.match(said[0], /being abandoned/);

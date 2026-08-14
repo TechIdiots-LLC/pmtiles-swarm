@@ -79,7 +79,10 @@ describe('what the libtorrent sidecar is asked to add', () => {
   it('does not make the claim when it was not made to it', async () => {
     // Claiming data that is not on disk has libtorrent offering pieces it
     // cannot produce, so this must never be assumed.
-    const params = await paramsFor({ magnet: 'magnet:?xt=urn:btih:aaaa', mode: 'mirror' });
+    const params = await paramsFor({
+      magnet: 'magnet:?xt=urn:btih:aaaa',
+      mode: 'mirror',
+    });
     assert.ok(!params.seedOnly);
   });
 

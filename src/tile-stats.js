@@ -81,7 +81,8 @@ export class TileStats {
     const asked = Number(options.recent);
     // Zero is a meaningful answer — counters without the ring — so it is not
     // treated as "unset". Negative or unparseable falls back to the default.
-    this.#limit = Number.isFinite(asked) && asked >= 0 ? Math.floor(asked) : DEFAULT_RECENT;
+    this.#limit =
+      Number.isFinite(asked) && asked >= 0 ? Math.floor(asked) : DEFAULT_RECENT;
   }
 
   /**
@@ -185,7 +186,8 @@ export class TileStats {
     }
 
     const asked = Number(options.recent);
-    const wanted = Number.isFinite(asked) && asked >= 0 ? Math.floor(asked) : this.#limit;
+    const wanted =
+      Number.isFinite(asked) && asked >= 0 ? Math.floor(asked) : this.#limit;
 
     return {
       since: this.#since,
@@ -236,7 +238,10 @@ export class TileStats {
     const ordered =
       this.#recent.length < this.#limit
         ? [...this.#recent]
-        : [...this.#recent.slice(this.#recentNext), ...this.#recent.slice(0, this.#recentNext)];
+        : [
+            ...this.#recent.slice(this.#recentNext),
+            ...this.#recent.slice(0, this.#recentNext),
+          ];
     return ordered.reverse().slice(0, count);
   }
 

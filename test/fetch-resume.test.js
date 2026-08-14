@@ -40,9 +40,10 @@ async function server(behaviour = {}) {
     const honoursRange = range && !behaviour.ignoreRange;
     const slice = honoursRange ? BODY.subarray(from) : BODY;
     if (honoursRange) {
-      headers['content-range'] = `bytes ${behaviour.wrongOffset ? from + 7 : from}-${
-        BODY.length - 1
-      }/${BODY.length}`;
+      headers['content-range'] =
+        `bytes ${behaviour.wrongOffset ? from + 7 : from}-${
+          BODY.length - 1
+        }/${BODY.length}`;
     }
     headers['content-length'] = String(slice.length);
     res.writeHead(honoursRange ? 206 : 200, headers);
@@ -100,7 +101,11 @@ describe('resuming a download that stopped', () => {
       const { bytes } = await fetchThrough(node);
       assert.deepEqual(bytes, BODY, 'the file must be byte-identical');
 
-      assert.equal(node.requests[0].range, null, 'the first asks for everything');
+      assert.equal(
+        node.requests[0].range,
+        null,
+        'the first asks for everything',
+      );
       assert.ok(
         node.requests.slice(1).some((request) => request.from > 0),
         `nothing resumed from an offset: ${JSON.stringify(node.requests)}`,
@@ -127,7 +132,10 @@ describe('resuming a download that stopped', () => {
           `attempt ${index} went backwards: ${offsets.join(', ')}`,
         );
       }
-      assert.ok(offsets.at(-1) > 0, `nothing was ever resumed: ${offsets.join(', ')}`);
+      assert.ok(
+        offsets.at(-1) > 0,
+        `nothing was ever resumed: ${offsets.join(', ')}`,
+      );
     } finally {
       await node.close();
     }
@@ -208,7 +216,11 @@ describe('resuming a download that stopped', () => {
       });
       const final = seen.at(-1);
       assert.equal(final.received, BODY.length);
-      assert.equal(final.total, BODY.length, 'total is the whole file, not the remainder');
+      assert.equal(
+        final.total,
+        BODY.length,
+        'total is the whole file, not the remainder',
+      );
     } finally {
       await node.close();
     }

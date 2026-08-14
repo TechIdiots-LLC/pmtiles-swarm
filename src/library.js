@@ -180,9 +180,10 @@ export class Library {
     });
 
     // Only PMTiles can have its tiles served, so only PMTiles gets probed.
-    const summary = identified.kind === 'pmtiles'
-      ? await probePMTiles(absolute).catch(() => undefined)
-      : undefined;
+    const summary =
+      identified.kind === 'pmtiles'
+        ? await probePMTiles(absolute).catch(() => undefined)
+        : undefined;
 
     const created = await createTorrentFromFile(absolute, {
       creator: this.#creator(),
@@ -242,7 +243,7 @@ export class Library {
       explicit ??
       (mode === 'cache' && this.#config.cacheSavePath
         ? this.#config.cacheSavePath
-        : this.#config.savePath ?? this.#config.webtorrent?.savePath);
+        : (this.#config.savePath ?? this.#config.webtorrent?.savePath));
 
     // A directory per archive, where that has been asked for. Only joined
     // archives get one: an archive created here keeps the file it was made
@@ -298,7 +299,9 @@ export class Library {
       `[trackers] ${entry.name} had none; announcing to ${trackers.length} instead`,
     );
     // Written down, so the magnet this node hands out is the repaired one too.
-    this.#catalog.put({ infoHash: entry.infoHash, magnet: repaired }).catch(() => {});
+    this.#catalog
+      .put({ infoHash: entry.infoHash, magnet: repaired })
+      .catch(() => {});
     return repaired;
   }
 
@@ -389,7 +392,13 @@ export class Library {
     // Recording that and saying so beats refusing every fifteen seconds
     // forever, which is what happened before and told nobody anything they
     // could act on.
-    if (await alreadyComplete({ savePath: entry.savePath, name: entry.name, size: entry.size })) {
+    if (
+      await alreadyComplete({
+        savePath: entry.savePath,
+        name: entry.name,
+        size: entry.size,
+      })
+    ) {
       const stray = await fs.stat(from).catch(() => null);
       if (stray) {
         console.warn(
@@ -561,7 +570,6 @@ export class Library {
    * @returns {Promise<object>} - The catalog entry.
    */
   async #fetchRemoteArchive(url, options = {}) {
-
     // Tracked so it can be stopped. Hashing a remote archive can run for hours
     // and move hundreds of gigabytes; discovering it was a mistake should not
     // mean killing the process.
@@ -582,9 +590,10 @@ export class Library {
       allowUnknown: options.allowUnknown ?? this.#config.allowUnknownArchives,
     });
 
-    const summary = identified.kind === 'pmtiles'
-      ? await probePMTiles(url).catch(() => undefined)
-      : undefined;
+    const summary =
+      identified.kind === 'pmtiles'
+        ? await probePMTiles(url).catch(() => undefined)
+        : undefined;
 
     // Retaining leaves a seedable copy behind. Discarding is explicit, because
     // the result is a torrent this node cannot serve.
@@ -623,29 +632,29 @@ export class Library {
     let created;
     try {
       created = await createTorrentFromUrl(url, {
-      includeSourceAsWebSeed: useSourceAsWebSeed,
-      // Upstreams often publish under a bare dated name; a source can rename it
-      // to something self-describing locally.
-      name: options.name,
-      pieceLength: options.pieceLength ?? this.#config.pieceLength,
-      trackers: this.#trackersFor(options),
-      webSeeds: options.webSeeds ?? [],
-      comment: options.comment,
-      md5: options.md5 ?? this.#config.md5,
-      retainPath: staging,
-      // A dropped connection partway through a planet archive is normal, not
-      // exceptional. Resumed rather than restarted, so hours of transfer are
-      // not thrown away by a few seconds of network trouble.
-      fetchAttempts: this.#config.fetchAttempts,
-      fetchRetryDelayMs: (this.#config.fetchRetrySeconds ?? 5) * 1000,
-      signal: controller.signal,
-      onProgress: ({ received, total, done }) => {
-        const state = this.#running.get(url);
-        if (state) Object.assign(state, { received, total });
-        const pct = total ? ((received / total) * 100).toFixed(1) : '?';
-        console.log(
-          `[fetch] ${url} ${pct}%${done ? ' complete' : ''} (${received} bytes)`,
-        );
+        includeSourceAsWebSeed: useSourceAsWebSeed,
+        // Upstreams often publish under a bare dated name; a source can rename it
+        // to something self-describing locally.
+        name: options.name,
+        pieceLength: options.pieceLength ?? this.#config.pieceLength,
+        trackers: this.#trackersFor(options),
+        webSeeds: options.webSeeds ?? [],
+        comment: options.comment,
+        md5: options.md5 ?? this.#config.md5,
+        retainPath: staging,
+        // A dropped connection partway through a planet archive is normal, not
+        // exceptional. Resumed rather than restarted, so hours of transfer are
+        // not thrown away by a few seconds of network trouble.
+        fetchAttempts: this.#config.fetchAttempts,
+        fetchRetryDelayMs: (this.#config.fetchRetrySeconds ?? 5) * 1000,
+        signal: controller.signal,
+        onProgress: ({ received, total, done }) => {
+          const state = this.#running.get(url);
+          if (state) Object.assign(state, { received, total });
+          const pct = total ? ((received / total) * 100).toFixed(1) : '?';
+          console.log(
+            `[fetch] ${url} ${pct}%${done ? ' complete' : ''} (${received} bytes)`,
+          );
         },
       });
     } catch (error) {
@@ -653,7 +662,8 @@ export class Library {
       // nothing will ever look in again. Left alone it is invisible waste —
       // and for a planet archive, invisible waste measured in gigabytes.
       this.#running.delete(url);
-      if (staging) await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+      if (staging)
+        await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
       throw error;
     }
 
@@ -786,7 +796,10 @@ export class Library {
 
     let storedTorrentPath;
     if (torrentFile) {
-      storedTorrentPath = path.join(this.torrentDir, `${parsed.infoHash}.torrent`);
+      storedTorrentPath = path.join(
+        this.torrentDir,
+        `${parsed.infoHash}.torrent`,
+      );
       await fs.mkdir(this.torrentDir, { recursive: true });
       await fs.writeFile(storedTorrentPath, torrentFile);
     }
@@ -886,7 +899,9 @@ export class Library {
     }
 
     return (body.archives ?? [])
-      .filter((archive) => archive.magnet && !this.#catalog.get(archive.infoHash))
+      .filter(
+        (archive) => archive.magnet && !this.#catalog.get(archive.infoHash),
+      )
       .map((archive) => ({
         infoHash: archive.infoHash,
         name: archive.name,
@@ -1044,7 +1059,11 @@ export class Library {
     for (const torrent of held) {
       if (this.#catalog.get(torrent.infoHash)) continue;
       if (wanted && !wanted.has(torrent.infoHash)) continue;
-      if (!wanted && !options.all && !/\.(pmtiles|mbtiles)$/i.test(torrent.name)) {
+      if (
+        !wanted &&
+        !options.all &&
+        !/\.(pmtiles|mbtiles)$/i.test(torrent.name)
+      ) {
         continue;
       }
 
@@ -1147,7 +1166,12 @@ export class Library {
       // Otherwise the catalog would list an archive this node neither seeds
       // nor can serve: the other client holds it, and nothing here does.
       await this.#engine
-        .add({ magnet, savePath: torrent.savePath, mode: 'mirror', seedOnly: true })
+        .add({
+          magnet,
+          savePath: torrent.savePath,
+          mode: 'mirror',
+          seedOnly: true,
+        })
         .catch((error) =>
           console.error(`[adopt] ${torrent.name}: ${error.message}`),
         );
@@ -1167,7 +1191,11 @@ export class Library {
    */
   async #adoptByMagnet(torrent, magnet, engine, options) {
     const mode = options.mode ?? 'cache';
-    const savePath = this.#savePathFor(mode, options.savePath, torrent.infoHash);
+    const savePath = this.#savePathFor(
+      mode,
+      options.savePath,
+      torrent.infoHash,
+    );
 
     // Ask the client we are adopting from for the real thing first. It has the
     // metainfo — it is seeding the archive — and that carries the trackers, the
@@ -1233,7 +1261,6 @@ export class Library {
     return (await this.captureMetadata(torrent.infoHash)) ?? entry;
   }
 
-
   /**
    * Checks whether an archive's source has changed since its torrent was made.
    *
@@ -1278,9 +1305,7 @@ export class Library {
       // Deliberately not awaited: rebuilding can take hours, and an origin
       // sweep should not block on it.
       this.#queueRebuild(entry, result).catch((error) =>
-        console.error(
-          `[rebuild] ${entry.name} failed: ${error.message}`,
-        ),
+        console.error(`[rebuild] ${entry.name} failed: ${error.message}`),
       );
     } else {
       console.warn(`[origin] not rebuilding automatically: ${auto.reason}`);
@@ -1299,7 +1324,8 @@ export class Library {
    */
   #autoRebuildDecision(entry) {
     const policy = this.#config.autoRebuild ?? {};
-    if (!policy.enabled) return { allowed: false, reason: 'autoRebuild is disabled' };
+    if (!policy.enabled)
+      return { allowed: false, reason: 'autoRebuild is disabled' };
 
     const sources = policy.sources ?? ['file'];
     if (!sources.includes(entry.source?.type)) {
@@ -1359,7 +1385,9 @@ export class Library {
         return null;
       }
 
-      console.log(`[rebuild] ${entry.name}: rebuilding from ${entry.source.location}`);
+      console.log(
+        `[rebuild] ${entry.name}: rebuilding from ${entry.source.location}`,
+      );
       const rebuilt = await this.rebuild(entry.infoHash);
       console.log(
         `[rebuild] ${entry.name}: ${entry.infoHash} -> ${rebuilt.infoHash}`,
@@ -1562,7 +1590,9 @@ export class Library {
     } else {
       // Removing without its data is a pause an engine cannot refuse; resume
       // adds it back and it rechecks what is already on disk.
-      await this.#engine.remove(infoHash, { deleteData: false }).catch(() => {});
+      await this.#engine
+        .remove(infoHash, { deleteData: false })
+        .catch(() => {});
     }
     await this.#tiles?.invalidate(infoHash).catch(() => {});
     return this.#catalog.put({ infoHash, paused: true });
@@ -1606,7 +1636,9 @@ export class Library {
    */
   async setMode(infoHash, mode) {
     if (mode !== 'mirror' && mode !== 'cache') {
-      const error = new Error(`mode must be 'mirror' or 'cache', got '${mode}'`);
+      const error = new Error(
+        `mode must be 'mirror' or 'cache', got '${mode}'`,
+      );
       error.status = 400;
       throw error;
     }
@@ -1628,7 +1660,9 @@ export class Library {
     }
 
     if (!live) {
-      await this.#engine.remove(infoHash, { deleteData: false }).catch(() => {});
+      await this.#engine
+        .remove(infoHash, { deleteData: false })
+        .catch(() => {});
       await this.#readd({ ...entry, mode });
     }
 
@@ -1664,8 +1698,11 @@ export class Library {
     }
 
     for (const name of names) {
-      if (name !== prefix && !name.startsWith(prefix) &&
-          !name.includes(infoHash)) {
+      if (
+        name !== prefix &&
+        !name.startsWith(prefix) &&
+        !name.includes(infoHash)
+      ) {
         continue;
       }
       const stat = await fs
@@ -1713,7 +1750,9 @@ export class Library {
       pieceLength: entry.pieceLength ?? parsed.pieceLength,
       pieceCount: entry.pieceCount ?? parsed.pieces?.length,
       fileCount: entry.fileCount ?? parsed.files?.length,
-      webSeeds: [...new Set([...(entry.webSeeds ?? []), ...(parsed.urlList ?? [])])],
+      webSeeds: [
+        ...new Set([...(entry.webSeeds ?? []), ...(parsed.urlList ?? [])]),
+      ],
       kind: entry.kind ?? guessKind(parsed.name ?? ''),
     };
 
@@ -1726,7 +1765,9 @@ export class Library {
       learned.webSeeds,
     );
 
-    console.log(`[metadata] ${learned.name}: written to ${path.basename(torrentPath)}`);
+    console.log(
+      `[metadata] ${learned.name}: written to ${path.basename(torrentPath)}`,
+    );
     return this.#catalog.put(learned);
   }
 
@@ -1776,7 +1817,12 @@ export class Library {
     if (path.resolve(from) === path.resolve(to)) {
       return this.#catalog.put({ infoHash, savePath: target });
     }
-    if (await fs.stat(to).then(() => true).catch(() => false)) {
+    if (
+      await fs
+        .stat(to)
+        .then(() => true)
+        .catch(() => false)
+    ) {
       const error = new Error(
         `${to} already exists; move or remove it first — two files claiming ` +
           'to be the same archive is not something to resolve by guessing',
@@ -1848,7 +1894,9 @@ export class Library {
   async #runMove(entry, move, target) {
     // Let go before touching the file. Removing without deleting keeps the
     // data; it is the handle that has to go.
-    await this.#engine.remove(entry.infoHash, { deleteData: false }).catch(() => {});
+    await this.#engine
+      .remove(entry.infoHash, { deleteData: false })
+      .catch(() => {});
     await this.#tiles?.invalidate(entry.infoHash).catch(() => {});
 
     try {

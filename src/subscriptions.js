@@ -130,15 +130,19 @@ export class SubscriptionManager {
     // for. `newest: 0` lifts the cap for feeds where that is what you want.
     //
     // Items arrive newest first, so the cap keeps the newest.
-    const limit = subscription.newest === 0
-      ? Number.POSITIVE_INFINITY
-      : Math.max(1, subscription.newest ?? 1);
+    const limit =
+      subscription.newest === 0
+        ? Number.POSITIVE_INFINITY
+        : Math.max(1, subscription.newest ?? 1);
 
     for (const item of items) {
       if (added.length >= limit) break;
       // A regex filter lets one feed serve several consumers with different
       // appetites, e.g. only taking Europe extracts.
-      if (subscription.filter && !new RegExp(subscription.filter, 'i').test(item.title)) {
+      if (
+        subscription.filter &&
+        !new RegExp(subscription.filter, 'i').test(item.title)
+      ) {
         continue;
       }
       const marker = item.infoHash ?? item.magnet ?? item.torrentUrl;
@@ -184,7 +188,7 @@ export class SubscriptionManager {
     return added;
   }
 
-/**
+  /**
    * Whether this subscription speaks the catalogue API rather than RSS.
    * @param {object} subscription - The subscription.
    * @returns {boolean} - True for the API.
@@ -255,7 +259,9 @@ export class SubscriptionManager {
           );
         }
       } catch (error) {
-        console.error(`[sync] could not add "${archive.name}": ${error.message}`);
+        console.error(
+          `[sync] could not add "${archive.name}": ${error.message}`,
+        );
       }
     }
 
@@ -364,7 +370,9 @@ export class SubscriptionManager {
       await this.#library
         .remove(entry.infoHash, { deleteData: subscription.prune === 'delete' })
         .catch((error) =>
-          console.error(`[sync] could not remove ${entry.name}: ${error.message}`),
+          console.error(
+            `[sync] could not remove ${entry.name}: ${error.message}`,
+          ),
         );
     }
   }

@@ -9,7 +9,9 @@ import { TileStats } from '../src/tile-stats.js';
 import { TileStore } from '../src/tiles.js';
 import { writeArchive } from './pmtiles-fixture.js';
 
-const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-swarm-stats-'));
+const workspace = await fs.mkdtemp(
+  path.join(os.tmpdir(), 'pmtiles-swarm-stats-'),
+);
 after(() => fs.rm(workspace, { recursive: true, force: true }));
 
 const INFOHASH = 'c0ffee11'.repeat(5);
@@ -55,7 +57,11 @@ async function serve(options = {}) {
   await catalog.load();
   await catalog.put(archive);
 
-  const tiles = new TileStore({ catalog, engine: completeEngine, config: { tiles: {} } });
+  const tiles = new TileStore({
+    catalog,
+    engine: completeEngine,
+    config: { tiles: {} },
+  });
   const stats = options.stats === null ? null : new TileStats(options);
   const app = createApp({
     library: { listWithStatus: async () => [] },
@@ -160,7 +166,9 @@ describe('counting real requests through the tile route', () => {
       for (let i = 0; i < 3; i += 1) {
         await fetch(`${base}/archives/${INFOHASH}/0/0/0.pbf`);
       }
-      const body = await fetch(`${base}/api/stats?recent=1`).then((r) => r.json());
+      const body = await fetch(`${base}/api/stats?recent=1`).then((r) =>
+        r.json(),
+      );
       assert.equal(body.requests, 3);
       assert.equal(body.recent.length, 1);
     } finally {
