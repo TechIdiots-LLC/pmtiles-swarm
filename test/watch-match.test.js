@@ -9,6 +9,41 @@ const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-match-'));
 after(() => fs.rm(workspace, { recursive: true, force: true }));
 
 /**
+ * Waits for something to become true, rather than sleeping long enough that it
+ * probably has.
+ *
+ * chokidar's awaitWriteFinish polls at 1000ms whatever the stability threshold
+ * is, so an import lands a tick or more after the write — and those timers slip
+ * badly on a loaded machine. `node --test test/*.test.js` runs 48 files at
+ * once, which on a two-core CI runner is exactly that machine. A fixed sleep
+ * long enough to be safe there is a slow test everywhere else, so this returns
+ * as soon as the condition holds and only spends the timeout when something is
+ * genuinely wrong.
+ * @param {Function} condition - Polled until it returns true.
+ * @param {number} [timeoutMs] - When to give up and let the assertion speak.
+ * @returns {Promise<void>} - Resolves when it holds, or on timeout.
+ */
+async function until(condition, timeoutMs = 30000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition() && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+/**
+ * Once the expected imports have landed, gives anything unwanted a moment to
+ * arrive too.
+ *
+ * The negative assertions here — that a file matching nothing is left alone,
+ * that a latest link is not imported as a build — are only meaningful if a
+ * wrong import would have had time to show up. chokidar reports every file in
+ * a directory in the same sweep, so by the time the wanted ones are in, the
+ * others have already been judged; this covers the ordering within that sweep.
+ * @returns {Promise<void>} - Resolves after the grace period.
+ */
+const settle = () => new Promise((resolve) => setTimeout(resolve, 300));
+
+/**
  * Drops several archives into one folder watched by several entries, and
  * reports which entry took which file.
  *
@@ -17,9 +52,10 @@ after(() => fs.rm(workspace, { recursive: true, force: true }));
  * entry, so the folder has to be described more than once.
  * @param {object[]} folders - Watch entries, minus the shared path.
  * @param {string[]} files - Archive names to create.
+ * @param {number} [expected] - Imports to wait for. Defaults to one per file.
  * @returns {Promise<object[]>} - {file, categories} for each import.
  */
-async function dropMany(folders, files) {
+async function dropMany(folders, files, expected = files.length) {
   const dir = await fs.mkdtemp(path.join(workspace, 'folder-'));
   const imports = [];
 
@@ -47,9 +83,8 @@ async function dropMany(folders, files) {
   for (const name of files) {
     await fs.writeFile(path.join(dir, name), 'x');
   }
-  // awaitWriteFinish polls at 1000ms regardless of stabilityThreshold, so a
-  // file is not declared stable for at least one tick after it is written.
-  await new Promise((resolve) => setTimeout(resolve, 2600));
+  await until(() => imports.length >= expected);
+  await settle();
   await manager.stop();
 
   return imports;
@@ -154,12 +189,14 @@ describe('several watch entries over one folder', () => {
       source: { type: 'file', location: `${dir}/${name}`, watch: dir },
     });
 
+    let imported = false;
     const library = {
       // Newest first: retire() bails out unless family[0] is the entry it
       // was given, so the wrong order makes this test pass vacuously.
       catalog: { list: () => [entry, held('10yrplus-20260101.pmtiles')] },
       addLocalArchive: async (file, options) => {
         entry.source.watch = options.watch;
+        imported = true;
         return entry;
       },
       remove: async (infoHash) => removed.push(infoHash),
@@ -189,9 +226,16 @@ describe('several watch entries over one folder', () => {
       },
     ]);
     await fs.writeFile(path.join(dir, 'monthly-20260813.pmtiles'), 'x');
-    await new Promise((resolve) => setTimeout(resolve, 2600));
+    // The import has to have happened for the assertion to mean anything: with
+    // nothing imported, nothing is retired and this would pass vacuously.
+    await until(() => imported);
+    await settle();
     await manager.stop();
 
+    assert.ok(
+      imported,
+      'the archive was never imported, so nothing was tested',
+    );
     assert.deepEqual(removed, [], 'another bucket must not be retired');
   });
 
@@ -199,6 +243,7 @@ describe('several watch entries over one folder', () => {
     const imports = await dropMany(
       [{ match: 'monthly-*.pmtiles', categories: ['wifidb-monthly'] }],
       ['monthly-20260813.pmtiles', 'heatmap-20260813.pmtiles'],
+      1,
     );
     assert.deepEqual(
       imports.map((i) => i.file),
@@ -219,6 +264,7 @@ describe('several watch entries over one folder', () => {
         },
       ],
       ['monthly-20260813.pmtiles', 'monthly.pmtiles'],
+      1,
     );
     assert.deepEqual(
       imports.map((i) => i.file),

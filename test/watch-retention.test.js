@@ -46,10 +46,19 @@ async function drop(folder, existing = () => []) {
 
   await fs.writeFile(path.join(dir, 'planet-new.pmtiles'), 'x');
   // The watcher waits for the file to stop changing before touching it, and
-  // then imports asynchronously.
-  await new Promise((resolve) => setTimeout(resolve, 900));
+  // then imports asynchronously. Waited for rather than slept through:
+  // chokidar's awaitWriteFinish polls at 1000ms, and the whole suite runs 48
+  // files at once, so any fixed sleep is a bet on how loaded the machine is.
+  const deadline = Date.now() + 30000;
+  while (!added && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  // A moment more, so a retirement that should not happen still has time to be
+  // recorded and fail the assertion.
+  await new Promise((resolve) => setTimeout(resolve, 300));
   await manager.stop();
 
+  assert.ok(added, 'the archive was never imported, so nothing was tested');
   return { added, removed };
 }
 
