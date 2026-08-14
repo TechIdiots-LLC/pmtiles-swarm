@@ -17,7 +17,11 @@
  * docs/internals.md — "Why a third DHT".
  */
 
-import { mutableMagnet, publishInfoHash } from './mutable.js';
+import {
+  mutableMagnet,
+  publishInfoHash,
+  trackersFromMagnet,
+} from './mutable.js';
 
 /** Republish well inside the ~2h a DHT keeps an item. */
 const DEFAULT_INTERVAL_MS = 30 * 60 * 1000;
@@ -197,6 +201,9 @@ export class MutablePublisher {
       // The current build, for a client that cannot resolve the key. Absent
       // when no entry was given, which leaves the series-only form.
       infoHash: entry?.infoHash,
+      // Somewhere to announce it, lifted from the archive's own magnet. An
+      // infohash with no tracker beside it is one a browser cannot act on.
+      trackers: trackersFromMagnet(entry?.magnet),
       salt: category,
       // The category rather than the build. This magnet resolves to whichever
       // archive is current, so naming one of them dates the string the moment

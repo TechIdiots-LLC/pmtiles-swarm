@@ -58,6 +58,13 @@
   `/api/categories`, filtered by the same `feedCategories` rule, so it can show nothing that was
   not already published — and it is not the console, which stays on the admin port.
   `publicIndex: false` turns it off, withdrawing the three paths it needs with it.
+- **A category can be previewed, and the preview is the category's own URL.** `/latest/<category>/preview`
+  reads the TileJSON beside it, so it renders whatever build is current rather than pinning to the
+  one that was newest when the link was made — the same URL a style holds, demonstrating itself.
+  The preview page now derives its source from wherever it is served instead of assembling one from
+  an infohash, so one page serves both forms.
+- **The public page gained a filter and a sort.** Search by name, infohash or category; order by name,
+  newest or largest. Both re-render from what was already loaded rather than asking the node again.
 - **`GET /latest/` lists the categories, without a credential.** Everything else under
   `/latest/` is public — the TileJSON, the torrent, the magnet, the per-category feed — so the
   index of what it offers belongs beside them rather than behind the console's door. The public
@@ -77,6 +84,12 @@
   never checked.
 
 ### 🐞 Bug fixes
+- **A mutable magnet had nowhere to announce.** `mutableMagnet()` was never passed trackers, so the
+  BEP 46 form carried `xt`, `xs`, `dn`, `s` and `ws` and no `tr=` at all. The infohash added in
+  0.21.0 was therefore unusable from a browser, which has neither DHT nor peer exchange to fall
+  back on and so had nothing to ask — leaving the web seed, which is just HTTP, as the only source.
+  The archive's own trackers are now lifted across in all three places one is built: the TileJSON's
+  torrent block, the `styleUrl` fragment, and the publisher's own magnet.
 - **The public front page could not read its own catalogue.** `/api/catalog` is on the list of
   paths that belong on a public listener, but that is a separate gate from the credential check,
   which guards everything under `/api/` except login and session — so on any node with

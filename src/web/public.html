@@ -159,6 +159,42 @@
         display: block;
         margin-bottom: 1.5rem;
       }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.6rem 0.9rem;
+        align-items: center;
+        margin-bottom: 1.5rem;
+      }
+      .toolbar input[type='search'] {
+        flex: 1 1 18rem;
+        min-width: 0;
+        padding: 0.45rem 0.6rem;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--card);
+        color: inherit;
+        font: inherit;
+      }
+      .toolbar label {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      .toolbar select {
+        padding: 0.35rem 0.4rem;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--card);
+        color: inherit;
+        font: inherit;
+      }
+      .count {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
     </style>
   </head>
   <body>
@@ -175,6 +211,25 @@
           <a href="/feed.xml">/feed.xml</a> as RSS.
         </p>
       </noscript>
+
+      <div class="toolbar" id="toolbar" hidden>
+        <input
+          type="search"
+          id="filter"
+          placeholder="Filter by name or category…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <label>
+          Sort
+          <select id="sort">
+            <option value="name">name</option>
+            <option value="newest">newest first</option>
+            <option value="largest">largest first</option>
+          </select>
+        </label>
+        <span class="count" id="count"></span>
+      </div>
 
       <div id="categories"></div>
       <div id="archives"><p class="empty">Loading…</p></div>
@@ -337,6 +392,9 @@
           };
           const ends = entry.endpoints;
           if (ends.tileJson) add(ends.tileJson, 'TileJSON');
+          // The newest build's preview, which is what "show me this
+          // category" means.
+          if (ends.preview) add(ends.preview, 'preview');
           if (ends.torrent) add(ends.torrent, '.torrent');
           if (ends.magnet) add(ends.magnet, 'magnet');
           if (ends.feed) add(ends.feed, 'RSS');
@@ -407,6 +465,58 @@
         });
       };
 
+      // Held so the filter and the sort re-render from memory rather than
+      // asking the node again on every keystroke.
+      let loadedArchives = [];
+      let loadedCategories = [];
+
+      const matches = (text, needle) =>
+        String(text ?? '')
+          .toLowerCase()
+          .includes(needle);
+
+      const sorters = {
+        name: (a, b) => String(a.name ?? '').localeCompare(String(b.name ?? '')),
+        newest: (a, b) =>
+          new Date(b.createdAt ?? 0) - new Date(a.createdAt ?? 0),
+        largest: (a, b) => (b.size ?? 0) - (a.size ?? 0),
+      };
+
+      // Re-renders both lists against the current filter and sort.
+      const apply = () => {
+        const needle = (document.getElementById('filter').value ?? '')
+          .trim()
+          .toLowerCase();
+        const order = document.getElementById('sort').value;
+
+        const archives = loadedArchives
+          .filter(
+            (archive) =>
+              needle === '' ||
+              matches(archive.name, needle) ||
+              matches(archive.infoHash, needle) ||
+              (archive.categories ?? []).some((c) => matches(c, needle)),
+          )
+          .sort(sorters[order] ?? sorters.name);
+
+        const categories = loadedCategories.filter(
+          (entry) =>
+            needle === '' ||
+            matches(entry.category, needle) ||
+            matches(entry.newest?.name, needle),
+        );
+
+        renderCategories(categories);
+        render(archives);
+
+        const count = document.getElementById('count');
+        count.textContent =
+          needle === ''
+            ? `${loadedArchives.length} archives, ${loadedCategories.length} categories`
+            : `${archives.length} of ${loadedArchives.length} archives, ` +
+              `${categories.length} of ${loadedCategories.length} categories`;
+      };
+
       const load = async () => {
         let archives = null;
 
@@ -440,7 +550,9 @@
           }
         }
 
-        render(archives.filter((archive) => archive.infoHash));
+        loadedArchives = archives.filter((archive) => archive.infoHash);
+        document.getElementById('toolbar').hidden = false;
+        apply();
 
         // /latest/ rather than /api/categories: the same list, without a
         // credential. This is the part most visitors actually want -- an
@@ -451,12 +563,16 @@
           const response = await fetch('/latest/');
           if (response.ok) {
             const body = await response.json();
-            renderCategories(body.categories ?? []);
+            loadedCategories = body.categories ?? [];
+            apply();
           }
         } catch {
           // Nothing to say. The archives above are the substance.
         }
       };
+
+      document.getElementById('filter').addEventListener('input', apply);
+      document.getElementById('sort').addEventListener('change', apply);
 
       load();
     </script>

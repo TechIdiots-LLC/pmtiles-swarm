@@ -498,3 +498,48 @@ describe('the public category index', () => {
     }
   });
 });
+
+describe('the public page toolbar', () => {
+  it('offers a filter and a sort, and wires both', async () => {
+    // Structural, the same way the console's own markup is checked: there is
+    // no DOM here to drive, but a control with no listener is a control that
+    // does nothing, and that is worth catching.
+    const page = await fs.readFile(
+      path.join(
+        path.dirname(new URL(import.meta.url).pathname).replace(/^\//, ''),
+        '..',
+        'src',
+        'web',
+        'public.html',
+      ),
+      'utf8',
+    );
+
+    assert.match(page, /id="filter"/, 'has a filter input');
+    assert.match(page, /id="sort"/, 'has a sort control');
+    assert.match(
+      page,
+      /getElementById\('filter'\)\.addEventListener\('input', apply\)/,
+      'the filter redraws',
+    );
+    assert.match(
+      page,
+      /getElementById\('sort'\)\.addEventListener\('change', apply\)/,
+      'and so does the sort',
+    );
+    // Every option the select offers must have a comparator behind it.
+    const options = [...page.matchAll(/<option value="([a-z]+)"/g)].map(
+      (m) => m[1],
+    );
+    assert.ok(options.length >= 3);
+    for (const option of options) {
+      assert.match(
+        page,
+        new RegExp(`\\b${option}: `),
+        `${option} has a comparator`,
+      );
+    }
+    // And the category cards offer the preview the endpoint now returns.
+    assert.match(page, /ends\.preview/, 'links a category preview');
+  });
+});

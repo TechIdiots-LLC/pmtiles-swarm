@@ -14,7 +14,7 @@ import {
   isPublicSurface,
 } from './auth.js';
 import { normalizeCategories } from './catalog.js';
-import { mutableMagnet } from './mutable.js';
+import { mutableMagnet, trackersFromMagnet } from './mutable.js';
 import { guessKind } from './library.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
 import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
@@ -80,6 +80,10 @@ function styleUrlFor(category, newest, base) {
         // of this URL — a client that cannot reach the tiles.json in front of
         // it, or cannot resolve a public key, still has something to join.
         infoHash: newest.infoHash,
+        // Somewhere to announce it, lifted from the archive's own magnet. A
+        // fragment carrying an infohash and no tracker gives a browser
+        // something to join and nobody to ask for it.
+        trackers: trackersFromMagnet(newest.magnet),
         salt: newest.mutable.salt ?? category,
         // The category, since that is what this magnet resolves to.
         name: newest.mutable.salt ?? category,
@@ -1802,6 +1806,11 @@ export function createApp({
             // newest build's own magnet, which pins that build but still
             // beats a blank map when the fallback is needed at all.
             styleUrl: servable ? styleUrlFor(category, newest, base) : null,
+            // Points at the category, not at a build. The page reads the
+            // TileJSON beside it, so it renders whatever is current — which
+            // makes it the same URL a style holds, demonstrating itself rather
+            // than pinning to today's infohash.
+            preview: servable ? `${base}/latest/${category}/preview` : null,
             torrent: `${base}/latest/${category}/archive.torrent`,
             magnet: `${base}/latest/${category}/magnet`,
             feed: `${base}/feed/${category}.xml`,
@@ -1973,6 +1982,17 @@ export function createApp({
   // shareable and says what it shows. The page reads the TileJSON next to it —
   // which is a complete, valid TileJSON already, so nothing here has to invent
   // a source description.
+  // The same page for a category, which is the more useful one to hand
+  // somebody: it reads /latest/<category>/tiles.json, so it renders whatever
+  // build is current rather than pinning to the one that happened to be newest
+  // when the link was made. That is exactly what a style points at, so this is
+  // the URL demonstrating itself.
+  //
+  // The page works out which by its own path, so there is nothing to pass.
+  app.get('/latest/:category/preview', (_req, res) => {
+    res.sendFile(path.join(here, 'web', 'preview.html'));
+  });
+
   app.get('/archives/:infoHash/preview', (_req, res) => {
     res.sendFile(path.join(here, 'web', 'preview.html'));
   });

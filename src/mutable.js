@@ -90,6 +90,22 @@ function rawPublicKey(publicKey) {
  * @param {string} [options.salt] - Salt, when one key publishes several archives.
  * @returns {string} - A BEP 46 magnet URI.
  */
+/**
+ * The trackers a magnet announces to.
+ *
+ * A BEP 46 magnet is assembled rather than parsed from a torrent, so it has no
+ * announce list of its own — but the archive it names does, in the plain magnet
+ * beside it. Lifting them across is what makes the mutable form joinable: an
+ * infohash with nowhere to announce is an infohash a browser cannot act on,
+ * having neither DHT nor peer exchange to fall back on.
+ * @param {string} [magnet] - A magnet URI to read `tr=` out of.
+ * @returns {string[]} - The announce URLs, in the order they appeared.
+ */
+export function trackersFromMagnet(magnet) {
+  if (typeof magnet !== 'string' || !magnet.startsWith('magnet:?')) return [];
+  return new URLSearchParams(magnet.slice('magnet:?'.length)).getAll('tr');
+}
+
 export function mutableMagnet(publicKey, options = {}) {
   // Buffer.from(string) would read hex as UTF-8 and produce a 64-byte key, so
   // the two forms have to be told apart rather than coerced.

@@ -79,8 +79,17 @@
       import * as maplibregl from '/vendor/maplibre-gl/maplibre-gl.mjs';
       import MaplibreInspect from '/vendor/maplibre-gl-inspect/maplibre-gl-inspect.mjs';
 
-      const infoHash = location.pathname.split('/')[2];
-      const tileJsonUrl = `/archives/${infoHash}/tiles.json`;
+      // Derived from wherever this page is served rather than assembled from
+      // an infohash, so one page previews both an archive and a category:
+      //   /archives/<infohash>/preview  ->  /archives/<infohash>/tiles.json
+      //   /latest/<category>/preview    ->  /latest/<category>/tiles.json
+      // The second is the one worth having, because it is what a style should
+      // actually point at — it follows the newest build instead of pinning to
+      // the one that happened to be current when the link was made.
+      const tileJsonUrl = location.pathname.replace(
+        /\/preview\/?$/,
+        '/tiles.json',
+      );
       const $ = (id) => document.getElementById(id);
 
       const fail = (message) => {
@@ -104,7 +113,7 @@
       const vector =
         vectorLayers.length > 0 || /\.(pbf|mvt)(\?|$)/.test(tilejson.tiles?.[0] ?? '');
 
-      $('name').textContent = tilejson.name ?? infoHash;
+      $('name').textContent = tilejson.name ?? tileJsonUrl;
       $('summary').textContent =
         `${vector ? 'vector' : 'raster'} · z${tilejson.minzoom ?? 0}–${tilejson.maxzoom ?? 14}` +
         (vector

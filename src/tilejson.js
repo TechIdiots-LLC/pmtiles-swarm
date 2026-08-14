@@ -1,4 +1,4 @@
-import { mutableMagnet } from './mutable.js';
+import { mutableMagnet, trackersFromMagnet } from './mutable.js';
 import { TileStore } from './tiles.js';
 
 /**
@@ -106,6 +106,9 @@ function buildTorrentBlock(entry, root) {
         // can join from this string alone rather than having to come back for
         // an infohash.
         infoHash: entry.infoHash,
+        // And somewhere to announce it. Without these the infohash above is
+        // unusable from a page: no DHT, no peer exchange, nothing to ask.
+        trackers: trackersFromMagnet(entry.magnet),
         salt: entry.mutable.salt,
         // The category, not this build: the record resolves to whichever
         // archive is current, and `dn` is a label the metadata replaces.
