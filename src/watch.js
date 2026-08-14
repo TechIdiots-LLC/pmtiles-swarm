@@ -42,6 +42,7 @@ export class WatchManager {
   #library;
   #watchers = [];
   #importing = new Set();
+  #ready = [];
 
   /**
    * Creates the manager.
@@ -141,6 +142,19 @@ export class WatchManager {
       watcher.on('error', (error) => {
         console.error(`[watch] ${directory}: ${error.message}`);
       });
+
+      // chokidar scans the directory before it starts reporting changes, and
+      // a file that lands during that scan is in neither the listing nor the
+      // event stream. Nothing in the daemon depends on knowing when the scan
+      // ends — an archive dropped that early is picked up by the next one —
+      // but anything driving this deliberately does, and a caller with no way
+      // to know is a caller that has to guess with a sleep.
+      this.#ready.push(
+        new Promise((resolve) => {
+          watcher.once('ready', resolve);
+          watcher.once('error', resolve);
+        }),
+      );
 
       this.#watchers.push(watcher);
       for (const entry of entries) {
@@ -266,5 +280,21 @@ export class WatchManager {
   async stop() {
     await Promise.all(this.#watchers.map((watcher) => watcher.close()));
     this.#watchers = [];
+    this.#ready = [];
+  }
+
+  /**
+   * Resolves once every watcher has finished its first scan.
+   *
+   * Until then a file dropped into a watched folder may be reported as an
+   * event, may be found by the scan, or may be missed by both — chokidar makes
+   * no promise about the window between opening a watch and finishing the
+   * listing. Nothing in the daemon needs this, since an archive that early is
+   * picked up on the next pass, but anything that creates a file and then
+   * expects to see it imported is racing without it.
+   * @returns {Promise<void>} - Resolves when watching has actually begun.
+   */
+  async ready() {
+    await Promise.all(this.#ready);
   }
 }

@@ -43,6 +43,9 @@ async function drop(folder, existing = () => []) {
 
   const manager = new WatchManager(library);
   manager.start([{ path: dir, stabilitySeconds: 0.05, ...folder }]);
+  // Before writing: a file dropped during chokidar's first scan can be missed
+  // by both the listing and the event stream.
+  await manager.ready();
 
   await fs.writeFile(path.join(dir, 'planet-new.pmtiles'), 'x');
   // The watcher waits for the file to stop changing before touching it, and

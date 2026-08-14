@@ -79,6 +79,11 @@ async function dropMany(folders, files, expected = files.length) {
   manager.start(
     folders.map((folder) => ({ path: dir, stabilitySeconds: 0.05, ...folder })),
   );
+  // Before writing anything. A file that lands during chokidar's first scan is
+  // in neither the listing nor the event stream, and no amount of waiting
+  // afterwards recovers it — which is a race that fails perhaps one run in
+  // five, on the loaded machine and not the idle one.
+  await manager.ready();
 
   for (const name of files) {
     await fs.writeFile(path.join(dir, name), 'x');
@@ -225,6 +230,7 @@ describe('several watch entries over one folder', () => {
         keep: 1,
       },
     ]);
+    await manager.ready();
     await fs.writeFile(path.join(dir, 'monthly-20260813.pmtiles'), 'x');
     // The import has to have happened for the assertion to mean anything: with
     // nothing imported, nothing is retired and this would pass vacuously.
