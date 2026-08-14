@@ -246,7 +246,8 @@ export class QBittorrentEngine {
    */
   async setRateLimits({ download, upload }) {
     // Its API takes 0 for unlimited, where -1 means the same thing here.
-    const rate = (value) => String(value == null || value < 0 ? 0 : Math.floor(value));
+    const rate = (value) =>
+      String(value == null || value < 0 ? 0 : Math.floor(value));
     await this.#request('/api/v2/transfer/setDownloadLimit', {
       method: 'POST',
       body: new URLSearchParams({ limit: rate(download) }),
@@ -369,10 +370,7 @@ export class QBittorrentEngine {
     headers.set('Referer', this.#options.url);
 
     const controller = new AbortController();
-    const timer = setTimeout(
-      () => controller.abort(),
-      this.#options.timeoutMs,
-    );
+    const timer = setTimeout(() => controller.abort(), this.#options.timeoutMs);
     try {
       return await fetch(new URL(path, this.#options.url), {
         ...init,
@@ -384,6 +382,7 @@ export class QBittorrentEngine {
       if (error.name === 'AbortError') {
         throw new Error(
           `qBittorrent ${path} timed out after ${this.#options.timeoutMs}ms`,
+          { cause: error },
         );
       }
       throw new Error(

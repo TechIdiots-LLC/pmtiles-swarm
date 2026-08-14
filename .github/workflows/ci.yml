@@ -6,6 +6,20 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          check-latest: true
+      # --ignore-scripts: as in the test job below.
+      - run: npm ci --ignore-scripts --prefer-offline --no-audit
+      - run: npm run lint
+      - run: npm run format:check
+
   test:
     name: Test on Node ${{ matrix.node }}
     runs-on: ubuntu-latest

@@ -21,7 +21,11 @@ import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
 import { freeSpace, listLocations } from './locations.js';
 import { restart, restartMode } from './restart.js';
 import { parseFeed, renderFeed } from './feed.js';
-import { ScheduledSourceManager, candidateDates, expandTemplate } from './sources.js';
+import {
+  ScheduledSourceManager,
+  candidateDates,
+  expandTemplate,
+} from './sources.js';
 import { limitFor, remaining } from './seeding.js';
 import { buildTileJson, extensionMatches } from './tilejson.js';
 import { TileReadError } from './tiles.js';
@@ -167,9 +171,7 @@ export function createApp({
     res.json({ ok: true });
   });
   // .torrent uploads arrive as raw bytes.
-  app.use(
-    express.raw({ type: 'application/x-bittorrent', limit: '64mb' }),
-  );
+  app.use(express.raw({ type: 'application/x-bittorrent', limit: '64mb' }));
 
   /**
    * The externally visible base URL, for absolute links in the feed and in
@@ -203,7 +205,8 @@ export function createApp({
    */
   const metadataRetries = new Map();
   const needsVectorLayers = (summary, infoHash) => {
-    if (!summary || summary.format !== 'pbf' || summary.vectorLayers) return false;
+    if (!summary || summary.format !== 'pbf' || summary.vectorLayers)
+      return false;
     const last = metadataRetries.get(infoHash) ?? 0;
     if (Date.now() - last < 60000) return false;
     metadataRetries.set(infoHash, Date.now());
@@ -295,7 +298,9 @@ export function createApp({
         return res.status(400).json({ error: 'a token needs a name' });
       }
       if (!ROLES.has(role)) {
-        return res.status(400).json({ error: `role must be one of: ${[...ROLES].join(', ')}` });
+        return res
+          .status(400)
+          .json({ error: `role must be one of: ${[...ROLES].join(', ')}` });
       }
 
       const scope = normalizeCategories({ categories });
@@ -496,7 +501,8 @@ export function createApp({
       if (!stats) {
         return res.status(501).json({ error: 'tile statistics are disabled' });
       }
-      const recent = req.query.recent === undefined ? undefined : Number(req.query.recent);
+      const recent =
+        req.query.recent === undefined ? undefined : Number(req.query.recent);
       res.setHeader('cache-control', 'no-store');
       res.json({
         node: config.nodeName ?? os.hostname(),
@@ -572,7 +578,9 @@ export function createApp({
   // should not mean killing the process.
   app.get(
     '/api/adds',
-    route(async (_req, res) => res.json({ running: library.runningAdds?.() ?? [] })),
+    route(async (_req, res) =>
+      res.json({ running: library.runningAdds?.() ?? [] }),
+    ),
   );
 
   app.delete(
@@ -596,12 +604,15 @@ export function createApp({
     '/api/subscriptions/preview',
     route(async (req, res) => {
       const { url, token, protocol } = req.body ?? {};
-      if (!url) return res.status(400).json({ error: 'give a feed or catalog url' });
+      if (!url)
+        return res.status(400).json({ error: 'give a feed or catalog url' });
 
       // The stored token, when the console is echoing back what it was shown.
       let credential = token;
       if (credential === '********') {
-        credential = (config.subscriptions ?? []).find((s) => s.url === url)?.token;
+        credential = (config.subscriptions ?? []).find(
+          (s) => s.url === url,
+        )?.token;
       }
 
       const kind =
@@ -621,7 +632,9 @@ export function createApp({
           signal: AbortSignal.timeout(15000),
         });
       } catch (error) {
-        return res.status(502).json({ error: `could not reach ${url}: ${error.message}` });
+        return res
+          .status(502)
+          .json({ error: `could not reach ${url}: ${error.message}` });
       }
 
       if (response.status === 401 || response.status === 403) {
@@ -632,7 +645,9 @@ export function createApp({
         });
       }
       if (!response.ok) {
-        return res.status(502).json({ error: `the peer answered ${response.status}` });
+        return res
+          .status(502)
+          .json({ error: `the peer answered ${response.status}` });
       }
 
       const body = await response.text();
@@ -662,7 +677,10 @@ export function createApp({
       res.json({
         protocol: 'rss',
         count: items.length,
-        names: items.slice(0, 5).map((item) => item.title).filter(Boolean),
+        names: items
+          .slice(0, 5)
+          .map((item) => item.title)
+          .filter(Boolean),
       });
     }),
   );
@@ -720,7 +738,9 @@ export function createApp({
         });
       }
 
-      res.status(400).json({ error: 'give either a url template or an index url' });
+      res
+        .status(400)
+        .json({ error: 'give either a url template or an index url' });
     }),
   );
 
@@ -796,7 +816,8 @@ export function createApp({
     '/api/torrents/:infoHash/warm',
     route(async (req, res) => {
       const job = warm?.get(req.params.infoHash);
-      if (!job) return res.status(404).json({ error: 'no warm for this archive' });
+      if (!job)
+        return res.status(404).json({ error: 'no warm for this archive' });
       res.json(job);
     }),
   );
@@ -904,7 +925,10 @@ export function createApp({
     '/api/torrents/:infoHash/location',
     route(async (req, res) => {
       try {
-        const move = await library.moveArchive(req.params.infoHash, req.body ?? {});
+        const move = await library.moveArchive(
+          req.params.infoHash,
+          req.body ?? {},
+        );
         res.status(202).json(move);
       } catch (error) {
         res.status(error.status ?? 500).json({ error: error.message });
@@ -939,14 +963,20 @@ export function createApp({
 
       if (body.categories !== undefined) {
         current.clear();
-        for (const tag of normalizeCategories({ categories: body.categories })) {
+        for (const tag of normalizeCategories({
+          categories: body.categories,
+        })) {
           current.add(tag);
         }
       }
-      for (const tag of normalizeCategories({ categories: [].concat(body.add ?? []) })) {
+      for (const tag of normalizeCategories({
+        categories: [].concat(body.add ?? []),
+      })) {
         current.add(tag);
       }
-      for (const tag of normalizeCategories({ categories: [].concat(body.remove ?? []) })) {
+      for (const tag of normalizeCategories({
+        categories: [].concat(body.remove ?? []),
+      })) {
         current.delete(tag);
       }
 
@@ -1057,7 +1087,9 @@ export function createApp({
           ? Buffer.from(value).toString()
           : String(value);
 
-      const tiers = (raw.length > 0 ? raw : [[decoded.announce].filter(Boolean)])
+      const tiers = (
+        raw.length > 0 ? raw : [[decoded.announce].filter(Boolean)]
+      )
         .map((tier, index) => ({
           tier: index,
           urls: (Array.isArray(tier) ? tier : [tier]).map(asText),
@@ -1131,7 +1163,8 @@ export function createApp({
   app.get(
     '/api/speed',
     route(async (_req, res) => {
-      if (!speed) return res.status(501).json({ error: 'speed limits are not running' });
+      if (!speed)
+        return res.status(501).json({ error: 'speed limits are not running' });
       res.json(speed.current());
     }),
   );
@@ -1139,11 +1172,13 @@ export function createApp({
   app.post(
     '/api/speed',
     route(async (req, res) => {
-      if (!speed) return res.status(501).json({ error: 'speed limits are not running' });
+      if (!speed)
+        return res.status(501).json({ error: 'speed limits are not running' });
       const mode = req.body?.mode ?? null;
       if (mode !== null && mode !== 'global' && mode !== 'alternative') {
         return res.status(400).json({
-          error: 'mode must be "global", "alternative", or null to follow the schedule',
+          error:
+            'mode must be "global", "alternative", or null to follow the schedule',
         });
       }
       res.json(await speed.setOverride(mode));
@@ -1166,7 +1201,10 @@ export function createApp({
           .json({ error: `${owner.name} cannot report piece detail` });
       }
       try {
-        const buckets = Math.min(4096, Math.max(0, Number(req.query.buckets) || 0));
+        const buckets = Math.min(
+          4096,
+          Math.max(0, Number(req.query.buckets) || 0),
+        );
         res.json(
           await engine.pieces(req.params.infoHash, {
             buckets,
@@ -1198,7 +1236,9 @@ export function createApp({
         // a 200 with an empty list. But it carries the reason now: answering a
         // broken engine with a bare `[]` made a sidecar that raised on every
         // peer indistinguishable from a swarm that genuinely had none.
-        console.warn(`[api] peers for ${req.params.infoHash}: ${error.message}`);
+        console.warn(
+          `[api] peers for ${req.params.infoHash}: ${error.message}`,
+        );
         res.status(200).json({ peers: [], error: error.message });
       }
     }),
@@ -1369,7 +1409,9 @@ export function createApp({
       try {
         engine = await adoptFrom(req.body);
       } catch (error) {
-        return res.status(502).json({ error: `could not reach it: ${error.message}` });
+        return res
+          .status(502)
+          .json({ error: `could not reach it: ${error.message}` });
       }
 
       try {
@@ -1395,7 +1437,9 @@ export function createApp({
           const wanted = new Set(body.infoHashes ?? []);
           const all = await library.nodeCandidates(body.swarm.url, body.swarm);
           const added = await library.adoptFromNode(
-            all.filter((archive) => wanted.size === 0 || wanted.has(archive.infoHash)),
+            all.filter(
+              (archive) => wanted.size === 0 || wanted.has(archive.infoHash),
+            ),
             {
               mode: body.mode === 'mirror' ? 'mirror' : 'cache',
               categories: normalizeCategories({ categories: body.categories }),
@@ -1413,7 +1457,9 @@ export function createApp({
       try {
         engine = await adoptFrom(body);
       } catch (error) {
-        return res.status(502).json({ error: `could not reach it: ${error.message}` });
+        return res
+          .status(502)
+          .json({ error: `could not reach it: ${error.message}` });
       }
 
       const added = await library.adoptFromEngine({
@@ -1625,7 +1671,8 @@ export function createApp({
         generatedAt: new Date().toISOString(),
         // Whether this is everything, or only what is shared publicly. A
         // consumer must not prune against a partial view.
-        complete: !Array.isArray(config.feedCategories) ||
+        complete:
+          !Array.isArray(config.feedCategories) ||
           (auth.enabled && auth.isAuthenticated(req)),
         count: entries.length,
         archives: entries,
@@ -1674,7 +1721,8 @@ export function createApp({
           // Only PMTiles has tiles to serve, so a category whose newest build
           // is an MBTiles archive gets a feed and a torrent but no tile
           // endpoint — the same rule as an individual archive.
-          const servable = Boolean(newest?.pmtiles) &&
+          const servable =
+            Boolean(newest?.pmtiles) &&
             (newest.kind ?? 'pmtiles') === 'pmtiles';
 
           return {
@@ -1689,7 +1737,9 @@ export function createApp({
             },
             servable,
             endpoints: {
-              tileJson: servable ? `${base}/latest/${category}/tiles.json` : null,
+              tileJson: servable
+                ? `${base}/latest/${category}/tiles.json`
+                : null,
               // The same URL with a magnet in the fragment, which is what a
               // style should carry. A fragment is never sent in a request, so
               // an ordinary client fetches the TileJSON and ignores it, while
@@ -1764,7 +1814,10 @@ export function createApp({
     // known to disagree about — and this one moves on every build, which is
     // the whole point of it.
     res.setHeader('cache-control', 'public, max-age=300');
-    res.redirect(302, `${baseUrl(req)}/archives/${entry.infoHash}/archive.torrent`);
+    res.redirect(
+      302,
+      `${baseUrl(req)}/archives/${entry.infoHash}/archive.torrent`,
+    );
   });
 
   app.get('/latest/:category/magnet', (req, res) => {
@@ -1798,8 +1851,8 @@ export function createApp({
       renderFeed(
         catalog.list().filter((entry) => publishesEntry(entry, req)),
         {
-        title: config.feedTitle ?? 'PMTiles archives',
-        baseUrl: baseUrl(req),
+          title: config.feedTitle ?? 'PMTiles archives',
+          baseUrl: baseUrl(req),
           copyright: config.feedCopyright,
           maxItems: feedLimit(req),
         },
@@ -1938,7 +1991,9 @@ export function createApp({
       res.setHeader('access-control-allow-origin', '*');
 
       if (!entry) {
-        return res.status(404).json({ ready: false, reason: 'unknown archive' });
+        return res
+          .status(404)
+          .json({ ready: false, reason: 'unknown archive' });
       }
 
       const kind = entry.kind ?? guessKind(entry.name ?? '');
@@ -1981,7 +2036,8 @@ export function createApp({
           ...shape,
           ready: false,
           format: summary.format,
-          reason: 'its metadata has not been read yet, so it carries no vector layers',
+          reason:
+            'its metadata has not been read yet, so it carries no vector layers',
         });
       }
 
@@ -2139,13 +2195,16 @@ export function createApp({
       app.use(mount, express.static(path.join(root, 'dist')));
     } catch {
       // Optional at runtime: everything except the preview works without them.
-      console.warn(`[web] ${name} is not installed; map previews are unavailable`);
+      console.warn(
+        `[web] ${name} is not installed; map previews are unavailable`,
+      );
     }
   }
 
   app.use(express.static(path.join(here, 'web')));
 
-  // eslint-disable-next-line no-unused-vars -- express identifies error handlers by arity
+  // Four parameters, two of them unused: express identifies an error handler
+  // by its arity, so dropping them turns this into ordinary middleware.
   app.use((error, _req, res, _next) => {
     // A validation failure is the caller's, not ours, and saying so is more
     // useful than a 500 — refusing to publish an unrecognised file is an

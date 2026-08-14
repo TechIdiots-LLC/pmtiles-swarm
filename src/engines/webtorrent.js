@@ -378,65 +378,6 @@ export class WebTorrentSeedEngine {
   /**
    * Which pieces are held, how rare each is, and what peers hold.
    *
-   * WebTorrent has all of this: `torrent.bitfield` for what this node holds,
-   * and `wire.peerPieces` for what each peer does. Availability is not a field
-   * here the way it is in libtorrent, but it is the same quantity — how many
-   * connected peers hold each piece — so it is counted from the wires rather
-   * than gone without.
-   * @param {string} infoHash - The archive.
-   * @param {object} [options] - `buckets`, and `peers` for per-peer maps.
-   * @returns {Promise<object>} - Bitfields, base64-encoded one byte per bucket.
-   */
-  async pieces(infoHash, { buckets, peers } = {}) {
-    const torrent = this.#find(infoHash);
-    if (!torrent) throw new Error(`not held here: ${infoHash}`);
-    const total = torrent.pieces?.length ?? 0;
-    if (!total) throw new Error('metadata has not arrived yet');
-
-    const width = Math.max(1, Math.min(Number(buckets) || total, total));
-    const wires = torrent.wires ?? [];
-
-    // Counted once for every piece rather than per bucket, so the reduction
-    // below sees real per-piece numbers and its minimum means what it says.
-    const availability = new Array(total).fill(0);
-    for (const wire of wires) {
-      if (!wire.peerPieces) continue;
-      for (let piece = 0; piece < total; piece += 1) {
-        if (wire.peerPieces.get(piece)) availability[piece] += 1;
-      }
-    }
-
-    const held = bucketise(total, width, (piece) => (torrent.bitfield?.get(piece) ? 1 : 0), allHeld);
-
-    return {
-      numPieces: total,
-      pieceLength: torrent.pieceLength,
-      buckets: width,
-      have: packBuckets(held),
-      availability: packBuckets(bucketise(total, width, (piece) => availability[piece], rarest)),
-      distributedCopies: distributedCopies(availability),
-      haveCount: held.length === 0 ? 0 : torrent.downloaded > 0 || torrent.done
-        ? countHeld(torrent, total)
-        : countHeld(torrent, total),
-      ...(peers
-        ? {
-            peers: wires
-              .filter((wire) => wire.peerPieces)
-              .map((wire) => ({
-                address: `${wire.remoteAddress}:${wire.remotePort}`,
-                client: wire.peerExtendedHandshake?.v ?? wire.type ?? 'peer',
-                have: packBuckets(
-                  bucketise(total, width, (piece) => (wire.peerPieces.get(piece) ? 1 : 0), anyHeld),
-                ),
-              })),
-          }
-        : {}),
-    };
-  }
-
-  /**
-   * Which pieces are held, how rare each is, and what peers hold.
-   *
    * `torrent.bitfield` is what this node holds and `wire.peerPieces` is what
    * each peer holds, so availability is counted from the wires. See
    * docs/internals.md — "What WebTorrent can report".

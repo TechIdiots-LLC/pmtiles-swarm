@@ -8,7 +8,6 @@
  * See docs/internals.md — "Scheduled sources".
  */
 
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import { linkLatest } from './latest-link.js';
 import { retains, retire } from './retention.js';
@@ -263,7 +262,9 @@ export class ScheduledSourceManager {
       const fallback = this.#config.sourceCheckIntervalHours ?? 6;
       console.log(
         `[source] following ${sources.length} scheduled source(s): ` +
-          sources.map((source) => describeSchedule(source, fallback)).join(', '),
+          sources
+            .map((source) => describeSchedule(source, fallback))
+            .join(', '),
       );
     }
   }
@@ -487,7 +488,9 @@ export class ScheduledSourceManager {
       }
       listing = await response.text();
     } catch (error) {
-      console.error(`[source] ${label}: could not read listing: ${error.message}`);
+      console.error(
+        `[source] ${label}: could not read listing: ${error.message}`,
+      );
       return [];
     }
 
@@ -513,7 +516,9 @@ export class ScheduledSourceManager {
           comment: source.comment,
         });
         imported.push(entry);
-        console.log(`[source] ${label}: imported ${entry.name} (${entry.infoHash})`);
+        console.log(
+          `[source] ${label}: imported ${entry.name} (${entry.infoHash})`,
+        );
         if (source.latestLink) await this.#linkLatest(source, entry);
         await this.#retire(source, entry);
       } catch (error) {
@@ -543,7 +548,10 @@ export class ScheduledSourceManager {
       try {
         pattern = new RegExp(source.match, 'i');
       } catch (error) {
-        throw new Error(`match is not a valid regular expression: ${error.message}`);
+        throw new Error(
+          `match is not a valid regular expression: ${error.message}`,
+          { cause: error },
+        );
       }
     }
 

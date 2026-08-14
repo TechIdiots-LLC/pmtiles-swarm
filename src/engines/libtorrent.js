@@ -24,6 +24,7 @@ function resolveSidecar() {
     throw new Error(
       'cannot locate the libtorrent sidecar: pmtiles-torrent is not resolvable. ' +
         `Run npm install, or pass libtorrent.script to point at it. (${error.message})`,
+      { cause: error },
     );
   }
 }

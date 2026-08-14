@@ -44,7 +44,11 @@ export function limit(label, work, ms = 5000) {
       resolve(ok);
     };
     const timer = setTimeout(
-      () => finish(false, `[shutdown] ${label} did not finish in ${ms}ms; moving on`),
+      () =>
+        finish(
+          false,
+          `[shutdown] ${label} did not finish in ${ms}ms; moving on`,
+        ),
       ms,
     );
     Promise.resolve()
@@ -85,14 +89,15 @@ export async function runStoppers(stoppers) {
  */
 export function closeServer(server, graceMs = 1000) {
   return new Promise((resolve) => {
-    let forced;
+    // Armed before close is asked for, so the handler that clears it can never
+    // run against a timer that has not been created yet.
+    const forced = setTimeout(() => server.closeAllConnections?.(), graceMs);
+    forced.unref?.();
     server.close(() => {
       clearTimeout(forced);
       resolve();
     });
     server.closeIdleConnections?.();
-    forced = setTimeout(() => server.closeAllConnections?.(), graceMs);
-    forced.unref?.();
   });
 }
 

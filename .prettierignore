@@ -1,0 +1,8 @@
+node_modules
+coverage
+package-lock.json
+CHANGELOG.md
+
+# Single-file pages with inlined script and style; prettier reflows the
+# embedded JavaScript in ways that make the diffs unreadable.
+src/web/*.html
