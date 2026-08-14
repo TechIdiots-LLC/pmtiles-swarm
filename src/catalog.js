@@ -23,6 +23,9 @@ import path from 'node:path';
  * @property {string[]} webSeeds - BEP 19 url-list entries.
  * @property {object} [pmtiles] - Header and metadata summary.
  * @property {object} [mutable] - BEP 46 identity: {publicKey, salt, seq}.
+ * @property {string} [originMtime] - The archive's mtime on the node that built
+ *   it, ISO 8601. Travels in the feed, since BitTorrent does not carry mtime,
+ *   and is restored when a download completes.
  * @property {string} createdAt - ISO timestamp.
  * @property {string} updatedAt - ISO timestamp.
  */

@@ -10,6 +10,11 @@
  * coverage, zoom range and tile format. That is the part a generic torrent feed
  * cannot offer, and it is what lets a subscriber decide whether it wants a
  * 72 GiB download before starting one.
+ *
+ * It also carries `<pmtiles:mtime>`, which is here because BitTorrent has
+ * nowhere else to put it: mtime is not in the metainfo, so without this a
+ * mirror serves a different `ETag` than its origin for identical bytes. The
+ * subscriber restores it on completion.
  */
 
 const PMTILES_NS = 'https://github.com/TechIdiots-LLC/pmtiles-swarm/ns/1.0';
@@ -114,6 +119,7 @@ ${(entry.categories ?? (entry.category ? [entry.category] : []))
       <pmtiles:infohash>${xml(entry.infoHash)}</pmtiles:infohash>
       <pmtiles:magnet>${xml(entry.magnet)}</pmtiles:magnet>
 ${entry.md5 ? `      <pmtiles:md5>${xml(entry.md5)}</pmtiles:md5>` : ''}
+${entry.originMtime ? `      <pmtiles:mtime>${xml(entry.originMtime)}</pmtiles:mtime>` : ''}
 ${mapFields}
     </item>`;
 }
@@ -143,6 +149,7 @@ export function formatBytes(bytes) {
  * @property {string} [magnet] - Magnet URI, when present.
  * @property {string} [torrentUrl] - URL of a .torrent enclosure.
  * @property {string} [category] - Item category.
+ * @property {string} [mtime] - The archive's mtime on the node that built it.
  */
 
 /**
@@ -194,12 +201,29 @@ export function parseFeed(body) {
       // RSS allows several <category> elements, and an archive may be tagged
       // more than once, so take all of them.
       md5: tag(block, 'pmtiles:md5'),
+      mtime: isoDate(tag(block, 'pmtiles:mtime')),
       categories: [...block.matchAll(/<category>([\s\S]*?)<\/category>/g)]
         .map((match) => decode(match[1]).trim())
         .filter(Boolean),
     });
   }
   return items;
+}
+
+/**
+ * Normalises a feed-supplied timestamp, or discards it.
+ *
+ * Accepts anything Date can parse — a peer may publish ISO 8601, and RSS's own
+ * dates are RFC 822 — and returns ISO 8601 so the catalog holds one spelling.
+ * Discarding rather than passing an unparseable value on matters because this
+ * ends in a `utimes()` call, where NaN sets the file's mtime to the epoch.
+ * @param {string | undefined} value - Raw element text.
+ * @returns {string | undefined} - An ISO 8601 timestamp, if it was one.
+ */
+function isoDate(value) {
+  if (!value) return undefined;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : undefined;
 }
 
 /**

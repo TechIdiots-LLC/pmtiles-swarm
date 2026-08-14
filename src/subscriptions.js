@@ -244,6 +244,7 @@ export class SubscriptionManager {
             torrentUrl: archive.torrent,
             infoHash: archive.infoHash,
             categories: archive.categories,
+            mtime: archive.originMtime,
           },
           subscription,
         );
@@ -421,6 +422,9 @@ export class SubscriptionManager {
       // subscription said. Defaulted here as well as there, so the two cannot
       // drift apart into disagreeing about what an unset mode means.
       mode: subscription.mode ?? 'cache',
+      // The mtime on the node that built it, which BitTorrent will not carry.
+      // Restored when the download completes.
+      originMtime: item.mtime,
     };
 
     // The .torrent is preferred where there is one: it carries the trackers

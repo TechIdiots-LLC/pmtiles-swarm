@@ -1650,6 +1650,9 @@ export function createApp({
           sparse: entry.sparse,
           mutable: entry.mutable,
           createdAt: entry.createdAt,
+          // As it arrived, not restated from the local file, or a
+          // mirror-of-a-mirror decays it to its own download time.
+          originMtime: entry.originMtime,
         }));
 
       res.json({

@@ -16,6 +16,18 @@
   WebRTC only and has no DHT, PeX or local discovery to fall back on, so `wss://` is not
   redundancy with the rest of the list, it is the whole of that path. Two are listed because it
   has no backstop. Every entry was checked for a completed handshake before being added.
+- **A mirror now serves the same `ETag` as the node it followed.** BitTorrent does not carry
+  mtime — it is not in the metainfo — so a delivered archive was stamped with the moment its
+  download finished, and Apache's default `FileETag MTime Size` then gave two nodes holding
+  byte-identical archives two different validators. A client whose range requests are balanced
+  across the pair fails part-way through a read, which `pmtiles.js` reports as `EtagMismatch`.
+  The origin's timestamp now travels in the feed as `<pmtiles:mtime>` and is restored when the
+  download completes, so the bytes and the validator agree everywhere. It is restored only where
+  a peer published one; an archive that arrives without it keeps its download time, exactly as
+  before. The restore happens between the rename and the re-add, while nothing is holding the
+  file: libtorrent's resume data records each file's size and mtime and re-hashes the whole
+  store when they disagree on load, so doing it under a running torrent would trade a broken
+  ETag for an hours-long recheck of a large library.
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes

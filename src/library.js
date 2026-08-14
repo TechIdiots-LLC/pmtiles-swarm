@@ -430,6 +430,13 @@ export class Library {
       throw error;
     }
 
+    // Between the remove and the re-add, while nothing holds the file.
+    // libtorrent records each file's size and mtime in its resume data and
+    // re-hashes the whole store when they disagree on load, so stamping under a
+    // running torrent costs a full recheck. The paths above return without
+    // detaching, so they are left alone.
+    await this.#restoreOriginMtime(entry, to);
+
     const updated = await this.#catalog.put({ infoHash, complete: true });
     await this.#readd(updated);
     // The reader still has the old path open, and the old path is now gone.
@@ -439,6 +446,34 @@ export class Library {
       console.log(`[complete] ${entry.name} is whole; dropped the marker`);
     }
     return updated;
+  }
+
+  /**
+   * Puts the origin's mtime back on an archive this node received.
+   *
+   * BitTorrent does not transmit mtime, so a completed download carries the
+   * moment it finished and no two nodes agree — which under Apache's default
+   * `FileETag` means two different ETags for identical bytes, and a failed read
+   * for a client balanced across both. Only ever restores what a peer
+   * published: an archive arriving without the field keeps its download time.
+   * @param {object} entry - Catalog entry, carrying originMtime if it has one.
+   * @param {string} file - The archive's finished path.
+   * @returns {Promise<void>} - Resolves whether or not anything was stamped.
+   */
+  async #restoreOriginMtime(entry, file) {
+    if (!entry?.originMtime || !file) return;
+    const when = new Date(entry.originMtime);
+    if (!Number.isFinite(when.getTime())) return;
+    try {
+      await fs.utimes(file, when, when);
+    } catch (error) {
+      // The archive is correct; only its ETag disagrees. Not worth failing a
+      // finished download over.
+      console.warn(
+        `[complete] ${entry.name}: could not restore the origin's timestamp ` +
+          `(${error.message}); this node will serve a different ETag for it`,
+      );
+    }
   }
 
   /**
@@ -825,6 +860,8 @@ export class Library {
       webSeeds: parsed.urlList ?? [],
       mode,
       complete,
+      // Held until the download finishes, which may be hours away.
+      originMtime: options.originMtime,
     });
 
     // The engine's add resolves once metadata is in hand, so for a magnet
@@ -903,6 +940,7 @@ export class Library {
         pmtiles: archive.pmtiles,
         webSeeds: archive.webSeeds ?? [],
         md5: archive.md5,
+        originMtime: archive.originMtime,
         sparse: archive.sparse,
         // Its data is on another node by definition, so it arrives the way any
         // archive does: from the swarm.
@@ -951,6 +989,7 @@ export class Library {
               ? [...new Set([...(entry.webSeeds ?? []), ...candidate.webSeeds])]
               : entry.webSeeds,
             md5: candidate.md5 ?? entry.md5,
+            originMtime: candidate.originMtime ?? entry.originMtime,
             sparse: candidate.sparse ?? entry.sparse,
             kind: candidate.kind ?? entry.kind,
             source: {
@@ -2107,6 +2146,14 @@ export class Library {
     // without re-reading the archive.
     const origin = await fingerprintOrigin(details.source).catch(() => null);
 
+    // This node built it, so it is the only one that can observe the archive's
+    // real mtime. Published in the feed and restored by whoever receives it.
+    const originMtime =
+      details.originMtime ??
+      (await fileMtime(
+        details.savePath ? path.join(details.savePath, created.name) : null,
+      ));
+
     await fs.mkdir(this.torrentDir, { recursive: true });
     const torrentPath = path.join(
       this.torrentDir,
@@ -2162,9 +2209,21 @@ export class Library {
       mode: details.mode ?? 'mirror',
       retainedAt: created.retainedAt,
       origin,
+      originMtime,
       stale: false,
     });
   }
+}
+
+/**
+ * A file's modification time as ISO 8601.
+ * @param {string | null} file - Path to stat.
+ * @returns {Promise<string | undefined>} - The timestamp, or undefined.
+ */
+async function fileMtime(file) {
+  if (!file) return undefined;
+  const stat = await fs.stat(file).catch(() => null);
+  return stat?.isFile() ? stat.mtime.toISOString() : undefined;
 }
 
 /** Query parameters that carry a signature, across the major object stores. */

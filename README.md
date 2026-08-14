@@ -62,6 +62,10 @@ save locations, access tokens and the external-program hooks.
 torrent enclosures, so **qBittorrent's built-in RSS auto-downloader can subscribe today** with no
 new software. Items also carry a namespaced description of the map — format, zoom range, bounds,
 tile count — so a subscriber can decide whether it wants a 72 GiB download before starting one.
+They carry the archive's mtime on the node that built it as well, which BitTorrent has no way to
+transmit: a subscriber restores it when the download completes, so a mirror and its origin serve
+the same `ETag` for the same bytes and a client reading ranges across both does not fail part-way
+through.
 
 **Follows feeds.** Subscribed feeds are polled and new archives added in one of two modes.
 
