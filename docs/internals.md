@@ -15,6 +15,21 @@ Operator-facing documentation is elsewhere — see [publishing](publishing.md),
 - [Joining a torrent, and learning about it afterwards](#joining-a-torrent-and-learning-about-it-afterwards)
 - [File timestamps and ETags](#file-timestamps-and-etags)
 - [Overlapping fetches](#overlapping-fetches)
+- [Answering for a tile that is not there](#answering-for-a-tile-that-is-not-there)
+- [Reading an archive that is still arriving](#reading-an-archive-that-is-still-arriving)
+- [The health endpoint](#the-health-endpoint)
+- [The externally visible base URL](#the-externally-visible-base-url)
+- [Scheduled sources](#scheduled-sources)
+- [Running two engines at once](#running-two-engines-at-once)
+- [Why libtorrent runs as a sidecar](#why-libtorrent-runs-as-a-sidecar)
+- [Making a torrent out of a map](#making-a-torrent-out-of-a-map)
+- [Resuming a partial download](#resuming-a-partial-download)
+- [Retiring and pruning a subscription](#retiring-and-pruning-a-subscription)
+- [The public listener](#the-public-listener)
+- [Publishing over the DHT](#publishing-over-the-dht)
+- [Retiring old builds](#retiring-old-builds)
+- [Prewarming a freshly joined archive](#prewarming-a-freshly-joined-archive)
+- [Named save locations](#named-save-locations)
 
 ## Marking incomplete archives
 
@@ -187,3 +202,433 @@ between `findBySource` says no and every caller starts a copy. Both produce the
 same infohash and try to move into the same directory, so the second lands on
 the first — on Windows a failed rename, elsewhere a silent clobber of a file the
 engine is already seeding.
+
+## Answering for a tile that is not there
+
+Whether a missing tile is a 404 or a 204 changes how a map renders, and the
+right answer depends on the archive.
+
+MapLibre only overzooms a parent tile when the child **404s**. A sparse
+raster-dem — Mapterhorn, or any terrain built only where there is land —
+therefore renders as holes if told 204, because that means "empty but present"
+and stops the fallback.
+
+Vector is the other way round: an empty tile legitimately means *no features
+here*, and 404 would make a map log errors while panning past the edge of
+coverage.
+
+So this defaults by format and is overridable per archive and globally, which is
+the same arrangement tileserver-gl uses.
+
+## Reading an archive that is still arriving
+
+A PMTiles summary can arrive with its header half and not its metadata half, and
+for a partial archive that is the normal case rather than the unlucky one.
+
+The two are nowhere near each other in the file. The header is the first 127
+bytes; the JSON metadata is wherever the writer put it, and planetiler puts it at
+the *end* — measured at byte 77,139,967,368 of a 77 GB archive, after every tile.
+Probing a file that is 10% downloaded therefore reads a perfectly good header and
+1,528 zero bytes where the metadata should be. Everything looks right except the
+one field vector rendering needs: with no `vector_layers`, maplibre-gl-inspect
+has nothing to build a style from and the preview renders black.
+
+The re-read is fetched in the background rather than awaited — reading the end of
+a 72 GiB archive out of a swarm is not something to hold an interactive request
+open for. The request answers with what it has, and the next one has the layers.
+
+It is rate-limited rather than given up on. An archive at 10% may genuinely have
+nothing to read yet and the same archive at 100% will, so a permanent
+"unavailable" flag would be wrong within the hour — but retrying on every request
+would put a swarm read behind each one. The limiter is in memory on purpose: a
+restart is a reasonable moment to try again.
+
+## The health endpoint
+
+For a load balancer, which needs three things: no credential, a cheap answer, and
+a status code rather than a body to parse. A balancer checking `/feed.xml`
+instead — the nearest thing that existed before — gets 200 from a node whose
+engine is dead, because a feed is built from the catalog and never touches the
+swarm.
+
+It reports readiness rather than liveness. `engine.list()` is a round trip, so a
+reply means the sidecar is answering and not merely that Node is, and everything
+that makes this node useful to a swarm goes through it.
+
+The answer is cached, because a balancer asks every couple of seconds and an IPC
+round trip per check buys nothing. The window is short enough that a node which
+has just died leaves rotation within one more check than it otherwise would.
+
+## The externally visible base URL
+
+Used for absolute links in the feed and in TileJSON. Three behaviours, in order:
+
+| | |
+|---|---|
+| `publicUrl` set | one canonical URL, whatever the request said |
+| `trustProxy` set | derived per request from `X-Forwarded-Proto` and `X-Forwarded-Host`, so one node can answer correctly on http and https at once |
+| neither | derived from the connection itself |
+
+Note `req.host` rather than `req.get('host')`: only the former follows
+`X-Forwarded-Host`. The raw `Host` header behind a proxy is whatever the proxy
+dialled — usually an internal address, which would otherwise end up baked into
+every published tile URL.
+
+## Scheduled sources
+
+A different shape from the origin checking in `origin.js`, which watches one
+fixed URL for its content changing. An upstream like
+`https://build.protomaps.com/20260806.pmtiles` never changes any given URL: it
+publishes a *new* one every day and yesterday's stays exactly as it was. Watching
+for change would never fire; what is needed is to work out today's URL and see
+whether it exists yet.
+
+Each build therefore becomes its own archive, with its own torrent and its own
+lifetime, so old builds stay seedable for as long as anyone wants them.
+
+There are two ways to find the new one. A **template** carries the date in the
+URL and is expanded and probed — one HEAD per candidate date, and it works
+against origins that publish no listing at all. An **index** is a directory URL,
+listed and filtered, for upstreams whose filenames are not predictable. Prefer a
+template where the naming allows it: it asks a direct question and gets a direct
+answer.
+
+### Date placeholders
+
+A `{...}` group is read as a date pattern — runs of Y, M and D with separators
+between them — rather than matched against a fixed list of spellings:
+
+| | | | |
+|---|---|---|---|
+| `{YYYYMMDD}` | 20260807 | `{YYYY-MM-DD}` | 2026-08-07 |
+| `{YY}` | 26 | `{M}-{D}-{YY}` | 8-7-26 |
+| `{DD.MM.YYYY}` | 07.08.2026 | `{YYYY}/{MM}` | 2026/08 |
+
+A run's length decides padding: `MM` is zero-padded, `M` is not, which is what an
+upstream naming files `8-7-26.pmtiles` needs. Year is the exception, since an
+unpadded year means nothing — `YY` is the last two digits and any other length is
+all four. Case is ignored, because length already carries the padding.
+
+A group that is not a date pattern is left exactly as found. URLs legitimately
+contain braces, and silently rewriting `{id}` into a date would be worse than not
+supporting it.
+
+### Reading a directory listing
+
+Two listings are handled, being the two met in the wild: an HTML index, where
+files are `<a href>` targets, and an S3-style `ListBucketResult`, where they are
+`<Key>` elements. Anything else yields nothing rather than guessing.
+
+Every result is resolved against the index URL and then checked to still sit
+underneath it. A listing is a document from somewhere else that this node is
+about to download gigabytes from and republish under its own name; following an
+off-site link out of one would let the page decide what this node distributes.
+
+"Newest" is by name, descending — dated filenames sort chronologically, and a
+listing's own order cannot be relied on.
+
+### Why only the newest few
+
+`newest` defaults to one, and that bound is the whole safety of the index form.
+An upstream keeping two years of daily planet builds would otherwise read as two
+years of archives to fetch — several hundred terabytes, begun without anyone
+asking. Raising it costs one full archive per step, so raise it only as far as
+the number of polls you expect to miss.
+
+### When a source is due
+
+Two ways to say when, because upstreams come in two shapes. A build published at
+a known hour wants a *time*: checking every six hours from whenever the process
+happened to start finds it up to six hours late, which for a daily archive is
+most of a day during which nobody could seed it. Anything else wants an interval.
+
+A source never looked at is always due. That is what catches up after the daemon
+has been down over a scheduled time, and it is safe because a poll that finds
+nothing new costs one HEAD request.
+
+### What retention will and will not remove
+
+A daily planet build is 137 GB, so a source kept for ever fills any disk within
+the week, and older builds are rarely wanted — the point of a dated build is that
+a newer one replaces it. `keep: 1` holds only the newest; `keepDays: 35` holds
+five weeks.
+
+The family is the archives this same *named* source imported, and nothing else.
+One added by hand, adopted from a client, or taken from a peer is never touched,
+even in the same directory.
+
+## Running two engines at once
+
+The engines are good at different things. libtorrent handles a multi-terabyte
+library and speaks BitTorrent v2; WebTorrent is a weaker bulk seeder but is the
+only one that can talk to a browser, over WebRTC. Running both lets a browser
+peer fetch tiles from the same swarm a thousand ordinary clients are seeding
+into, without either engine having to grow the other's abilities.
+
+One rule makes this safe, and everything else follows from it:
+
+> **Only the primary engine ever writes.**
+
+Two BitTorrent clients pointed at the same incomplete file will both write to it,
+and the result is not a race that one of them wins — it is a file that neither
+client's bitfield describes, which both then "repair" forever. So a secondary is
+only ever handed an archive that is already complete, and only ever as a seed.
+
+A cache-mode archive is never handed over at all. It is a scatter of pieces on
+purpose, and a second client seeing a mostly-missing file would try to fill it in.
+
+Everything that changes what is held — adding, removing, pausing, switching mode
+— goes to the primary first and is mirrored to secondaries only where it is safe.
+Everything that reports goes to both and is merged, because a peer is a peer
+whichever client found it.
+
+### Completeness is asked, not taken on trust
+
+`seedOnly` is the caller's claim, and a caller reading it from a catalog can be
+wrong: a `complete` flag set by a disk check against a preallocated file once
+said "finished" about an archive 10% downloaded. That claim is the only thing
+standing between one incomplete file and two clients writing to it, so the
+primary is asked directly.
+
+An engine still checking has no answer yet, and gets a no. Under-sharing costs a
+minute, because the periodic sweep hands the archive over as soon as it really is
+finished. Over-sharing costs the file.
+
+### What WebTorrent can report
+
+`torrent.bitfield` is what this node holds and `wire.peerPieces` is what each
+peer holds, so piece availability is counted from the wires rather than gone
+without. The one real difference from libtorrent is reach: libtorrent's
+availability includes peers it knows of through the swarm, where this can only
+count the wires actually connected. Same shape, smaller sample.
+
+## Why libtorrent runs as a sidecar
+
+libtorrent is the only one of the three engines that offers what large-scale map
+distribution wants: BitTorrent v2 and hybrid torrents, resume data so a restart
+does not re-hash the store, piece-level control for on-demand reads, and seeding
+that holds up at multi-terabyte scale.
+
+It is reached through a child process rather than a native binding because Node
+has no maintained libtorrent binding — the packages on npm are abandoned 2022
+stubs, and the one live fork exposes neither piece deadlines nor v2. A sidecar
+also keeps the install honest: one distro package rather than a C++ toolchain
+plus Boost. The protocol is line-delimited JSON, so the engine class would be
+unchanged if the other end were later replaced by a real N-API addon.
+
+**It does not mark incomplete files.** The rename would have to happen in the
+sidecar, which ships with pmtiles-torrent rather than here, so a download sits
+under its final name until it finishes. Do not point a web server at a libtorrent
+save path that is also serving web seeds. Completion is still recorded correctly
+— the watcher finds no marked file and notes that the archive is whole.
+
+## Making a torrent out of a map
+
+Two choices here are specific to distributing maps rather than generic files.
+
+**Piece length.** Creation tools size pieces for whole-file downloads, which for
+a multi-hundred-gigabyte archive means 16 MiB or more. That is a poor fit for a
+tile server, where a cold tile costs a whole piece. The default here is 4 MiB,
+trading a larger hash list for a quarter of the read amplification.
+
+**Web seeds.** A brand-new archive has no peers, which normally makes it useless
+until someone finishes downloading it. BEP 19 lets the torrent name an HTTP or S3
+URL as a fallback source, so it works from the moment it is published and simply
+gets cheaper as peers appear. If the archive already lives on a web server,
+always pass its URL.
+
+### Keeping or discarding the bytes
+
+Piece hashes are computed over content, so creating a torrent from a remote
+archive reads every byte either way. What differs is whether they are kept:
+
+- **retain** (default) writes them to `retainPath` as they arrive, so the node
+  becomes a real seeder the moment the torrent is published. Costs the archive's
+  full size in disk.
+- **discard** streams them past the hasher and drops them. Costs bandwidth and
+  time but no disk, and leaves the node unable to seed what it just published.
+  Only viable because the origin URL is registered as a web seed. Reasonable for
+  publishing something you already host; a poor default, because a torrent nobody
+  seeds is just HTTP with extra steps.
+
+Either way the origin becomes a web seed, since by definition it serves the exact
+bytes being hashed.
+
+### Why the MD5 is opt-in
+
+Not for integrity — the torrent already covers that, and better, since it
+verifies per piece and so says *where* something went wrong rather than only that
+it did. The MD5 is for the quick manual check people actually do, and for tooling
+that expects a checksum file next to a download.
+
+Where the bytes already stream past, as in a URL being fetched, the digest rides
+along for nothing. Against a file already on disk there is no such pass to join,
+so it is a second full read of the archive.
+
+## Resuming a partial download
+
+A planet archive is hours of transfer, and a connection dropping at 35% should
+not mean starting from nothing. HTTP has had the answer since 1999: ask for
+`Range: bytes=N-` and append.
+
+Three things must hold before appending is safe, and each is checked rather than
+assumed:
+
+1. **The server honoured the range.** One that ignores it answers 200 with the
+   whole file, and appending that to a partial one gives a file that is part
+   duplicate and wholly wrong.
+2. **The file has not changed.** Resuming across a change splices the head of one
+   build onto the tail of another, producing a torrent for bytes that never
+   existed anywhere — which hashes perfectly well locally and fails for every
+   peer that ever tries it. `ETag` is compared first, since it is exactly this
+   question; `Last-Modified` second, weaker but what most static file servers
+   actually send. With neither, resuming is refused: fetching a planet archive
+   twice is expensive, publishing a corrupt one is worse.
+3. **The returned range starts where it was asked to**, because `Content-Range`
+   is the server's own account of what it sent.
+
+Any of those failing restarts the download rather than guessing.
+
+## Retiring and pruning a subscription
+
+Two different questions, which is why an RSS feed can have the first and not the
+second.
+
+**Retiring** is about the disk: a feed publishing weekly leaves a copy behind
+every week, and the publisher will go on listing all of them. Age applies however
+short the list is. It happens only after something new has landed, and never to
+the newest copy.
+
+**Pruning** is about the publisher: it has stopped offering this, so let it go.
+Absence from a bounded feed is not evidence that anything was withdrawn —
+planet.openstreetmap.org lists five dumps and says nothing about the hundreds
+before them — so pruning needs a full catalogue, not a feed.
+
+Pruning is off unless asked for, and narrow when on. Four things are never
+pruned, each of which would otherwise be a way to lose something that was not the
+peer's to retract:
+
+- anything created here, from a watch folder, a URL or a local file;
+- anything added by hand, which is an operator's decision, not a feed's;
+- anything another subscription still lists, since one peer dropping it says
+  nothing about the other;
+- everything, if the peer's document was partial — a filtered view is not
+  evidence of absence.
+
+| setting | effect |
+|---|---|
+| omitted | nothing is ever removed. The default, and where a new peer should stay until you have watched it for a while |
+| `'report'` | logs what it would remove and removes nothing |
+| `true` | forgets the archive and stops seeding, leaving the data |
+| `'delete'` | also removes the files |
+
+## The public listener
+
+When the console and the API are given a port of their own, what is left on the
+other one is the surface a stranger or a peer is *meant* to reach. Everything
+else stops existing there — answered 404 rather than 401, because a 401 tells
+whoever asked that there is something behind it.
+
+The catalogue is on that list deliberately. It is how another node keeps itself
+in step, so it has to be reachable from outside; what it publishes is already
+decided by `feedCategories` and by whatever token was presented.
+
+## Publishing over the DHT
+
+A category is the only stable handle this system has. Every archive is addressed
+by its infohash, which is what makes a tile immutable and leaves a style with
+nothing to point at that survives a rebuild. `/latest/<category>/` solves that
+with a server; BEP 46 solves it without one — a signed DHT record, addressed by
+public key, naming whichever infohash is current.
+
+Only the node that builds needs the private key. Serving nodes carry the public
+half on the catalog entry and hand it out in the TileJSON. Two nodes publishing
+under one key would fight over `seq`, so this is deliberately a single-publisher
+design. The salt is the category name, so one keypair addresses every category.
+
+**The part that rots quietly:** DHT nodes drop mutable items after roughly two
+hours. A record published once works all afternoon and is gone by evening, so
+republishing on a timer is not an optimisation — it is the feature.
+
+### Why a third DHT
+
+Both seeding engines run one already, so `bittorrent-dht` looks redundant. It is
+not:
+
+- **libtorrent's** DHT lives in the Python sidecar, and the 2.x Python bindings
+  do not expose `dht_put_item` or `dht_get_item` at all. The alerts are bound
+  (`dht_mutable_item_alert`, `dht_put_alert`) so the C++ side supports BEP 44,
+  but there is no method to start one. Checked against 2.0.13 — worth re-checking
+  if a later binding adds them, since a sidecar op would then be tidier for a
+  libtorrent-only node.
+- **WebTorrent's** DHT *is* `bittorrent-dht`, reachable as `client.dht`, so
+  reusing it is possible and would save a socket. Not done, to keep one code path
+  that behaves the same whichever engine is configured.
+
+The dependency costs nothing: webtorrent already depends on the same version and
+npm dedupes them, so declaring it directly only removes a reliance on a
+transitive.
+
+## Retiring old builds
+
+This deletes data, so it is deliberately narrow:
+
+- **Off unless `keep` or `keepDays` is set.** Silence has to mean "keep
+  everything", since the alternative is deleting archives nobody asked to lose.
+- **Only the family it is given** — whatever the caller can prove came from the
+  same source or folder. An archive added by hand, adopted from a client, or
+  taken from a peer is never touched, even in the same directory.
+- **Never the newest build, and never the one just imported.**
+
+Nothing is deleted until the new build is the one being served. A category's feed
+and its `/latest/<category>/tiles.json` resolve to the newest archive in it, and
+that is what consumers point at; once they resolve to this build, the ones it
+replaced are no longer where anyone is being sent. Deleting before that would
+break the very URL the feed is advertising.
+
+That rule also covers the case which makes this necessary at all: an import run
+taking several builds takes them newest first, so an *older* one can be the most
+recent import. It has superseded nothing and must retire nothing.
+
+The torrent goes with the data. Leaving a catalog entry whose file is gone would
+leave the node advertising an archive it cannot serve, and every peer that asked
+would fail.
+
+## Prewarming a freshly joined archive
+
+A PMTiles archive is useless until its header has been read. The header is the
+first 127 bytes and names where the root directory and the JSON metadata live;
+without it there is no TileJSON, no vector layers, and a preview that renders
+black. Reading it also *prioritises* what it found — the root directory as
+critical, the metadata as high — so the head of the file arrives out of order
+rather than whenever the download happens to reach it.
+
+None of that happened on its own. The read is on the interactive path, so it ran
+only when somebody opened the archive, and the backfill that follows it required
+a summary to already exist — which is precisely what a freshly joined archive
+does not have. So the first request paid for the header, and if it timed out
+first, which against a 72 GiB mirror with no web seed it does, nothing ever tried
+again.
+
+A mirror gets there eventually by downloading everything. The point of doing it
+deliberately is that "eventually" is hours, where the archive is servable in the
+first few seconds if the right few kilobytes are asked for first.
+
+## Named save locations
+
+A torrent client usually hangs the save path off the category: everything tagged
+`movies` goes to the movies disk. That does not work here, because an archive can
+carry several categories on purpose — a planet build is both `basemaps` and
+`weekly` — and two categories naming two disks is a question with no right
+answer.
+
+So the location is chosen rather than derived, and naming them is what makes that
+bearable: `M:\_NZB_Finished_Unsorted` is not something anyone should retype, and a
+name survives the path changing underneath it.
+
+Only new data is placed. An archive records where it was put and keeps it, so
+renaming or repointing a location never moves anything that already exists —
+moving several hundred gigabytes is not something a settings screen should do as
+a side effect. A move checks free space before the engine is disturbed, since
+running out halfway through costs an hour, a partial file to clean up, and an
+archive that has to be put back.

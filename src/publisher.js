@@ -1,48 +1,20 @@
 /**
  * Announcing the current build of a category over the DHT (BEP 46).
  *
- * A category is the only stable handle this system has. Every archive is
- * addressed by its infohash, which is what makes a tile immutable and leaves a
- * style with nothing to point at that survives a rebuild. `/latest/<category>/`
- * solves that with a server; this solves it without one — a signed DHT record,
- * addressed by public key, naming whichever infohash is current.
+ * A signed DHT record, addressed by public key and salted with the category
+ * name, naming whichever infohash is current. Single-publisher by design: two
+ * nodes under one key would fight over `seq`.
  *
- * Only the node that builds needs the private key. Serving nodes carry the
- * public half on the catalog entry and hand it out in the TileJSON, and
- * publishing is the only operation the secret is used for. Two nodes
- * publishing under one key would fight over `seq`, so this is deliberately a
- * single-publisher design.
+ * DHT nodes drop mutable items after roughly two hours, so republishing on a
+ * timer is not an optimisation here — it is the feature.
  *
- * The salt is the category name, so one keypair addresses every category
- * rather than needing one each.
- *
- * The part that rots quietly: DHT nodes drop mutable items after roughly two
- * hours. A record published once works all afternoon and is gone by evening,
- * so republishing on a timer is not an optimisation here — it is the feature.
+ * See docs/internals.md — "Publishing over the DHT".
  */
 
 /*
- * Why this uses bittorrent-dht rather than an engine's own DHT.
- *
- * Both seeding engines run a DHT already, so a third one looks redundant.
- * It is not, for two different reasons:
- *
- *   libtorrent   - its DHT lives in the Python sidecar, and the 2.x Python
- *                  bindings do not expose dht_put_item or dht_get_item at all.
- *                  The alerts are bound (dht_mutable_item_alert, dht_put_alert)
- *                  so the C++ side supports BEP 44, but there is no method to
- *                  start one. Checked against 2.0.13; worth re-checking if a
- *                  later binding adds them, because a sidecar op would then be
- *                  the tidier answer for a libtorrent-only node.
- *
- *   webtorrent   - its DHT *is* bittorrent-dht, reachable as `client.dht`, so
- *                  reusing it is possible and would save a socket. Not done,
- *                  to keep one code path that behaves the same whichever
- *                  engine is configured.
- *
- * The dependency itself costs nothing: webtorrent already depends on the same
- * version, and npm dedupes them to one install. Declaring it directly only
- * removes the reliance on a transitive.
+ * bittorrent-dht rather than an engine's own DHT: libtorrent's Python bindings
+ * do not expose dht_put_item, and WebTorrent's is bittorrent-dht anyway. See
+ * docs/internals.md — "Why a third DHT".
  */
 
 import { mutableMagnet, publishInfoHash } from './mutable.js';

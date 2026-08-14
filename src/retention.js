@@ -68,30 +68,10 @@ export function expired({ family, keep, keepDays, now = Date.now() }) {
 /**
  * Retires the builds a family has outgrown, and removes their data.
  *
- * Deliberately narrow, because this deletes data:
- *
- *   * Off unless `keep` or `keepDays` is set. Silence has to mean "keep
- *     everything", since the alternative is deleting archives nobody asked to
- *     lose.
- *   * Only the family it is given — whatever the caller can prove came from
- *     the same source or folder. An archive added by hand, adopted from a
- *     client, or taken from a peer is never touched, even in the same
- *     directory.
- *   * Never the newest build, and never the one just imported.
- *
- * Nothing is deleted until the new build is the one being served. A category's
- * feed and its `/latest/<category>/tiles.json` resolve to the newest archive in
- * it, and that is what consumers point at; once they resolve to this build, the
- * ones it replaced are no longer where anyone is being sent. Before that —
- * while an older build is still the answer — deleting it would break the very
- * URL the feed is advertising. It also covers the case that makes this
- * necessary at all: an import run that takes several builds takes them newest
- * first, so an *older* one can be the most recent import. It has superseded
- * nothing and must retire nothing.
- *
- * The torrent goes with the data. Leaving a catalog entry whose file is gone
- * would leave the node advertising an archive it cannot serve, and every peer
- * that asked would fail.
+ * Deliberately narrow, because this deletes data: off unless `keep` or
+ * `keepDays` is set, only the family it is given, never the newest build and
+ * never the one just imported. Nothing goes until the new build is the one
+ * being served. See docs/internals.md — "Retiring old builds".
  * @param {object} options - What to retire and how to say so.
  * @param {object} options.library - The library, for removal.
  * @param {object[]} options.family - Builds from one source, newest first.

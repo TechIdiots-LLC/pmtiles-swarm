@@ -1,29 +1,15 @@
 /**
  * Two clients on one library.
  *
- * The engines are good at different things. libtorrent handles a
- * multi-terabyte library and speaks BitTorrent v2; WebTorrent is a weaker bulk
- * seeder but is the only one that can talk to a browser, over WebRTC. Running
- * both means a browser peer can fetch tiles from the same swarm that a
- * thousand ordinary clients are seeding into, without either engine having to
- * grow the other's abilities.
- *
  * One rule makes this safe, and everything here follows from it:
  *
  *   **Only the primary engine ever writes.**
  *
- * Two BitTorrent clients pointed at the same incomplete file will both write
- * to it, and the result is not a race that one of them wins — it is a file
- * that neither client's bitfield describes, which both then "repair" forever.
- * So a secondary is only ever handed an archive that is already complete, and
- * only ever as a seed. A cache-mode archive is never handed over at all: it is
- * a scatter of pieces on purpose, and a second client seeing a mostly-missing
- * file would try to fill it in.
+ * A secondary is only ever handed an archive that is already complete, and only
+ * ever as a seed. Mutations go to the primary and are mirrored only where it is
+ * safe; reports go to both and are merged.
  *
- * Everything that changes what is held — adding, removing, pausing, switching
- * mode — goes to the primary first and is mirrored to secondaries only where
- * it is safe. Everything that reports goes to both and is merged, because a
- * peer is a peer whichever client found it.
+ * See docs/internals.md — "Running two engines at once".
  */
 
 /**
@@ -186,15 +172,10 @@ export class CompositeEngine {
   /**
    * Whether the primary actually holds the whole archive.
    *
-   * Asked rather than taken on trust. `seedOnly` is the caller's claim, and a
-   * caller reading it from a catalog can be wrong — a `complete` flag set by a
-   * disk check against a preallocated file said "finished" about an archive
-   * 10% downloaded, and that claim is the only thing standing between one
-   * incomplete file and two clients writing to it.
-   *
-   * An engine still checking has no answer yet, and gets a no. Under-sharing
-   * costs a minute: the periodic sweep hands it over as soon as it is really
-   * finished. Over-sharing costs the file.
+   * Asked rather than taken on trust, since `seedOnly` is the caller's claim.
+   * An engine still checking gets a no: under-sharing costs a minute,
+   * over-sharing costs the file. See docs/internals.md — "Completeness is
+   * asked, not taken on trust".
    * @param {string} infoHash - The archive.
    * @returns {Promise<boolean>} - True when the primary reports it whole.
    */

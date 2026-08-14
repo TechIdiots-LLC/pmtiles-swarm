@@ -173,20 +173,11 @@ export function createApp({
 
   /**
    * The externally visible base URL, for absolute links in the feed and in
-   * TileJSON.
+   * TileJSON. Honours `publicUrl`, then `trustProxy`, then the connection.
    *
-   * Three behaviours, in order:
-   *
-   *   `publicUrl` set          one canonical URL, whatever the request said.
-   *   `trustProxy` set         derived per request from X-Forwarded-Proto and
-   *                            X-Forwarded-Host, so the same node can answer
-   *                            correctly on http and https at once.
-   *   neither                  derived from the connection itself.
-   *
-   * Note `req.host` rather than `req.get('host')`: only the former follows
-   * X-Forwarded-Host, and the raw Host header behind a proxy is whatever the
-   * proxy dialled — usually an internal address, which would end up baked into
-   * every published tile URL.
+   * `req.host` rather than `req.get('host')`: only the former follows
+   * X-Forwarded-Host. See docs/internals.md — "The externally visible base
+   * URL".
    * @param {import('express').Request} req - The request.
    * @returns {string} - Base URL without a trailing slash.
    */
@@ -196,29 +187,16 @@ export function createApp({
   /**
    * Whether an archive should answer a missing tile with 404 rather than 204.
    *
-   * MapLibre only overzooms a parent tile when the child 404s. A sparse
-   * raster-dem — Mapterhorn, or any terrain built only where there is land —
-   * therefore renders as holes if told 204, because that means "empty but
-   * present" and stops the fallback.
-   *
-   * Vector is the other way round: an empty tile legitimately means no features
-   * here, and 404 would make a map log errors while panning past coverage.
-   *
-   * Overridable per archive and globally, defaulting by format, which is the
-   * same arrangement tileserver-gl uses.
+   * Defaults by format, overridable per archive and globally. See
+   * docs/internals.md — "Answering for a tile that is not there".
    * @param {object} entry - Catalog entry.
    * @returns {boolean} - True to answer 404.
    */
   /**
    * When a vector archive is worth re-reading the metadata for.
    *
-   * Rate-limited rather than given up on. An archive at 10% may genuinely have
-   * nothing to read yet and the same archive at 100% will, so a permanent
-   * "unavailable" flag would be wrong within the hour — but retrying on every
-   * request would put a swarm read behind each one.
-   *
-   * In memory on purpose: a restart is a reasonable moment to try again, and
-   * this is not worth writing to the catalog for.
+   * Rate-limited rather than given up on, in memory rather than in the catalog.
+   * See docs/internals.md — "Reading an archive that is still arriving".
    * @param {object} summary - The stored PMTiles summary.
    * @param {string} infoHash - Which archive.
    * @returns {boolean} - True to attempt a read now.
@@ -424,21 +402,10 @@ export function createApp({
   /**
    * Whether this node should be sent traffic.
    *
-   * For a load balancer, which needs three things this did not have: no
-   * credential, a cheap answer, and a status code rather than a body to parse.
-   * A balancer checking `/feed.xml` instead — the nearest thing that existed —
-   * gets 200 from a node whose engine is dead, because a feed is built from
-   * the catalog and never touches the swarm.
-   *
-   * Readiness rather than liveness. `engine.list()` is a round trip to the
-   * engine, so a reply means the sidecar is answering and not merely that Node
-   * is; that is the difference worth reporting, since everything that makes
-   * this node useful to a swarm goes through it.
-   *
-   * Cached, because a balancer asks every couple of seconds and an IPC round
-   * trip per check is a cost with nothing to show for it. The window is short
-   * enough that a node which has just died is out of rotation within one more
-   * check than it would have been.
+   * Readiness rather than liveness: `engine.list()` is a round trip, so a reply
+   * means the sidecar is answering and not merely that Node is. Cached, since a
+   * balancer asks every couple of seconds. See docs/internals.md — "The health
+   * endpoint".
    */
   let healthChecked = 0;
   let healthOk = true;
@@ -1360,14 +1327,10 @@ export function createApp({
   /**
    * The engine an adopt request is talking about.
    *
-   * Normally the configured one — "adopt what this node already seeds". A
-   * request naming a qBittorrent instead gets a throwaway connection to it,
-   * for the case this feature exists to serve: a client already holding a
-   * library, beside a node that would rather run its own.
-   *
-   * Read-only, deliberately: `markIncompleteFiles: false` keeps an import from
-   * changing a preference on somebody else's client as a side effect of being
-   * looked at.
+   * Normally the configured one; a request naming a qBittorrent gets a
+   * throwaway connection to it. Read-only deliberately —
+   * `markIncompleteFiles: false` keeps an import from changing a preference on
+   * somebody else's client as a side effect of being looked at.
    * @param {object} body - The request body.
    * @returns {Promise<object | undefined>} - An engine, or undefined for the configured one.
    */
@@ -1925,23 +1888,11 @@ export function createApp({
         }
       }
 
-      // A summary can arrive with its header half and not its metadata half,
-      // and for a partial archive that is the normal case rather than the
-      // unlucky one.
-      //
-      // The two are nowhere near each other. The header is the first 127
-      // bytes; the JSON metadata is wherever the writer put it, and planetiler
-      // puts it at the *end* — measured at byte 77,139,967,368 of a 77 GB
-      // archive, after every tile. So probing a file that is 10% downloaded
-      // reads a perfectly good header and 1528 zero bytes where the metadata
-      // should be. Everything looks right except the one field vector
-      // rendering needs: with no `vector_layers`, maplibre-gl-inspect has
-      // nothing to build a style from and the preview renders black.
-      //
-      // Fetched in the background rather than awaited. Reading the end of a
-      // 72 GiB archive out of a swarm is not something to hold an interactive
-      // request open for, and it does not need to be: this answers now with
-      // what it has, and the next request has the layers.
+      // A partial archive normally has its header and not its metadata: the
+      // header is the first 127 bytes, and planetiler writes the metadata after
+      // every tile. Fetched in the background rather than awaited, so this
+      // answers now and the next request has the layers. See docs/internals.md
+      // — "Reading an archive that is still arriving".
       startMetadataBackfill(entry);
 
       // Anyone embedding a map is doing so from another origin.

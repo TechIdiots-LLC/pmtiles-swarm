@@ -7,18 +7,9 @@ import { DEFAULT_SUFFIX } from './incomplete.js';
 /**
  * Turning a PMTiles archive into a torrent.
  *
- * Two things here are specific to distributing maps rather than generic files.
- *
- * Piece length: creation tools size pieces for whole-file downloads, which for
- * a multi-hundred-gigabyte archive means 16 MiB or more. That is a poor fit for
- * a tile server, where a cold tile costs a whole piece; 4 MiB is the default
- * here, trading a larger hash list for a quarter of the read amplification.
- *
- * Web seeds: a brand-new archive has no peers, which normally makes it useless
- * until someone finishes downloading it. BEP 19 lets the torrent name an HTTP
- * or S3 URL as a fallback source, so it works from the moment it is published
- * and simply gets cheaper as peers appear. If the archive already lives on a
- * web server, always pass its URL.
+ * Two things here are specific to maps rather than generic files: a 4 MiB
+ * default piece length, and a web seed on every torrent. See docs/internals.md
+ * — "Making a torrent out of a map".
  */
 
 /**
@@ -70,22 +61,10 @@ export async function createTorrentFromFile(filePath, options = {}) {
 /**
  * Creates a torrent from a remote archive.
  *
- * Piece hashes are computed over content, so there is no way to do this without
- * reading every byte. What differs is whether those bytes are kept:
- *
- *   retain (default) — they are written to `retainPath` as they arrive, so the
- *     node holds a complete copy and becomes a real seeder the moment the
- *     torrent is published. Costs the archive's full size in disk.
- *
- *   discard — they are streamed past the hasher and dropped. Costs bandwidth
- *     and time but no disk, and leaves the node unable to seed what it just
- *     published. That is only viable because the origin URL is registered as a
- *     web seed, so peers fetch over HTTP until someone mirrors it. Reasonable
- *     for publishing something you already host; a poor default, because a
- *     torrent nobody seeds is just HTTP with extra steps.
- *
- * Either way the origin becomes a web seed, since by definition it serves the
- * exact bytes being hashed.
+ * Every byte is read either way, since piece hashes are computed over content.
+ * Passing `retainPath` keeps them, so the node can seed; omitting it discards
+ * them and leaves the origin web seed to serve peers. Either way the origin
+ * becomes a web seed. See docs/internals.md — "Keeping or discarding the bytes".
  * @param {string} url - HTTP(S) URL of the archive.
  * @param {CreateTorrentOptions & {retainPath?: string, onProgress?: Function}} [options] - Creation options. Omit retainPath to discard.
  * @returns {Promise<CreatedTorrent & {retainedAt?: string}>} - The created torrent.
@@ -180,16 +159,9 @@ async function bytesOnDisk(target) {
 /**
  * Whether a partial download may be continued rather than started again.
  *
- * The dangerous case is a file that changed underneath: resuming then splices
- * the head of one build onto the tail of another, and the result is a torrent
- * for bytes that never existed anywhere — which hashes perfectly well here and
- * fails for every peer that ever tries it.
- *
- * So the validator is compared, not just the length. `ETag` first, since it is
- * exactly this question; `Last-Modified` second, which is weaker but is what
- * most static file servers actually send. With neither, resuming is refused:
- * fetching a planet archive twice is expensive, and publishing a corrupt one
- * is worse.
+ * The validator is compared, not just the length: `ETag` first, `Last-Modified`
+ * second, and with neither, resuming is refused. See docs/internals.md —
+ * "Resuming a partial download".
  * @param {Headers} before - Headers seen when the download began.
  * @param {Headers} after - Headers from the resume attempt.
  * @returns {{ok: boolean, why?: string}} - Whether it is safe to continue.
@@ -227,19 +199,10 @@ function rangeStart(contentRange) {
 /**
  * Streams a URL to a file, resuming where a previous attempt stopped.
  *
- * A planet archive is hours of transfer, and a connection that dropped at 35%
- * used to mean starting from nothing — repeatedly, since the next attempt is
- * just as likely to drop. HTTP has had the answer since 1999: ask for
- * `Range: bytes=N-` and append.
- *
- * Three things must hold before appending is safe, and each is checked rather
- * than assumed. The server has to honour the range — one that ignores it
- * answers 200 with the whole file, and appending that to a partial one gives
- * a file that is part duplicate and wholly wrong. The file must not have
- * changed, which is what the validator comparison is for. And the range that
- * came back must begin where it was asked to, because `Content-Range` is the
- * server's own account of what it sent. Any of those failing restarts the
- * download instead of guessing.
+ * Three things must hold before appending is safe — the server honoured the
+ * range, the file has not changed, and the returned range starts where it was
+ * asked to — and each is checked rather than assumed. Any of them failing
+ * restarts the download. See docs/internals.md — "Resuming a partial download".
  * @param {string} url - Source URL.
  * @param {string} target - Destination path.
  * @param {Function} [onProgress] - Called with {received, total}.
@@ -402,15 +365,10 @@ function delay(ms, signal) {
 /**
  * Computes an MD5 of a file.
  *
- * Not for integrity — the torrent already covers that, and better: it verifies
- * per piece, so it says *where* something went wrong rather than only that it
- * did. This is for the quick manual check people actually do, and for tooling
- * downstream that expects a checksum file next to a download.
- *
- * Note what it costs. Everywhere the bytes already stream past — a URL being
- * fetched — the digest rides along for nothing. Against a file already on disk
- * there is no such pass to join, so this is a second read of the whole archive.
- * Opt-in for that reason.
+ * Not for integrity — the torrent already covers that per piece — but for the
+ * quick manual check people actually do. Opt-in because against a file already
+ * on disk it is a second full read. See docs/internals.md — "Why the MD5 is
+ * opt-in".
  * @param {string} filePath - The file to hash.
  * @returns {Promise<string>} - Lowercase hex digest.
  */

@@ -437,15 +437,9 @@ export class WebTorrentSeedEngine {
   /**
    * Which pieces are held, how rare each is, and what peers hold.
    *
-   * WebTorrent has all of this, contrary to what the engine table used to
-   * imply: `torrent.bitfield` is what this node holds, and `wire.peerPieces` is
-   * what each peer does. Availability is not a named field here the way
-   * libtorrent's is, but it is the same quantity — how many connected peers
-   * hold each piece — so it is counted from the wires rather than gone without.
-   *
-   * The one real difference is reach: libtorrent's availability includes peers
-   * it knows of through the swarm, where this can only count the wires actually
-   * connected. It is the same shape, over a smaller sample.
+   * `torrent.bitfield` is what this node holds and `wire.peerPieces` is what
+   * each peer holds, so availability is counted from the wires. See
+   * docs/internals.md — "What WebTorrent can report".
    * @param {string} infoHash - The archive.
    * @param {object} [options] - `buckets`, and `peers` for per-peer maps.
    * @returns {Promise<object>} - Bucketed maps, base64, one byte per bucket.
@@ -563,15 +557,10 @@ export class WebTorrentSeedEngine {
 /**
  * A chunk store that writes to a marked name.
  *
- * WebTorrent builds its store from the file list in the metainfo, so the
- * on-disk name is normally fixed by the torrent. This wraps the default store
- * and rewrites those paths on the way in, which is enough on its own:
- * everything else — reads, hash checks, deleting the data on removal — goes
- * through the same file list and so follows the marker automatically.
- *
- * Paths arrive relative to the torrent and are joined with the save path by the
- * store itself, so appending here appends to the filename rather than to a
- * directory component.
+ * WebTorrent builds its store from the metainfo's file list, so rewriting those
+ * paths on the way in is enough on its own — reads, hash checks and deletion all
+ * go through the same list. Paths arrive relative to the torrent, so appending
+ * here appends to the filename rather than to a directory component.
  *
  * Written against fs-chunk-store's public API (MIT, Copyright (c) Feross
  * Aboukhadijeh). See NOTICE.md.

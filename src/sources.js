@@ -2,28 +2,10 @@
  * Scheduled sources: upstreams that publish a new archive on a schedule, at a
  * URL that encodes the date.
  *
- * This is a different shape from the origin checking in `origin.js`. That
- * watches one fixed URL for its content changing. An upstream like
- * `https://build.protomaps.com/20260806.pmtiles` never changes any given URL —
- * it publishes a *new* one every day, and yesterday's stays exactly as it was.
- * Watching for change would never fire; what is needed is to work out today's
- * URL and see whether it exists yet.
+ * Each build becomes its own archive. Found either by a `url` template with the
+ * date in it, expanded and probed, or by listing an `index` directory.
  *
- * Each build therefore becomes its own archive with its own torrent and its own
- * lifetime, which is what you want: old builds stay seedable for as long as
- * anyone still wants them.
- *
- * Two ways to find the new one:
- *
- *   url    a template with the date in it, expanded and probed. Costs one HEAD
- *          per candidate date and works against anything, including origins
- *          that publish no listing at all.
- *   index  a directory URL, listed and filtered. For upstreams whose filenames
- *          are not predictable, or where you would rather not encode the
- *          naming scheme by hand.
- *
- * A template is the more reliable of the two — it asks a direct question and
- * gets a direct answer — so where the naming is predictable, prefer it.
+ * See docs/internals.md — "Scheduled sources".
  */
 
 import fs from 'node:fs/promises';
@@ -34,25 +16,10 @@ import { retains, retire } from './retention.js';
 /**
  * Expands date placeholders in a template.
  *
- * Rather than a fixed list of spellings, a `{...}` group is read as a date
- * pattern: runs of Y, M and D, with separators between them. So all of these
- * work without any of them being special-cased —
- *
- *   {YYYYMMDD}     20260807      {YYYY-MM-DD}   2026-08-07
- *   {YY}           26            {M}-{D}-{YY}   8-7-26
- *   {DD.MM.YYYY}   07.08.2026    {YYYY}/{MM}    2026/08
- *
- * A run's length decides padding: `MM` is zero-padded, `M` is not, which is
- * what an upstream naming files `8-7-26.pmtiles` needs. Year is the exception,
- * since an unpadded year means nothing: `YY` is the last two digits and any
- * other length is all four.
- *
- * Case is ignored, because length already carries the padding and using case
- * for it as well would make `{m}` and `{M}` differ for no visible reason.
- *
- * A group that is not a date pattern is left exactly as it was found. URLs
- * legitimately contain braces, and silently rewriting `{id}` into a date would
- * be worse than not supporting it.
+ * A `{...}` group is read as a date pattern — runs of Y, M and D with
+ * separators — rather than matched against a fixed list of spellings. A group
+ * that is not one is left exactly as found, since URLs legitimately contain
+ * braces. See docs/internals.md — "Date placeholders".
  * @param {string} template - The template string.
  * @param {Date} date - The date to substitute.
  * @returns {string} - The expanded string.
@@ -140,15 +107,9 @@ export function lastScheduled(times, now) {
 /**
  * Whether a source is due to be looked at.
  *
- * Two ways to say when, because upstreams come in two shapes. A build
- * published at a known hour wants a time: checking every six hours from
- * whenever the process happened to start finds it up to six hours late, which
- * for a daily archive is most of a day during which nobody could seed it.
- * Anything else wants an interval.
- *
- * A source never looked at is always due. That is what catches up after the
- * daemon has been down over a scheduled time, and it is safe because a poll
- * that finds nothing new costs one HEAD request.
+ * A build published at a known hour wants a time; anything else wants an
+ * interval. A source never looked at is always due. See docs/internals.md —
+ * "When a source is due".
  * @param {object} source - The source definition.
  * @param {Date | undefined} lastRun - When it was last polled.
  * @param {object} [options] - Fallback interval in hours, and the current time.
@@ -209,15 +170,11 @@ function describeSchedule(source, defaultHours) {
 /**
  * Pulls candidate file URLs out of a directory listing.
  *
- * Handles the two listings actually met in the wild: an HTML index, where the
- * files are `<a href>` targets, and an S3-style `ListBucketResult`, where they
- * are `<Key>` elements. Anything else yields nothing rather than guessing.
- *
- * Every result is resolved against the index URL and then checked to still sit
- * underneath it. A listing is a document from somewhere else that this node is
- * about to download gigabytes from and publish under its own name; following an
- * off-site link out of one would mean the page decides what this node
- * distributes.
+ * Handles an HTML index and an S3-style `ListBucketResult`; anything else
+ * yields nothing rather than guessing. Every result is resolved against the
+ * index URL and checked to still sit underneath it, so an off-site link cannot
+ * decide what this node distributes. See docs/internals.md — "Reading a
+ * directory listing".
  * @param {string} body - The listing document.
  * @param {string} indexUrl - Where it came from.
  * @returns {string[]} - Absolute URLs, in the order they appeared.
@@ -512,12 +469,9 @@ export class ScheduledSourceManager {
    * Polls a source that publishes into a directory rather than at a
    * predictable URL.
    *
-   * Only the newest few listed files are ever considered, and `newest` defaults
-   * to one. That bound is the whole safety of this: an upstream keeping two
-   * years of daily planet builds would otherwise be read as two years of
-   * archives to fetch, which is several hundred terabytes and would begin
-   * without anyone asking. Raising it costs one full archive per step, so it is
-   * worth raising only as far as the number of polls you expect to miss.
+   * Only the newest few listed files are considered, and `newest` defaults to
+   * one. That bound is the whole safety of this. See docs/internals.md — "Why
+   * only the newest few".
    * @param {object} source - The source definition.
    * @returns {Promise<object[]>} - Entries imported.
    */
@@ -626,16 +580,9 @@ export class ScheduledSourceManager {
   /**
    * Removes older builds from the same source, where retention says to.
    *
-   * A daily planet build is 137 GB. Kept for ever, a source like that fills
-   * any disk within the week — and the older ones are rarely what anyone
-   * wants, because the whole point of a dated build is that a newer one
-   * replaces it. `keep: 1` holds only the newest; `keepDays: 35` holds five
-   * weeks of them.
-   *
    * The family is the archives this same *named* source imported, and nothing
-   * else — one added by hand, adopted from a client, or taken from a peer is
-   * never touched, even in the same directory. See `retire` for the rest of
-   * what this will not do.
+   * else. See `retire`, and docs/internals.md — "What retention will and will
+   * not remove".
    * @param {object} source - The source definition.
    * @param {object} entry - The build just imported.
    * @returns {Promise<string[]>} - The infohashes removed.

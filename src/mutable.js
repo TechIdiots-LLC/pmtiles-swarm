@@ -1,17 +1,10 @@
 /**
  * Updatable torrents, via BEP 46 (Updating Torrents Via DHT Mutable Items).
  *
- * A torrent's infohash is a hash of its content, so a rebuilt archive is always
- * a new torrent — there is no such thing as editing one in place. BEP 46 works
- * around that with a level of indirection: you publish an ed25519-signed record
- * into the DHT whose value names the *current* infohash, and hand out the
- * public key instead of the infohash. Subscribers resolve the key whenever they
- * check, and follow the archive across rebuilds.
- *
- * This is the decentralised sibling of the RSS feed. The feed is easier to
- * consume (qBittorrent reads RSS today, with no new software) but needs a
- * server that stays up; the DHT record needs no server but has to be
- * republished periodically or it expires. Publishing both costs little.
+ * An ed25519-signed DHT record whose value names the *current* infohash, so a
+ * subscriber holding the public key follows an archive across rebuilds. The
+ * decentralised sibling of the RSS feed: no server, but it expires unless
+ * republished. See docs/internals.md — "Publishing over the DHT".
  *
  * Built directly on bittorrent-dht's BEP 44 put/get rather than through
  * WebTorrent's high-level API, which does not expose them — and independent of

@@ -267,18 +267,10 @@ export class SubscriptionManager {
   /**
    * Removes what this feed's archives have outgrown.
    *
-   * Separate from pruning, and answering a different question. Pruning is
-   * about the *publisher*: it has stopped offering this, so let it go. This is
-   * about the disk: a feed publishing weekly leaves a copy behind every week,
-   * and the publisher will go on listing all of them.
-   *
-   * That distinction is why an RSS feed can have this and cannot have pruning.
-   * Absence from a bounded feed is not evidence that anything was withdrawn —
-   * planet.openstreetmap.org lists five dumps and says nothing about the
-   * hundreds before them — but age is age however short the list is.
-   *
-   * Only after something new has landed, and never the newest copy, which are
-   * the same guards a scheduled source retires under. See `retire`.
+   * Separate from pruning, and answering a different question: this is about
+   * the disk, pruning is about the publisher. Only after something new has
+   * landed, and never the newest copy. See `retire`, and docs/internals.md —
+   * "Retiring and pruning a subscription".
    * @param {object} subscription - The subscription.
    * @returns {Promise<void>} - Resolves once anything due has gone.
    */
@@ -313,25 +305,9 @@ export class SubscriptionManager {
   /**
    * Drops archives this subscription no longer lists.
    *
-   * Off unless asked for, and narrow when on. Four things are never pruned,
-   * and each would otherwise be a way to lose something that was not the
-   * peer's to retract:
-   *
-   *   - anything created here, from a watch folder, a URL or a local file;
-   *   - anything added by hand, which is an operator's decision, not a feed's;
-   *   - anything another subscription still lists, since one peer dropping it
-   *     says nothing about the other;
-   *   - everything, if the peer's document was partial — a filtered view is
-   *     not evidence of absence.
-   *
-   * Four settings, and the first two are the ones to start with:
-   *
-   *   omitted     nothing is ever removed. The default, and where a new peer
-   *               should stay until you have watched it for a while.
-   *   'report'    logs what it would remove and removes nothing. The way to
-   *               find out whether you agree with it before it can act.
-   *   true        forgets the archive and stops seeding, leaving the data.
-   *   'delete'    also removes the files.
+   * Off unless asked for, and narrow when on: four things are never pruned, and
+   * the setting has four values from `omitted` through `'report'` and `true` to
+   * `'delete'`. See docs/internals.md — "Retiring and pruning a subscription".
    * @param {object} subscription - The subscription.
    * @param {object} document - The catalogue document received.
    * @param {object[]} listed - The archives it listed, after filtering.

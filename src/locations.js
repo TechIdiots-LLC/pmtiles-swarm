@@ -4,20 +4,11 @@ import path from 'node:path';
 /**
  * Named places for archive data to land.
  *
- * A torrent client usually hangs the save path off the category: everything
- * tagged `movies` goes to the movies disk. That does not work here, because an
- * archive can carry several categories on purpose — a planet build is both
- * `basemaps` and `weekly` — and two categories naming two disks is a question
- * with no right answer.
+ * Chosen rather than derived from the category, since an archive can carry
+ * several. Only new data is placed: an archive records where it was put and
+ * keeps it, so repointing a location never moves anything that already exists.
  *
- * So the location is chosen rather than derived. Naming them is what makes
- * that bearable: `M:\_NZB_Finished_Unsorted` is not something anyone should
- * retype, and a name survives the path changing underneath it.
- *
- * Only new data is placed. An archive records where it was put and keeps it,
- * so renaming or repointing a location never moves anything that already
- * exists — moving several hundred gigabytes is not something a settings screen
- * should do as a side effect.
+ * See docs/internals.md — "Named save locations".
  */
 
 /**
@@ -159,9 +150,7 @@ const HEADROOM = 64 * 1024 * 1024;
  * Refuses a move that would not fit.
  *
  * Checked before the engine is disturbed, so a move that cannot work costs
- * nothing — running out of disk halfway through copying several hundred
- * gigabytes means an hour spent, a partial file to clean up, and an archive
- * that has to be put back.
+ * nothing.
  * @param {object} options - Where from, where to, and how big.
  * @param {string} options.from - The file being moved.
  * @param {string} options.to - Where it is going.

@@ -43,14 +43,9 @@ export function limitFor(entry, globalLimit) {
 /**
  * What is left before a limit removes an archive.
  *
- * The counterpart to {@link evaluate}, which answers "is it time yet". This
- * answers "how much longer", which is the thing worth showing in a list: a
- * limit that silently removes an archive one day is much easier to live with
- * when you can see it coming.
- *
- * A ratio target cannot be turned into a time — that depends on how fast peers
- * happen to be downloading — so it is reported as progress towards a number
- * rather than as a duration. A time limit can, and is.
+ * The counterpart to {@link evaluate}, which answers "is it time yet". A ratio
+ * target cannot be turned into a duration, since that depends on how fast peers
+ * are downloading, so it is reported as progress towards a number instead.
  * @param {object} entry - Catalog entry.
  * @param {object} status - Live status from the engine, for the ratio.
  * @param {object} globalLimit - The node's default.

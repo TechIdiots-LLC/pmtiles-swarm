@@ -126,14 +126,9 @@ export function verifyPassword(password, stored) {
 /**
  * The surface that belongs on a public listener.
  *
- * When the console and the API are given a port of their own, this is what is
- * left on the other one: the things a stranger or a peer is *meant* to reach.
- * Everything else stops existing there — answered 404 rather than 401, because
- * a 401 tells whoever asked that there is something behind it.
- *
- * The catalogue is on this list deliberately. It is how another node keeps
- * itself in step, so it has to be reachable from outside; what it publishes is
- * already decided by `feedCategories` and by whatever token was presented.
+ * What is left on the other port when the console and API get one of their own.
+ * Everything else is answered 404 rather than 401. The catalogue is on this
+ * list deliberately. See docs/internals.md — "The public listener".
  * @param {string} path - Request path.
  * @returns {boolean} - True when a public listener should serve it.
  */

@@ -1,24 +1,12 @@
 /**
  * Reading the head of a newly joined archive, before anybody asks for it.
  *
- * A PMTiles archive is useless until its header has been read: the header is
- * the first 127 bytes and names where the root directory and the JSON metadata
- * live, and without it there is no TileJSON, no vector layers, and a preview
- * that renders black. Reading it also *prioritises* what it found — the source
- * hints the root directory as critical and the metadata as high — so the head
- * of the file arrives out of order rather than whenever the download reaches
- * it.
+ * An archive is unservable until its header has been read, and reading it also
+ * prioritises the root directory and metadata so the head of the file arrives
+ * out of order. Done deliberately because otherwise it waits on the first
+ * interactive request, which against a large mirror times out first.
  *
- * None of that happened on its own. The read is on the interactive path, so it
- * ran when somebody opened the archive; and the backfill that follows it up
- * required a summary to already exist, which is precisely what a freshly joined
- * archive does not have. So the first request paid for the header, and if it
- * timed out first — which against a 72 GiB mirror with no web seed it does —
- * nothing ever tried again.
- *
- * A mirror gets there eventually by downloading everything. The point of doing
- * it deliberately is that "eventually" is hours, and the archive is servable in
- * the first few seconds if the right few kilobytes are asked for first.
+ * See docs/internals.md — "Prewarming a freshly joined archive".
  */
 
 import { guessKind } from './library.js';
