@@ -76,6 +76,10 @@ function styleUrlFor(category, newest, base) {
   const url = `${base}/latest/${category}/tiles.json`;
   const magnet = newest?.mutable?.publicKey
     ? mutableMagnet(newest.mutable.publicKey, {
+        // Whichever build is newest right now. The fragment is the whole point
+        // of this URL — a client that cannot reach the tiles.json in front of
+        // it, or cannot resolve a public key, still has something to join.
+        infoHash: newest.infoHash,
         salt: newest.mutable.salt ?? category,
         // The category, since that is what this magnet resolves to.
         name: newest.mutable.salt ?? category,

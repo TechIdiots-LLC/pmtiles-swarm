@@ -194,6 +194,9 @@ export class MutablePublisher {
    */
   magnetFor(category, entry) {
     return mutableMagnet(this.#key.publicKey, {
+      // The current build, for a client that cannot resolve the key. Absent
+      // when no entry was given, which leaves the series-only form.
+      infoHash: entry?.infoHash,
       salt: category,
       // The category rather than the build. This magnet resolves to whichever
       // archive is current, so naming one of them dates the string the moment

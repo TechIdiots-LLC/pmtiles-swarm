@@ -102,6 +102,10 @@ function buildTorrentBlock(entry, root) {
       // Built here so a consumer does not have to know how to assemble one,
       // and buildable by any node, because it contains only the public half.
       magnet: mutableMagnet(entry.mutable.publicKey, {
+        // The build that is current, so a client with no DHT — every browser —
+        // can join from this string alone rather than having to come back for
+        // an infohash.
+        infoHash: entry.infoHash,
         salt: entry.mutable.salt,
         // The category, not this build: the record resolves to whichever
         // archive is current, and `dn` is a label the metadata replaces.

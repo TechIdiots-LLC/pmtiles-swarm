@@ -285,6 +285,37 @@ describe('mutable torrents (BEP 46)', () => {
     );
   });
 
+  it('carries the current build alongside the key when given one', () => {
+    // One string for both kinds of client: a browser has no DHT and joins the
+    // xt, a DHT-capable client resolves the xs and follows the series. Without
+    // the xt, the browser has to come back for an infohash — which defeats
+    // putting the magnet in a URL fragment at all.
+    const key = generatePublisherKey();
+    const infoHash = 'A'.repeat(40);
+    const magnet = mutableMagnet(key.publicKey, {
+      infoHash,
+      name: 'planet',
+      salt: 'planet',
+    });
+
+    // xt first, because that is where a client looks for something to join.
+    assert.match(
+      magnet,
+      /^magnet:\?xt=urn:btih:a{40}&xs=urn:btpk:[a-f0-9]{64}/,
+    );
+    // Lowercased, since an infohash is compared as hex and case would make two
+    // spellings of one archive.
+    assert.doesNotMatch(magnet, /A{40}/);
+    // Both halves still readable by the parsers that care about each.
+    assert.strictEqual(
+      publicKeyFromMagnet(magnet),
+      Buffer.from(key.publicKey).toString('hex'),
+    );
+    const params = new URLSearchParams(magnet.slice('magnet:?'.length));
+    assert.strictEqual(params.get('xt'), `urn:btih:${infoHash.toLowerCase()}`);
+    assert.strictEqual(params.get('s'), 'planet');
+  });
+
   it('returns null for a magnet that is not mutable', () => {
     assert.strictEqual(
       publicKeyFromMagnet(`magnet:?xt=urn:btih:${'a'.repeat(40)}`),

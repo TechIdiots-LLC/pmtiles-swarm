@@ -629,11 +629,28 @@ for want of trying — WebTorrent's `browser` field maps `bittorrent-dht` to
 `false`, next to `net` and `ut_pex`, because a page has no UDP or TCP sockets at
 all. There is no DHT to query and nothing to substitute for one.
 
-This is why the TileJSON carries both. `torrent.mutable.magnet` is for a client
-that can resolve it; `torrent.magnet` carries a real infohash and a `wss://`
-tracker for one that cannot, which picks up a new build by re-reading the
-document. An archive announced only to `udp://` trackers is healthy in a desktop
-client and invisible from a browser, with nothing in either to say why.
+So the mutable magnet carries both: `xt=urn:btih:` for the build that is current
+when the string is built, and `xs=urn:btpk:` for the key. A DHT-capable client
+resolves the key and follows the series; a browser joins the infohash and gets a
+working archive with no further requests.
+
+Carrying only the key would have been the tidier design and was the wrong one.
+This string is routinely put in the _fragment of a tiles.json URL_, which exists
+so that one URL is self-sufficient — a plain client fetches it over HTTP, a swarm
+client joins directly. A key-only fragment forces a browser to fetch the very
+document the fragment was attached to before it can join anything, which is the
+one thing the arrangement was meant to avoid. It also throws away the failure
+case that motivated it: a client holding the URL can still reach the swarm when
+the HTTP endpoint is down, but only if the fragment names something it can join
+without asking anyone.
+
+The infohash going stale on the next rebuild is expected and harmless. A client
+that resolves the key moves off it; one that cannot was never following the
+series. It is a starting point, not a subscription.
+
+An archive announced only to `udp://` trackers is still healthy in a desktop
+client and invisible from a browser, with nothing in either to say why — so the
+infohash only helps if a `wss://` tracker is in the list beside it.
 
 ### Why a third DHT
 

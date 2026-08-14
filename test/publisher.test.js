@@ -180,15 +180,18 @@ describe('the magnet a style points at', () => {
     const { publisher } = build(entries);
     const magnet = publisher.magnetFor('openmaptiles', entries[0]);
 
-    assert.match(magnet, /^magnet:\?xs=urn:btpk:[0-9a-f]{64}/);
+    assert.match(
+      magnet,
+      /^magnet:\?xt=urn:btih:a{40}&xs=urn:btpk:[0-9a-f]{64}/,
+    );
     assert.match(magnet, /&s=openmaptiles/);
     assert.match(magnet, /&dn=openmaptiles(&|$)/, 'named for the category');
     // The web seed is what makes it useful with no peers: a client can range
     // read the archive over HTTP and still be correct.
     assert.match(magnet, /&ws=https%3A%2F%2Fexample\.org%2Fplanet\.pmtiles/);
-    // No infohash anywhere — that is the whole point, since an infohash is
-    // what goes stale on the next build.
-    assert.doesNotMatch(magnet, /btih/);
+    // The key is the handle that outlives every build. The infohash beside it
+    // is only somewhere for a client with no DHT to start, and is expected to
+    // go stale -- so what matters is that it did not displace the key.
     assert.equal(publicKeyFromMagnet(magnet), publisher.publicKeyHex);
   });
 

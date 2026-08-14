@@ -128,7 +128,10 @@ describe('tilejson', () => {
       base,
     );
     const { magnet } = doc.torrent.mutable;
-    assert.match(magnet, /^magnet:\?xs=urn:btpk:deadbeef/);
+    assert.match(
+      magnet,
+      /^magnet:\?xt=urn:btih:[a-f0-9]+&xs=urn:btpk:deadbeef/,
+    );
     assert.match(magnet, /&s=planet/);
     // Carries the web seed, so a client with no peers can still range-read the
     // archive over HTTP and derive everything it needs.
@@ -136,9 +139,11 @@ describe('tilejson', () => {
       magnet,
       /&ws=https%3A%2F%2Fmaps\.example\.org%2Ffixture\.pmtiles/,
     );
-    // And no infohash, which is the entire point: an infohash is what goes
-    // stale on the next build.
-    assert.doesNotMatch(magnet, /btih/);
+    // The key is what a style points at across rebuilds. The infohash beside
+    // it names the build that is current, so a client with no DHT -- which is
+    // every browser -- can join from this string rather than having to fetch
+    // the document it came from first.
+    assert.ok(magnet.includes(`urn:btih:${entry().infoHash}`));
   });
 
   it('omits the mutable block when the archive is not mutable', () => {

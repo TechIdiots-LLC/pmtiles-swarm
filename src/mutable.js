@@ -73,12 +73,17 @@ function rawPublicKey(publicKey) {
 /**
  * The magnet URI subscribers use to follow an archive across rebuilds.
  *
- * Note this carries no infohash: `xs=urn:btpk:` names the public key, and the
- * client resolves it through the DHT to whatever infohash is current.
+ * `xs=urn:btpk:` names the public key, which a client resolves through the DHT
+ * to whatever infohash is current. Given `infoHash` as well, the result carries
+ * `xt=urn:btih:` for the build that is current now — see docs/internals.md,
+ * "Who can follow one". The two together are what let one string serve both
+ * kinds of client: join immediately from the `xt`, follow the series from the
+ * `xs`, and a client that understands only one of them still works.
  * @param {Uint8Array | string} publicKey - Raw 32-byte public key, or its hex form.
  *   A serving node has only the hex, off the catalog entry, and must be able to
  *   build this string without ever seeing the raw key or the private half.
  * @param {object} [options] - Extra magnet parameters.
+ * @param {string} [options.infoHash] - The build that is current, so a client with no DHT has somewhere to start.
  * @param {string} [options.name] - Display name for the archive.
  * @param {string[]} [options.trackers] - Tracker announce URLs.
  * @param {string[]} [options.webSeeds] - BEP 19 web seeds.
@@ -92,7 +97,17 @@ export function mutableMagnet(publicKey, options = {}) {
     typeof publicKey === 'string'
       ? publicKey.toLowerCase()
       : Buffer.from(publicKey).toString('hex');
-  const parts = [`magnet:?xs=urn:btpk:${hex}`];
+  // `xt` first, because that is where every client looks for something to
+  // join and a good many stop reading once they have found it. A stale one is
+  // not a hazard: a client that resolves the key moves off it, and one that
+  // cannot was never going to follow the series anyway.
+  const parts = [];
+  if (options.infoHash) {
+    parts.push(`magnet:?xt=urn:btih:${String(options.infoHash).toLowerCase()}`);
+    parts.push(`xs=urn:btpk:${hex}`);
+  } else {
+    parts.push(`magnet:?xs=urn:btpk:${hex}`);
+  }
   if (options.name) parts.push(`dn=${encodeURIComponent(options.name)}`);
   if (options.salt) parts.push(`s=${encodeURIComponent(options.salt)}`);
   for (const tracker of options.trackers ?? []) {

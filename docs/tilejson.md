@@ -13,7 +13,8 @@ page is what they mean.
 - [Why extra members are safe](#why-extra-members-are-safe)
 - [`torrent`](#torrent)
   - [`torrent.mutable`](#torrentmutable)
-  - [Following one needs a DHT, which not every client has](#following-one-needs-a-dht-which-not-every-client-has)
+  - [One string, both kinds of client](#one-string-both-kinds-of-client)
+  - [Where this magnet shows up](#where-this-magnet-shows-up)
 - [`sparse`](#sparse)
 - [A complete example](#a-complete-example)
 - [What a plain client sees](#what-a-plain-client-sees)
@@ -61,42 +62,60 @@ an archive across rebuilds instead of pinning to the version the document was
 generated from. See
 [internals.md](internals.md#publishing-over-the-dht).
 
-| member      | type   |                                                                           |
-| ----------- | ------ | ------------------------------------------------------------------------- |
-| `publicKey` | string | Hex ed25519 public key. The stable identity.                              |
-| `salt`      | string | Distinguishes several archives published under one key.                   |
-| `seq`       | number | Sequence number of the record this document was built from.               |
-| `magnet`    | string | A BEP 46 magnet (`xs=urn:btpk:`), assembled so a client does not have to. |
+| member      | type   |                                                                                                |
+| ----------- | ------ | ---------------------------------------------------------------------------------------------- |
+| `publicKey` | string | Hex ed25519 public key. The stable identity.                                                   |
+| `salt`      | string | Distinguishes several archives published under one key.                                        |
+| `seq`       | number | Sequence number of the record this document was built from.                                    |
+| `magnet`    | string | A BEP 46 magnet carrying both the key (`xs=urn:btpk:`) and the current build (`xt=urn:btih:`). |
 
 Only the public half ever appears here, so any node mirroring the archive can
 serve this block — publishing is the only thing the secret is used for.
 
-### Following one needs a DHT, which not every client has
+### One string, both kinds of client
 
-A BEP 46 magnet carries no infohash — that is the point of it. The public key is
-resolved through the DHT to whichever infohash is current, so a client cannot
-join the swarm until it has done that lookup.
+`mutable.magnet` carries **both** identifiers:
 
-**Node can.** WebTorrent bundles `bittorrent-dht` and runs a DHT node of its own,
-and this project resolves these records directly through BEP 44 `get` rather than
-through any engine's API. A Node consumer reading this TileJSON can take
-`mutable.publicKey`, resolve it, and follow the archive across rebuilds with no
-further requests to this node.
+```
+magnet:?xt=urn:btih:<current build>&xs=urn:btpk:<public key>&dn=…&s=…&ws=…
+```
 
-**A browser cannot.** WebTorrent's `browser` field maps `bittorrent-dht` to
-`false`, so the browser build ships an empty stub in its place — along with
-`net` and `ut_pex`, for the same underlying reason: a page has no UDP or TCP
-sockets, only WebRTC and HTTP. There is no DHT to query and no way to add one.
+- `xs=urn:btpk:` is the public key. Resolving it through the DHT gives whichever
+  infohash is current, now and after every future rebuild.
+- `xt=urn:btih:` is the build that was current when the document was generated.
 
-So a page uses `torrent.magnet`, which carries a real `xt=urn:btih:` infohash and
-a `wss://` tracker, and picks up a new build by re-reading the TileJSON. That is
-not a workaround — re-reading a URL is what a browser is good at, and it is one
-request against a document it already had to fetch.
+A client reads whichever it understands. A DHT-capable one resolves the key and
+follows the series indefinitely; one without a DHT joins the infohash and gets a
+working archive immediately.
+
+That second case is the whole reason the infohash is there, and it is not a
+minor one. **A browser has no DHT** — WebTorrent's `browser` field maps
+`bittorrent-dht` to `false`, alongside `net` and `ut_pex`, because a page has no
+UDP or TCP sockets at all. Given only a public key, a browser would have to fetch
+this TileJSON before it could join anything. Since this magnet is routinely
+carried in the _fragment of the TileJSON URL itself_ — see
+[`styleUrl`](#where-this-magnet-shows-up) — that would make the fragment useless
+to the one client most likely to be reading it.
+
+The infohash does go stale on the next rebuild. That is acceptable and expected:
+a client that can resolve the key moves off it, and one that cannot was never
+going to follow the series anyway. It is a starting point, not a subscription.
+
+### Where this magnet shows up
+
+Three places, all built from the same function, so they agree:
+
+- `torrent.mutable.magnet` in this document.
+- The fragment on `styleUrl`, from `GET /api/categories` — a
+  `…/latest/<category>/tiles.json#magnet:?…`. One string that a plain client
+  fetches over HTTP and a swarm client joins directly, with no extra round trip
+  for either.
+- Whatever the publisher hands out for a category.
 
 The practical consequence for whoever creates torrents: an archive announced only
 to `udp://` trackers is perfectly healthy in a desktop client and invisible from
 a browser, with nothing in either to say why. Keep a `wss://` tracker in the
-list.
+list, or the `xt` above buys a browser nothing.
 
 ## `sparse`
 
@@ -138,7 +157,7 @@ See
       "publicKey": "9f8e7d...",
       "salt": "planet",
       "seq": 1755180000,
-      "magnet": "magnet:?xs=urn:btpk:9f8e7d...&dn=planet"
+      "magnet": "magnet:?xt=urn:btih:a1b2c3d4e5f6...&xs=urn:btpk:9f8e7d...&dn=planet"
     }
   }
 }

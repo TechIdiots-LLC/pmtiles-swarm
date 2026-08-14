@@ -269,10 +269,13 @@ describe('the URL a style should point at', () => {
     }
   });
 
-  it('prefers the mutable magnet, which a category needs', async () => {
-    // The whole point for a category: an infohash names one build and goes
-    // stale on the next, while the URL keeps following the category. A BEP 46
-    // magnet names the category and resolves the current build over the DHT.
+  it('carries both the key and the build that is current', async () => {
+    // The point for a category is the key: an infohash names one build and
+    // goes stale on the next, while the URL keeps following the category.
+    // The infohash rides along anyway, because a browser has no DHT and would
+    // otherwise have to fetch the tiles.json this fragment is attached to
+    // before it could join anything -- which is the one thing putting a magnet
+    // in the fragment was supposed to avoid.
     const api = await serve([
       entry({
         infoHash: 'b'.repeat(40),
@@ -285,16 +288,14 @@ describe('the URL a style should point at', () => {
     try {
       const [row] = await api.get('/api/categories').then((r) => r.json());
       const fragment = row.endpoints.styleUrl.split('#')[1];
-      assert.match(fragment, /^magnet:\?xs=urn:btpk:/);
+      assert.match(fragment, /^magnet:\?xt=urn:btih:b{40}&xs=urn:btpk:/);
       assert.match(fragment, /&s=openmaptiles/);
       // Carries the web seed, so a client with no peers can still range-read
       // the archive and derive what it needs.
       assert.match(fragment, /&ws=https%3A/);
-      assert.doesNotMatch(
-        fragment,
-        /btih/,
-        'no infohash, so nothing to go stale',
-      );
+      // The key is what survives a rebuild; it must not have been displaced by
+      // the infohash that will not.
+      assert.match(fragment, /xs=urn:btpk:(de){32}(&|$)/);
     } finally {
       await api.close();
     }
