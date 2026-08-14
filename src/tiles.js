@@ -5,6 +5,7 @@ import { PMTiles, SharedPromiseCache } from 'pmtiles';
 import { TorrentSource } from 'pmtiles-torrent';
 import { NodeFileSource } from './file-source.js';
 import { onDiskPath } from './incomplete.js';
+import { MbtilesArchive, isMbtiles } from './mbtiles.js';
 import { summarize } from './pmtiles-probe.js';
 import { LibtorrentReadEngine } from './read-engine.js';
 
@@ -101,6 +102,11 @@ export class TileStore {
     if (!tile?.data) return null;
 
     const data = Buffer.from(tile.data);
+    // Already compressed where it was stored. MBTiles keeps vector tiles
+    // gzipped by definition, so they go out as they came rather than being
+    // inflated here only to be deflated again below.
+    if (tile.encoding) return { data, encoding: tile.encoding };
+
     const format = entry.pmtiles?.format;
     if (!format || PRECOMPRESSED.has(format)) return { data };
 
@@ -242,6 +248,28 @@ export class TileStore {
    */
   async #openArchive(entry) {
     const local = await this.#completeLocalPath(entry);
+
+    // An MBTiles archive is servable only from a complete local copy — see
+    // docs/internals.md, "Serving an MBTiles archive". The 415 is deliberate
+    // where it is whole and 503 where it is not: one is "never", the other is
+    // "not yet", and they call for different things from whoever asked.
+    if (entry.kind === 'mbtiles' || isMbtiles(entry.name)) {
+      if (!local) {
+        throw new TileReadError(
+          'this MBTiles archive is not complete on this node yet; it can be ' +
+            'served as tiles once the download finishes',
+          503,
+        );
+      }
+      const archive = await MbtilesArchive.open(local);
+      return {
+        mode: 'local',
+        archive,
+        openedAt: new Date().toISOString(),
+        close: () => archive.close(),
+      };
+    }
+
     if (local) {
       const source = new NodeFileSource(local);
       return {

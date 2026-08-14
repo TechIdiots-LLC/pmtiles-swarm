@@ -231,10 +231,12 @@ publish any readable file to a public swarm, and the format is checked by conten
 rather than by extension, because the extension is whatever the caller said it
 was.
 
-PMTiles and MBTiles are both recognised. Only PMTiles can have its tiles served —
-MBTiles is SQLite, whose pages are scattered rather than spatially clustered, so
-on-demand reading over a swarm does not work the way it does for a flat,
-Hilbert-ordered file — but both are perfectly good things to distribute.
+PMTiles and MBTiles are both recognised, and both can have their tiles served —
+PMTiles at any time, MBTiles once this node holds a complete copy. MBTiles is
+SQLite, whose pages are scattered rather than spatially clustered, so on-demand
+reading over a swarm does not work the way it does for a flat, Hilbert-ordered
+file; a finished local copy has no such problem. See
+[serving-tiles.md](serving-tiles.md#what-can-be-served).
 
 ## Trackers
 

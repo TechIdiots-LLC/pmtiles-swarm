@@ -1916,12 +1916,13 @@ export function createApp({
       let entry = catalog.get(req.params.infoHash);
       if (!entry) return res.status(404).json({ error: 'unknown archive' });
 
-      // Only PMTiles can be read a tile at a time. MBTiles is SQLite: reading
-      // it needs the whole file and a database engine, so it is distributed
-      // here but never served.
-      if (entry.kind && entry.kind !== 'pmtiles') {
+      // MBTiles is servable, but only from a complete local copy: it is
+      // SQLite, so it cannot be read a byte range at a time out of the swarm
+      // the way PMTiles can. The store decides that, since only it knows
+      // whether the download has finished — anything else is refused outright.
+      if (entry.kind && entry.kind !== 'pmtiles' && entry.kind !== 'mbtiles') {
         return res.status(415).json({
-          error: `this is a ${entry.kind} archive, and only PMTiles can be served as tiles`,
+          error: `this is a ${entry.kind} archive, and only PMTiles and MBTiles can be served as tiles`,
           kind: entry.kind,
         });
       }
@@ -2022,13 +2023,30 @@ export function createApp({
         complete: entry.complete === true,
       };
 
+      // An MBTiles archive becomes servable by waiting, which is exactly what
+      // this endpoint is asked to distinguish — but only by finishing, not by
+      // a header arriving. It cannot be read a byte range at a time, so there
+      // is no partial state in which it is usable.
+      if (kind === 'mbtiles') {
+        if (!shape.complete) {
+          return res.status(503).json({
+            ...shape,
+            ready: false,
+            reason:
+              'MBTiles is SQLite and cannot be read out of the swarm, so this ' +
+              'becomes servable when the download finishes',
+          });
+        }
+        return res.json({ ...shape, ready: true });
+      }
+
       if (kind !== 'pmtiles') {
         return res.status(415).json({
           ...shape,
           ready: false,
           reason:
             `this is ${kind ? `a ${kind}` : 'not a PMTiles'} archive, and only ` +
-            'PMTiles can be read a byte range at a time — it will not become ' +
+            'PMTiles and MBTiles can be served as tiles — it will not become ' +
             'servable by waiting',
         });
       }
@@ -2103,11 +2121,13 @@ export function createApp({
     '/archives/:infoHash/:z/:x/:y.:ext',
     route(async (req, res) => {
       const { infoHash, ext } = req.params;
-      const entry = catalog.get(infoHash);
+      let entry = catalog.get(infoHash);
       if (!entry) return res.status(404).json({ error: 'unknown archive' });
-      if (entry.kind && entry.kind !== 'pmtiles') {
+      // MBTiles passes through here and is turned away by the store instead,
+      // which is the only layer that knows whether the download has finished.
+      if (entry.kind && entry.kind !== 'pmtiles' && entry.kind !== 'mbtiles') {
         return res.status(415).json({
-          error: `this is a ${entry.kind} archive, and only PMTiles can be served as tiles`,
+          error: `this is a ${entry.kind} archive, and only PMTiles and MBTiles can be served as tiles`,
         });
       }
 
@@ -2121,6 +2141,22 @@ export function createApp({
       if (z < 0 || z > 26 || x < 0 || y < 0 || x >= limit || y >= limit) {
         return res.status(400).json({ error: 'tile coordinates out of range' });
       }
+      // An MBTiles archive never went through the PMTiles prober, so it
+      // reaches here with no summary and nothing to check the extension
+      // against. Read one now: it is a handful of rows out of a local SQLite
+      // file, kept in the catalog, so this is paid once per archive rather
+      // than per tile. A failure is left to the read below to report, which
+      // already knows how to say "not complete yet".
+      if (!entry.pmtiles?.format) {
+        const summary = await tiles.summarize(entry.infoHash).catch(() => null);
+        if (summary) {
+          entry = await catalog.put({
+            infoHash: entry.infoHash,
+            pmtiles: summary,
+          });
+        }
+      }
+
       if (!extensionMatches(entry, ext)) {
         return res.status(400).json({
           error: `this archive holds ${entry.pmtiles?.format ?? 'unknown'} tiles`,

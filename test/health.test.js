@@ -231,25 +231,34 @@ describe('whether one archive can be served yet', () => {
 
   it('says never for something that cannot be served at all', async () => {
     // 415 rather than 503, because the difference matters to whoever is
-    // waiting: an MBTiles archive is distributed here and cannot be read a
-    // byte range at a time, so polling it would be polling for ever.
+    // waiting: this is not a tile archive at all, so polling it would be
+    // polling for ever.
     const node = await withArchives([
-      { infoHash: hash('e'), name: 'terrain.mbtiles', kind: 'mbtiles' },
       { infoHash: hash('f'), name: 'planet-260803.osm.pbf' },
     ]);
     try {
-      for (const c of ['e', 'f']) {
-        const response = await node.ready(hash(c));
-        assert.equal(
-          response.status,
-          415,
-          `${c} should be refused, not deferred`,
-        );
-        assert.match(
-          (await response.json()).reason,
-          /will not become servable/,
-        );
-      }
+      const response = await node.ready(hash('f'));
+      assert.equal(response.status, 415, 'should be refused, not deferred');
+      assert.match((await response.json()).reason, /will not become servable/);
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('says "not yet" for an MBTiles archive still arriving', async () => {
+    // It cannot be read out of the swarm, but it does become servable — when
+    // the download finishes. 503 rather than 415, because polling this one
+    // will eventually get an answer.
+    const node = await withArchives([
+      { infoHash: hash('e'), name: 'terrain.mbtiles', kind: 'mbtiles' },
+    ]);
+    try {
+      const response = await node.ready(hash('e'));
+      assert.equal(response.status, 503);
+      assert.match(
+        (await response.json()).reason,
+        /when the download finishes/,
+      );
     } finally {
       await node.close();
     }

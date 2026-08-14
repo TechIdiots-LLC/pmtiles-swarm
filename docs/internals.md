@@ -15,6 +15,7 @@ Operator-facing documentation is elsewhere — see [publishing](publishing.md),
 - [Joining a torrent, and learning about it afterwards](#joining-a-torrent-and-learning-about-it-afterwards)
 - [File timestamps and ETags](#file-timestamps-and-etags)
 - [Overlapping fetches](#overlapping-fetches)
+- [Serving an MBTiles archive](#serving-an-mbtiles-archive)
 - [Answering for a tile that is not there](#answering-for-a-tile-that-is-not-there)
 - [Reading an archive that is still arriving](#reading-an-archive-that-is-still-arriving)
 - [The health endpoint](#the-health-endpoint)
@@ -236,6 +237,55 @@ than as a default, or it would override the setting below it.
 
 Whatever was read is republished in the TileJSON, so the next node to mirror the
 archive starts from the same answer instead of the guess.
+
+## Serving an MBTiles archive
+
+MBTiles cannot be read out of a swarm. It is SQLite, whose pages are laid out
+for a B-tree rather than spatially, so "the tiles near this tile are near it in
+the file" — the property every on-demand read here rests on — simply does not
+hold. Reading one tile can touch pages anywhere in the file, which over a swarm
+means fetching pieces from anywhere in the archive.
+
+None of that is true once the download has finished. A complete MBTiles on local
+disk is an ordinary SQLite database holding the same tiles and the same metadata
+a PMTiles would, and refusing to serve it is refusing something that works.
+
+So it is served, but only from a complete local copy. The tile store is the
+layer that decides, because it is the only one that knows whether the download
+has finished; the API no longer refuses by file kind alone.
+
+The three answers stay distinct, because they call for different things from
+whoever asked:
+
+- **415** — not a tile archive at all. Waiting will not help.
+- **503** — an MBTiles that is still arriving. Waiting is exactly what helps,
+  but only by finishing: unlike PMTiles there is no partial state in which it
+  becomes readable, so there is nothing to prewarm and no header to wait for.
+- **200** — complete, and served.
+
+Read through `node:sqlite`, which is built in, so this costs no dependency. It
+is imported at the point an MBTiles archive is first opened rather than at
+module load, because requiring it prints an ExperimentalWarning and a node that
+never touches MBTiles should not have to explain one. The database is opened
+read-only: this node is seeding those exact bytes, and a stray write would
+change the file underneath the torrent and fail hash checks for every peer
+reading it.
+
+Two details are easy to get wrong and silent when you do:
+
+- **Rows are TMS, URLs are XYZ.** `tile_row` counts from the bottom, so it is
+  `2^z - 1 - y`. Getting this backwards does not error — it serves a real tile
+  from the wrong hemisphere.
+- **`pbf` means gzipped**, by the spec's own definition. It goes out as stored,
+  with `content-encoding: gzip`, rather than being inflated here and deflated
+  again a layer up. Writers exist that store raw protobuf anyway, so the gzip
+  magic number is checked rather than assumed: claiming an encoding the bytes do
+  not have hands the browser something it cannot read.
+
+An MBTiles archive never goes through the PMTiles prober, so it reaches the tile
+route with no summary and nothing to check the requested extension against. One
+is read on first use and kept in the catalog — a handful of rows from a local
+file, paid once per archive rather than per tile.
 
 ## Reading an archive that is still arriving
 

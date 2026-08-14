@@ -13,22 +13,33 @@ GET /archives/{infohash}/archive.torrent     the .torrent
 `jpg`, `webp`, `avif` for raster. Asking for the wrong one is a 400 rather than
 a silently wrong content type.
 
-## Only PMTiles is served
+## What can be served
 
-An archive that is not PMTiles answers **415** here, with the reason, and the
-console does not offer it a TileJSON URL at all.
+PMTiles, always. MBTiles, once this node holds a complete copy. Anything else
+answers **415** here, with the reason, and the console does not offer it a
+TileJSON URL at all.
 
-MBTiles is SQLite. Reading a tile from it means reading pages scattered across
-the file and running a database engine over them, where PMTiles is flat and
-Hilbert-ordered — which is exactly what makes reading one tile from a swarm a
-matter of fetching one or two pieces. So MBTiles is distributed and seeded here
-perfectly well; it just has no tile endpoint.
+The difference is what each format costs to read. PMTiles is flat and
+Hilbert-ordered, so one tile is one or two pieces and an archive can be served
+while it is still arriving — a node holding almost none of a 72 GiB archive can
+still answer for any tile in it. MBTiles is SQLite, whose pages are laid out for
+a B-tree rather than spatially, so reading one tile can touch pages anywhere in
+the file. Over a swarm that is not a read, it is a download.
+
+Once the download has finished, that objection disappears: the file is on local
+disk and is an ordinary SQLite database holding the same tiles and the same
+metadata. So an MBTiles archive answers **503** while it is arriving and serves
+normally once it is complete. There is no partial state in between — unlike
+PMTiles it does not become readable a header at a time, so there is nothing to
+prewarm.
 
 A joined torrent takes a first guess at its format from its filename, so an
 `.mbtiles` is known before any byte arrives. The first read settles it for
 certain, and the answer is recorded — otherwise asking for the TileJSON of an
-MBTiles archive would pull pieces out of the swarm on every attempt, doing work
-that could never succeed.
+archive that turns out to hold no tiles at all would pull pieces out of the
+swarm on every attempt, doing work that could never succeed.
+
+See [internals.md](internals.md#serving-an-mbtiles-archive).
 
 ## Missing tiles
 

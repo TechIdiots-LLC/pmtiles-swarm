@@ -3002,16 +3002,17 @@ describe('reading a joined archive on demand', () => {
     }
   });
 
-  it('refuses a tile endpoint for an archive that is not PMTiles', async () => {
-    // MBTiles is SQLite. It can be distributed here perfectly well, but it
-    // cannot be read a byte range at a time, so there is no tile endpoint to
-    // give out — and offering one produces a URL that fails later, somewhere
-    // less obvious.
-    const dir = await fs.mkdtemp(path.join(workspace, 'mbtiles-'));
+  it('refuses a tile endpoint for an archive that holds no tiles', async () => {
+    // Something distributed here that is not a tile archive at all — a source
+    // PBF, say. It can be seeded perfectly well, but there is no tile endpoint
+    // to give out, and offering one produces a URL that fails later, somewhere
+    // less obvious. MBTiles is a separate case: see mbtiles.test.js, since it
+    // does become servable once complete.
+    const dir = await fs.mkdtemp(path.join(workspace, 'notiles-'));
     const archive = entry({
       savePath: dir,
       pmtiles: undefined,
-      kind: 'mbtiles',
+      kind: 'unknown',
     });
     const catalog = new Catalog(dir);
     await catalog.load();
@@ -3035,7 +3036,7 @@ describe('reading a joined archive on demand', () => {
     try {
       const json = await fetch(`${base}/tiles.json`);
       assert.equal(json.status, 415);
-      assert.match((await json.json()).error, /only PMTiles can be served/);
+      assert.match((await json.json()).error, /can be served as tiles/);
 
       // The tiles themselves too, not just the description of them.
       assert.equal((await fetch(`${base}/0/0/0.png`)).status, 415);
