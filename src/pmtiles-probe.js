@@ -36,7 +36,27 @@ const TILE_TYPES = {
  * @property {string} [description] - Description from the archive metadata.
  * @property {string} [attribution] - Attribution from the archive metadata.
  * @property {object[]} [vectorLayers] - Vector layer definitions, for pbf archives.
+ * @property {boolean} [sparse] - What the archive says about missing tiles, if it says anything.
  */
+
+/**
+ * Reads a flag out of archive metadata, which is not reliably typed.
+ *
+ * A PMTiles JSON blob carries a real boolean, but the same metadata routinely
+ * arrives having been round-tripped through MBTiles, where every value is TEXT
+ * — so the honest reading of `"false"` is false, not "a non-empty string".
+ * @param {unknown} value - Whatever the metadata held.
+ * @returns {boolean | undefined} - The flag, or undefined if it said nothing.
+ */
+export function metadataFlag(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const text = String(value).trim().toLowerCase();
+  if (['true', '1', 'yes'].includes(text)) return true;
+  if (['false', '0', 'no'].includes(text)) return false;
+  return undefined;
+}
 
 /**
  * Reads an archive's header and metadata.
@@ -79,6 +99,10 @@ export function summarize(header, metadata = {}) {
     description: metadata.description,
     attribution: metadata.attribution,
     vectorLayers: metadata.vector_layers,
+    // What the archive says about its own missing tiles. tileserver-gl reads
+    // the same key, so an archive built to be served there carries the answer
+    // with it and does not have to be configured again here.
+    sparse: metadataFlag(metadata.sparse),
   };
 }
 

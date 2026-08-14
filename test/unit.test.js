@@ -5,6 +5,7 @@ import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { Catalog } from '../src/catalog.js';
 import { formatBytes, parseFeed, renderFeed } from '../src/feed.js';
+import { metadataFlag } from '../src/pmtiles-probe.js';
 import {
   generatePublisherKey,
   mutableMagnet,
@@ -289,5 +290,33 @@ describe('mutable torrents (BEP 46)', () => {
       publicKeyFromMagnet(`magnet:?xt=urn:btih:${'a'.repeat(40)}`),
       null,
     );
+  });
+});
+
+describe('archive metadata flags', () => {
+  it('reads a real boolean', () => {
+    assert.equal(metadataFlag(true), true);
+    assert.equal(metadataFlag(false), false);
+  });
+
+  it('reads the strings MBTiles produces, where every value is TEXT', () => {
+    // An archive's metadata routinely arrives having been round-tripped
+    // through MBTiles, so "false" has to mean false. Read as a plain
+    // truthiness test it would mean true, which is the opposite.
+    assert.equal(metadataFlag('false'), false);
+    assert.equal(metadataFlag('0'), false);
+    assert.equal(metadataFlag('no'), false);
+    assert.equal(metadataFlag('true'), true);
+    assert.equal(metadataFlag('1'), true);
+    assert.equal(metadataFlag('TRUE'), true);
+  });
+
+  it('says nothing when the metadata said nothing', () => {
+    // Distinct from false: an archive that does not mention sparse must fall
+    // through to the node's setting, not override it with a default.
+    assert.equal(metadataFlag(undefined), undefined);
+    assert.equal(metadataFlag(null), undefined);
+    assert.equal(metadataFlag(''), undefined);
+    assert.equal(metadataFlag('maybe'), undefined);
   });
 });

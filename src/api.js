@@ -255,8 +255,26 @@ export function createApp({
       });
   };
 
+  /**
+   * Whether a missing tile should answer 404 rather than 204.
+   *
+   * Four sources, most specific first. The archive's own metadata sits above
+   * the node-wide default deliberately: an archive that declares `sparse` knows
+   * something this node does not, and a blanket setting chosen because most
+   * archives here are raster would otherwise force 404 onto a vector archive
+   * that had explicitly said not to.
+   *
+   * The last resort is a guess from the tile format, and only a guess — PMTiles
+   * cannot say whether raster data is a DEM, so raster defaults to the answer a
+   * DEM needs.
+   * @param {object} entry - The catalog entry.
+   * @returns {boolean} - True for 404, false for 204.
+   */
   const isSparse = (entry) =>
-    entry.sparse ?? config.tiles?.sparse ?? entry.pmtiles?.format !== 'pbf';
+    entry.sparse ??
+    entry.pmtiles?.sparse ??
+    config.tiles?.sparse ??
+    entry.pmtiles?.format !== 'pbf';
 
   /**
    * A stored token, as it may be shown.

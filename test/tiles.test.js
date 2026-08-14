@@ -902,6 +902,46 @@ describe('missing tile status', () => {
       404,
     );
   });
+
+  it('believes what the archive says about itself', async () => {
+    // tileserver-gl reads `sparse` out of the archive's own metadata, so an
+    // archive built to be served there already carries the answer. Reading it
+    // here means the same file behaves the same way in both, without being
+    // configured twice.
+    assert.equal(
+      await missingTileStatus({
+        pmtiles: { format: 'webp', contentType: 'image/webp', sparse: false },
+      }),
+      204,
+    );
+    assert.equal(
+      await missingTileStatus({ pmtiles: { format: 'pbf', sparse: true } }),
+      404,
+    );
+  });
+
+  it('puts the archive above the node default, and the operator above both', async () => {
+    // A node-wide setting is chosen because most archives here are one kind.
+    // An archive that declares `sparse` knows something the node does not, so
+    // the blanket must not silently overrule it -- that is the failure this
+    // ordering exists to prevent.
+    assert.equal(
+      await missingTileStatus({
+        config: { sparse: true },
+        pmtiles: { format: 'webp', contentType: 'image/webp', sparse: false },
+      }),
+      204,
+    );
+    // Setting it on the entry is still an operator overriding the archive,
+    // which stays the last word.
+    assert.equal(
+      await missingTileStatus({
+        entry: { sparse: true },
+        pmtiles: { format: 'pbf', sparse: false },
+      }),
+      404,
+    );
+  });
 });
 
 describe('publishing archives for web seeding', () => {

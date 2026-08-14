@@ -52,6 +52,9 @@ export function buildTileJson(entry, baseUrl) {
   if (summary.description) doc.description = summary.description;
   if (summary.attribution) doc.attribution = summary.attribution;
   if (summary.vectorLayers) doc.vector_layers = summary.vectorLayers;
+  // Passed on so the next node to mirror this archive reads the same answer we
+  // did, rather than falling back to a guess from the tile format.
+  if (summary.sparse !== undefined) doc.sparse = summary.sparse;
   if (summary.format === 'pbf') doc.format = 'pbf';
   else if (summary.format) doc.format = summary.format;
 

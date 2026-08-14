@@ -217,8 +217,25 @@ Vector is the other way round: an empty tile legitimately means _no features
 here_, and 404 would make a map log errors while panning past the edge of
 coverage.
 
-So this defaults by format and is overridable per archive and globally, which is
-the same arrangement tileserver-gl uses.
+Defaulting by format is only a guess, and a weak one: PMTiles records that tiles
+are webp, not that they are terrain, so raster falls back to the answer a DEM
+needs because that is the case where guessing wrong renders visibly broken.
+
+The guess is the last resort rather than the rule. An archive's own metadata can
+carry `sparse`, which is where tileserver-gl reads it from, so an archive built
+to be served there arrives already knowing the answer — and that reading is
+preferred over this node's default, since a blanket setting was chosen without
+reference to any particular archive. An operator can still override it per
+archive, which stays the last word.
+
+Metadata is not reliably typed. A PMTiles JSON blob holds a real boolean, but the
+same metadata often arrives having been round-tripped through MBTiles, where
+every value is TEXT — so `"false"` has to be read as false rather than as a
+non-empty string, and anything unrecognised has to read as _said nothing_ rather
+than as a default, or it would override the setting below it.
+
+Whatever was read is republished in the TileJSON, so the next node to mirror the
+archive starts from the same answer instead of the guess.
 
 ## Reading an archive that is still arriving
 

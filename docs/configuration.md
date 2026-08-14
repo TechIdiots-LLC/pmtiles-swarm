@@ -419,9 +419,24 @@ header from, and taking a full minute to say so looks like a hang rather than
 see [internals.md](internals.md#reading-an-archive-that-is-still-arriving).
 
 `sparse` is not cosmetic; see
-[internals.md](internals.md#answering-for-a-tile-that-is-not-there). Left unset it
-defaults per archive by format, and an individual archive can override it. Same
-rule and same name as tileserver-gl.
+[internals.md](internals.md#answering-for-a-tile-that-is-not-there). Four things
+decide it, most specific first:
+
+1. `sparse` set on the individual archive — an operator's decision about this
+   one file, and the last word.
+2. `sparse` in the archive's own metadata, which is where tileserver-gl reads it
+   from too.
+3. `tiles.sparse`, this node's default.
+4. Failing all of that, a guess from the tile format: 404 for raster, 204 for
+   vector.
+
+The archive sits above the node default on purpose. A blanket setting is chosen
+because most archives here are one kind; an archive that declares `sparse` knows
+something the node does not, and must not be silently overruled by a default
+that was never about it.
+
+What the archive said is republished in its TileJSON, so a node mirroring it
+reads the same answer rather than falling back to the guess.
 
 ### Prewarming
 
