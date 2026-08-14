@@ -3,10 +3,14 @@
   The public front door, served at / on the public listener when the console
   has an admin port of its own.
 
-  Reads /api/catalog and /api/categories, both of which are already public and
-  already filtered by feedCategories — so this page shows exactly what this node
-  publishes and cannot show anything else. It is deliberately plain: no build
-  step, no dependencies, and it degrades to a readable list of links if the
+  Reads /latest/ for the categories and, for the archives, /api/catalog where a
+  credential allows it and /feed.xml where one does not — everything under /api/
+  is guarded on a node with any authentication configured, which is most of them,
+  and a front page that answers 401 to its own audience is worse than none.
+
+  All three are filtered by feedCategories, so this page shows exactly what the
+  node publishes and cannot show anything else. It is deliberately plain: no
+  build step, no dependencies, and it degrades to a readable list of links if the
   script does not run.
 -->
 <html lang="en">
@@ -167,7 +171,7 @@
       <noscript>
         <p class="failed">
           This page lists the archives using JavaScript. Without it, the same
-          information is at <a href="/api/catalog">/api/catalog</a> as JSON and
+          information is at <a href="/latest/">/latest/</a> as JSON and
           <a href="/feed.xml">/feed.xml</a> as RSS.
         </p>
       </noscript>
@@ -176,8 +180,7 @@
       <div id="archives"><p class="empty">Loading…</p></div>
 
       <footer>
-        <a href="/api/catalog">catalog JSON</a> ·
-        <a href="/api/categories">categories JSON</a> ·
+        <a href="/latest/">categories JSON</a> ·
         <a href="/feed.xml">RSS feed</a> ·
         <a href="/health">health</a>
       </footer>
@@ -280,27 +283,85 @@
 
       // Categories are the handle that survives a rebuild, so they go first —
       // a style should point at one of these rather than at an infohash.
+      // Categories first, and given the same weight as an archive, because
+      // for most visitors they are the more useful thing: an archive URL names
+      // one build and goes stale on the next, while a category names whichever
+      // is current and keeps working across rebuilds. A style should point at
+      // one of these.
       const renderCategories = (categories) => {
         const host = document.getElementById('categories');
-        const usable = categories.filter((c) => c.endpoints?.styleUrl);
+        host.textContent = '';
+        const usable = categories.filter((c) => c.endpoints);
         if (usable.length === 0) return;
 
         host.append(el('h2', null, 'Categories'));
-        const urls = el('div', 'urls');
+        host.append(
+          el(
+            'p',
+            'facts',
+            'These follow the newest build. Point a style at one of these ' +
+              'rather than at an archive below, and it keeps working when the ' +
+              'archive is rebuilt.',
+          ),
+        );
+
         for (const entry of usable) {
-          // `category` and `archives` are what /api/categories actually calls
+          // `category` and `archives` are what the endpoint actually calls
           // these; `name` and `count` would read better and are not there.
-          const label = Number.isFinite(entry.archives)
-            ? `${entry.category} (${entry.archives})`
-            : entry.category;
-          urls.append(
-            urlRow(label, new URL(entry.endpoints.styleUrl, location.href).href),
-          );
+          const card = el('div', 'archive');
+          const head = el('header');
+          head.append(el('span', 'name', entry.category));
+          if (Number.isFinite(entry.archives)) {
+            head.append(
+              el(
+                'span',
+                'tag',
+                `${entry.archives} build${entry.archives === 1 ? '' : 's'}`,
+              ),
+            );
+          }
+          card.append(head);
+
+          if (entry.newest?.name) {
+            const facts = [`newest: ${entry.newest.name}`];
+            const size = bytes(entry.newest.size);
+            if (size) facts.push(size);
+            card.append(el('p', 'facts', facts.join(' · ')));
+          }
+
+          const links = el('div', 'links');
+          const add = (href, text) => {
+            const a = el('a', null, text);
+            a.href = href;
+            links.append(a);
+          };
+          const ends = entry.endpoints;
+          if (ends.tileJson) add(ends.tileJson, 'TileJSON');
+          if (ends.torrent) add(ends.torrent, '.torrent');
+          if (ends.magnet) add(ends.magnet, 'magnet');
+          if (ends.feed) add(ends.feed, 'RSS');
+          card.append(links);
+
+          const urls = el('div', 'urls');
+          // The one worth copying: the TileJSON URL with the magnet in its
+          // fragment, which a plain client fetches over HTTP and a swarm-aware
+          // one joins directly.
+          if (ends.styleUrl) {
+            urls.append(
+              urlRow('style URL', new URL(ends.styleUrl, location.href).href),
+            );
+          } else if (ends.tileJson) {
+            urls.append(
+              urlRow('TileJSON', new URL(ends.tileJson, location.href).href),
+            );
+          }
+          if (urls.childElementCount > 0) card.append(urls);
+
+          host.append(card);
         }
-        host.append(urls);
+
         host.append(el('h2', null, 'Archives'));
       };
-
       const PMTILES_NS =
         'https://github.com/TechIdiots-LLC/pmtiles-swarm/ns/1.0';
 
@@ -381,11 +442,17 @@
 
         render(archives.filter((archive) => archive.infoHash));
 
-        // Best effort, and after the archives: this one is guarded on an
-        // authenticated node and the page is worth showing without it.
+        // /latest/ rather than /api/categories: the same list, without a
+        // credential. This is the part most visitors actually want -- an
+        // archive URL names one build, a category names whichever is current
+        // -- so it is worth more than a best-effort attempt at a guarded
+        // endpoint that answers 401 to exactly the audience this page is for.
         try {
-          const response = await fetch('/api/categories');
-          if (response.ok) renderCategories(await response.json());
+          const response = await fetch('/latest/');
+          if (response.ok) {
+            const body = await response.json();
+            renderCategories(body.categories ?? []);
+          }
         } catch {
           // Nothing to say. The archives above are the substance.
         }

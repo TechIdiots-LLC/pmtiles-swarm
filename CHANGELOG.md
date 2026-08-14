@@ -58,6 +58,14 @@
   `/api/categories`, filtered by the same `feedCategories` rule, so it can show nothing that was
   not already published — and it is not the console, which stays on the admin port.
   `publicIndex: false` turns it off, withdrawing the three paths it needs with it.
+- **`GET /latest/` lists the categories, without a credential.** Everything else under
+  `/latest/` is public — the TileJSON, the torrent, the magnet, the per-category feed — so the
+  index of what it offers belongs beside them rather than behind the console's door. The public
+  front page now leads with categories rather than only listing archives, which is the more
+  useful handle for a visitor: an archive URL names one build and goes stale on the next, while a
+  category names whichever is current. Same builder as `/api/categories`, so the two cannot drift
+  apart. The page's footer and its noscript block no longer link `/api/` paths that answer 401 to
+  exactly the audience they are shown to.
 - **The feed carries the BEP 46 identity.** `<pmtiles:mutable>` holds the magnet naming an
   archive's publishing key, so a consumer following a category across rebuilds can read the
   public key straight out of the feed instead of fetching a TileJSON to find it — the key rides

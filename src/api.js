@@ -1744,9 +1744,19 @@ export function createApp({
   // what makes a tile immutable, but leaves nothing for a style to point at
   // that survives a rebuild — and until now the endpoints that give you one
   // were documented rather than discoverable.
-  app.get(
-    '/api/categories',
-    route(async (req, res) => {
+  /**
+   * Every category, with the endpoints that resolve to its newest build.
+   *
+   * Shared by the guarded `/api/categories` and the public `/latest/`, which
+   * want exactly the same answer — one is the console asking and the other is
+   * a stranger, and neither is told anything the other is not. Filtering runs
+   * through `publishesEntry`, so `feedCategories` and whatever token was
+   * presented decide what appears, the same as everywhere else.
+   * @param {import('express').Request} req - The request, for its credential and base URL.
+   * @returns {object[]} - One row per category, sorted by name.
+   */
+  const describeCategories = (req) => {
+    {
       const base = baseUrl(req);
       const visible = catalog
         .list()
@@ -1759,51 +1769,82 @@ export function createApp({
         }
       }
 
-      res.json(
-        [...counts.keys()].sort().map((category) => {
-          const newest = newestIn(category, req);
-          // Only PMTiles has tiles to serve, so a category whose newest build
-          // is an MBTiles archive gets a feed and a torrent but no tile
-          // endpoint — the same rule as an individual archive.
-          const servable =
-            Boolean(newest?.pmtiles) &&
-            (newest.kind ?? 'pmtiles') === 'pmtiles';
+      return [...counts.keys()].sort().map((category) => {
+        const newest = newestIn(category, req);
+        // Only PMTiles has tiles to serve, so a category whose newest build
+        // is an MBTiles archive gets a feed and a torrent but no tile
+        // endpoint — the same rule as an individual archive.
+        const servable =
+          Boolean(newest?.pmtiles) && (newest.kind ?? 'pmtiles') === 'pmtiles';
 
-          return {
-            category,
-            archives: counts.get(category),
-            newest: newest && {
-              infoHash: newest.infoHash,
-              name: newest.name,
-              size: newest.size,
-              createdAt: newest.createdAt,
-              kind: newest.kind ?? 'pmtiles',
-            },
-            servable,
-            endpoints: {
-              tileJson: servable
-                ? `${base}/latest/${category}/tiles.json`
-                : null,
-              // The same URL with a magnet in the fragment, which is what a
-              // style should carry. A fragment is never sent in a request, so
-              // an ordinary client fetches the TileJSON and ignores it, while
-              // a swarm-aware one has the magnet before it makes any call --
-              // and can therefore still start when this server cannot answer.
-              //
-              // The mutable magnet where there is one, because a category is
-              // precisely where an infohash goes stale: it names the category
-              // and resolves the current build over the DHT. Otherwise the
-              // newest build's own magnet, which pins that build but still
-              // beats a blank map when the fallback is needed at all.
-              styleUrl: servable ? styleUrlFor(category, newest, base) : null,
-              torrent: `${base}/latest/${category}/archive.torrent`,
-              magnet: `${base}/latest/${category}/magnet`,
-              feed: `${base}/feed/${category}.xml`,
-              latestFeed: `${base}/latest/${category}.xml`,
-            },
-          };
-        }),
-      );
+        return {
+          category,
+          archives: counts.get(category),
+          newest: newest && {
+            infoHash: newest.infoHash,
+            name: newest.name,
+            size: newest.size,
+            createdAt: newest.createdAt,
+            kind: newest.kind ?? 'pmtiles',
+          },
+          servable,
+          endpoints: {
+            tileJson: servable ? `${base}/latest/${category}/tiles.json` : null,
+            // The same URL with a magnet in the fragment, which is what a
+            // style should carry. A fragment is never sent in a request, so
+            // an ordinary client fetches the TileJSON and ignores it, while
+            // a swarm-aware one has the magnet before it makes any call --
+            // and can therefore still start when this server cannot answer.
+            //
+            // The mutable magnet where there is one, because a category is
+            // precisely where an infohash goes stale: it names the category
+            // and resolves the current build over the DHT. Otherwise the
+            // newest build's own magnet, which pins that build but still
+            // beats a blank map when the fallback is needed at all.
+            styleUrl: servable ? styleUrlFor(category, newest, base) : null,
+            torrent: `${base}/latest/${category}/archive.torrent`,
+            magnet: `${base}/latest/${category}/magnet`,
+            feed: `${base}/feed/${category}.xml`,
+            latestFeed: `${base}/latest/${category}.xml`,
+          },
+        };
+      });
+    }
+  };
+
+  // The console's view. Identical to the public one below, and guarded only
+  // because everything under /api/ is.
+  app.get(
+    '/api/categories',
+    route(async (req, res) => {
+      res.json(describeCategories(req));
+    }),
+  );
+
+  // The same list, without a credential.
+  //
+  // Everything under /latest/ is public already — the TileJSON, the torrent,
+  // the magnet, the per-category feed — so the index of what /latest/ offers
+  // belongs here rather than behind the console's door. A category is also the
+  // handle a person actually wants: an infohash names one build, and this
+  // names whichever is current, so a style pointing at it keeps working across
+  // rebuilds.
+  //
+  // Not a second implementation. It is the same builder, filtered by the same
+  // rule, so the two cannot drift into disagreeing about what is published.
+  app.get(
+    '/latest/',
+    route(async (req, res) => {
+      res.setHeader('access-control-allow-origin', '*');
+      // Short, because the answer changes when a build lands.
+      res.setHeader('cache-control', 'public, max-age=60');
+      res.json({
+        // Named so a consumer can refuse a document it does not understand,
+        // the same as the catalogue does.
+        format: 'pmtiles-swarm-categories/1',
+        generatedAt: new Date().toISOString(),
+        categories: describeCategories(req),
+      });
     }),
   );
 

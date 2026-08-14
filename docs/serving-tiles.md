@@ -41,6 +41,27 @@ swarm on every attempt, doing work that could never succeed.
 
 See [internals.md](internals.md#serving-an-mbtiles-archive).
 
+## The category index
+
+`GET /latest/` lists every category this node publishes, with the endpoints
+that resolve to each one's newest build — the TileJSON, the `.torrent`, the
+magnet, the per-category feed, and the style URL with the magnet in its
+fragment.
+
+Public, and deliberately so. Everything else under `/latest/` is — the
+TileJSON, the torrent, the magnet, the feed — so the index of what `/latest/`
+offers belongs beside them rather than behind the console's door.
+`/api/categories` returns the identical list from the identical builder, and is
+guarded only because everything under `/api/` is.
+
+A category is also the handle worth publishing. An archive URL names one build
+and goes stale on the next; a category names whichever is current, so a style
+pointing at one keeps working across rebuilds.
+
+Filtered by `feedCategories` and by whatever token was presented, the same as
+the catalogue and the feeds — so it can show nothing this node was not already
+publishing.
+
 ## Missing tiles
 
 A tile the archive does not hold answers **404 for raster and 204 for vector**,

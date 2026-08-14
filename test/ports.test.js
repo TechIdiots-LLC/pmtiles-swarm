@@ -392,3 +392,109 @@ describe('the public page on a node with a credential', () => {
     }
   });
 });
+
+describe('the public category index', () => {
+  /**
+   * A node with a credential configured, which is the case that matters: the
+   * page's audience has no credential, so anything it needs must be reachable
+   * without one.
+   * @returns {Promise<object>} - A fetcher and close().
+   */
+  async function guarded() {
+    const dir = await fs.mkdtemp(path.join(workspace, 'public-cats-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put({
+      infoHash: 'a'.repeat(40),
+      name: 'planet.pmtiles',
+      size: 1024,
+      categories: ['basemaps'],
+      magnet: `magnet:?xt=urn:btih:${'a'.repeat(40)}`,
+      pmtiles: { format: 'pbf', minZoom: 0, maxZoom: 14 },
+    });
+
+    // An admin port this listener is not on, so every request here counts as
+    // public and `/` serves the catalogue page rather than the console.
+    const probe = (await import('node:net')).createServer();
+    await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve));
+    const adminPort = probe.address().port;
+    await new Promise((resolve) => probe.close(resolve));
+
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog,
+      engine: { name: 'webtorrent', list: async () => [] },
+      subscriptions: {},
+      tiles: {},
+      config: {
+        watch: [],
+        subscriptions: [],
+        adminPort,
+        auth: { apiKey: 'secret-token' },
+      },
+    });
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise((resolve) => server.once('listening', resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+    return {
+      get: (route, headers) => fetch(`${base}${route}`, { headers }),
+      close: () => new Promise((resolve) => server.close(resolve)),
+    };
+  }
+
+  it('is served without a credential, unlike /api/categories', async () => {
+    // Everything else under /latest/ is public — the TileJSON, the torrent,
+    // the magnet, the per-category feed — so the index of what /latest/ offers
+    // belongs there rather than behind the console's door.
+    const node = await guarded();
+    try {
+      assert.equal((await node.get('/api/categories')).status, 401);
+
+      const response = await node.get('/latest/');
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.format, 'pmtiles-swarm-categories/1');
+
+      const [row] = body.categories;
+      assert.equal(row.category, 'basemaps');
+      assert.equal(typeof row.archives, 'number');
+      assert.match(row.endpoints.tileJson, /\/latest\/basemaps\/tiles\.json$/);
+      assert.match(row.endpoints.styleUrl, /#magnet:\?/);
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('says the same thing as the guarded endpoint', async () => {
+    // One builder behind both, so they cannot drift into disagreeing about
+    // what this node publishes to whom.
+    const node = await guarded();
+    try {
+      const open = (await node.get('/latest/').then((r) => r.json()))
+        .categories;
+      const closed = await node
+        .get('/api/categories', { Authorization: 'Bearer secret-token' })
+        .then((r) => r.json());
+
+      assert.deepEqual(
+        open,
+        closed,
+        'the public index and the console see the same categories',
+      );
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('never links a visitor at something that will refuse them', async () => {
+    const node = await guarded();
+    try {
+      const page = await node.get('/').then((r) => r.text());
+      assert.doesNotMatch(page, /href="\/api\//, 'no /api/ links at all');
+      assert.match(page, /href="\/latest\/"/);
+      assert.match(page, /href="\/feed\.xml"/);
+    } finally {
+      await node.close();
+    }
+  });
+});
