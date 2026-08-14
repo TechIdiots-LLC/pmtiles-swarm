@@ -84,6 +84,12 @@ const DEFAULTS = {
   /** Interface for the admin listener. Defaults to `host`. */
   adminHost: undefined,
   /**
+   * Serve a catalogue page at `/` on the public listener, when `adminPort`
+   * splits the two. Off also withdraws the paths that page needs — see
+   * docs/internals.md, "The public root is the catalogue, not a 404".
+   */
+  publicIndex: true,
+  /**
    * What shape of torrent to create: 'hybrid', 'v1' or 'v2'. Hybrid needs
    * libtorrent to be one of the engines and falls back to v1 without it. See
    * docs/configuration.md — "Creating torrents".

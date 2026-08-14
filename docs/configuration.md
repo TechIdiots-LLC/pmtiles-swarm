@@ -32,14 +32,15 @@ Some settings only take effect on restart. Those are marked **restart**.
 
 ## Listeners
 
-| setting      | default     |                                                              |
-| ------------ | ----------- | ------------------------------------------------------------ |
-| `port`       | `8090`      | **restart**                                                  |
-| `host`       | `'0.0.0.0'` | **restart**                                                  |
-| `adminPort`  | unset       | a separate port for the console and the API. **restart**     |
-| `adminHost`  | `host`      | interface for the admin listener. **restart**                |
-| `publicUrl`  | unset       | public base URL, for absolute links in the feed and TileJSON |
-| `trustProxy` | `false`     | trust `X-Forwarded-*` headers                                |
+| setting       | default     |                                                              |
+| ------------- | ----------- | ------------------------------------------------------------ |
+| `port`        | `8090`      | **restart**                                                  |
+| `host`        | `'0.0.0.0'` | **restart**                                                  |
+| `adminPort`   | unset       | a separate port for the console and the API. **restart**     |
+| `adminHost`   | `host`      | interface for the admin listener. **restart**                |
+| `publicIndex` | `true`      | serve a catalogue page at `/` on the public listener         |
+| `publicUrl`   | unset       | public base URL, for absolute links in the feed and TileJSON |
+| `trustProxy`  | `false`     | trust `X-Forwarded-*` headers                                |
 
 ### Splitting the admin surface off
 
@@ -54,6 +55,27 @@ internet while the admin port is bound to `127.0.0.1` or a private interface, so
 the thing that can rewrite the configuration is not merely password-protected but
 unreachable. On the public listener the admin surface answers 404, because a 401
 would confirm it is there.
+
+### `publicIndex`
+
+With `adminPort` set, `/` on the public listener serves a catalogue page: the
+archives this node publishes, their tile and TileJSON URLs, their torrents and
+magnets, and a preview link for each. Split listeners are the arrangement where
+a node faces strangers, so that is when a front door saying what it serves is
+worth having.
+
+It is a view of `/api/catalog` and `/api/categories`, filtered by the same
+`feedCategories` rule, so it cannot show anything the node was not already
+publishing.
+
+Set it to `false` and `/` goes back to 404. Three paths go with it — the page
+would be useless without them and they exist for it: `/api/categories`, the
+per-archive `/preview`, and `/vendor/` (the MapLibre bundle the preview renders
+with). Tiles, TileJSON, `.torrent` files, the feeds and `/api/catalog` are
+unaffected either way.
+
+Takes effect on the next request; no restart. See
+[internals.md](internals.md#the-public-root-is-the-catalogue-not-a-404).
 
 ### `trustProxy`
 

@@ -119,12 +119,34 @@ export function createApp({
   // else is served on the public one — and only what is meant to be public.
   // Checked by the port the request actually arrived on rather than by a
   // header, because a header is something the caller controls.
+  const onAdminPort = (req) =>
+    Boolean(config.adminPort) &&
+    req.socket?.localPort === Number(config.adminPort);
+
+  // On by default: split listeners are the arrangement where this node faces
+  // strangers, which is exactly when there should be something at the front
+  // door saying what it serves. Off for a node meant to answer only the peers
+  // and styles that already know its URLs.
+  //
+  // Read per request rather than captured, so turning it off takes effect on
+  // the next request instead of at the next restart.
+  const publicIndex = () => config.publicIndex !== false;
+
   if (config.adminPort) {
     app.use((req, res, next) => {
-      const arrivedOnAdmin = req.socket?.localPort === Number(config.adminPort);
-      if (arrivedOnAdmin || isPublicSurface(req.path)) return next();
+      const allowed = isPublicSurface(req.path, { index: publicIndex() });
+      if (onAdminPort(req) || allowed) return next();
       // 404 rather than 403: a refusal confirms there is something here.
       res.status(404).json({ error: 'not found' });
+    });
+
+    // Only reachable when the gate above let it through, which is where the
+    // setting is enforced. Ahead of the static mount at the bottom of this
+    // file, which would otherwise hand out the console's index.html on both
+    // ports.
+    app.get('/', (req, res, next) => {
+      if (onAdminPort(req)) return next();
+      res.sendFile(path.join(here, 'web', 'public.html'));
     });
   }
 

@@ -600,6 +600,38 @@ The catalogue is on that list deliberately. It is how another node keeps itself
 in step, so it has to be reachable from outside; what it publishes is already
 decided by `feedCategories` and by whatever token was presented.
 
+### The public root is the catalogue, not a 404
+
+Split listeners are the arrangement where this node faces strangers, so that is
+exactly when there should be something at the front door saying what it serves.
+`/` on the public port renders `web/public.html`: the archives, their tile and
+TileJSON URLs, their torrents and magnets, and a link to the preview for each.
+
+It is a view of `/api/catalog` and `/api/categories`, both of which were already
+public and are filtered by the same `feedCategories` rule — so the page cannot
+show anything the node was not already publishing. It carries no state of its
+own and asks for nothing guarded.
+
+Three things joined the public list to make it work, and each is a read of
+something already published: `/api/categories`, which groups the same archives
+and carries the style URL for each; the per-archive `/preview`; and `/vendor/`,
+which is the MapLibre bundle the preview renders with. The preview used to be
+excluded on the grounds that it is console furniture and would not render
+without `/vendor` anyway — both true, and both answered by publishing the pair
+rather than neither.
+
+`/` being public does not publish the console. The static mount at the bottom of
+`api.js` would have served `index.html` on both ports, so the public root is
+routed explicitly ahead of it; `/index.html` itself stays off the list, and asking
+for it by name still 404s.
+
+`publicIndex: false` turns the whole thing off, and takes those three paths with
+it — an off switch that only hid the page would leave the surface it opened still
+open, which is not off. What a peer or a style needs is untouched either way.
+The setting is read per request rather than captured at startup, so an operator
+who decides the front page was a mistake does not have to stop a node
+mid-download to act on it.
+
 ## Publishing over the DHT
 
 A category is the only stable handle this system has. Every archive is addressed

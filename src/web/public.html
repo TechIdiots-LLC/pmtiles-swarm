@@ -1,0 +1,332 @@
+<!doctype html>
+<!--
+  The public front door, served at / on the public listener when the console
+  has an admin port of its own.
+
+  Reads /api/catalog and /api/categories, both of which are already public and
+  already filtered by feedCategories — so this page shows exactly what this node
+  publishes and cannot show anything else. It is deliberately plain: no build
+  step, no dependencies, and it degrades to a readable list of links if the
+  script does not run.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Map archives</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #16181d;
+        --muted: #5c6370;
+        --line: #dfe3ea;
+        --card: #f7f8fa;
+        --accent: #1c6fd6;
+        --code: #eef1f6;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14161a;
+          --fg: #e6e8ec;
+          --muted: #9aa2b1;
+          --line: #2b2f37;
+          --card: #1b1e24;
+          --accent: #6fb2ff;
+          --code: #22262e;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 2rem 1.25rem 4rem;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          15px/1.55 system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+      }
+      main {
+        max-width: 62rem;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 1.5rem;
+        margin: 0 0 0.25rem;
+      }
+      .lede {
+        color: var(--muted);
+        margin: 0 0 2rem;
+      }
+      h2 {
+        font-size: 1.05rem;
+        margin: 2.5rem 0 0.75rem;
+        padding-bottom: 0.4rem;
+        border-bottom: 1px solid var(--line);
+      }
+      a {
+        color: var(--accent);
+      }
+      code,
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.86em;
+      }
+      .archive {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--card);
+        padding: 1rem 1.1rem;
+        margin-bottom: 0.85rem;
+      }
+      .archive header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem 0.75rem;
+        align-items: baseline;
+        margin-bottom: 0.5rem;
+      }
+      .name {
+        font-weight: 600;
+        word-break: break-all;
+      }
+      .facts {
+        color: var(--muted);
+        font-size: 0.88rem;
+        margin-bottom: 0.6rem;
+      }
+      .tag {
+        display: inline-block;
+        padding: 0.05rem 0.45rem;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        font-size: 0.78rem;
+        color: var(--muted);
+      }
+      .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.35rem 0.9rem;
+        font-size: 0.9rem;
+      }
+      .urls {
+        margin-top: 0.7rem;
+        display: grid;
+        gap: 0.3rem;
+      }
+      .urls div {
+        display: flex;
+        gap: 0.5rem;
+        align-items: baseline;
+        flex-wrap: wrap;
+      }
+      .urls span {
+        color: var(--muted);
+        min-width: 5.5rem;
+        font-size: 0.82rem;
+      }
+      .urls code {
+        background: var(--code);
+        padding: 0.1rem 0.35rem;
+        border-radius: 4px;
+        word-break: break-all;
+      }
+      .empty,
+      .failed {
+        color: var(--muted);
+        border: 1px dashed var(--line);
+        border-radius: 8px;
+        padding: 1.5rem;
+        text-align: center;
+      }
+      footer {
+        margin-top: 3rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--line);
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      noscript {
+        display: block;
+        margin-bottom: 1.5rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Map archives</h1>
+      <p class="lede">
+        Tile archives published by this node, over HTTP and over BitTorrent.
+      </p>
+
+      <noscript>
+        <p class="failed">
+          This page lists the archives using JavaScript. Without it, the same
+          information is at <a href="/api/catalog">/api/catalog</a> as JSON and
+          <a href="/feed.xml">/feed.xml</a> as RSS.
+        </p>
+      </noscript>
+
+      <div id="categories"></div>
+      <div id="archives"><p class="empty">Loading…</p></div>
+
+      <footer>
+        <a href="/api/catalog">catalog JSON</a> ·
+        <a href="/api/categories">categories JSON</a> ·
+        <a href="/feed.xml">RSS feed</a> ·
+        <a href="/health">health</a>
+      </footer>
+    </main>
+
+    <script type="module">
+      const el = (tag, className, text) => {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      };
+
+      const bytes = (n) => {
+        if (!Number.isFinite(n) || n <= 0) return null;
+        const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+        let value = n;
+        let unit = 0;
+        while (value >= 1024 && unit < units.length - 1) {
+          value /= 1024;
+          unit += 1;
+        }
+        return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+      };
+
+      // A row of "label: copyable URL". The URLs are the point of the page, so
+      // they are shown in full rather than hidden behind link text.
+      const urlRow = (label, url) => {
+        const row = el('div');
+        row.append(el('span', null, label));
+        const code = el('code', null, url);
+        row.append(code);
+        return row;
+      };
+
+      const render = (archives) => {
+        const host = document.getElementById('archives');
+        host.textContent = '';
+        if (archives.length === 0) {
+          host.append(
+            el('p', 'empty', 'This node is not publishing any archives yet.'),
+          );
+          return;
+        }
+
+        for (const archive of archives) {
+          const card = el('div', 'archive');
+          const head = el('header');
+          head.append(el('span', 'name', archive.name ?? archive.infoHash));
+          for (const category of archive.categories ?? []) {
+            head.append(el('span', 'tag', category));
+          }
+          card.append(head);
+
+          const facts = [];
+          const size = bytes(archive.size);
+          if (size) facts.push(size);
+          const summary = archive.pmtiles;
+          if (summary?.format) facts.push(summary.format);
+          if (Number.isFinite(summary?.minZoom)) {
+            facts.push(`z${summary.minZoom}–${summary.maxZoom}`);
+          }
+          if (archive.createdAt) {
+            facts.push(new Date(archive.createdAt).toISOString().slice(0, 10));
+          }
+          if (facts.length > 0) card.append(el('p', 'facts', facts.join(' · ')));
+
+          const root = `/archives/${archive.infoHash}`;
+          const links = el('div', 'links');
+          const add = (href, text) => {
+            const a = el('a', null, text);
+            a.href = href;
+            links.append(a);
+          };
+
+          // Only PMTiles and a completed MBTiles have a tile endpoint, and the
+          // catalogue says which kind this is — so a link that would answer 415
+          // is not offered at all.
+          const servable = !archive.kind || archive.kind !== 'unknown';
+          if (servable) {
+            add(`${root}/tiles.json`, 'TileJSON');
+            add(`${root}/preview`, 'preview');
+          }
+          add(`${root}/archive.torrent`, '.torrent');
+          if (archive.magnet) add(archive.magnet, 'magnet');
+          card.append(links);
+
+          const urls = el('div', 'urls');
+          if (servable) {
+            urls.append(urlRow('TileJSON', new URL(`${root}/tiles.json`, location.href).href));
+          }
+          for (const seed of archive.webSeeds ?? []) {
+            urls.append(urlRow('web seed', seed));
+          }
+          if (urls.childElementCount > 0) card.append(urls);
+
+          host.append(card);
+        }
+      };
+
+      // Categories are the handle that survives a rebuild, so they go first —
+      // a style should point at one of these rather than at an infohash.
+      const renderCategories = (categories) => {
+        const host = document.getElementById('categories');
+        const usable = categories.filter((c) => c.endpoints?.styleUrl);
+        if (usable.length === 0) return;
+
+        host.append(el('h2', null, 'Categories'));
+        const urls = el('div', 'urls');
+        for (const entry of usable) {
+          // `category` and `archives` are what /api/categories actually calls
+          // these; `name` and `count` would read better and are not there.
+          const label = Number.isFinite(entry.archives)
+            ? `${entry.category} (${entry.archives})`
+            : entry.category;
+          urls.append(
+            urlRow(label, new URL(entry.endpoints.styleUrl, location.href).href),
+          );
+        }
+        host.append(urls);
+        host.append(el('h2', null, 'Archives'));
+      };
+
+      const load = async () => {
+        try {
+          const response = await fetch('/api/catalog');
+          if (!response.ok) throw new Error(`catalog said ${response.status}`);
+          const body = await response.json();
+          render(body.archives ?? []);
+        } catch (error) {
+          const host = document.getElementById('archives');
+          host.textContent = '';
+          host.append(
+            el('p', 'failed', `Could not load the catalog: ${error.message}`),
+          );
+          return;
+        }
+
+        // Best effort, and after the archives: the page is worth showing
+        // without it.
+        try {
+          const response = await fetch('/api/categories');
+          if (response.ok) renderCategories(await response.json());
+        } catch {
+          // Nothing to say. The archives above are the substance.
+        }
+      };
+
+      load();
+    </script>
+  </body>
+</html>

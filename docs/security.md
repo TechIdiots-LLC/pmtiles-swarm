@@ -72,10 +72,10 @@ about reachability:
 }
 ```
 
-| listener    | serves                                                                                                                                       |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `port`      | tiles, TileJSON, `.torrent` files, the feeds, the `latest` endpoints, and `/api/catalog` — everything a stranger or a peer is meant to reach |
-| `adminPort` | the console and the rest of the API, plus all of the above                                                                                   |
+| listener    | serves                                                                                                                                                                |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `port`      | tiles, TileJSON, `.torrent` files, the feeds, the `latest` endpoints, `/api/catalog`, and a catalogue page at `/` — everything a stranger or a peer is meant to reach |
+| `adminPort` | the console and the rest of the API, plus all of the above                                                                                                            |
 
 The public port can then face the internet while the admin port is bound to
 loopback or a private interface, so the thing that can rewrite the
@@ -84,6 +84,13 @@ stronger statement, and it is the one a firewall can enforce.
 
 On the public listener the admin surface answers **404, not 403**. A refusal
 confirms there is something behind it; an absence does not.
+
+`/` on the public listener is a catalogue page listing what this node publishes,
+with its public URLs and a preview link for each. It is a view of `/api/catalog`
+and `/api/categories`, filtered by the same rule, so it shows nothing that was
+not already published — and it is not the console, which stays on the admin port.
+Set `publicIndex: false` to turn it off; that also withdraws `/api/categories`,
+the per-archive `/preview` and `/vendor/`, which exist for it.
 
 Routing is by the port the request arrived on, never by a header, because a
 header is something the caller controls.

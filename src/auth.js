@@ -122,24 +122,36 @@ export function verifyPassword(password, stored) {
 }
 
 /**
- * Whether a request path is one anybody may fetch.
- * @param {string} path - The request path.
- * @returns {boolean} - True when no credential is needed.
- */
-/**
  * The surface that belongs on a public listener.
  *
  * What is left on the other port when the console and API get one of their own.
  * Everything else is answered 404 rather than 401. The catalogue is on this
  * list deliberately. See docs/internals.md — "The public listener".
+ *
+ * Everything here is a read of something already published. Nothing on this
+ * list can change anything, and nothing on it reports who else holds a
+ * credential — those two properties are what the list is for, and are worth
+ * re-checking against anything added to it.
  * @param {string} path - Request path.
+ * @param {object} [options] - What this node publishes.
+ * @param {boolean} [options.index] - Whether the front page is served. False takes it and the three paths it needs off the list.
  * @returns {boolean} - True when a public listener should serve it.
  */
-export function isPublicSurface(path) {
-  // The map preview is part of the console, not part of the contract. It also
-  // loads MapLibre from /vendor, which is not on this list — so publishing it
-  // here would publish a page that cannot render.
-  if (/^\/archives\/[^/]+\/preview\/?$/.test(path)) return false;
+export function isPublicSurface(path, options = {}) {
+  const index = options.index !== false;
+
+  // What the front page needs in order to be a front page. Turning it off has
+  // to take these with it, or "no index" would leave the surface it opened up
+  // still open — an off switch that only hides the page is not one.
+  if (
+    path === '/' ||
+    path === '/api/categories' ||
+    path === '/api/categories/' ||
+    path.startsWith('/vendor/') ||
+    /^\/archives\/[^/]+\/preview\/?$/.test(path)
+  ) {
+    return index;
+  }
 
   return (
     // A load balancer checks this, and it checks the public port.
