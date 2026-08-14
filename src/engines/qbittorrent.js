@@ -299,7 +299,7 @@ export class QBittorrentEngine {
       name: row.name,
       size: row.total_size ?? row.size,
       progress: row.progress,
-      // eslint-disable-next-line security/detect-object-injection -- state comes from qBittorrent and falls back
+      // State comes from qBittorrent, and anything unrecognised falls back.
       state: STATE_MAP[row.state] ?? 'error',
       peers: row.num_leechs ?? 0,
       seeds: row.num_seeds ?? 0,
