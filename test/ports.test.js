@@ -329,3 +329,66 @@ describe('what the safety check looks at', () => {
     );
   });
 });
+
+describe('the public page on a node with a credential', () => {
+  it('falls back to the feed, which needs none', async () => {
+    // /api/catalog is listed as public *surface* — it belongs on the public
+    // port — but that is a different gate from the credential check, which
+    // guards everything under /api/ except login and session. On any node with
+    // authentication configured the page cannot read the catalog, so it reads
+    // the feed instead. Both were true and only one had been accounted for.
+    const dir = await fs.mkdtemp(path.join(workspace, 'guarded-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put({
+      infoHash: 'a'.repeat(40),
+      name: 'planet.pmtiles',
+      size: 1024,
+      categories: ['basemaps'],
+      magnet: `magnet:?xt=urn:btih:${'a'.repeat(40)}`,
+      pmtiles: { format: 'pbf', minZoom: 0, maxZoom: 14 },
+    });
+
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog,
+      engine: { name: 'webtorrent', list: async () => [] },
+      subscriptions: {},
+      tiles: {},
+      config: {
+        watch: [],
+        subscriptions: [],
+        auth: { apiKey: 'secret-token' },
+      },
+    });
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise((resolve) => server.once('listening', resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+
+    try {
+      assert.equal(
+        (await fetch(`${base}/api/catalog`)).status,
+        401,
+        'the catalog is guarded, which is the whole reason for the fallback',
+      );
+
+      const feed = await fetch(`${base}/feed.xml`);
+      assert.equal(feed.status, 200, 'the feed is not');
+
+      // Every field web/public.html reads out of an item.
+      const xml = await feed.text();
+      for (const pattern of [
+        /<pmtiles:infohash>[a-f0-9]{40}<\/pmtiles:infohash>/,
+        /<pmtiles:magnet>magnet:\?/,
+        /<pmtiles:format>pbf<\/pmtiles:format>/,
+        /<title>planet\.pmtiles<\/title>/,
+        /<category>basemaps<\/category>/,
+        /<enclosure [^>]*length="1024"/,
+      ]) {
+        assert.match(xml, pattern);
+      }
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});

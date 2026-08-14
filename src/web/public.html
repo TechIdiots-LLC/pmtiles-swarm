@@ -301,23 +301,88 @@
         host.append(el('h2', null, 'Archives'));
       };
 
-      const load = async () => {
-        try {
-          const response = await fetch('/api/catalog');
-          if (!response.ok) throw new Error(`catalog said ${response.status}`);
-          const body = await response.json();
-          render(body.archives ?? []);
-        } catch (error) {
-          const host = document.getElementById('archives');
-          host.textContent = '';
-          host.append(
-            el('p', 'failed', `Could not load the catalog: ${error.message}`),
-          );
-          return;
+      const PMTILES_NS =
+        'https://github.com/TechIdiots-LLC/pmtiles-swarm/ns/1.0';
+
+      // The feed says the same things the catalog does, in RSS. It is the
+      // fallback because it is the one that needs no credential: /api/catalog
+      // is guarded whenever this node has any authentication configured, which
+      // is most of them, and a front page that 401s is worse than none.
+      const fromFeed = (xmlText) => {
+        const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+        if (doc.querySelector('parsererror')) {
+          throw new Error('the feed is not valid XML');
         }
 
-        // Best effort, and after the archives: the page is worth showing
-        // without it.
+        const text = (item, name) =>
+          item.getElementsByTagNameNS(PMTILES_NS, name)[0]?.textContent ??
+          undefined;
+
+        return [...doc.getElementsByTagName('item')].map((item) => {
+          const zoom = (name) => {
+            const value = Number(text(item, name));
+            return Number.isFinite(value) ? value : undefined;
+          };
+          const enclosure = item.getElementsByTagName('enclosure')[0];
+          const format = text(item, 'format');
+
+          return {
+            infoHash: text(item, 'infohash'),
+            name: item.getElementsByTagName('title')[0]?.textContent,
+            size: Number(enclosure?.getAttribute('length')) || undefined,
+            categories: [...item.getElementsByTagName('category')].map(
+              (node) => node.textContent,
+            ),
+            magnet: text(item, 'magnet'),
+            createdAt: item.getElementsByTagName('pubDate')[0]?.textContent,
+            pmtiles: format
+              ? {
+                  format,
+                  minZoom: zoom('minzoom'),
+                  maxZoom: zoom('maxzoom'),
+                }
+              : undefined,
+          };
+        });
+      };
+
+      const load = async () => {
+        let archives = null;
+
+        // Richer where it is reachable: the catalog carries web seeds and the
+        // sparse flag, which the feed does not.
+        try {
+          const response = await fetch('/api/catalog');
+          if (response.ok) {
+            archives = (await response.json()).archives ?? [];
+          }
+        } catch {
+          // Fall through to the feed.
+        }
+
+        if (archives === null) {
+          try {
+            const response = await fetch('/feed.xml');
+            if (!response.ok) throw new Error(`feed said ${response.status}`);
+            archives = fromFeed(await response.text());
+          } catch (error) {
+            const host = document.getElementById('archives');
+            host.textContent = '';
+            host.append(
+              el(
+                'p',
+                'failed',
+                `Could not load the archives: ${error.message}`,
+              ),
+            );
+            return;
+          }
+        }
+
+        render(archives.filter((archive) => archive.infoHash));
+
+        // Best effort, and after the archives: this one is guarded on an
+        // authenticated node and the page is worth showing without it.
         try {
           const response = await fetch('/api/categories');
           if (response.ok) renderCategories(await response.json());
