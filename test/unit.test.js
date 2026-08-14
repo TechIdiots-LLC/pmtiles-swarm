@@ -351,3 +351,43 @@ describe('archive metadata flags', () => {
     assert.equal(metadataFlag('maybe'), undefined);
   });
 });
+
+describe('the mutable identity in a feed', () => {
+  it('publishes it, so a consumer needs no second request', () => {
+    // The public key is not otherwise in the feed, and a subscriber that wants
+    // to follow a category across rebuilds would have to fetch a TileJSON to
+    // find it. It rides inside the magnet as xs=urn:btpk:, so carrying the
+    // magnet carries the identity.
+    const xml = renderFeed(
+      [
+        entry(1, {
+          mutable: { publicKey: 'de'.repeat(32), salt: 'basemaps', seq: 4 },
+          webSeeds: ['https://maps.example.org/planet.pmtiles'],
+        }),
+      ],
+      { title: 'Maps', baseUrl: 'https://maps.example.org' },
+    );
+
+    assert.match(xml, /<pmtiles:mutable>magnet:\?xt=urn:btih:1{40}/);
+    assert.match(xml, /xs=urn:btpk:(de){32}/);
+    assert.match(xml, /&amp;s=basemaps/);
+    // And the round trip a subscriber makes.
+    const [item] = parseFeed(xml);
+    assert.match(item.mutableMagnet, /^magnet:\?xt=urn:btih:/);
+    assert.equal(
+      publicKeyFromMagnet(item.mutableMagnet),
+      'de'.repeat(32),
+      'the key is readable straight out of the feed',
+    );
+  });
+
+  it('says nothing for an archive with no identity', () => {
+    // Most archives have none. An empty element would be a claim.
+    const xml = renderFeed([entry(1)], {
+      title: 'Maps',
+      baseUrl: 'https://maps.example.org',
+    });
+    assert.doesNotMatch(xml, /pmtiles:mutable/);
+    assert.equal(parseFeed(xml)[0].mutableMagnet, undefined);
+  });
+});

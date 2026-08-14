@@ -58,6 +58,11 @@
   `/api/categories`, filtered by the same `feedCategories` rule, so it can show nothing that was
   not already published — and it is not the console, which stays on the admin port.
   `publicIndex: false` turns it off, withdrawing the three paths it needs with it.
+- **The feed carries the BEP 46 identity.** `<pmtiles:mutable>` holds the magnet naming an
+  archive's publishing key, so a consumer following a category across rebuilds can read the
+  public key straight out of the feed instead of fetching a TileJSON to find it — the key rides
+  inside the string as `xs=urn:btpk:`. Absent for archives that have no identity, since an empty
+  element would be a claim.
 - **Lint and format tooling.** `npm run lint`, `lint:fix`, `format`, `format:check`, `tidy` and
   `check`, wired into CI. There was no linter before, though the source carried
   `eslint-disable` comments for one — so those suppressed nothing and the rules they named were

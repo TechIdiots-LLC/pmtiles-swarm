@@ -17,6 +17,8 @@
  * subscriber restores it on completion.
  */
 
+import { mutableMagnet } from './mutable.js';
+
 const PMTILES_NS = 'https://github.com/TechIdiots-LLC/pmtiles-swarm/ns/1.0';
 
 /**
@@ -118,6 +120,18 @@ ${(entry.categories ?? (entry.category ? [entry.category] : []))
       <enclosure url="${xml(torrentUrl)}" length="${xml(entry.size)}" type="application/x-bittorrent"/>
       <pmtiles:infohash>${xml(entry.infoHash)}</pmtiles:infohash>
       <pmtiles:magnet>${xml(entry.magnet)}</pmtiles:magnet>
+${
+  entry.mutable?.publicKey
+    ? `      <pmtiles:mutable>${xml(
+        mutableMagnet(entry.mutable.publicKey, {
+          infoHash: entry.infoHash,
+          salt: entry.mutable.salt,
+          name: entry.mutable.salt ?? entry.name,
+          webSeeds: entry.webSeeds,
+        }),
+      )}</pmtiles:mutable>`
+    : ''
+}
 ${entry.md5 ? `      <pmtiles:md5>${xml(entry.md5)}</pmtiles:md5>` : ''}
 ${entry.originMtime ? `      <pmtiles:mtime>${xml(entry.originMtime)}</pmtiles:mtime>` : ''}
 ${mapFields}
@@ -150,6 +164,7 @@ export function formatBytes(bytes) {
  * @property {string} [torrentUrl] - URL of a .torrent enclosure.
  * @property {string} [category] - Item category.
  * @property {string} [mtime] - The archive's mtime on the node that built it.
+ * @property {string} [mutableMagnet] - BEP 46 magnet, when the publisher has an identity for it.
  */
 
 /**
@@ -196,6 +211,11 @@ export function parseFeed(body) {
     items.push({
       title: title ?? 'untitled',
       infoHash: tag(block, 'pmtiles:infohash')?.toLowerCase(),
+      // The BEP 46 magnet, when the publisher has an identity for this
+      // archive. Carried so a consumer can follow the series across rebuilds,
+      // and so it can read the public key out of the feed rather than being
+      // told it separately -- the key is inside the string as xs=urn:btpk:.
+      mutableMagnet: tag(block, 'pmtiles:mutable'),
       magnet,
       torrentUrl,
       // RSS allows several <category> elements, and an archive may be tagged
