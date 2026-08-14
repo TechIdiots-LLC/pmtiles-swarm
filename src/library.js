@@ -129,11 +129,9 @@ export class Library {
    *   `trackers`     replaces the global list outright
    *   `addTrackers`  appends to it
    *
-   * Appending is usually what is meant. A watch folder wanting its builds on a
-   * private tracker rarely wants them off the public ones as well, and having
-   * only a replacing option makes that mistake silent — the torrent still
-   * works, it is just announced to fewer places than intended, which nothing
-   * about it reveals.
+   * Appending is usually what is meant, and a replacing-only option makes the
+   * mistake silent: the torrent still works, it is simply announced to fewer
+   * places than intended, which nothing about it reveals.
    * @param {object} options - May carry `trackers` and `addTrackers`.
    * @returns {string[]} - Announce URLs, de-duplicated.
    */
@@ -233,11 +231,8 @@ export class Library {
   /**
    * Where an archive's data belongs, given how it is being held.
    *
-   * One directory by default, for both mirrors and caches. What a partial
-   * archive needed was to be *distinguishable*, not to be somewhere else, and
-   * the marker in its name does that without a completed download having to
-   * move between filesystems. `cacheSavePath` stays available for anyone who
-   * wants the separation as a placement decision — cache on faster disk, say.
+   * One directory by default, for both mirrors and caches; `cacheSavePath`
+   * separates them. See docs/internals.md — "Where archive data goes".
    * @param {string} mode - 'mirror' or 'cache'.
    * @param {string} [explicit] - An explicit override.
    * @returns {string} - The save path.
@@ -282,12 +277,8 @@ export class Library {
   /**
    * An archive's magnet, with this node's trackers where it carries none.
    *
-   * An archive joined from a bare infohash has nothing to announce to, so it
-   * waits for the DHT to turn up a peer and — on a private swarm, or a quiet
-   * one — never starts at all. That is worth repairing every time it is handed
-   * back to the engine rather than only when it was first added, because the
-   * archives most likely to be in that state were added before there was
-   * anything to repair them.
+   * An archive joined from a bare infohash has nothing to announce to. See
+   * docs/internals.md — "An archive joined from a bare infohash".
    * @param {object} entry - Catalog entry.
    * @returns {string | undefined} - A magnet, or undefined when there is none.
    */
@@ -314,14 +305,8 @@ export class Library {
   /**
    * Refuses to put two different archives at the same path.
    *
-   * Filenames are not unique and were never going to be. Two builds of the
-   * same map are both `planet.pmtiles`; a rebuild mints a new infohash and
-   * keeps the name. Point both at one directory and whichever finishes second
-   * overwrites the first, or worse, the two take turns writing pieces into one
-   * file and neither ends up with the archive it thinks it has.
-   *
-   * Caught when the second one is added, where it can still be answered by
-   * choosing somewhere else to put it.
+   * Filenames are not unique: a rebuild mints a new infohash and keeps the
+   * name. See docs/internals.md — "Filenames are not unique".
    * @param {object} candidate - infoHash, name and savePath of what is being added.
    * @returns {void}
    * @throws {Error} When another archive already occupies that path.
@@ -430,11 +415,10 @@ export class Library {
       throw error;
     }
 
-    // Between the remove and the re-add, while nothing holds the file.
-    // libtorrent records each file's size and mtime in its resume data and
-    // re-hashes the whole store when they disagree on load, so stamping under a
-    // running torrent costs a full recheck. The paths above return without
-    // detaching, so they are left alone.
+    // Must stay between the remove and the re-add: stamping under a running
+    // torrent costs libtorrent a full recheck, and moving this call fails
+    // silently. See docs/internals.md — "Why it is restored between the rename
+    // and the re-add".
     await this.#restoreOriginMtime(entry, to);
 
     const updated = await this.#catalog.put({ infoHash, complete: true });
@@ -451,11 +435,9 @@ export class Library {
   /**
    * Puts the origin's mtime back on an archive this node received.
    *
-   * BitTorrent does not transmit mtime, so a completed download carries the
-   * moment it finished and no two nodes agree — which under Apache's default
-   * `FileETag` means two different ETags for identical bytes, and a failed read
-   * for a client balanced across both. Only ever restores what a peer
-   * published: an archive arriving without the field keeps its download time.
+   * Only ever restores what a peer published: an archive arriving without the
+   * field keeps its download time. See docs/internals.md — "File timestamps and
+   * ETags".
    * @param {object} entry - Catalog entry, carrying originMtime if it has one.
    * @param {string} file - The archive's finished path.
    * @returns {Promise<void>} - Resolves whether or not anything was stamped.
@@ -553,20 +535,9 @@ export class Library {
     const existing = this.#catalog.findBySource(url);
     if (existing) return existing;
 
-    // A second request for a URL already being fetched joins the first.
-    //
-    // The catalog cannot answer this: an entry only exists once the download
-    // has finished and the torrent has been hashed, so for the hours in
-    // between, `findBySource` says no and every caller starts its own copy.
-    // The scheduler happens to be safe — a poll holds a flag for the whole
-    // import, so no tick can overlap it — but nothing protects the API, and
-    // `POST /api/torrents {url}` for something a schedule is already fetching
-    // used to mean two downloads of the same hundred gigabytes.
-    //
-    // Both would produce the same infohash and try to move into the same
-    // directory, so the second would land on the first: on Windows a failed
-    // rename, elsewhere a silent clobber of a file the engine is already
-    // seeding.
+    // A second request for a URL already being fetched joins the first; the
+    // catalog cannot answer this, since an entry exists only once the download
+    // has finished. See docs/internals.md — "Overlapping fetches".
     const inFlight = this.#inFlight.get(url);
     if (inFlight) {
       console.log(`[fetch] ${url} is already being fetched; joining that one`);
@@ -624,18 +595,8 @@ export class Library {
     );
 
     // Downloaded into a directory of its own, then moved once the infohash
-    // exists.
-    //
-    // An archive fetched from a URL has no infohash while it is being fetched
-    // — that is computed from the bytes, which is the thing still arriving —
-    // so it cannot be put where it belongs until it is finished. Landing it in
-    // the root instead reintroduces exactly the collision the infohash layout
-    // exists to prevent: two sources publishing `planet.pmtiles`, or the same
-    // build fetched twice, writing into one file.
-    //
-    // A random staging directory has no such clash, and the move at the end is
-    // a rename within one filesystem, so it is atomic and instant whatever the
-    // archive weighs.
+    // exists to be filed under. See docs/internals.md — "Staging, for an
+    // archive fetched from a URL".
     const staging = retain
       ? path.join(root, INCOMING, crypto.randomBytes(8).toString('hex'))
       : undefined;
@@ -1061,14 +1022,12 @@ export class Library {
    * about — the migration path for an existing qBittorrent library.
    *
    * By default only archives are taken, since the rest of a general torrent
-   * library is not this node's to manage, and `infoHashes` narrows it further
-   * to an explicit list.
+   * library is not this node's to manage; `infoHashes` narrows it further.
    *
-   * A torrent may be adopted from an engine other than the configured one, for
-   * the case this exists to serve: a qBittorrent already seeding a library,
-   * beside a node that would rather run its own client. Where that happens the
-   * archive is also handed to the local engine, since otherwise the catalog
-   * would list something this node does not seed and cannot serve.
+   * A torrent may be adopted from an engine other than the configured one —
+   * a qBittorrent already seeding a library, beside a node that would rather
+   * run its own client. It is then also handed to the local engine, or the
+   * catalog would list something this node does not seed and cannot serve.
    * @param {object} [options] - Import options.
    * @param {object} [options.engine] - Import from this engine instead of the configured one.
    * @param {boolean} [options.all] - Import every torrent, not just archives.
@@ -1278,12 +1237,9 @@ export class Library {
   /**
    * Checks whether an archive's source has changed since its torrent was made.
    *
-   * A changed source does not invalidate the torrent — the bytes it describes
-   * are still perfectly good bytes — but it does mean the catalog is
-   * advertising something the source no longer has, and that any web seed
-   * pointing at that source will now fail hash verification for every peer
-   * that tries it. The entry is flagged rather than rebuilt, because rebuilding
-   * means re-hashing and, for a remote archive, re-downloading.
+   * The entry is flagged rather than rebuilt, since rebuilding means re-hashing
+   * and, for a remote archive, re-downloading. See docs/internals.md —
+   * "Rebuilding produces a new torrent".
    * @param {string} infoHash - The archive to check.
    * @returns {Promise<import('./origin.js').OriginCheck | null>} - What was found.
    */
@@ -1436,10 +1392,8 @@ export class Library {
   /**
    * Rebuilds an archive's torrent from its current source.
    *
-   * This produces a *new* torrent with a new infohash, because the infohash is
-   * a hash of the content — there is no such thing as updating one in place.
-   * The old entry is kept and marked superseded, so anything still seeding it
-   * keeps working while subscribers move across via the feed.
+   * Produces a *new* torrent with a new infohash, and marks the old entry
+   * superseded. See docs/internals.md — "Rebuilding produces a new torrent".
    * @param {string} infoHash - The archive to rebuild.
    * @param {object} [options] - Passed through to the add.
    * @returns {Promise<object>} - The new catalog entry.
@@ -1725,23 +1679,10 @@ export class Library {
   /**
    * Writes down the metainfo of an archive that was joined by magnet.
    *
-   * A magnet carries an infohash and, if you are lucky, a display name. The
-   * real name, the exact size and the piece geometry arrive afterwards over
-   * BEP 9 — and used to arrive into nothing: the catalog kept the magnet and
-   * forgot the rest, so every restart asked the swarm again for something this
-   * node had already been told.
-   *
-   * BEP 9 transfers the `info` dictionary and nothing else, so trackers and web
-   * seeds do not arrive that way — they live outside `info`, which is exactly
-   * why adding a web seed leaves an infohash unchanged. What the magnet's own
-   * `tr=` and `ws=` parameters carried is kept and merged with whatever the
-   * metainfo holds, which for a real `.torrent` is everything.
-   *
-   * That was not only wasteful. Re-fetching needs a peer, so a restart while
-   * the swarm was quiet left the archive stuck; the `.torrent` endpoint had
-   * nothing to serve and the feed advertised a URL that answered 404; and the
-   * size stayed at whatever the magnet claimed, which is usually zero — which
-   * in turn made the disk-space check before a move meaningless.
+   * The real name, size and piece geometry arrive over BEP 9, which transfers
+   * the `info` dictionary alone — so the magnet's own `tr=` and `ws=` are kept
+   * and merged. See docs/internals.md — "Joining a torrent, and learning about
+   * it afterwards".
    * @param {string} infoHash - The archive.
    * @returns {Promise<object | null>} - The updated entry, or null if nothing was learned.
    */

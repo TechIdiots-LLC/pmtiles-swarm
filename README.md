@@ -38,6 +38,8 @@ node src/index.js --config swarm.config.json
   `/archives/<infohash>/ready`.
 - **[docs/architecture-diagram.md](docs/architecture-diagram.md)** — how a publishing node, a
   serving tier, the swarm and both kinds of client fit together.
+- **[docs/internals.md](docs/internals.md)** — for anyone changing the code: the constraints
+  that are not visible from it, and the failures that produced them.
 
 ## What it does
 

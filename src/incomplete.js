@@ -4,30 +4,10 @@ import path from 'node:path';
 /**
  * Telling a half-downloaded archive from a whole one, on disk.
  *
- * A partial archive is dangerous in a way a partial download of most things is
- * not. These files are served: a web seed URL is predictable and gets published
- * before the file exists, so the moment a name appears in a served directory,
- * peers start fetching it — and every one of them fails hash verification
- * against a file that is only half written. Something has to say "not yet".
+ * An incomplete archive is written as `planet.pmtiles.incomplete` and renamed
+ * to `planet.pmtiles` the instant it is whole.
  *
- * This does it with the name. An incomplete archive is written as
- * `planet.pmtiles.incomplete` and renamed to `planet.pmtiles` the instant it is
- * whole. Three things follow from doing it that way rather than by keeping
- * incomplete files in a separate directory:
- *
- *   - The rename is within one directory, so it is atomic and instant however
- *     large the archive is. Moving between directories is only instant if they
- *     happen to share a filesystem; otherwise it is a real copy, which for a
- *     700 GiB archive is an hour of disk and twice the space.
- *   - A web seed URL 404s until the exact moment the file is whole, then starts
- *     working. That is precisely the semantics a web seed wants, and it comes
- *     free with the rename.
- *   - There is one directory to configure, back up and point a web server at.
- *
- * The objection to name-based markers is that they have to be maintained and
- * can drift out of step with the truth. That is answered by deriving the name
- * from one place — {@link onDiskName} — which both adding and restoring go
- * through, so there is no second copy of the rule to fall behind.
+ * See docs/internals.md — "Marking incomplete archives".
  */
 
 /** The default marker. Deliberately readable rather than terse. */
@@ -48,17 +28,9 @@ export function suffixFor(config) {
 /**
  * What an archive is called on disk right now.
  *
- * The single source of truth for the marker. Adding, restoring, clearing a
- * cache and reading a local copy all ask this rather than each deciding for
- * themselves — which is what stops the name drifting away from the truth it is
- * supposed to describe.
- *
- * Only an archive *known* to be partial is marked. An entry with no `complete`
- * field at all predates markers, so its data is on disk under its plain name
- * whatever state it is in, and treating "unknown" as "incomplete" would send
- * the engine looking for a file that does not exist — which it answers by
- * downloading the whole archive again from nothing. Silent, and expensive
- * enough to be worth this paragraph.
+ * Only an archive *known* to be partial is marked; an entry with no `complete`
+ * field predates markers. See docs/internals.md — "Unknown is not the same as
+ * incomplete".
  * @param {object} entry - Catalog entry.
  * @param {object} config - Resolved configuration.
  * @returns {string} - The filename, with the marker if it is known to be partial.
@@ -83,12 +55,8 @@ export function onDiskPath(entry, config) {
 /**
  * Whether a whole copy is already sitting where an archive is about to be added.
  *
- * Joining a torrent whose data you already hold is normal — you seeded it
- * before, or built it and are re-adding it — and in that case the file is
- * complete from the first moment and must not be given a marker saying
- * otherwise. Size is enough to decide: the engine hashes it immediately
- * afterwards, and a file that is the right length but wrong content fails that
- * check and is re-fetched, marker or no marker.
+ * Size is enough to decide: the engine hashes the file immediately afterwards,
+ * so one of the right length and wrong content is re-fetched either way.
  * @param {object} details - Name, size and savePath of what is being added.
  * @returns {Promise<boolean>} - True when a complete file is already there.
  */
@@ -99,13 +67,9 @@ export async function alreadyComplete({ savePath, name, size }) {
 /**
  * What is already sitting where an archive is about to be added.
  *
- * Separate from the yes/no answer because the interesting case is neither:
- * a file with the right name and the wrong size. That is usually a copy still
- * in progress or an older build left behind, and treating it as simply
- * "not complete" means the download starts from nothing into a marked name
- * and then cannot be renamed at the end, because the stale file is in the way.
- * Saying so at the moment it is noticed is worth more than discovering it
- * hours later.
+ * Separate from the yes/no answer because the interesting case is neither: a
+ * file with the right name and the wrong size, which is reported rather than
+ * treated as "not complete".
  * @param {object} details - Name, size and savePath of what is being added.
  * @returns {Promise<{complete: boolean, conflict?: object}>} - What was found.
  */
@@ -127,14 +91,8 @@ export async function describeExisting({ savePath, name, size }) {
 /**
  * Renames a finished archive to its real name.
  *
- * The engine has to let go first. Renaming a file underneath a running torrent
- * leaves the client holding a handle to a path that no longer exists, and the
- * next read or piece verification fails in a way that looks like disk
- * corruption rather than like a rename.
- *
- * Nothing here deletes. If the destination is somehow already taken, this stops
- * and says so: two files claiming to be the same archive is a situation to
- * report, not to resolve by guessing which one matters.
+ * The engine has to let go first, and nothing here deletes. See
+ * docs/internals.md — "The engine has to let go before a rename".
  * @param {string} from - Current path, carrying the marker.
  * @param {string} to - The real name.
  * @returns {Promise<'renamed' | 'absent' | 'already'>} - What happened.
@@ -144,8 +102,7 @@ export async function promote(from, to) {
 
   const source = await fs.stat(from).catch(() => null);
   if (!source) {
-    // Either an engine that does its own renaming got there first, or this ran
-    // twice. Both are fine; neither is worth an error.
+    // An engine that renames for itself got there first, or this ran twice.
     const target = await fs.stat(to).catch(() => null);
     return target ? 'already' : 'absent';
   }
@@ -238,23 +195,9 @@ export class CompletionWatcher {
 
       if (entry.complete) continue;
 
-      // Two ways to be finished, and the engine's account wins whenever it has
-      // one.
-      //
-      // This used to be the other way round — disk first, on the reasoning
-      // that a file of the right size plainly is finished. It is not: a
-      // torrent client allocates the whole file up front. libtorrent creates
-      // a 77 GB sparse file the moment a download starts, so an archive 0%
-      // downloaded already measures exactly its final size, and the disk check
-      // called it complete. The catalog then said so, and on the next restart
-      // the composite handed a 10%-downloaded archive to a secondary as a
-      // finished seed — the one thing that rule exists to prevent.
-      //
-      // Size still answers where nothing else can: an archive the engine has
-      // no opinion about, because it is not holding it yet. That is the case
-      // this was written for — a finished file dropped into the save path
-      // before its torrent was added — and it is only sound precisely because
-      // no client is writing there.
+      // The engine's account wins whenever it has one: a client allocates the
+      // whole file up front, so size reads as complete at 0% downloaded. See
+      // docs/internals.md — "Size cannot tell you a download has finished".
       const whole = entry.status
         ? entry.status.progress >= 1
         : await alreadyComplete({
