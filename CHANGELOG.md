@@ -64,6 +64,14 @@
   never checked.
 
 ### 🐞 Bug fixes
+- **The public front page could not read its own catalogue.** `/api/catalog` is on the list of
+  paths that belong on a public listener, but that is a separate gate from the credential check,
+  which guards everything under `/api/` except login and session — so on any node with
+  authentication configured the page answered "catalog said 401" and listed nothing. It now
+  prefers the catalogue, which carries web seeds and the sparse flag, and falls back to
+  `/feed.xml`, which needs no credential and says the same things: name, infohash, magnet, size,
+  categories, format and zoom range. Deliberately not fixed by making the catalogue
+  world-readable, which would undo a decision the operator made on purpose.
 - **WebTorrent's `pieces()` was defined twice.** The later definition wins, so the first had
   never run — which is why it still called an undefined `countHeld` and no test noticed.
 - **A stuck HTTP connection could keep a shutdown waiting.** `closeServer` armed its force-close
