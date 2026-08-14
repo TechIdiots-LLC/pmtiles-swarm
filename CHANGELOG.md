@@ -28,9 +28,48 @@
   file: libtorrent's resume data records each file's size and mtime and re-hashes the whole
   store when they disagree on load, so doing it under a running torrent would trade a broken
   ETag for an hours-long recheck of a large library.
-- _...Add new stuff here..._
+- **MBTiles archives are served as tiles once their download finishes.** They could be
+  distributed but never served, which was right while one is arriving — MBTiles is SQLite, whose
+  pages are laid out for a B-tree rather than spatially, so reading one tile can touch pages
+  anywhere in the file, and over a swarm that is not a read but a download. None of that is true
+  of a complete local copy: it is an ordinary database holding the same tiles and metadata a
+  PMTiles does. A TileJSON endpoint and z/x/y tiles now answer for one, read through the built-in
+  `node:sqlite` so this costs no dependency. An incomplete archive answers 503 — "not yet" —
+  where anything that holds no tiles at all still answers 415.
+- **`sparse` is read from the archive's own metadata.** Defaulting by tile format is a guess:
+  PMTiles records that tiles are webp, not that they are terrain. tileserver-gl reads `sparse`
+  from the metadata, so an archive built to be served there already carried the answer and it was
+  being ignored here — the same file behaved differently in the two servers unless configured
+  twice. Precedence is the entry, then the archive, then this node's default, then the format
+  guess; the archive sits above the node default because a blanket setting was chosen without
+  reference to any particular archive. It is republished in the TileJSON, so a mirror starts from
+  the same answer.
+- **A mutable magnet now carries the build that is current, alongside the key.** A BEP 46 magnet
+  named only the public key, which needs a DHT to resolve — and browsers have none, since
+  WebTorrent stubs out `bittorrent-dht` in its browser build for want of UDP sockets. That
+  mattered because this string is routinely put in the fragment of a `tiles.json` URL, an
+  arrangement whose whole point is that one URL is self-sufficient. A key-only fragment forced a
+  browser to fetch the very document the fragment was attached to before it could join anything.
+  The magnet is now `xt=urn:btih:<build>&xs=urn:btpk:<key>`: a client resolves whichever it
+  understands, and the infohash going stale on the next build is what the key beside it is for.
+- **The public listener has a front page.** With `adminPort` splitting the two, `/` on the public
+  port was a 404. It now lists the archives this node publishes with their tile and TileJSON
+  URLs, torrents, magnets and a preview for each. It is a view of `/api/catalog` and
+  `/api/categories`, filtered by the same `feedCategories` rule, so it can show nothing that was
+  not already published — and it is not the console, which stays on the admin port.
+  `publicIndex: false` turns it off, withdrawing the three paths it needs with it.
+- **Lint and format tooling.** `npm run lint`, `lint:fix`, `format`, `format:check`, `tidy` and
+  `check`, wired into CI. There was no linter before, though the source carried
+  `eslint-disable` comments for one — so those suppressed nothing and the rules they named were
+  never checked.
 
 ### 🐞 Bug fixes
+- **WebTorrent's `pieces()` was defined twice.** The later definition wins, so the first had
+  never run — which is why it still called an undefined `countHeld` and no test noticed.
+- **A stuck HTTP connection could keep a shutdown waiting.** `closeServer` armed its force-close
+  timer after registering the handler that clears it, so a close callback arriving first would
+  `clearTimeout(undefined)` and leave the timer running.
+- **Three thrown errors discarded the error that caused them**, losing the cause chain.
 - **Retention no longer reaches across a folder's other entries.** A watched folder's family was
   built from the directory alone, so several entries sharing one — which `match` exists to make
   possible — were treated as a single family. With `keep: 1`, importing this week's `monthly`
