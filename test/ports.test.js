@@ -2,6 +2,7 @@ import assert from 'node:assert';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { after, describe, it } from 'node:test';
 import { createApp } from '../src/api.js';
 import {
@@ -504,14 +505,13 @@ describe('the public page toolbar', () => {
     // Structural, the same way the console's own markup is checked: there is
     // no DOM here to drive, but a control with no listener is a control that
     // does nothing, and that is worth catching.
+    // fileURLToPath, not a URL pathname with the leading slash stripped: that
+    // trick turns "/C:/x" into "C:/x" on Windows and "/home/x" into "home/x"
+    // everywhere else, which is a relative path and resolves against wherever
+    // the runner happens to be.
+    const here = path.dirname(fileURLToPath(import.meta.url));
     const page = await fs.readFile(
-      path.join(
-        path.dirname(new URL(import.meta.url).pathname).replace(/^\//, ''),
-        '..',
-        'src',
-        'web',
-        'public.html',
-      ),
+      path.join(here, '..', 'src', 'web', 'public.html'),
       'utf8',
     );
 
