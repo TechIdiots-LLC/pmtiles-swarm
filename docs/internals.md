@@ -617,6 +617,24 @@ design. The salt is the category name, so one keypair addresses every category.
 hours. A record published once works all afternoon and is gone by evening, so
 republishing on a timer is not an optimisation — it is the feature.
 
+### Who can follow one
+
+Publishing is Node-only by definition — it needs the private key and a DHT
+socket. Resolving is the interesting half, because it decides what a client can
+be told.
+
+A Node client can follow the record: WebTorrent bundles `bittorrent-dht`, and
+`resolveInfoHash` here does the BEP 44 `get` directly. A browser cannot, and not
+for want of trying — WebTorrent's `browser` field maps `bittorrent-dht` to
+`false`, next to `net` and `ut_pex`, because a page has no UDP or TCP sockets at
+all. There is no DHT to query and nothing to substitute for one.
+
+This is why the TileJSON carries both. `torrent.mutable.magnet` is for a client
+that can resolve it; `torrent.magnet` carries a real infohash and a `wss://`
+tracker for one that cannot, which picks up a new build by re-reading the
+document. An archive announced only to `udp://` trackers is healthy in a desktop
+client and invisible from a browser, with nothing in either to say why.
+
 ### Why a third DHT
 
 Both seeding engines run one already, so `bittorrent-dht` looks redundant. It is

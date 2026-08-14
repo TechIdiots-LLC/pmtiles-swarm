@@ -12,6 +12,8 @@ page is what they mean.
 
 - [Why extra members are safe](#why-extra-members-are-safe)
 - [`torrent`](#torrent)
+  - [`torrent.mutable`](#torrentmutable)
+  - [Following one needs a DHT, which not every client has](#following-one-needs-a-dht-which-not-every-client-has)
 - [`sparse`](#sparse)
 - [A complete example](#a-complete-example)
 - [What a plain client sees](#what-a-plain-client-sees)
@@ -64,14 +66,37 @@ generated from. See
 | `publicKey` | string | Hex ed25519 public key. The stable identity.                              |
 | `salt`      | string | Distinguishes several archives published under one key.                   |
 | `seq`       | number | Sequence number of the record this document was built from.               |
-| `magnet`    | string | A BEP 46 magnet (`xt=urn:btpk:`), assembled so a client does not have to. |
+| `magnet`    | string | A BEP 46 magnet (`xs=urn:btpk:`), assembled so a client does not have to. |
 
 Only the public half ever appears here, so any node mirroring the archive can
 serve this block — publishing is the only thing the secret is used for.
 
-Note that a BEP 46 magnet carries no infohash, and resolving one needs the DHT.
-A browser has no DHT, so a page cannot follow a mutable magnet; it uses
-`torrent.magnet` and re-reads the TileJSON to pick up a new build.
+### Following one needs a DHT, which not every client has
+
+A BEP 46 magnet carries no infohash — that is the point of it. The public key is
+resolved through the DHT to whichever infohash is current, so a client cannot
+join the swarm until it has done that lookup.
+
+**Node can.** WebTorrent bundles `bittorrent-dht` and runs a DHT node of its own,
+and this project resolves these records directly through BEP 44 `get` rather than
+through any engine's API. A Node consumer reading this TileJSON can take
+`mutable.publicKey`, resolve it, and follow the archive across rebuilds with no
+further requests to this node.
+
+**A browser cannot.** WebTorrent's `browser` field maps `bittorrent-dht` to
+`false`, so the browser build ships an empty stub in its place — along with
+`net` and `ut_pex`, for the same underlying reason: a page has no UDP or TCP
+sockets, only WebRTC and HTTP. There is no DHT to query and no way to add one.
+
+So a page uses `torrent.magnet`, which carries a real `xt=urn:btih:` infohash and
+a `wss://` tracker, and picks up a new build by re-reading the TileJSON. That is
+not a workaround — re-reading a URL is what a browser is good at, and it is one
+request against a document it already had to fetch.
+
+The practical consequence for whoever creates torrents: an archive announced only
+to `udp://` trackers is perfectly healthy in a desktop client and invisible from
+a browser, with nothing in either to say why. Keep a `wss://` tracker in the
+list.
 
 ## `sparse`
 
