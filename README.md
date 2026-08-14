@@ -28,6 +28,8 @@ node src/index.js --config swarm.config.json
   feed contents, and updatable torrents.
 - **[docs/serving-tiles.md](docs/serving-tiles.md)** — the TileJSON and z/x/y endpoints, the
   `torrent` block that torrent-aware clients use, caching, and running behind a proxy.
+- **[docs/tilejson.md](docs/tilejson.md)** — the TileJSON document in detail, and the two
+  members that are ours rather than the spec's: `torrent` and `sparse`.
 - **[docs/security.md](docs/security.md)** — what is public, what is guarded, named tokens with
   roles, console sign-in, and why an unauthenticated node refuses to listen on a reachable
   address.
