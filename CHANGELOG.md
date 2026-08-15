@@ -5,17 +5,7 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- **One archive whose metainfo never arrived stopped every other archive being warmed.** A sweep
-  warms a single archive, chosen as the first one due, and an archive joined by magnet that has no
-  metainfo yet is answered "not yet" and deliberately left unstamped so the next pass retries in
-  seconds rather than after the full backoff. The two together meant an archive stuck that way
-  stayed due at no cost, was chosen again on every pass, and its neighbours were never attempted at
-  all — for as long as it was stuck, which where no peer ever answers is indefinitely. A node with
-  two mirrors could therefore warm neither, having genuinely tried only one. The fast retry is now
-  bounded: after five consecutive passes the wait has plainly stopped being nearly over, and it is
-  charged as an attempt like any other so the backoff spreads them out and lets its neighbours
-  through. It says so when it makes that switch, which is otherwise the quietest moment in the
-  process — the point where an archive goes from "about to work" to "may never work".
+- _...Add new stuff here..._
 
 ## 0.24.0
 ### ✨ Features and improvements
@@ -121,6 +111,17 @@
   archives it is skipping for want of a recognised kind. That last case is what an archive joined by
   magnet looks like before its metainfo arrives: `guessKind` cannot tell it is PMTiles, `due`
   refuses it, and nothing said so.
+- **One archive whose metainfo never arrived stopped every other archive being warmed.** A sweep
+  warms a single archive, chosen as the first one due, and an archive joined by magnet that has no
+  metainfo yet is answered "not yet" and deliberately left unstamped so the next pass retries in
+  seconds rather than after the full backoff. The two together meant an archive stuck that way
+  stayed due at no cost, was chosen again on every pass, and its neighbours were never attempted at
+  all — for as long as it was stuck, which where no peer ever answers is indefinitely. A node with
+  two mirrors could therefore warm neither, having genuinely tried only one. The fast retry is now
+  bounded: after five consecutive passes the wait has plainly stopped being nearly over, and it is
+  charged as an attempt like any other so the backoff spreads them out and lets its neighbours
+  through. It says so when it makes that switch, which is otherwise the quietest moment in the
+  process — the point where an archive goes from "about to work" to "may never work".
 - **A mutable magnet had nowhere to announce.** `mutableMagnet()` was never passed trackers, so the
   BEP 46 form carried `xt`, `xs`, `dn`, `s` and `ws` and no `tr=` at all. The infohash added in
   0.21.0 was therefore unusable from a browser, which has neither DHT nor peer exchange to fall
