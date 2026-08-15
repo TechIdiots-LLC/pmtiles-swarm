@@ -561,3 +561,123 @@ describe('a summary that is not really a summary', () => {
     }
   });
 });
+
+describe('saying whether it is warming at all', () => {
+  /**
+   * Runs start() and collects what it printed.
+   * @param {object} config - Resolved configuration.
+   * @param {object} [tiles] - Stand-in tile store.
+   * @returns {string[]} - The lines logged.
+   */
+  function startAndCapture(config, tiles = tilesOf({})) {
+    const lines = [];
+    const log = console.log;
+    const warn = console.warn;
+    console.log = (line) => lines.push(line);
+    console.warn = (line) => lines.push(line);
+    try {
+      const warmer = new HeadWarmer(tiles, catalogOf([]), config);
+      warmer.start();
+      warmer.stop();
+    } finally {
+      console.log = log;
+      console.warn = warn;
+    }
+    return lines;
+  }
+
+  it('says so when it is running, and how often', () => {
+    const lines = startAndCapture({ tiles: { prewarmIntervalSeconds: 45 } });
+    assert.ok(
+      lines.some((line) => line.includes('every 45s')),
+      `expected an interval line, got ${JSON.stringify(lines)}`,
+    );
+  });
+
+  it('names the setting that switched it off', () => {
+    const lines = startAndCapture({ tiles: { prewarm: false } });
+    assert.ok(
+      lines.some((line) => line.includes('tiles.prewarm is false')),
+      `expected a reason, got ${JSON.stringify(lines)}`,
+    );
+  });
+
+  it('names a zero interval as the reason rather than going quiet', () => {
+    const lines = startAndCapture({ tiles: { prewarmIntervalSeconds: 0 } });
+    assert.ok(
+      lines.some((line) => line.includes('prewarmIntervalSeconds is 0')),
+      `expected a reason, got ${JSON.stringify(lines)}`,
+    );
+  });
+
+  it('says so when there is no tile store to read with', () => {
+    const lines = startAndCapture({}, {});
+    assert.ok(
+      lines.some((line) => line.includes('no tile store')),
+      `expected a reason, got ${JSON.stringify(lines)}`,
+    );
+  });
+});
+
+describe('a node that never finds anything to warm', () => {
+  /**
+   * Sweeps until the idle report should have fired.
+   * @param {object[]} entries - Catalog contents.
+   * @returns {Promise<string[]>} - The lines logged.
+   */
+  async function sweepUntilReported(entries) {
+    const lines = [];
+    const log = console.log;
+    const warn = console.warn;
+    console.log = (line) => lines.push(line);
+    console.warn = (line) => lines.push(line);
+    try {
+      const warmer = new HeadWarmer(tilesOf({}), catalogOf(entries), {});
+      for (let pass = 0; pass < 12; pass++) await warmer.sweep();
+    } finally {
+      console.log = log;
+      console.warn = warn;
+    }
+    return lines;
+  }
+
+  it('reports archives it is skipping rather than staying silent', async () => {
+    // Joined by magnet, so there is no name to guess a kind from and `due`
+    // refuses it. Indistinguishable from a healthy idle node before this.
+    const lines = await sweepUntilReported([
+      { infoHash: 'c'.repeat(40), name: 'c'.repeat(40) },
+    ]);
+    assert.ok(
+      lines.some((line) => line.includes('no summary')),
+      `expected a skip report, got ${JSON.stringify(lines)}`,
+    );
+  });
+
+  it('says the quiet is earned when every archive is summarised', async () => {
+    const lines = await sweepUntilReported([
+      {
+        infoHash: 'd'.repeat(40),
+        name: 'x.pmtiles',
+        pmtiles: { format: 'png' },
+      },
+    ]);
+    assert.ok(
+      lines.some((line) => line.includes('nothing to warm')),
+      `expected an all-clear, got ${JSON.stringify(lines)}`,
+    );
+  });
+
+  it('says it once, not on every pass', async () => {
+    const lines = await sweepUntilReported([
+      {
+        infoHash: 'e'.repeat(40),
+        name: 'y.pmtiles',
+        pmtiles: { format: 'png' },
+      },
+    ]);
+    assert.equal(
+      lines.filter((line) => line.includes('nothing to warm')).length,
+      1,
+    );
+  });
+});

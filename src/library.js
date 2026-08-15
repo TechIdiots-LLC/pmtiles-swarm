@@ -836,6 +836,17 @@ export class Library {
       complete,
       // Held until the download finishes, which may be hours away.
       originMtime: options.originMtime,
+      // What the peer that offered this says it holds, where it said anything.
+      // The head warmer replaces it with what the archive's own header says as
+      // soon as it can read one; until then this is what makes the archive
+      // servable at all, since `servable` is simply whether a summary exists.
+      //
+      // Spread rather than set, because catalog.put merges by spreading the
+      // record over the existing one -- and a key present with an undefined
+      // value still overwrites. Setting it unconditionally would mean an
+      // archive re-added from a feed that carries no summary silently lost the
+      // one it had already read for itself.
+      ...(options.pmtiles ? { pmtiles: options.pmtiles } : {}),
     });
 
     // The engine's add resolves once metadata is in hand, so for a magnet

@@ -165,7 +165,61 @@ export function formatBytes(bytes) {
  * @property {string} [category] - Item category.
  * @property {string} [mtime] - The archive's mtime on the node that built it.
  * @property {string} [mutableMagnet] - BEP 46 magnet, when the publisher has an identity for it.
+ * @property {object} [pmtiles] - Coverage summary, when the feed carries one.
  */
+
+/**
+ * Reads the `pmtiles:*` summary out of a feed item, when it has one.
+ *
+ * renderItem publishes format, zoom range, bounds, tile count and attribution
+ * for exactly this — so a subscriber can tell what an archive holds before
+ * committing to 80 GiB of it. For a long time nothing read them back, which had
+ * a consequence well beyond the feed being less informative than it looked: a
+ * mirror's `servable` flag is `Boolean(entry.pmtiles)`, so an archive arrived
+ * with no summary, was unservable, and stayed unservable until the head warmer
+ * managed to read the header out of the swarm — while the answer had been in
+ * the feed all along.
+ *
+ * Deliberately partial. There is no `vectorLayers` here, because the publisher
+ * has none to give: planetiler writes that section after every tile, so on a
+ * planet archive it is the very end of the file. An entry summarised from a
+ * feed therefore stays due for warming, which is what fills the rest in.
+ *
+ * @param {string} block - The item XML.
+ * @returns {object | undefined} - The summary, or undefined if absent.
+ */
+function mapSummary(block) {
+  const format = tag(block, 'pmtiles:format');
+  // Format is the field `servable` and the tile routes key off, so a summary
+  // without it is not a summary. Better no object at all than one that reports
+  // an archive as readable and then cannot say what is in it.
+  if (!format) return undefined;
+
+  const number = (name) => {
+    const raw = tag(block, name);
+    if (raw === undefined || raw.trim() === '') return undefined;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : undefined;
+  };
+
+  const bounds = (tag(block, 'pmtiles:bounds') ?? '')
+    .split(',')
+    .map((part) => Number(part.trim()))
+    .filter((part) => Number.isFinite(part));
+
+  return {
+    format,
+    minZoom: number('pmtiles:minzoom'),
+    maxZoom: number('pmtiles:maxzoom'),
+    bounds: bounds.length === 4 ? bounds : undefined,
+    tileCount: number('pmtiles:tiles'),
+    attribution: tag(block, 'pmtiles:attribution'),
+    // Says where this came from, because a summary taken on trust from another
+    // node is not the same fact as one read off the archive's own header, and
+    // the difference matters when the two disagree.
+    source: 'feed',
+  };
+}
 
 /**
  * Parses a subscribed feed.
@@ -222,6 +276,10 @@ export function parseFeed(body) {
       // more than once, so take all of them.
       md5: tag(block, 'pmtiles:md5'),
       mtime: isoDate(tag(block, 'pmtiles:mtime')),
+      // What the publisher already knows about the archive's contents. Absent
+      // from a generic torrent feed, and absent from ours for an archive the
+      // publishing node has not summarised either.
+      pmtiles: mapSummary(block),
       categories: [...block.matchAll(/<category>([\s\S]*?)<\/category>/g)]
         .map((match) => decode(match[1]).trim())
         .filter(Boolean),

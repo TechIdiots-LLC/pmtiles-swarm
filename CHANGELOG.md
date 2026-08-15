@@ -2,6 +2,23 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.24.0
+### ✨ Features and improvements
+- **A mirror now inherits the archive summary from the feed it follows.** `renderItem` has always
+  published `pmtiles:format`, the zoom range, the bounds and the tile count, and `parseFeed` has
+  always thrown them away — so the fact that a feed is more useful than a generic torrent feed was
+  true of the XML and of nothing else. It matters more than it sounds: an archive is servable when
+  `entry.pmtiles` exists, so a fresh mirror served nothing at all until it had read the header out
+  of the swarm itself. On an 80 GiB planet archive whose only seed is busy that is hours of a node
+  that looks joined, downloads steadily, and answers every tile request with 400. The summary now
+  comes across with the item and the archive is servable the moment it is added. It is marked
+  `source: 'feed'`, because a summary taken on trust is not the same fact as one read off the
+  header, and the head warmer still replaces it with the latter as soon as it can read one.
 - **A watched folder can ask for its stable name to be a hard link.**
   `latestLinkType: "hard"` reverses the order the two kinds are attempted in,
   for a folder whose archives are read *through* that name rather than followed
@@ -84,6 +101,16 @@
   never checked.
 
 ### 🐞 Bug fixes
+- **Head warming now says whether it is running.** Every way it could decline was a bare `return`:
+  `tiles.prewarm` false, `prewarmIntervalSeconds` at zero, a node with no tile store to read with,
+  and — the one that actually bites — a pass that finds no archive eligible to warm. All four
+  produced an identical empty log, so "warming is switched off" and "warming is working and has
+  nothing to do" could not be told apart, and on a node whose mirrors were stuck at 400 the only
+  way to tell was to read the source. It now names the reason at startup, or says how often it will
+  look; and after ten idle passes it says either that everything has been summarised or which
+  archives it is skipping for want of a recognised kind. That last case is what an archive joined by
+  magnet looks like before its metainfo arrives: `guessKind` cannot tell it is PMTiles, `due`
+  refuses it, and nothing said so.
 - **A mutable magnet had nowhere to announce.** `mutableMagnet()` was never passed trackers, so the
   BEP 46 form carried `xt`, `xs`, `dn`, `s` and `ws` and no `tr=` at all. The infohash added in
   0.21.0 was therefore unusable from a browser, which has neither DHT nor peer exchange to fall

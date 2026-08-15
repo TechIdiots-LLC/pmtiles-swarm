@@ -409,6 +409,16 @@ export class SubscriptionManager {
       // The mtime on the node that built it, which BitTorrent will not carry.
       // Restored when the download completes.
       originMtime: item.mtime,
+      // What the publisher says the archive holds: format, zoom range, bounds.
+      //
+      // This is the difference between a mirror that can serve tiles the moment
+      // it joins and one that cannot serve them until it has read the header out
+      // of the swarm -- which, for an 80 GiB archive whose only seed is busy,
+      // can be a very long time, and used to be the only way an entry ever got
+      // a summary at all. The head warmer still runs and still overwrites this
+      // with what the archive itself says; this only means the wait is not
+      // spent unservable.
+      pmtiles: item.pmtiles,
     };
 
     // The .torrent is preferred where there is one: it carries the trackers

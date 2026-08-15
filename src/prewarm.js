@@ -20,6 +20,21 @@ const DEFAULT_MAX_BACKOFF_SECONDS = 600;
 /** How long to let the node settle before the first attempt. */
 const DEFAULT_INITIAL_DELAY_SECONDS = 10;
 
+/** How often to look for an archive that needs its head read. */
+const DEFAULT_INTERVAL_SECONDS = 30;
+
+/**
+ * How many consecutive passes may find nothing to warm before saying so.
+ *
+ * Silence is the right output for a node whose archives are all summarised, and
+ * it is also what a node produces when every archive is being skipped for a
+ * reason nobody can see — an entry whose kind is not yet known, most often,
+ * because it was joined by magnet and its metainfo has not arrived. One line
+ * after a few minutes of that separates the two without turning a healthy node
+ * into a log generator.
+ */
+const IDLE_PASSES_BEFORE_REPORTING = 10;
+
 /**
  * Whether a failure means "not yet" rather than "not working".
  *
@@ -49,6 +64,7 @@ export class HeadWarmer {
   #waiting = new Set();
   #running = false;
   #runningSince = 0;
+  #idlePasses = 0;
 
   /**
    * @param {object} tiles - The tile store, for `summarize`.
@@ -69,6 +85,31 @@ export class HeadWarmer {
       this.#config.tiles?.prewarm !== false &&
       typeof this.#tiles?.summarize === 'function'
     );
+  }
+
+  /**
+   * Why this node is not warming, or null when it is.
+   *
+   * Exists so `start()` can say which of its several reasons applied. They are
+   * each a bare `return` on a condition, and the difference between them was
+   * invisible: a node with warming switched off, a node whose interval was set
+   * to zero, and a node warming perfectly well with nothing to do all produced
+   * exactly the same empty log.
+   * @returns {string | null} - The reason, or null.
+   */
+  get disabledReason() {
+    if (this.#config.tiles?.prewarm === false) {
+      return 'tiles.prewarm is false';
+    }
+    if (typeof this.#tiles?.summarize !== 'function') {
+      return 'this node has no tile store to read headers with';
+    }
+    const seconds =
+      this.#config.tiles?.prewarmIntervalSeconds ?? DEFAULT_INTERVAL_SECONDS;
+    if (seconds <= 0) {
+      return `tiles.prewarmIntervalSeconds is ${seconds}`;
+    }
+    return null;
   }
 
   /**
@@ -162,7 +203,11 @@ export class HeadWarmer {
     }
 
     const entry = this.#catalog.list().find((candidate) => this.due(candidate));
-    if (!entry) return null;
+    if (!entry) {
+      this.#reportIdle();
+      return null;
+    }
+    this.#idlePasses = 0;
 
     this.#running = true;
     this.#runningSince = this.#now();
@@ -241,13 +286,55 @@ export class HeadWarmer {
   }
 
   /**
+   * Says why nothing is being warmed, when that has gone on long enough to be
+   * worth explaining.
+   *
+   * Distinguishes the two ways a pass finds nothing: everything is summarised,
+   * which is the goal, and everything is being skipped, which is a fault that
+   * otherwise looks identical. The archives that are neither summarised nor
+   * eligible are named, because the reason is almost always visible in the name
+   * — an entry still called by its infohash has no metainfo yet, so `guessKind`
+   * cannot tell it is PMTiles and `due` refuses it.
+   * @returns {void}
+   */
+  #reportIdle() {
+    this.#idlePasses++;
+    if (this.#idlePasses !== IDLE_PASSES_BEFORE_REPORTING) return;
+
+    const unread = this.#catalog
+      .list()
+      .filter((entry) => !entry.pmtiles?.format);
+    if (unread.length === 0) {
+      console.log('[warm] every archive has been summarised; nothing to warm');
+      return;
+    }
+    console.warn(
+      `[warm] ${unread.length} archive(s) have no summary and none are ` +
+        'eligible to be warmed; their kind is not PMTiles, or is not yet ' +
+        `known: ${unread
+          .slice(0, 5)
+          .map((entry) => entry.name ?? entry.infoHash)
+          .join(', ')}${unread.length > 5 ? ', …' : ''}`,
+    );
+  }
+
+  /**
    * Starts warming, and keeps at it.
    * @returns {void}
    */
   start() {
-    if (!this.enabled) return;
-    const seconds = this.#config.tiles?.prewarmIntervalSeconds ?? 30;
-    if (seconds <= 0) return;
+    // Said once at startup, either way. A node that is not warming is a node
+    // whose mirrored archives will not become servable on their own, and that
+    // is far too important to be inferred from the absence of log lines --
+    // which is exactly how it had to be diagnosed before.
+    const reason = this.disabledReason;
+    if (reason) {
+      console.warn(`[warm] not warming: ${reason}`);
+      return;
+    }
+    const seconds =
+      this.#config.tiles?.prewarmIntervalSeconds ?? DEFAULT_INTERVAL_SECONDS;
+    console.log(`[warm] reading archive heads every ${seconds}s`);
 
     const run = () =>
       this.sweep().catch((error) =>
