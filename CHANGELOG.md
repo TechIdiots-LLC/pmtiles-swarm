@@ -7,6 +7,25 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.24.1
+### 🐞 Bug fixes
+- **Takes pmtiles-torrent 0.4.5, which stops a torrent that is not ready yet reporting a corrupt
+  one.** Reading a piece from an archive whose metadata had not arrived — or that was still checking
+  what is on disk, which is how a resync starts — came back as `invalid piece index in slot list`.
+  The piece count is zero until metadata lands, so every index is out of range including the valid
+  ones, and what is really "ask again in a moment" arrived under a name that reads as a damaged
+  archive. Head warming took that at its word and applied its full doubling backoff, so an archive
+  sat unservable for minutes on a node that was downloading it at 60 MiB/s throughout.
+
+  The floor is raised rather than the range widened, because `^0.4.2` already permitted 0.4.5 and
+  the lockfile is what a deployment installs from: `npm ci` would have kept fetching 0.4.2 and none
+  of this would have reached a node.
+
+  Worth knowing how much rides on that single read. The PMTiles v3 specification requires the root
+  directory to lie within the first 16,384 bytes, so a 16 KiB read at offset 0 fetches the header
+  and the root directory together — one piece, after which the archive is servable. A mirror is
+  unservable until exactly that read succeeds.
+
 ## 0.24.0
 ### ✨ Features and improvements
 - **A mirror now inherits the archive summary from the feed it follows.** `renderItem` has always
