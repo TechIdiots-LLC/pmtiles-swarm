@@ -681,3 +681,108 @@ describe('a node that never finds anything to warm', () => {
     );
   });
 });
+
+describe('one archive that is never ready', () => {
+  const STUCK = 'a'.repeat(40);
+  const OTHER = 'b'.repeat(40);
+
+  /**
+   * A warmer over two archives, the first of which never has its metainfo.
+   * @returns {object} - The warmer, what was asked, and the clock.
+   */
+  function pair() {
+    const asked = [];
+    // Well clear of zero: `due` compares now-minus-last-tried against the
+    // backoff, so a clock starting at 0 makes a never-tried archive look as
+    // though it had just been tried.
+    const clock = { now: 1_000_000 };
+    const tiles = {
+      summarize: async (infoHash) => {
+        asked.push(infoHash);
+        if (infoHash === STUCK) throw new Error('metadata has not arrived');
+        return { format: 'pbf', minZoom: 0, maxZoom: 14, vectorLayers: [] };
+      },
+    };
+    const entries = [
+      { infoHash: STUCK, name: 'stuck.pmtiles' },
+      { infoHash: OTHER, name: 'other.pmtiles' },
+    ];
+    const catalog = catalogOf(entries);
+    const warmer = new HeadWarmer(tiles, catalog, {}, () => clock.now);
+    return { warmer, asked, clock, catalog };
+  }
+
+  /**
+   * Sweeps a number of times, moving the clock on a little between passes.
+   * @param {object} harness - From pair().
+   * @param {number} passes - How many sweeps.
+   * @returns {Promise<string[]>} - Lines logged.
+   */
+  async function run({ warmer, clock }, passes) {
+    const lines = [];
+    const log = console.log;
+    const warn = console.warn;
+    console.log = (line) => lines.push(line);
+    console.warn = (line) => lines.push(line);
+    try {
+      for (let pass = 0; pass < passes; pass++) {
+        await warmer.sweep();
+        // Well under the 15s base backoff, so nothing becomes due again by
+        // waiting -- an archive gets another turn only if it was never stamped.
+        clock.now += 1000;
+      }
+    } finally {
+      console.log = log;
+      console.warn = warn;
+    }
+    return lines;
+  }
+
+  it('still gets its fast retries while the wait is plausibly nearly over', async () => {
+    const harness = pair();
+    await run(harness, 3);
+    // Every pass went to the stuck one, which is the intended behaviour: its
+    // metainfo really is usually seconds away.
+    assert.deepEqual(harness.asked, [STUCK, STUCK, STUCK]);
+  });
+
+  it('stops monopolising the sweep, so its neighbour is warmed too', async () => {
+    // The bug: a "not yet" answer stamped nothing, so the archive stayed due at
+    // no cost, was chosen again as the first due entry on every pass, and the
+    // archive beside it was never attempted once.
+    const harness = pair();
+    await run(harness, 8);
+    assert.ok(
+      harness.asked.includes(OTHER),
+      `the second archive was never attempted: ${JSON.stringify(harness.asked)}`,
+    );
+  });
+
+  it('gives up the sweep after a bounded number of passes, not eventually', async () => {
+    const harness = pair();
+    await run(harness, 8);
+    const stuckTries = harness.asked.filter((hash) => hash === STUCK).length;
+    assert.ok(stuckTries <= 6, `stuck archive took ${stuckTries} of 8 passes`);
+  });
+
+  it('says when it stops treating the wait as a wait', async () => {
+    const harness = pair();
+    const lines = await run(harness, 8);
+    assert.ok(
+      lines.some((line) => line.includes('still has no torrent metadata')),
+      `expected a give-up line, got ${JSON.stringify(lines)}`,
+    );
+  });
+
+  it('warms the neighbour properly rather than merely reaching it', async () => {
+    // Reaching it is not the point; the summary has to land, and once it has
+    // the archive is no longer due and does not consume further passes.
+    const harness = pair();
+    await run(harness, 8);
+    const stored = harness.catalog.written.find(
+      (patch) => patch.infoHash === OTHER,
+    );
+    assert.equal(stored?.pmtiles?.format, 'pbf');
+    assert.equal(harness.asked.filter((hash) => hash === OTHER).length, 1);
+  });
+});

@@ -36,6 +36,24 @@ const DEFAULT_INTERVAL_SECONDS = 30;
 const IDLE_PASSES_BEFORE_REPORTING = 10;
 
 /**
+ * How many passes in a row an archive may claim on the strength of "not yet".
+ *
+ * An archive joined from a magnet has no metainfo until BEP 9 finishes, which
+ * is usually seconds, so charging it the full backoff wastes a wait that was
+ * nearly over — hence the fast retry. What that must not do is cost nothing for
+ * ever. A pass warms one archive, chosen as the *first* that is due, and an
+ * entry that stays due at no cost is chosen again on the next pass and on every
+ * pass after it. One archive stuck this way therefore stops every other archive
+ * on the node from being warmed at all, silently, and for as long as it is
+ * stuck — which on a node whose peer never answers is indefinitely.
+ *
+ * Past this many passes the wait has plainly stopped being nearly over, and it
+ * is charged as an attempt like any other so the backoff can spread the
+ * attempts out and let its neighbours through.
+ */
+const MAX_CONSECUTIVE_EARLY_PASSES = 5;
+
+/**
  * Whether a failure means "not yet" rather than "not working".
  *
  * An archive joined from a magnet has no metainfo until BEP 9 has finished, and
@@ -62,6 +80,8 @@ export class HeadWarmer {
   #tried = new Map();
   #attempts = new Map();
   #waiting = new Set();
+  /** Consecutive passes each archive has answered "not yet" to. */
+  #early = new Map();
   #running = false;
   #runningSince = 0;
   #idlePasses = 0;
@@ -220,6 +240,11 @@ export class HeadWarmer {
 
       this.#tried.set(entry.infoHash, this.#now());
       this.#waiting.delete(entry.infoHash);
+      // The metainfo evidently arrived, so the run of "not yet" answers is
+      // over. Cleared rather than left standing, since a later magnet re-add of
+      // the same archive starts its own wait and should get its own fast
+      // retries rather than inheriting a spent allowance.
+      this.#early.delete(entry.infoHash);
       // Counted even on success, because a read that got the header and not
       // the metadata has not finished and will be back. The count only matters
       // while an archive is still due, and one that is done is never asked
@@ -255,30 +280,47 @@ export class HeadWarmer {
       return stored;
     } catch (error) {
       if (tooEarly(error)) {
-        // Not stamped, so the next pass tries again in seconds rather than in
-        // minutes — and said once, because a node that has just started will
-        // answer this way until the metainfo lands.
-        if (!this.#waiting.has(entry.infoHash)) {
-          this.#waiting.add(entry.infoHash);
-          console.log(
-            `[warm] ${entry.name}: waiting for the torrent metadata before ` +
-              'reading its head',
-          );
+        const passes = (this.#early.get(entry.infoHash) ?? 0) + 1;
+        this.#early.set(entry.infoHash, passes);
+
+        if (passes <= MAX_CONSECUTIVE_EARLY_PASSES) {
+          // Not stamped, so the next pass tries again in seconds rather than in
+          // minutes — and said once, because a node that has just started will
+          // answer this way until the metainfo lands.
+          if (!this.#waiting.has(entry.infoHash)) {
+            this.#waiting.add(entry.infoHash);
+            console.log(
+              `[warm] ${entry.name}: waiting for the torrent metadata before ` +
+                'reading its head',
+            );
+          }
+          return null;
         }
-        return null;
+
+        // Waited long enough to stop calling it a wait. Said out loud, because
+        // this is the moment the archive goes from "about to work" to "may
+        // never work", and it is otherwise the quietest possible transition.
+        console.warn(
+          `[warm] ${entry.name}: still has no torrent metadata after ` +
+            `${passes} passes; treating that as a failure so other archives ` +
+            'get a turn',
+        );
+      } else {
+        // A real attempt: it reached the swarm and found nothing. Ordinary
+        // while an archive is young, since the piece holding the header may not
+        // exist anywhere reachable yet. Worth saying, because it is the answer
+        // to "why is my preview blank", and the backoff keeps it from becoming
+        // noise.
+        console.warn(`[warm] ${entry.name}: ${error.message}`);
+        this.#early.delete(entry.infoHash);
       }
 
-      // A real attempt: it reached the swarm and found nothing. Ordinary while
-      // an archive is young, since the piece holding the header may not exist
-      // anywhere reachable yet. Worth saying, because it is the answer to "why
-      // is my preview blank", and the backoff keeps it from becoming noise.
       this.#tried.set(entry.infoHash, this.#now());
       this.#waiting.delete(entry.infoHash);
       this.#attempts.set(
         entry.infoHash,
         (this.#attempts.get(entry.infoHash) ?? 0) + 1,
       );
-      console.warn(`[warm] ${entry.name}: ${error.message}`);
       return null;
     } finally {
       this.#running = false;
