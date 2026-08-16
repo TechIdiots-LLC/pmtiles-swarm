@@ -7,6 +7,25 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.26.1
+### 🐞 Bug fixes
+- **A download that finished was fetched all over again.** Resuming looked only at the
+  `.incomplete` path. A run that transferred the whole archive, had the marker removed, and then
+  stopped during the hashing left the file under its final name — so the restart found nothing to
+  resume and re-fetched every byte, with the finished copy sitting beside it the entire time.
+  Reported after 700 GB was transferred twice.
+
+  A file already under the final name is now checked against the length the source reports, and
+  hashed where it matches. Where it does not match it is not the archive being asked for, whatever
+  its name says, and the fetch proceeds — hashing it would publish the wrong bytes under the right
+  name, which is worse than transferring it again.
+- **Hashing looked like a hang.** Progress was reported for the download and then nothing at all,
+  while `createTorrentFromFile` read the whole archive to build the piece hashes — twice, with
+  `md5` on. For a planet archive that is the longer half of the work and it was completely silent,
+  so a fetch reaching 100% and going quiet read as a stall. Reported as "it completed and never
+  started making the torrent", when it had been making it for some time. It now says what it is
+  doing when it starts, reports a heartbeat every minute while it runs, and says how long it took.
+
 ## 0.26.0
 ### 🐞 Bug fixes
 - **The add dialog stayed on screen for the length of a download.** `POST /api/torrents` awaited

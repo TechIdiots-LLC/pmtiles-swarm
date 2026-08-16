@@ -49,13 +49,48 @@ export async function createTorrentFromFile(filePath, options = {}) {
   if (!stat.isFile() || stat.size === 0) {
     throw new Error(`not a usable file: ${filePath}`);
   }
-  // A second read of the archive, which is why it is opt-in. Nothing else here
-  // touches these bytes again once the piece hashes are done.
-  const md5Digest = options.md5 ? await md5File(filePath) : undefined;
-  return buildTorrent(filePath, path.basename(filePath), stat.size, {
-    ...options,
-    md5Digest,
+
+  // Says that it started, and keeps saying it is going.
+  //
+  // Hashing reads the whole archive, and with md5 on it reads it twice — for a
+  // planet archive that is the longer half of the job, and it emitted nothing
+  // at all. The download reports every second and then stops dead, so the
+  // symptom is a fetch that reaches 100% and appears to hang; reported from the
+  // field as "it completed and never started making the torrent", when it had
+  // in fact been making it for some time.
+  const what = options.sourceUrl ?? filePath;
+  const passes = options.md5 ? 'twice, once of them for the MD5' : 'once';
+  console.log(
+    `[hash] ${what}: reading ${stat.size} bytes ${passes} to build the torrent`,
+  );
+  const startedAt = Date.now();
+  const heartbeat = setInterval(() => {
+    const minutes = Math.round((Date.now() - startedAt) / 60000);
+    console.log(`[hash] ${what}: still hashing after ${minutes}m`);
+  }, 60000);
+  heartbeat.unref?.();
+  options.onProgress?.({
+    phase: 'hashing',
+    received: stat.size,
+    total: stat.size,
   });
+
+  try {
+    // A second read of the archive, which is why it is opt-in. Nothing else
+    // here touches these bytes again once the piece hashes are done.
+    const md5Digest = options.md5 ? await md5File(filePath) : undefined;
+    const built = await buildTorrent(
+      filePath,
+      path.basename(filePath),
+      stat.size,
+      { ...options, md5Digest },
+    );
+    const seconds = Math.round((Date.now() - startedAt) / 1000);
+    console.log(`[hash] ${what}: torrent built in ${seconds}s`);
+    return built;
+  } finally {
+    clearInterval(heartbeat);
+  }
 }
 
 /**
@@ -91,21 +126,53 @@ export async function createTorrentFromUrl(url, options = {}) {
     // verify. The marker means the URL 404s until the moment it is real.
     const target = path.join(options.retainPath, name);
     const marker = options.incompleteSuffix ?? DEFAULT_SUFFIX;
-    await downloadTo(
-      url,
-      `${target}${marker}`,
-      options.onProgress,
-      options.signal,
-      {
+    const partial = `${target}${marker}`;
+
+    // A run that got all the way through the download and stopped during the
+    // hashing leaves the archive under its final name, the marker already
+    // removed. Resuming looked only at the marker path, so it saw nothing to
+    // continue, and fetched the whole thing again with the finished copy
+    // sitting beside it -- 700 GB re-transferred to arrive at a file that was
+    // already there.
+    //
+    // Hashing is the longer half for a large archive and reports nothing while
+    // it runs, so being interrupted in it is not unlikely.
+    const finished = await bytesOnDisk(target);
+    const resuming = await bytesOnDisk(partial);
+    let haveIt = false;
+    if (finished > 0 && resuming === 0) {
+      const expected = await remoteLength(url, options.signal);
+      if (expected && finished === expected) {
+        haveIt = true;
+        console.log(
+          `[fetch] ${url} is already downloaded (${finished} bytes); ` +
+            'hashing what is on disk rather than fetching it again',
+        );
+      } else {
+        // Same name, different length: whatever this is, it is not the archive
+        // being asked for, and hashing it would publish the wrong bytes under
+        // the right name. The download proceeds to the marker path as usual.
+        console.warn(
+          `[fetch] ${target} exists but is ${finished} bytes against ` +
+            `${expected ?? 'an unknown length'} at the source; fetching again`,
+        );
+      }
+    }
+
+    if (!haveIt) {
+      await downloadTo(url, partial, options.onProgress, options.signal, {
         attempts: options.fetchAttempts,
         retryDelayMs: options.fetchRetryDelayMs,
-      },
-    );
-    if (marker) await fs.rename(`${target}${marker}`, target);
+      });
+      if (marker) await fs.rename(partial, target);
+    }
+
     const created = await createTorrentFromFile(target, {
       ...options,
       name,
       webSeeds,
+      onProgress: options.onProgress,
+      sourceUrl: url,
     });
     return { ...created, retainedAt: target };
   }
@@ -157,6 +224,30 @@ export async function createTorrentFromUrl(url, options = {}) {
  * @param {string} target - The partial file.
  * @returns {Promise<number>} - Bytes on disk.
  */
+/**
+ * What the source says the archive is, in bytes, or 0 when it will not say.
+ *
+ * Used to decide whether a file already under its final name is the archive
+ * being asked for. A HEAD is enough and costs nothing next to the alternative,
+ * which is transferring the whole thing a second time to find out.
+ *
+ * @param {string} url - The archive's URL.
+ * @param {AbortSignal} [signal] - Cancels the probe.
+ * @returns {Promise<number>} - Length, or 0.
+ */
+async function remoteLength(url, signal) {
+  try {
+    const response = await fetch(url, { method: 'HEAD', signal });
+    if (!response.ok) return 0;
+    return Number(response.headers.get('content-length') ?? 0) || 0;
+  } catch {
+    // A source that refuses HEAD tells us nothing, which is not the same as
+    // telling us the file is wrong. The caller re-fetches, which is what it
+    // would have done anyway.
+    return 0;
+  }
+}
+
 async function bytesOnDisk(target) {
   const stat = await fs.stat(target).catch(() => null);
   return stat?.isFile() ? stat.size : 0;

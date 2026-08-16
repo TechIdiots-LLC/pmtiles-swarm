@@ -25,7 +25,7 @@ async function server(behaviour = {}) {
   const listener = http.createServer((req, res) => {
     const range = req.headers.range;
     const from = range ? Number(/bytes=(\d+)-/.exec(range)?.[1] ?? 0) : 0;
-    requests.push({ range: range ?? null, from });
+    requests.push({ range: range ?? null, from, method: req.method });
 
     const etag = behaviour.changingEtag ? `"gen-${requests.length}"` : ETAG;
     const headers = { 'accept-ranges': 'bytes' };
@@ -264,6 +264,57 @@ describe('resuming a download that stopped', () => {
         Date.now() - started >= 110,
         `gave up after only ${Date.now() - started}ms`,
       );
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('hashes a finished download instead of fetching it again', async () => {
+    // Reported from the field, and expensive: a run downloaded the archive in
+    // full, the marker was removed, and it stopped during the hashing -- which
+    // for a large archive is the longer half and says nothing while it runs.
+    // The restart looked only at the marker path, found nothing to resume, and
+    // re-fetched 700 GB to arrive at the file already sitting beside it.
+    const node = await server();
+    const dir = await fs.mkdtemp(path.join(workspace, 'done-'));
+    await fs.writeFile(path.join(dir, 'planet.pmtiles'), BODY);
+    try {
+      const created = await createTorrentFromUrl(node.url, {
+        retainPath: dir,
+        pieceLength: 16384,
+        fetchRetryDelayMs: 1,
+      });
+      // A HEAD to check the length, and not one byte of the archive.
+      assert.deepStrictEqual(
+        node.requests.map((r) => r.method ?? 'GET'),
+        ['HEAD'],
+      );
+      assert.strictEqual(
+        (await fs.readFile(created.retainedAt)).length,
+        BODY.length,
+      );
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('fetches again when the file under that name is something else', async () => {
+    // Same name, different length. Hashing it would publish the wrong bytes
+    // under the right name, which is worse than transferring it again.
+    const node = await server();
+    const dir = await fs.mkdtemp(path.join(workspace, 'wrong-'));
+    await fs.writeFile(path.join(dir, 'planet.pmtiles'), Buffer.alloc(11, 7));
+    try {
+      const created = await createTorrentFromUrl(node.url, {
+        retainPath: dir,
+        pieceLength: 16384,
+        fetchRetryDelayMs: 1,
+      });
+      assert.ok(
+        node.requests.some((r) => (r.method ?? 'GET') === 'GET'),
+        'it should have fetched the archive',
+      );
+      assert.deepStrictEqual(await fs.readFile(created.retainedAt), BODY);
     } finally {
       await node.close();
     }
