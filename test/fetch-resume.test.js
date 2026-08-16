@@ -50,6 +50,14 @@ async function server(behaviour = {}) {
 
     if (drops > 0) {
       drops -= 1;
+      // Cut before writing anything. A drop that transfers nothing is the
+      // case the budget is actually counting -- one that moves bytes proves
+      // the route works and is treated as new trouble rather than the same
+      // trouble continuing.
+      if (behaviour.dropWithoutBytes) {
+        res.destroy();
+        return;
+      }
       // Send some, then cut the connection: exactly what a dropped transfer
       // looks like to the client, down to the "terminated" it produces.
       //
@@ -192,14 +200,70 @@ describe('resuming a download that stopped', () => {
     }
   });
 
-  it('gives up rather than retrying for ever', async () => {
-    const node = await server({ dropFirst: 99 });
+  it('gives up when nothing is getting through', async () => {
+    // The budget counts consecutive attempts that transferred nothing, so a
+    // source dropping before it sends a byte spends it exactly.
+    const node = await server({ dropFirst: 99, dropWithoutBytes: true });
     try {
       await assert.rejects(
         () => fetchThrough(node, { fetchAttempts: 3 }),
-        /after 3 attempts/,
+        /3 consecutive attempts without progress/,
       );
       assert.equal(node.requests.length, 3);
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('keeps going while the drops are still making progress', async () => {
+    // The failure this was written for: 226 GB transferred across six separate
+    // stalls, and the budget spent as though none of it had happened. An
+    // attempt that moved bytes reached the source and got data out of it, so
+    // the trouble it then hit is new -- otherwise a long download is ended by
+    // its own history rather than by anything wrong with it.
+    const node = await server({ dropFirst: 8 });
+    try {
+      const { bytes } = await fetchThrough(node, { fetchAttempts: 3 });
+      assert.ok(
+        node.requests.length > 3,
+        `gave up after ${node.requests.length} requests despite progress`,
+      );
+      assert.strictEqual(bytes.length, BODY.length);
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('still stops eventually, however much it dribbles', async () => {
+    // Progress resetting the budget must not become an unbounded loop, so
+    // there is a ceiling on total attempts regardless.
+    const node = await server({ dropFirst: 9999 });
+    try {
+      await assert.rejects(() => fetchThrough(node, { fetchAttempts: 2 }));
+      assert.ok(
+        node.requests.length <= 20,
+        `made ${node.requests.length} requests`,
+      );
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('waits longer after each consecutive failure', async () => {
+    // A flat delay made ten attempts worth about forty-five seconds in total,
+    // which is shorter than most of the interruptions it exists to survive.
+    const node = await server({ dropFirst: 99, dropWithoutBytes: true });
+    const started = Date.now();
+    try {
+      await assert.rejects(() =>
+        fetchThrough(node, { fetchAttempts: 3, fetchRetryDelayMs: 40 }),
+      );
+      // 40 + 80 between three attempts; allowed slack, but a flat 40 would
+      // total 80 and could not reach this.
+      assert.ok(
+        Date.now() - started >= 110,
+        `gave up after only ${Date.now() - started}ms`,
+      );
     } finally {
       await node.close();
     }

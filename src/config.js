@@ -326,8 +326,21 @@ const DEFAULTS = {
    * docs/internals.md — "Resuming a partial download".
    */
   fetchAttempts: 10,
-  /** How long to wait before resuming a download that stopped. */
-  fetchRetrySeconds: 5,
+  /**
+   * Base wait before resuming a download that stopped, in seconds.
+   *
+   * Multiplied by the number of consecutive failures, so the wait grows while
+   * the trouble lasts: at 30 it waits 30s, then 60, then 90, and a run of ten
+   * spans something over twenty minutes. A flat five seconds made ten attempts
+   * worth about forty-five seconds in total, which is shorter than most of the
+   * interruptions this exists to survive — a download that had transferred
+   * 226 GB was ended by a single bad minute.
+   *
+   * Counted per consecutive failure rather than per attempt: anything that
+   * moves bytes clears the count, because a transfer that got data out of the
+   * source has proved the route and whatever it hit next is new trouble.
+   */
+  fetchRetrySeconds: 30,
   /** How often to check seeding limits, in seconds. Zero disables it. */
   seedingCheckIntervalSeconds: 3600,
   /**

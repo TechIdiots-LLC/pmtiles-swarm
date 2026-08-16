@@ -7,6 +7,36 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.25.0
+### ✨ Features and improvements
+- **A stopped download is kept, and adding the same URL again resumes it.** Staging directories
+  were named at random, so a partial transfer became unreachable the moment the add returned:
+  nothing knew where it was, and re-adding the URL opened a fresh directory beside it and started
+  from zero. They are now named from the URL, and a fetch that runs out of attempts leaves its
+  bytes in place rather than deleting them — so the second add finds the first one's work and
+  continues with a Range request. Cancelling still removes them: somebody said stop, and leaving
+  hundreds of gigabytes behind after that is the waste the deletion was written to avoid.
+
+  Note the disk consequence. A download abandoned for good now keeps its partial file until the
+  directory is removed by hand; the give-up message and a log line both name the path.
+
+### 🐞 Bug fixes
+- **Ten network blips ended an 800 GB download, whatever it had achieved.** Two faults, and the
+  attempt count was neither of them.
+
+  The budget counted every failure rather than consecutive failures that transferred nothing, so it
+  described the whole download instead of the trouble it was in. Observed in the field: 226 GB
+  across six separate stalls, then the remaining four spent inside one bad minute, because a
+  quarter of a terabyte of progress counted for nothing. An attempt that moves bytes has reached
+  the source and got data out of it, so whatever it hits next is new trouble — progress now clears
+  the count, against a high-water mark so a short attempt after a long one is not mistaken for it.
+  A ceiling on total attempts keeps that from becoming an unbounded loop.
+
+  And the wait between attempts was flat, so ten of them covered about forty-five seconds — shorter
+  than most of the interruptions they exist to survive. It now grows with each consecutive failure
+  and the base moves from 5 seconds to 30, which spans something over twenty minutes rather than
+  under one.
+
 ## 0.24.4
 ### 🐞 Bug fixes
 - **The feed advertised a .torrent nobody could fetch.** Every item named

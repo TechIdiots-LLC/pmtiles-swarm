@@ -606,8 +606,22 @@ export class Library {
     // Downloaded into a directory of its own, then moved once the infohash
     // exists to be filed under. See docs/internals.md — "Staging, for an
     // archive fetched from a URL".
+    // Named from the URL rather than at random, so a download that stopped can
+    // be picked up again.
+    //
+    // A random name made every add its own directory, which meant a partial
+    // transfer was unreachable the moment the add returned: nothing knew where
+    // it was, and re-adding the same URL opened a fresh directory beside it and
+    // started from zero. For a planet archive that is hundreds of gigabytes
+    // thrown away because a network went out for a few minutes. Derived from
+    // the URL, the second add finds the first one's bytes and downloadTo
+    // resumes with a Range request.
     const staging = retain
-      ? path.join(root, INCOMING, crypto.randomBytes(8).toString('hex'))
+      ? path.join(
+          root,
+          INCOMING,
+          crypto.createHash('sha256').update(url).digest('hex').slice(0, 16),
+        )
       : undefined;
 
     // The origin is a valid web seed for exactly these bytes, so it is used as
@@ -658,12 +672,26 @@ export class Library {
         },
       });
     } catch (error) {
-      // A cancelled or failed fetch leaves a partial file in a directory
-      // nothing will ever look in again. Left alone it is invisible waste —
-      // and for a planet archive, invisible waste measured in gigabytes.
       this.#running.delete(url);
-      if (staging)
+      // Cancelling is a decision to stop wanting this; running out of attempts
+      // is not. The two used to be cleaned up identically, so a download that
+      // survived six stalls and reached 226 GB had all of it deleted by the
+      // seventh -- and the resume that the staging directory exists to make
+      // possible had nothing left to resume from.
+      //
+      // A cancelled fetch is still removed. Somebody said stop, and leaving
+      // gigabytes behind after that is the invisible waste this was written to
+      // avoid in the first place.
+      const cancelled = controller.signal.aborted;
+      if (staging && cancelled) {
         await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
+      } else if (staging) {
+        console.warn(
+          `[fetch] keeping the partial download in ${staging}; adding ${url} ` +
+            'again resumes it, and discarding it is a matter of removing that ' +
+            'directory',
+        );
+      }
       throw error;
     }
 

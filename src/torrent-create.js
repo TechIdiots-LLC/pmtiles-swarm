@@ -230,7 +230,31 @@ async function downloadTo(url, target, onProgress, signal, options = {}) {
   let lastReport = 0;
   let lastError;
 
-  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+  // The budget counts *consecutive* failures that moved nothing, not failures.
+  //
+  // Counting every failure made the budget a property of the whole download
+  // rather than of the trouble it is in, and for a large archive those are not
+  // the same thing at all. A 700 GiB transfer over a domestic line drops
+  // occasionally; observed in the field, a download reached 226 GB across six
+  // separate stalls and then exhausted the remaining four on a single bad
+  // minute, because nothing about a quarter of a terabyte of progress counted
+  // for anything. An attempt that transferred bytes proves the source and the
+  // route are alive, so the trouble it hit is over and the next one is new.
+  //
+  // The high-water mark rather than the last attempt's figure: an attempt can
+  // fail having written less than a previous one already had on disk, and that
+  // is not progress.
+  let consumed = 0;
+  let best = await bytesOnDisk(target);
+  // Reset does mean an unlucky download can go round more times than the
+  // budget names, which is the point, so there is a ceiling as well: a source
+  // dribbling a few bytes before dropping every time would otherwise retry
+  // for ever.
+  const ceiling = attempts * 10;
+  let taken = 0;
+
+  while (consumed < attempts && taken < ceiling) {
+    taken += 1;
     const from = await bytesOnDisk(target);
     // A file already at full length is one a previous attempt finished, and
     // that the caller died before renaming. Re-fetching it buys nothing.
@@ -249,8 +273,11 @@ async function downloadTo(url, target, onProgress, signal, options = {}) {
       // A cancelled download is a decision, not a failure to retry past.
       if (signal?.aborted) throw error;
       lastError = error;
-      if (attempt === attempts) break;
-      await delay(retryDelayMs, signal);
+      // Nothing was transferred -- the request never opened -- so this one
+      // always counts.
+      consumed += 1;
+      if (consumed >= attempts) break;
+      await delay(retryDelayMs * consumed, signal);
       continue;
     }
 
@@ -324,18 +351,38 @@ async function downloadTo(url, target, onProgress, signal, options = {}) {
       if (signal?.aborted) throw error;
       lastError = error;
       const reached = await bytesOnDisk(target);
+      // Progress clears the slate. Anything that moved bytes reached the
+      // source and got data out of it, so whatever it then ran into is a new
+      // problem rather than a continuation of the last one.
+      if (reached > best) {
+        best = reached;
+        consumed = 0;
+      } else {
+        consumed += 1;
+      }
       console.warn(
         `[fetch] ${url} stopped at ${reached} bytes ` +
-          `(attempt ${attempt}/${attempts}): ${error.message}`,
+          `(${consumed}/${attempts} consecutive without progress): ` +
+          error.message,
       );
-      if (attempt === attempts) break;
-      await delay(retryDelayMs, signal);
+      if (consumed >= attempts) break;
+      // Growing with each consecutive failure, so a budget spans an outage
+      // rather than a moment: at the default of 30s this waits 30, 60, 90 …
+      // and ten of them cover something over twenty minutes. A flat delay made
+      // ten attempts worth about forty-five seconds, which is shorter than
+      // most of the interruptions it exists to survive.
+      await delay(retryDelayMs * consumed, signal);
     }
   }
 
+  // Says what was reached as well as what failed. What matters when this lands
+  // is whether there is anything worth resuming, and the byte count is the
+  // whole of that answer -- the partial file is kept, so re-adding the same URL
+  // continues from here rather than starting again.
   throw new Error(
-    `could not finish downloading ${url} after ${attempts} attempts: ` +
-      `${lastError?.message ?? 'unknown error'}`,
+    `could not finish downloading ${url} after ${consumed} consecutive ` +
+      `attempts without progress (${best} bytes transferred, kept for a ` +
+      `resume): ${lastError?.message ?? 'unknown error'}`,
   );
 }
 
