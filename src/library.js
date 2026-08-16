@@ -541,8 +541,15 @@ export class Library {
    * @returns {Promise<object>} - The catalog entry.
    */
   async addRemoteArchive(url, options = {}) {
+    // Both shortcuts below have to fire onValidated before returning, and for
+    // the same reason: a caller waiting on it to answer a request would
+    // otherwise wait for something that has already happened, or -- worse --
+    // for the whole of a download somebody else started.
     const existing = this.#catalog.findBySource(url);
-    if (existing) return existing;
+    if (existing) {
+      options.onValidated?.({ url, kind: existing.kind, held: true });
+      return existing;
+    }
 
     // A second request for a URL already being fetched joins the first; the
     // catalog cannot answer this, since an entry exists only once the download
@@ -550,6 +557,7 @@ export class Library {
     const inFlight = this.#inFlight.get(url);
     if (inFlight) {
       console.log(`[fetch] ${url} is already being fetched; joining that one`);
+      options.onValidated?.({ url, joined: true });
       return inFlight;
     }
 
@@ -589,6 +597,18 @@ export class Library {
     assertPublishable(identified, {
       allowUnknown: options.allowUnknown ?? this.#config.allowUnknownArchives,
     });
+
+    // Everything a caller can do something about has now been checked: the URL
+    // answers, it is an archive of a kind this will publish, and it is not a
+    // credential being broadcast to a swarm. What remains is the transfer,
+    // which for a planet archive is hours.
+    //
+    // A caller that wants to stop waiting there says so with onValidated. That
+    // is the difference between a dialog that closes on a bad URL with the
+    // reason in it, and one that sits open for the length of the download --
+    // and the console was always written for the former, since it reports
+    // progress through runningAdds() and says "watch the log" as it closes.
+    options.onValidated?.({ url, kind: identified.kind });
 
     const summary =
       identified.kind === 'pmtiles'

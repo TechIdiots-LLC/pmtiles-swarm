@@ -1387,7 +1387,40 @@ export function createApp({
       if (body.path) {
         entry = await library.addLocalArchive(body.path, options);
       } else if (body.url) {
-        entry = await library.addRemoteArchive(body.url, options);
+        // Answered as soon as the URL has been checked, not when the transfer
+        // finishes. Awaiting the whole thing held the response open for the
+        // length of the download -- hours for a planet archive -- so the
+        // console's add dialog stayed on screen throughout, over an archive
+        // that was visibly appearing behind it.
+        //
+        // Progress has its own route already: runningAdds() feeds /api/adds,
+        // the console polls it, and DELETE /api/adds cancels one. This is the
+        // piece that was missing rather than a new mechanism.
+        const validated = Promise.withResolvers();
+        const running = library
+          .addRemoteArchive(body.url, {
+            ...options,
+            onValidated: validated.resolve,
+          })
+          // A failure after validation has nowhere to be reported: the
+          // response has gone. It is logged where the rest of the fetch is,
+          // and swallowed here so it cannot take the process down as an
+          // unhandled rejection.
+          .catch((error) => {
+            validated.reject(error);
+            console.error(`[fetch] ${body.url}: ${error.message}`);
+          });
+
+        // Whichever comes first: the checks passing, or the whole attempt
+        // failing. A URL that does not answer, or is not an archive, still
+        // reports itself in the dialog where somebody can correct it.
+        await validated.promise;
+        void running;
+        return res.status(202).json({
+          accepted: true,
+          url: body.url,
+          message: 'fetching; progress is reported by /api/adds',
+        });
       } else if (body.magnet) {
         entry = await library.addExistingTorrent(
           { magnet: body.magnet },

@@ -7,6 +7,29 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.26.0
+### 🐞 Bug fixes
+- **The add dialog stayed on screen for the length of a download.** `POST /api/torrents` awaited
+  the entire transfer before answering, so for a URL the response arrived hours after the request
+  — and the console, which closes the dialog when the response lands, sat there over an archive
+  visibly appearing behind it.
+
+  The console was always written for the other arrangement: it says "fetching — watch the log" as
+  it closes, polls `/api/adds` for progress, and offers `DELETE /api/adds` to cancel. Only the
+  route was missing. It now answers **202** as soon as the URL has been checked — it answers, it is
+  an archive of a publishable kind, it is not a credential about to be broadcast — and lets the
+  transfer run behind it. Everything a person can correct is still reported in the dialog, because
+  all of it is found before the first byte moves.
+
+  Both shortcuts inside `addRemoteArchive` had to be taught the same signal. A URL already in the
+  catalog, or one already being fetched by somebody else, returns without ever reaching the checks
+  — so a response waiting on them would have waited for something that had already happened, or
+  for the whole of a download another caller had started.
+
+  `url` bodies now answer 202 with an acknowledgement rather than 201 with the finished entry.
+  Paths, magnets and `.torrent` URLs are unchanged: they were always fast, and still answer 201
+  with the entry.
+
 ## 0.25.0
 ### ✨ Features and improvements
 - **A stopped download is kept, and adding the same URL again resumes it.** Staging directories
