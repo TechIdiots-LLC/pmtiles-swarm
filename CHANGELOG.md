@@ -7,6 +7,17 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.24.2
+### 🐞 Bug fixes
+- **An empty `publicUrl` was read as an empty base rather than as no setting.** `??` treats only
+  null and undefined as absent, so `"publicUrl": ""` — which is how an operator naturally writes
+  "I do not want this" into a key already in the file — produced URLs like
+  `/archives/<hash>/{z}/{x}/{y}.pbf`. Those half-work, which is the trap: a browser resolves them
+  against the TileJSON it just fetched and renders perfectly, while everything needing an absolute
+  URL quietly gets something unusable — a torrent client handed the `torrent` link, another node
+  syncing from the feed. Empty and whitespace now mean unset, and the base falls back to the
+  request, which is what a node syncing internally by IP depends on.
+
 ## 0.24.1
 ### 🐞 Bug fixes
 - **Takes pmtiles-torrent 0.4.5, which stops a torrent that is not ready yet reporting a corrupt

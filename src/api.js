@@ -213,8 +213,21 @@ export function createApp({
    * @param {import('express').Request} req - The request.
    * @returns {string} - Base URL without a trailing slash.
    */
-  const baseUrl = (req) =>
-    (config.publicUrl ?? `${req.protocol}://${req.host}`).replace(/\/$/, '');
+  const baseUrl = (req) => {
+    // An empty publicUrl means "not set", not "use an empty base".
+    //
+    // `??` reads only null and undefined as absent, so `"publicUrl": ""` --
+    // which is how an operator naturally writes "I do not want this" in a JSON
+    // file that already has the key -- produced a base of "" and URLs like
+    // `/archives/<hash>/{z}/{x}/{y}.pbf`. Those half-work, which is the worst
+    // of both: a browser resolves them against the TileJSON it fetched and
+    // renders perfectly, while every consumer that needs an absolute URL --
+    // a torrent client handed the `torrent` link, another node syncing from
+    // the feed -- silently gets something it cannot use.
+    const configured = String(config.publicUrl ?? '').trim();
+    const base = configured || `${req.protocol}://${req.host}`;
+    return base.replace(/\/$/, '');
+  };
 
   /**
    * Whether an archive should answer a missing tile with 404 rather than 204.
