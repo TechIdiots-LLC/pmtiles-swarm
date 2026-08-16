@@ -63,8 +63,12 @@ describe('feed rendering', () => {
     assert.match(xml, /type="application\/x-bittorrent"/);
     assert.match(
       xml,
-      /<enclosure url="https:\/\/maps\.example\.org\/api\/torrents\/1{40}\/file"/,
+      /<enclosure url="https:\/\/maps\.example\.org\/archives\/1{40}\/archive\.torrent"/,
     );
+    // The public route, not the gated API. A feed exists to be followed by
+    // somebody else, and the API answers 404 on the public listener and 401 on
+    // the console one -- so an item naming it is unreachable to every reader.
+    assert.doesNotMatch(xml, /\/api\//);
   });
 
   it('describes the map when the archive has been probed', () => {
@@ -117,7 +121,7 @@ describe('feed parsing', () => {
     assert.strictEqual(items.length, 2);
     assert.strictEqual(items[0].title, 'build-1.pmtiles');
     assert.strictEqual(items[0].infoHash, '1'.repeat(40));
-    assert.ok(items[0].torrentUrl.endsWith('/file'));
+    assert.ok(items[0].torrentUrl.endsWith('/archive.torrent'));
   });
 
   it('reads a magnet supplied as the link', () => {

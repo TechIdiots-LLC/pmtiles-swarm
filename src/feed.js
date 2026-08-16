@@ -84,7 +84,27 @@ ${items}
  * @returns {string} - The item XML.
  */
 function renderItem(entry, baseUrl) {
-  const torrentUrl = `${baseUrl}/api/torrents/${entry.infoHash}/file`;
+  // The public route, which is the only one a subscriber can use.
+  //
+  // This named /api/torrents/<hash>/file, and that address is unreachable to
+  // everyone the feed is written for: the API is not on the public listener at
+  // all, so it answers 404 there, and on the console listener it answers 401.
+  // A feed is a public document whose whole purpose is to be followed by
+  // somebody else, and every consumer of it -- our own subscriptions, and any
+  // ordinary torrent client pointed at the same URL -- got one of those two.
+  //
+  // Nothing broke loudly, because subscriptions.js falls back to the magnet and
+  // logs a line about it. What that fallback costs is invisible from here and
+  // considerable: BEP 9 carries only the info dict, and a v2 torrent's piece
+  // layers live outside it, so an archive joined by magnet can never obtain
+  // them. On a hybrid torrent the mirror then holds metadata it cannot verify
+  // pieces against, and republishes a .torrent that claims v2 and omits the
+  // hashes -- measured at 413 KB against the origin's 1,074 KB, the difference
+  // being exactly 20,636 pieces x 32 bytes.
+  //
+  // Kept identical to what the TileJSON advertises for the same archive, in
+  // api.js. Those two disagreeing is what this was.
+  const torrentUrl = `${baseUrl}/archives/${entry.infoHash}/archive.torrent`;
   const map = entry.pmtiles;
 
   const mapFields = map

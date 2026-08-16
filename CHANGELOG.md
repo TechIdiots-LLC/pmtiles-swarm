@@ -7,6 +7,26 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.24.4
+### 🐞 Bug fixes
+- **The feed advertised a .torrent nobody could fetch.** Every item named
+  `/api/torrents/<infohash>/file`, and that address is unreachable to exactly the audience a feed
+  is written for: the API is not on the public listener, so it answers 404 there, and on the
+  console listener it answers 401. Our own subscriptions got one or the other, and so did any
+  ordinary torrent client pointed at the same URL.
+
+  It failed quietly, which is why it lasted. `subscriptions.js` falls back to the magnet and logs a
+  line about it, so a mirror still joined and still downloaded. What the fallback costs is not
+  visible from there: BEP 9 carries only the info dict, and a v2 torrent's piece layers live
+  outside it, so an archive joined by magnet can never obtain them. On a hybrid torrent the mirror
+  then holds metadata it cannot verify pieces against and republishes a .torrent that claims v2
+  while omitting the hashes — 413 KB against the origin's 1,074 KB, the difference being precisely
+  20,636 pieces x 32 bytes. Anything mirroring from that mirror inherits it.
+
+  Items now name `/archives/<infohash>/archive.torrent`, which is public, unauthenticated, and the
+  same URL the TileJSON has always given for the same archive. Those two disagreeing was the bug;
+  a test now pins that they agree and that what they name answers 200 on the public surface.
+
 ## 0.24.3
 ### 🐞 Bug fixes
 - **Takes pmtiles-torrent 0.4.6.** Two things a node reading pieces on demand wanted. The sidecar
