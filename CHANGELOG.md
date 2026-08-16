@@ -7,6 +7,22 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.24.3
+### 🐞 Bug fixes
+- **Takes pmtiles-torrent 0.4.6.** Two things a node reading pieces on demand wanted. The sidecar
+  no longer discards the alerts that explain a failed read — `torrent_error_alert` and
+  `file_error_alert` were drained from the queue and thrown away by the one loop running while a
+  read was outstanding, so a full disk, an unwritable save path and a torrent that could not verify
+  its pieces all arrived as the same silent timeout. And the last piece of an archive is now
+  fetched before any header has been read: everything else is prioritised from the header, so until
+  one can be read nothing points anywhere but at the header, and planetiler writes the JSON
+  metadata and the leaf directories after all the tile data — where a partial mirror is least
+  likely to have them.
+
+  The floor is raised in the lockfile as well as the range. `^0.4.5` already permitted 0.4.6, and a
+  deployment installs from the lockfile, so without moving it `npm ci` would have gone on fetching
+  the version without either fix.
+
 ## 0.24.2
 ### 🐞 Bug fixes
 - **An empty `publicUrl` was read as an empty base rather than as no setting.** `??` treats only
