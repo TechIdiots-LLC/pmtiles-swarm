@@ -186,9 +186,11 @@ describe('the magnet a style points at', () => {
     );
     assert.match(magnet, /&s=openmaptiles/);
     assert.match(magnet, /&dn=openmaptiles(&|$)/, 'named for the category');
-    // The web seed is what makes it useful with no peers: a client can range
-    // read the archive over HTTP and still be correct.
-    assert.match(magnet, /&ws=https%3A%2F%2Fexample\.org%2Fplanet\.pmtiles/);
+    // No web seed. This magnet resolves to whichever build is current, and a
+    // ws naming one of them would be merged into whatever the client resolved
+    // -- serving bytes that fail hash verification against it. The metainfo
+    // carries the right one for the build that was actually reached.
+    assert.ok(!magnet.includes('ws='));
     // The key is the handle that outlives every build. The infohash beside it
     // is only somewhere for a client with no DHT to start, and is expected to
     // go stale -- so what matters is that it did not displace the key.

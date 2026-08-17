@@ -305,9 +305,12 @@ describe('the URL a style should point at', () => {
       const magnet = new URLSearchParams(fragment).get('magnet');
       assert.match(magnet, /^magnet:\?xt=urn:btih:b{40}&xs=urn:btpk:/);
       assert.match(magnet, /&s=openmaptiles/);
-      // Carries the web seed, so a client with no peers can still range-read
-      // the archive and derive what it needs.
-      assert.match(magnet, /&ws=https%3A/);
+      // No web seed, deliberately. A web seed URL names one build and this
+      // magnet names a series, so they disagree the moment the next build
+      // lands -- and BEP 9 never replaces a magnet's ws, it merges it, which
+      // would attach a stale URL to whatever build the client resolved and
+      // fail verification on every piece it served.
+      assert.ok(!magnet.includes('ws='));
       // The key is what survives a rebuild; it must not have been displaced by
       // the infohash that will not.
       assert.match(magnet, /xs=urn:btpk:(de){32}(&|$)/);

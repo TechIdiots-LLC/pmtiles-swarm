@@ -133,12 +133,10 @@ describe('tilejson', () => {
       /^magnet:\?xt=urn:btih:[a-f0-9]+&xs=urn:btpk:deadbeef/,
     );
     assert.match(magnet, /&s=planet/);
-    // Carries the web seed, so a client with no peers can still range-read the
-    // archive over HTTP and derive everything it needs.
-    assert.match(
-      magnet,
-      /&ws=https%3A%2F%2Fmaps\.example\.org%2Ffixture\.pmtiles/,
-    );
+    // No web seed on the mutable magnet: it names a series, and a URL naming
+    // one build would be merged into whatever build the client resolved to.
+    // The immutable magnet in the same document still carries its own.
+    assert.ok(!magnet.includes('ws='));
     // The key is what a style points at across rebuilds. The infohash beside
     // it names the build that is current, so a client with no DHT -- which is
     // every browser -- can join from this string rather than having to fetch

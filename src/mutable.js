@@ -86,7 +86,6 @@ function rawPublicKey(publicKey) {
  * @param {string} [options.infoHash] - The build that is current, so a client with no DHT has somewhere to start.
  * @param {string} [options.name] - Display name for the archive.
  * @param {string[]} [options.trackers] - Tracker announce URLs.
- * @param {string[]} [options.webSeeds] - BEP 19 web seeds.
  * @param {string} [options.salt] - Salt, when one key publishes several archives.
  * @returns {string} - A BEP 46 magnet URI.
  */
@@ -129,12 +128,25 @@ export function mutableMagnet(publicKey, options = {}) {
   for (const tracker of options.trackers ?? []) {
     parts.push(`tr=${encodeURIComponent(tracker)}`);
   }
-  // Carried because it is what makes a magnet useful with no peers at all: a
-  // client can range-read the archive over HTTP and still be correct, which is
-  // the difference between a slow first paint and a blank map.
-  for (const seed of options.webSeeds ?? []) {
-    parts.push(`ws=${encodeURIComponent(seed)}`);
-  }
+  // No `ws=`, and the omission is the point.
+  //
+  // A web seed URL names one build. This magnet names a series, and a client
+  // that resolves the key lands on whatever build is current -- so the two
+  // disagree the moment the next one is published. They do not disagree
+  // harmlessly: `tr=` and `ws=` live outside the info dictionary, so BEP 9
+  // never replaces them, and a client keeps the magnet's copies and merges
+  // them into whatever torrent it ends up with. The result is a web seed
+  // attached to a build it does not describe, failing hash verification on
+  // every piece it serves until the peer bans it.
+  //
+  // Nothing is lost. The metainfo carries the right web seed for whichever
+  // build the client actually resolved -- it is written into `url-list` when
+  // that build's torrent is created -- and there are two ways to reach it: the
+  // `torrent=` handle in the style fragment, or BEP 9 from any peer. This was
+  // the third route, and the only one that could be wrong.
+  //
+  // An immutable magnet is a different case and still carries its web seeds:
+  // there, `xt` and `ws` name the same build and cannot drift apart.
   return parts.join('&');
 }
 

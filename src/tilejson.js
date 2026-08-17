@@ -113,7 +113,6 @@ function buildTorrentBlock(entry, root) {
         // The category, not this build: the record resolves to whichever
         // archive is current, and `dn` is a label the metadata replaces.
         name: entry.mutable.salt,
-        webSeeds: entry.webSeeds,
       }),
     };
   }

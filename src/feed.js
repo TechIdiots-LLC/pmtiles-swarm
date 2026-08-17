@@ -147,7 +147,6 @@ ${
           infoHash: entry.infoHash,
           salt: entry.mutable.salt,
           name: entry.mutable.salt ?? entry.name,
-          webSeeds: entry.webSeeds,
         }),
       )}</pmtiles:mutable>`
     : ''

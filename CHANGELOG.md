@@ -7,6 +7,36 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.32.0
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- **A mutable magnet no longer carries a web seed.** A `ws=` URL names one build; a BEP 46 magnet
+  names a series. They disagree the moment the next build is published — and not harmlessly, which
+  was the part that was easy to miss. `tr=` and `ws=` live outside the info dictionary, so BEP 9
+  never replaces them: a client keeps the magnet's copies and merges them into whatever torrent it
+  resolved to. So the client that did exactly what the magnet asked — resolved the key, landed on
+  the current build — was handed a web seed for a previous one, and every piece it fetched from
+  there failed hash verification until the peer banned it. A client that *ignored* the key and
+  joined the pinned `xt=` was fine, because there the infohash and the web seed named the same
+  build.
+
+  Nothing is lost. The metainfo carries the right web seed for whichever build was actually
+  resolved, written into `url-list` when that torrent was created, and there are two ways to reach
+  it: the `torrent=` handle added to style URLs in 0.30.0, or BEP 9 from any peer. The magnet was
+  the third route and the only one that could be wrong.
+
+  Affects the category style URL, the feed's `pmtiles:mutable`, the TileJSON `torrent.mutable
+  .magnet` and the publisher's own magnet. Archives' immutable magnets still carry their web seeds,
+  since there `xt` and `ws` cannot drift apart. The parameter was removed from `mutableMagnet`
+  outright rather than dropped at each call site, so it cannot be reintroduced by a future caller.
+
+  **Restyle anything holding one.** A style carrying an older mutable magnet keeps working, but
+  carries the stale web seed until it is regenerated.
+
+- _...Add new stuff here..._
+
 ## 0.31.0
 ### ✨ Features and improvements
 - **A Recheck files button, for when an archive's progress and its files disagree.** Every figure a

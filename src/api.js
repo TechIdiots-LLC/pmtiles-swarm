@@ -123,7 +123,6 @@ function styleUrlFor(category, newest, base) {
         salt: newest.mutable.salt ?? category,
         // The category, since that is what this magnet resolves to.
         name: newest.mutable.salt ?? category,
-        webSeeds: newest.webSeeds,
       })
     : newest?.magnet;
   // Category-scoped rather than the newest build's immutable URL, for the same

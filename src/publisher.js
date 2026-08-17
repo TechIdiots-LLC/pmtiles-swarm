@@ -211,7 +211,6 @@ export class MutablePublisher {
       // with the metadata and overrides it -- so nothing depends on this
       // beyond being honest about what the magnet identifies.
       name: category,
-      webSeeds: entry?.webSeeds,
     });
   }
 

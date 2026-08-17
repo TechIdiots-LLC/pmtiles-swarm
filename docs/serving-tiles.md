@@ -303,7 +303,7 @@ that publishes signs a DHT record naming whichever infohash is current, and the
 magnet then names the **category** rather than a build:
 
 ```
-magnet:?xs=urn:btpk:<public key>&s=openmaptiles&dn=…&ws=…
+magnet:?xs=urn:btpk:<public key>&s=openmaptiles&dn=…
 ```
 
 No infohash anywhere, so nothing to go stale. A client resolves the record over
@@ -368,7 +368,7 @@ TileJSON documents from this server carry a non-standard `torrent` member:
       "publicKey": "7680dc95248eb807…",
       "salt": "openmaptiles",
       "seq": 1786108931,
-      "magnet": "magnet:?xs=urn:btpk:7680dc95248eb807…&s=openmaptiles&ws=…"
+      "magnet": "magnet:?xs=urn:btpk:7680dc95248eb807…&s=openmaptiles"
     }
   }
 }

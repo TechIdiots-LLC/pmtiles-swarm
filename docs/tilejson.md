@@ -77,12 +77,27 @@ serve this block — publishing is the only thing the secret is used for.
 `mutable.magnet` carries **both** identifiers:
 
 ```
-magnet:?xt=urn:btih:<current build>&xs=urn:btpk:<public key>&dn=…&s=…&ws=…
+magnet:?xt=urn:btih:<current build>&xs=urn:btpk:<public key>&dn=…&s=…
 ```
 
 - `xs=urn:btpk:` is the public key. Resolving it through the DHT gives whichever
   infohash is current, now and after every future rebuild.
 - `xt=urn:btih:` is the build that was current when the document was generated.
+
+**No `ws=`, and the omission is deliberate.** A web seed URL names one build;
+this magnet names a series. They disagree the moment the next build is
+published, and not harmlessly: `tr=` and `ws=` sit outside the info dictionary,
+so BEP 9 never replaces them — a client keeps the magnet's copies and merges
+them into whatever torrent it resolved to. A web seed attached to a build it
+does not describe fails hash verification on every piece it serves, until the
+peer banning it stops the waste.
+
+Nothing is lost by leaving it out. `webseeds` above is the same list for the
+build this document describes, and the metainfo for whichever build a client
+resolves to carries its own — written into `url-list` when that torrent was
+created, and reachable either from the `torrent=` handle in a style fragment or
+over BEP 9 from any peer. The archive's own immutable magnet still carries web
+seeds, because there `xt` and `ws` name the same build and cannot drift apart.
 
 A client reads whichever it understands. A DHT-capable one resolves the key and
 follows the series indefinitely; one without a DHT joins the infohash and gets a
