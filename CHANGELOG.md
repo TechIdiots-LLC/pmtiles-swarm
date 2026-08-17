@@ -7,6 +7,20 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.32.1
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- **Requires pmtiles-torrent 0.5.1, so the connection indicator and Recheck files actually work.**
+  Both features shipped against a dependency range that still allowed 0.4.6, which has neither
+  sidecar op. The declared requirement and the declared dependency disagreed, and the symptom was
+  a feature that looked built and did nothing: the indicator hid itself, because an engine that
+  cannot answer is deliberately not reported as unreachable, so there was nothing to see and
+  nothing to explain why.
+
+- _...Add new stuff here..._
+
 ## 0.32.0
 ### ✨ Features and improvements
 - _...Add new stuff here..._
