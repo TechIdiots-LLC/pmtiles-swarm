@@ -57,6 +57,7 @@ describe('deciding whose head to read', () => {
       infoHash: 'b'.repeat(40),
       name: 'terrain.pmtiles',
       pmtiles: { format: 'png' },
+      summarySource: 'header',
     };
     assert.equal(warmer([entry]).due(entry), false);
   });
@@ -76,6 +77,7 @@ describe('deciding whose head to read', () => {
       infoHash: 'd'.repeat(40),
       name: 'planet.pmtiles',
       pmtiles: { ...VECTOR, vectorLayers: [{ id: 'water' }] },
+      summarySource: 'header',
     };
     assert.equal(warmer([withLayers]).due(withLayers), false);
   });
@@ -511,6 +513,10 @@ describe('a summary that is not really a summary', () => {
         infoHash: 'c'.repeat(40),
         name: 'p.pmtiles',
         pmtiles: { format: 'png' },
+        // Says where it came from, which is now the load-bearing part: a
+        // format alone is what a feed supplies for an archive that is not
+        // here yet.
+        summarySource: 'header',
       }),
       false,
     );
@@ -784,5 +790,37 @@ describe('one archive that is never ready', () => {
     );
     assert.equal(stored?.pmtiles?.format, 'pbf');
     assert.equal(harness.asked.filter((hash) => hash === OTHER).length, 1);
+  });
+});
+
+describe('a summary that was told apart from one that was read', () => {
+  const warmer = () => new HeadWarmer({}, { list: () => [] }, {});
+  const summary = { format: 'webp', minZoom: 0, maxZoom: 16 };
+  const entry = (extra) => ({
+    infoHash: 'a'.repeat(40),
+    name: 'planet.pmtiles',
+    kind: 'pmtiles',
+    pmtiles: summary,
+    ...extra,
+  });
+
+  it('warms a subscribed archive whose summary came from the feed', () => {
+    // The bug this exists for. A feed carries format, zoom range and bounds so
+    // a subscriber can judge a 698 GiB download before starting one, so the
+    // entry is fully summarised before a byte of it is here. Read as proof a
+    // header had been read, that retired every subscribed archive on the spot
+    // -- silently, because as far as the runner knew there was nothing to do.
+    assert.equal(warmer().due(entry({ summarySource: 'feed' })), true);
+  });
+
+  it('leaves an archive alone once its own header answered', () => {
+    assert.equal(warmer().due(entry({ summarySource: 'header' })), false);
+  });
+
+  it('treats an entry from before this was recorded as unread', () => {
+    // Self-healing in the safe direction: a local archive re-reads its own
+    // header off local disk and costs nothing, where assuming the other way
+    // would leave every existing subscription stuck exactly as it was.
+    assert.equal(warmer().due(entry()), true);
   });
 });

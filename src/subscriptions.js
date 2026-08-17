@@ -419,6 +419,10 @@ export class SubscriptionManager {
       // with what the archive itself says; this only means the wait is not
       // spent unservable.
       pmtiles: item.pmtiles,
+      // Told, not read. The feed carries this so a subscriber can judge a
+      // 698 GiB download before starting one, which means it is populated
+      // before a single byte exists here.
+      summarySource: 'feed',
     };
 
     // The .torrent is preferred where there is one: it carries the trackers

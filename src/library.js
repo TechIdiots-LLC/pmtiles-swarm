@@ -204,6 +204,10 @@ export class Library {
       // The torrent names the file, so the save path is its parent directory.
       savePath: path.dirname(absolute),
       pmtiles: summary,
+      // Read out of the archive, not taken from anybody's word for it. The
+      // prewarmer needs the difference: a summary that arrived in a feed says
+      // nothing about whether the header is on this disk. See prewarm.due().
+      summarySource: 'header',
       kind: identified.kind,
       sparse: options.sparse,
       md5: created.md5,
@@ -747,6 +751,10 @@ export class Library {
       buildDate: options.buildDate,
       savePath,
       pmtiles: summary,
+      // Read out of the archive, not taken from anybody's word for it. The
+      // prewarmer needs the difference: a summary that arrived in a feed says
+      // nothing about whether the header is on this disk. See prewarm.due().
+      summarySource: 'header',
       kind: identified.kind,
       sparse: options.sparse,
       md5: created.md5,
@@ -1212,6 +1220,10 @@ export class Library {
       magnet,
       webSeeds: [],
       pmtiles: summary,
+      // Read out of the archive, not taken from anybody's word for it. The
+      // prewarmer needs the difference: a summary that arrived in a feed says
+      // nothing about whether the header is on this disk. See prewarm.due().
+      summarySource: 'header',
       kind: guessKind(torrent.name ?? ''),
       mode: 'mirror',
       // The engine's own account of it. It is on disk under its real name

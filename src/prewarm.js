@@ -157,12 +157,23 @@ export class HeadWarmer {
     const kind = entry.kind ?? guessKind(entry.name ?? '');
     if (kind !== 'pmtiles') return false;
 
-    // A summary that names a format is one a header was actually read for.
-    // Anything else — an empty object, or one left behind by a read that raced
-    // its deadline — is not an answer, and treating it as one retired the
-    // archive permanently: no logs, no retries, nothing to explain the silence.
+    // A summary is only an answer about *this disk* if a header on this disk
+    // produced it. `format` was standing in for that and does not mean it.
+    //
+    // The feed carries format, zoom range and bounds precisely so a subscriber
+    // can judge a 698 GiB download before starting one -- so a subscribed
+    // archive arrives fully summarised, before a byte of it exists here. Read
+    // as "a header was read", that retired every subscribed archive on the spot
+    // and did it silently, since as far as this was concerned there was nothing
+    // to do. The archives most in need of their header were the only ones never
+    // offered one, and the log said "nothing to warm".
+    //
+    // An entry from before this was recorded has no source, and is treated as
+    // unread. That is the self-healing direction: a local archive re-reads its
+    // own header off local disk and costs nothing, where the other way round
+    // leaves every existing subscription stuck exactly as it was.
     const summary = entry.pmtiles;
-    const read = Boolean(summary?.format);
+    const read = entry.summarySource === 'header' && Boolean(summary?.format);
     if (read && (summary.format !== 'pbf' || summary.vectorLayers)) {
       return false;
     }
@@ -257,6 +268,9 @@ export class HeadWarmer {
       const stored = await this.#catalog.put({
         infoHash: entry.infoHash,
         pmtiles: { ...entry.pmtiles, ...summary },
+        // The whole point of this pass: from here on the entry's summary is
+        // one the header answered for, so due() stops choosing it.
+        summarySource: 'header',
       });
       // Said accurately, because the two halves arrive separately and the
       // difference matters: the header is at byte zero, while the JSON

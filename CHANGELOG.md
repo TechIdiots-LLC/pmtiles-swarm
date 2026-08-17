@@ -7,6 +7,29 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.32.2
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- **The head warmer no longer skips every archive it was built for.** It decided an archive was done
+  by `Boolean(entry.pmtiles?.format)` — "a summary that names a format is one a header was read
+  for". That is not what a format means. A feed carries format, zoom range and bounds precisely so a
+  subscriber can judge a 698 GiB download before starting one, so a subscribed archive arrives fully
+  summarised before a byte of it exists locally. Every one of them was therefore retired on the spot,
+  and retired silently: the runner logged "every archive has been summarised; nothing to warm" and
+  meant it. The archives most in need of their header were the only ones never offered one, and the
+  visible symptom was a readable TileJSON — served from that same feed summary, touching no bytes —
+  beside tile reads that failed and previews that came up empty.
+
+  Entries now record where the summary came from: `summarySource: 'header'` where an archive's own
+  header answered, `'feed'` where a subscription was told. An entry written before this has neither,
+  and is treated as unread — the self-healing direction, since a local archive re-reads its own
+  header off local disk for nothing, while assuming the opposite would leave every existing
+  subscription stuck exactly as it is.
+
+- _...Add new stuff here..._
+
 ## 0.32.1
 ### ✨ Features and improvements
 - _...Add new stuff here..._

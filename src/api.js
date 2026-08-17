@@ -2168,6 +2168,7 @@ export function createApp({
           entry = await catalog.put({
             infoHash: entry.infoHash,
             pmtiles: summary,
+            summarySource: 'header',
           });
         } catch (error) {
           // The content had its say. Record it so this is answered from the
@@ -2383,6 +2384,7 @@ export function createApp({
           entry = await catalog.put({
             infoHash: entry.infoHash,
             pmtiles: summary,
+            summarySource: 'header',
           });
         }
       }
