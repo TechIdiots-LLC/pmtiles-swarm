@@ -7,6 +7,18 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.33.0
+### ✨ Features and improvements
+- **Requires pmtiles-torrent 0.6.1, which is what finally makes a downloading archive servable.**
+  Two fixes there, both about the few kilobytes at the front of a PMTiles archive that say where
+  every other section begins. A read used to ask for its piece with a deadline and then raise on
+  libtorrent's immediate "I do not have that yet" — abandoning the very fetch it had just
+  requested, so each attempt gave up within milliseconds and left nothing behind to hurry the
+  piece. And the head was only ever asked for by a reader, so an archive nothing happened to read
+  was never prioritised at all. Reads now wait out their own timeout, and the head is prioritised
+  when the archive is added. On a 698 GiB mirror with two complete seeds connected this was the
+  difference between 200 GiB downloaded with no tile servable and a head that arrives in seconds.
+
 ## 0.32.3
 ### ✨ Features and improvements
 - _...Add new stuff here..._
