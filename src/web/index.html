@@ -375,6 +375,18 @@
           </label>
           <button id="traffic-reset" style="margin-left:auto">Reset counters</button>
         </div>
+        <div class="bar">
+          <label>
+            Swarm bandwidth
+            <select id="traffic-window">
+              <option value="1">last hour</option>
+              <option value="24" selected>last 24 hours</option>
+              <option value="168">last week</option>
+            </select>
+          </label>
+          <span class="sub" id="traffic-window-note"></span>
+        </div>
+        <div id="swarm-traffic"><div class="sub">loading…</div></div>
         <div id="traffic-body"><div class="sub">loading…</div></div>
       </section>
 
@@ -3919,7 +3931,10 @@
         }
         if (name === 'settings') loadSettings().catch((e) => toast(e.message));
         if (name === 'categories') loadCategories().catch((e) => toast(e.message));
-        if (name === 'traffic') loadTraffic().catch((e) => toast(e.message));
+        if (name === 'traffic') {
+          loadTraffic().catch((e) => toast(e.message));
+          loadSwarmTraffic();
+        }
       };
       // The footer's year, set from the clock rather than typed into a file
       // nobody will remember to edit. The version beside it arrives with the
@@ -3961,6 +3976,123 @@
        * Reads the report and draws it.
        * @returns {Promise<void>} - Resolves once drawn.
        */
+      /**
+       * Draws a series as an SVG path, scaled to a shared maximum.
+       *
+       * Inline rather than through a charting library. The console is one
+       * self-contained file served by the node itself, and pulling in a
+       * dependency to draw two lines would be a larger decision than the
+       * feature -- it would have to be vendored, kept current, and would arrive
+       * on every page load for a panel most visits never open.
+       *
+       * @param {object[]} points - The series.
+       * @param {string} key - Which field to plot.
+       * @param {number} peak - Value at the top of the chart, shared by both.
+       * @param {number} width - Viewbox width.
+       * @param {number} height - Viewbox height.
+       * @returns {string} - A path's `d` attribute.
+       */
+      function trafficPath(points, key, peak, width, height) {
+        if (points.length === 0) return '';
+        const step = points.length > 1 ? width / (points.length - 1) : width;
+        return points
+          .map((point, index) => {
+            const x = (index * step).toFixed(1);
+            // Guarded against a peak of zero: an idle week is a flat line along
+            // the bottom, not a division by zero that renders nothing at all.
+            const y = (height - (peak ? (point[key] / peak) * height : 0)).toFixed(1);
+            return `${index === 0 ? 'M' : 'L'}${x} ${y}`;
+          })
+          .join(' ');
+      }
+
+      /**
+       * The whole-node bandwidth chart, and what each archive contributed.
+       * @param {object} report - From /api/traffic.
+       * @returns {string} - Markup.
+       */
+      function renderSwarmTraffic(report) {
+        const points = report.points ?? [];
+        if (points.length === 0) {
+          return `<div class="panel"><div class="sub">
+            Nothing recorded yet. Samples are taken every
+            ${report.sampleSeconds}s, so a chart appears once a couple have
+            been.</div></div>`;
+        }
+
+        // One scale for both lines. Plotting each against its own maximum
+        // would draw a node uploading 2 KB/s and downloading 200 MB/s as two
+        // similar-looking lines, which is the opposite of what a chart is for.
+        const peak = Math.max(
+          1,
+          ...points.map((point) => Math.max(point.down, point.up)),
+        );
+        const W = 1000;
+        const H = 160;
+        const down = trafficPath(points, 'down', peak, W, H);
+        const up = trafficPath(points, 'up', peak, W, H);
+        const span = (report.to - report.from) / 3600;
+
+        const rows = (report.totals ?? [])
+          .map((row) => {
+            const held = archives.find((a) => a.infoHash === row.infoHash);
+            const name = held?.name ?? `${row.infoHash.slice(0, 12)}…`;
+            return `<tr>
+              <td><b>${escapeHtml(name)}</b>
+                <div class="sub">${escapeHtml(row.infoHash.slice(0, 12))}…</div></td>
+              <td>${bytes(row.down)}</td>
+              <td>${bytes(row.up)}</td>
+            </tr>`;
+          })
+          .join('');
+
+        return `<div class="panel">
+          <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"
+               style="width:100%;height:160px;display:block"
+               role="img" aria-label="upload and download over the last ${span.toFixed(0)} hours">
+            <path d="${down}" fill="none" stroke="var(--accent)" stroke-width="2"
+                  vector-effect="non-scaling-stroke" />
+            <path d="${up}" fill="none" stroke="var(--ok)" stroke-width="2"
+                  vector-effect="non-scaling-stroke" />
+          </svg>
+          <div class="sub" style="display:flex;gap:1rem;flex-wrap:wrap">
+            <span><b style="color:var(--accent)">—</b> down</span>
+            <span><b style="color:var(--ok)">—</b> up</span>
+            <span>peak ${bytes(peak)}/s</span>
+            <span>${points.length} points, ${report.seconds}s each</span>
+          </div>
+        </div>
+        ${
+          rows
+            ? `<div class="panel"><table class="rows">
+                 <thead><tr><th>Archive</th><th>Downloaded</th><th>Uploaded</th></tr></thead>
+                 <tbody>${rows}</tbody></table>
+               <div class="sub">Bytes are the sampled speed held across each
+                 interval, so they follow the chart above rather than the
+                 engine's own counters.</div></div>`
+            : ''
+        }`;
+      }
+
+      /** Loads and draws the swarm bandwidth panel. @returns {Promise<void>} */
+      async function loadSwarmTraffic() {
+        const host = $('swarm-traffic');
+        const hours = Number($('traffic-window').value) || 24;
+        try {
+          const report = await api(`/api/traffic?hours=${hours}`);
+          $('traffic-window-note').textContent =
+            `sampled every ${report.sampleSeconds}s, kept for ${report.keepHours}h`;
+          host.innerHTML = renderSwarmTraffic(report);
+        } catch (error) {
+          if (error.message?.includes('disabled')) {
+            host.innerHTML =
+              '<div class="panel"><div class="sub">Swarm statistics are turned off on this node — set <code>traffic</code> in the configuration to enable them.</div></div>';
+            return;
+          }
+          host.innerHTML = `<div class="panel"><div class="sub">Could not load: ${escapeHtml(error.message)}</div></div>`;
+        }
+      }
+
       async function loadTraffic() {
         const body = $('traffic-body');
         let report;
@@ -4058,14 +4190,21 @@
         clearInterval(trafficTimer);
         if (!$('traffic-live').checked) return;
         trafficTimer = setInterval(() => {
-          if (!$('view-traffic').hidden) loadTraffic().catch(() => {});
+          if (!$('view-traffic').hidden) {
+            loadTraffic().catch(() => {});
+            loadSwarmTraffic();
+          }
         }, 5000);
       };
 
-      $('traffic-refresh').onclick = () => loadTraffic().catch((e) => toast(e.message));
+      $('traffic-refresh').onclick = () => {
+        loadTraffic().catch((e) => toast(e.message));
+        loadSwarmTraffic();
+      };
       $('traffic-live').onchange = trafficPoll;
       trafficPoll();
 
+      $('traffic-window').onchange = () => loadSwarmTraffic();
       $('traffic-reset').onclick = async () => {
         // Deliberately separate from reading: a page polling the endpoint must
         // never be able to erase the history it is drawing.

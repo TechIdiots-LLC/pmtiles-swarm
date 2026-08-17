@@ -354,6 +354,62 @@ What the running service actually has:
 systemctl show -p ReadWritePaths -p UMask -p SupplementaryGroups pmtiles-swarm
 ```
 
+## The statistics database
+
+Upload and download speed per archive is sampled on a timer and kept in
+`stats.db`, in `dataDir` beside the catalog. It is on by default.
+
+**It needs no new path.** `dataDir` is already in `ReadWritePaths` — the
+catalog is written there on every change — so a unit that works today works
+with this. Worth knowing rather than checking: the file appears on its own the
+first time the node starts, with no migration step and nothing to create by
+hand.
+
+SQLite writes a journal beside the database while a transaction is open, so it
+needs the **directory** writable and not only the file. That is the same
+requirement the catalog already has, and the same failure if it is missing —
+see [Two checks that lie](#two-checks-that-lie), which applies here unchanged.
+
+### The warning in the journal is expected
+
+```
+ExperimentalWarning: SQLite is an experimental feature and might change at any time
+```
+
+`node:sqlite` prints this the first time it is loaded. It is Node's warning
+about its own module, not a statement about this node's data, and it appears
+once at startup. It is mentioned here because a new warning in the journal
+immediately after an upgrade is exactly the shape of a real fault, and it is
+worth being able to dismiss it without an investigation.
+
+### How large it gets
+
+Bounded by the retention window, not by how long the node has been running:
+
+```
+rows  =  archives  x  keepHours x 3600 / sampleSeconds
+```
+
+At the defaults — every 15 seconds, kept for a week — that is about 40,000 rows
+per archive, so a node carrying twenty is a few megabytes. Samples past the
+window are deleted every ten minutes.
+
+SQLite does not return freed pages to the filesystem on its own, so the file
+settles at roughly its high-water mark rather than shrinking after a large
+retention cut. `VACUUM` reclaims it if that ever matters; at these sizes it
+will not.
+
+### Turning it down, or off
+
+```json
+{ "traffic": { "sampleSeconds": 60, "keepHours": 24 } }
+```
+
+Both are reloaded without a restart. `"traffic": false` switches it off
+entirely, and a database that cannot be opened is reported and stepped over
+rather than being fatal — a node that cannot record what it moved should still
+move it.
+
 ## The publisher key
 
 Only needed if this node publishes BEP 46 records — the signed DHT entries that

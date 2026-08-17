@@ -2,7 +2,22 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.27.0
+### ✨ Features and improvements
 - **Bandwidth history per archive, kept across restarts.** The tile side of this question already
+
+  The Traffic tab draws it: one chart for the node with a window of an hour, a day or a week, and
+  a table of what each archive moved over that window. Drawn as inline SVG rather than through a
+  charting library — the console is a single self-contained file the node serves itself, and a
+  dependency for two lines would have to be vendored, kept current, and shipped on every page load
+  for a panel most visits never open. Both lines share one scale, because drawing each against its
+  own maximum renders a node uploading 2 KB/s and downloading 200 MB/s as two similar lines, which
+  is the opposite of what a chart is for.
   had an answer; the swarm side had none. An archive could seed steadily for a day and leave no
   trace but a speed in the console that is gone the moment you look away, which makes "what is
   using the bandwidth" and "is this archive earning its disk" unanswerable.
@@ -28,7 +43,6 @@
   a node that cannot record what it moved should still move it.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.26.2
 ### 🐞 Bug fixes
