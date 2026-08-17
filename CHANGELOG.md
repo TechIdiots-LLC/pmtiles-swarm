@@ -7,6 +7,27 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.35.4
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **Requires pmtiles-torrent 0.7.2, which is what actually stops `libtorrent list timed out after
+  60000ms`.** The console header sat at "connecting…" and clicking an archive never loaded its
+  details, on a node that was otherwise seeding, downloading and serving tiles perfectly well.
+  0.35.1 and 0.35.3 both chased this — through the sidecar's request loop, then through a slow
+  disk — and neither reached it.
+
+  The cost was in the listing itself. Reading one torrent's state is a blocking round-trip to
+  libtorrent's session thread, and the sidecar did three per torrent, so twenty archives cost
+  sixty, each queued behind whatever that one thread was doing. Measured on a session holding
+  twenty torrents: 0.66ms idle against 1001ms with the session busy hashing. The slow disk is real
+  and is what makes the session thread slow — but a slow session thread only becomes a minute of
+  waiting when the call costs sixty round-trips. The sidecar now keeps a status cache fed by
+  asynchronous updates, and listing reads a dictionary.
+
+  `^0.7.1` already admits 0.7.2, so a fresh install picks the fix up on its own. The floor is
+  raised anyway, because a node installed from a lock file does not.
+
 ## 0.35.3
 ### ✨ Features and improvements
 
