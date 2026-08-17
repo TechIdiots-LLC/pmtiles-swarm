@@ -44,6 +44,12 @@ function resolveSidecar() {
 export class LibtorrentEngine {
   #options;
   #child = null;
+  /** Whether the sidecar has ever announced itself, which decides if a death is worth retrying. */
+  #everReady = false;
+  /** Set when a working sidecar died, so the next one knows it is a replacement. */
+  #lost = false;
+  /** Called once a replacement sidecar is ready, to give it the library back. */
+  #onReconnect = null;
   #pending = new Map();
   #nextId = 1;
   #buffer = '';
@@ -88,6 +94,18 @@ export class LibtorrentEngine {
   /** @returns {string | null} - libtorrent version, once connected. */
   get version() {
     return this.#version;
+  }
+
+  /**
+   * Registers what to do once a replacement sidecar is ready.
+   *
+   * The engine can restart the process but cannot repopulate it — it does not
+   * know the catalogue. Whoever does hands this a way to put it back.
+   * @param {Function} handler - Called with no arguments; may return a promise.
+   * @returns {void}
+   */
+  onReconnect(handler) {
+    this.#onReconnect = handler;
   }
 
   /**
@@ -170,7 +188,33 @@ export class LibtorrentEngine {
           if (message.event === 'ready') {
             clearTimeout(timer);
             this.#version = message.libtorrent;
+            // Remembered so a later death can be told from a start that never
+            // worked. One is worth trying again, the other is a broken install
+            // and retrying it per call is a spawn storm. See the exit handler.
+            this.#everReady = true;
             resolve();
+
+            // A replacement sidecar holds nothing. Coming back empty is worse
+            // than staying down was: `list` answers, so the node looks healthy
+            // while seeding none of its library. Whoever owns the catalogue is
+            // told to hand it back.
+            //
+            // Not awaited, and deferred out of this turn: the respawn happens
+            // inside somebody's call, and restoring re-enters the engine.
+            if (this.#lost) {
+              this.#lost = false;
+              const restore = this.#onReconnect;
+              if (restore) {
+                setImmediate(() => {
+                  Promise.resolve(restore()).catch((error) =>
+                    console.error(
+                      `[libtorrent] could not hand the library back to the ` +
+                        `replacement sidecar: ${error.message}`,
+                    ),
+                  );
+                });
+              }
+            }
             continue;
           }
           this.#settle(message);
@@ -219,9 +263,39 @@ export class LibtorrentEngine {
           return;
         }
 
+        // Said out loud, always. The exit code used to go only into the error
+        // handed to whatever calls happened to be in flight, so a sidecar that
+        // died with nothing pending died silently — and a death with no stderr
+        // behind it, which is what being killed by the OOM killer looks like,
+        // left nothing in the log at all. What the operator saw instead was
+        // "libtorrent sidecar is not running" once a second, for ever, with no
+        // line anywhere saying when it stopped or why.
+        console.error(
+          `[libtorrent] sidecar exited (code ${code}). No stderr above this ` +
+            'means it was killed rather than failing — the OOM killer is the ' +
+            'usual reason on a node hashing or downloading a large archive.',
+        );
+
         const error = new Error(`libtorrent sidecar exited (code ${code})`);
         for (const { reject: fail } of this.#pending.values()) fail(error);
         this.#pending.clear();
+
+        // A sidecar that worked and then died is worth starting again. It was
+        // not: #ready stayed resolved and #child stayed null, so every call
+        // from then on threw "libtorrent sidecar is not running" until the
+        // whole service was restarted by hand — one crash and the node stopped
+        // seeding its entire library, with the download in front of it still
+        // running and reporting progress as though nothing had happened.
+        //
+        // Only when it had reached ready at least once. A sidecar that has
+        // never started is a missing python or a missing binding, and
+        // respawning that on every call is a spawn storm against a fault no
+        // amount of retrying fixes.
+        if (this.#everReady) {
+          this.#ready = null;
+          this.#lost = true;
+          return;
+        }
         reject(error);
       });
     });

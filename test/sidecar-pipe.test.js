@@ -54,13 +54,16 @@ describe('talking to a sidecar that has gone', () => {
     await assert.rejects(
       () => engine.list(),
       (error) => {
-        // Either route is correct and both are the same condition: the child
-        // handler may already have cleared the handle, or the write may reach
-        // a pipe that has just gone. What matters is that it is an error the
-        // caller receives rather than one the process dies of.
+        // Any of these routes is correct and they are all the same condition:
+        // the child handler may already have cleared the handle, the write may
+        // reach a pipe that has just gone, or — since a sidecar that has
+        // worked once is now started again rather than given up on — the
+        // replacement may have exited too, which for this stand-in it always
+        // does. What matters is that it is an error the caller receives rather
+        // than one the process dies of.
         assert.match(
           error.message,
-          /sidecar is (?:no longer|not) running|EPIPE/i,
+          /sidecar is (?:no longer|not) running|sidecar exited|EPIPE/i,
           `unexpected failure: ${error.message}`,
         );
         return true;

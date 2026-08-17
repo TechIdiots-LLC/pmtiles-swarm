@@ -64,6 +64,22 @@ export class CompositeEngine {
   }
 
   /**
+   * Passes a reconnect handler to whichever engines can lose their backing
+   * process and start another.
+   *
+   * Only libtorrent has one today. Offered to every engine that will take it
+   * rather than reached for by name, so a second one gains this by
+   * implementing the method.
+   * @param {Function} handler - Called once a replacement is ready.
+   * @returns {void}
+   */
+  onReconnect(handler) {
+    for (const engine of [this.#primary, ...this.#secondaries]) {
+      engine.onReconnect?.(handler);
+    }
+  }
+
+  /**
    * The underlying WebTorrent client, where one of the engines is WebTorrent.
    *
    * The tile reader asks for this so it can share the seeding client rather

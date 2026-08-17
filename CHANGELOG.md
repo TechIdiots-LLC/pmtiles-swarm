@@ -7,6 +7,38 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.35.1
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **A sidecar that dies is started again, instead of taking the node down with it until somebody
+  notices.** It was given up on for good: the readiness promise stayed resolved and the process
+  handle stayed null, so every call from then on threw `libtorrent sidecar is not running` — once a
+  second, indefinitely. One crash and the node stopped seeding its whole library while whatever
+  download was in front of it carried on reporting progress, which is what made it look fine.
+
+  A replacement holds nothing, so the catalogue is handed back to it as well. Coming back empty
+  would be the worse failure of the two: `list` answers, so the node reads as healthy while seeding
+  none of its archives. Only a sidecar that reached ready at least once is restarted — one that has
+  never started is a missing python or a missing binding, and retrying that per call is a spawn
+  storm against a fault no amount of retrying fixes.
+- **The sidecar's death is now in the log.** The exit code went only into the error handed to calls
+  that happened to be in flight, so a sidecar that died with nothing pending died silently. With no
+  stderr behind it — which is what being killed rather than failing looks like, the OOM killer being
+  the usual reason on a node hashing or downloading something large — there was nothing in the log
+  to say it had happened at all, only the consequences.
+- **A source that could not be read is no longer called the wrong format.** Every transport fault
+  — a refused connection, a dropped body, a 404 — came back from `identifyUrl` as `unknown`, and so
+  was reported as “this does not look like a map archive”. Seen in the field on a scheduled source
+  that had answered a HEAD seconds earlier, with `fetch failed` on the line below it in the same
+  log, which was the truth for both. Worse on a node with `allowUnknownArchives` set: an
+  unreachable URL passed the format check and the add went ahead on sixteen bytes nothing had
+  managed to read. It now says `could not read <url>: <why>`, and `allowUnknown` no longer applies
+  to it, being about format.
+- **A failed add no longer haunts `/api/adds`.** An add is registered as running before its source
+  is read, and nothing removed it if identification failed — so the console drew a download that
+  was not happening, with a cancel button that cancelled nothing, until the process restarted.
+
 ## 0.35.0
 ### ✨ Features and improvements
 - **Requires pmtiles-torrent 0.7.0, which stops the libtorrent sidecar going deaf while it works.**

@@ -92,12 +92,33 @@ export async function identifyFile(filePath) {
  * @returns {Promise<ArchiveKind>} - What it is.
  */
 export async function identifyUrl(url, options = {}) {
+  // "I could not read this" and "this is not an archive" are different
+  // answers, and returning UNKNOWN for both made every network fault report
+  // itself as a format one. Seen in the field as a source that had answered a
+  // HEAD seconds earlier being refused with "this does not look like a map
+  // archive", while the line under it in the same log said "fetch failed" —
+  // which was the truth for both of them.
+  //
+  // Worse than a confusing message on a node with allowUnknownArchives set:
+  // an unreachable URL passed assertPublishable as an unknown format and the
+  // add went ahead, on sixteen bytes nothing had managed to read.
+  let response;
   try {
-    const response = await fetch(url, {
+    response = await fetch(url, {
       headers: { range: 'bytes=0-15' },
       signal: options.signal,
     });
-    if (!response.ok && response.status !== 206) return UNKNOWN;
+  } catch (error) {
+    // An abort is the caller's own doing and already means something to it.
+    if (error?.name === 'AbortError') throw error;
+    throw unreachable(url, error?.message ?? String(error), error);
+  }
+
+  if (!response.ok && response.status !== 206) {
+    throw unreachable(url, `${response.status} ${response.statusText}`.trim());
+  }
+
+  try {
     if (!response.body) return UNKNOWN;
 
     // Read the first bytes off the stream and then stop, rather than
@@ -121,9 +142,31 @@ export async function identifyUrl(url, options = {}) {
     }
 
     return identifyBytes(head.subarray(0, filled));
-  } catch {
-    return UNKNOWN;
+  } catch (error) {
+    // The body died partway through the sixteen bytes. Still a transport
+    // failure rather than a verdict on the format.
+    if (error?.name === 'AbortError') throw error;
+    throw unreachable(url, error?.message ?? String(error), error);
   }
+}
+
+/**
+ * The error for a source that could not be read at all.
+ * @param {string} url - What was being read.
+ * @param {string} why - The transport's own account of it.
+ * @param {Error} [cause] - The original failure, kept for a stack.
+ * @returns {Error} - Ready to throw.
+ */
+function unreachable(url, why, cause) {
+  const error = new Error(
+    `could not read ${url}: ${why}. Nothing was published — this says the ` +
+      'source could not be reached, not that it is the wrong format, so ' +
+      'allowUnknown does not apply.',
+    cause ? { cause } : undefined,
+  );
+  // A source this node could not reach is not the caller's bad request.
+  error.status = 502;
+  return error;
 }
 
 /**

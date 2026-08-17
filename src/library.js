@@ -749,10 +749,22 @@ export class Library {
     // Probing reads only the header and directory, so this is cheap even
     // against a multi-gigabyte archive — worth doing before committing to a
     // download that may take hours.
-    const identified = await identifyUrl(url, { signal: controller.signal });
-    assertPublishable(identified, {
-      allowUnknown: options.allowUnknown ?? this.#config.allowUnknownArchives,
-    });
+    //
+    // Cleaned up on the way out, because this is the one stretch that can fail
+    // with the add already listed as running. It left an entry behind that
+    // nothing would ever remove: /api/adds reported a download that was not
+    // happening, the console drew it under "being added" with a cancel button
+    // that cancelled nothing, and it stayed until the process restarted.
+    let identified;
+    try {
+      identified = await identifyUrl(url, { signal: controller.signal });
+      assertPublishable(identified, {
+        allowUnknown: options.allowUnknown ?? this.#config.allowUnknownArchives,
+      });
+    } catch (error) {
+      this.#running.delete(url);
+      throw error;
+    }
 
     // Everything a caller can do something about has now been checked: the URL
     // answers, it is an archive of a kind this will publish, and it is not a

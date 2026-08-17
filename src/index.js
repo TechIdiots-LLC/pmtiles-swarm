@@ -272,6 +272,20 @@ PMTILES_SWARM_PUBLIC_URL
     );
   }
 
+  // And again if the engine loses its backing process and starts another. A
+  // replacement holds nothing, so without this the node would come back
+  // answering every call and seeding none of its library — which reads as
+  // healthy, and is the worse of the two failures.
+  engine.onReconnect?.(async () => {
+    const held = catalog.list().length;
+    if (held === 0) return;
+    const { restored, failed } = await library.restore();
+    console.log(
+      `[restore] ${restored} of ${held} archives handed back to the replacement` +
+        (failed > 0 ? ` (${failed} could not be)` : ''),
+    );
+  });
+
   // What this node has served. In memory and bounded, so it costs the same
   // after a billion tiles as after ten; `tileStats.recent: 0` keeps the
   // counters and drops the per-request ring, and `false` turns it off.
