@@ -60,9 +60,11 @@ day are followed by a dated URL template or by reading a directory listing, on a
 per source.
 
 **Has a console.** Everything above is done from a web UI in the shape of a torrent client:
-archives with progress, ratio and expiry; tabbed detail with trackers, peers, HTTP sources and
-content; and a settings screen covering monitored folders, watched web locations, remote nodes,
-save locations, access tokens and the external-program hooks.
+archives with progress, ratio, expiry and when each was added, searchable and sortable by any of
+them; tabbed detail with trackers, peers, HTTP sources and content; a chart of what the swarm has
+been sending and receiving, kept in SQLite so it survives a restart; an indicator saying whether
+peers can reach this node at all; and a settings screen covering monitored folders, watched web
+locations, remote nodes, save locations, access tokens and the external-program hooks.
 
 **Publishes RSS.** `/feed.xml`, and `/feed/<category>.xml` per category. Plain RSS 2.0 with
 torrent enclosures, so **qBittorrent's built-in RSS auto-downloader can subscribe today** with no
@@ -739,7 +741,7 @@ which the endpoint answers 501.
 
 | Method                | Path                                                        | Purpose                                                                                                                                                                                                                                   |
 | --------------------- | ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET`                 | `/api/status`                                               | Engine health, counts, watched folders, save locations and free space                                                                                                                                                                     |
+| `GET`                 | `/api/status`                                               | Engine health, counts, watched folders, save locations, free space, and whether the swarm can reach this node                                                                                                                             |
 | `GET`                 | `/api/torrents`                                             | Catalog joined with live swarm state and what is left of each seeding limit                                                                                                                                                               |
 | `POST`                | `/api/torrents`                                             | Add via `{path}`, `{url}`, `{magnet}`, `{torrentUrl}`, or a raw `.torrent` body                                                                                                                                                           |
 | `DELETE`              | `/api/torrents/:infoHash`                                   | Remove (`?deleteData=true` to delete data too)                                                                                                                                                                                            |

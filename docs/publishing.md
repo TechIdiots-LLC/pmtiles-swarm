@@ -231,10 +231,15 @@ rather than exceptional. Each attempt continues from the bytes already on disk w
 HTTP range request, so a drop costs the retry delay instead of everything transferred so
 far.
 
+The budget counts _consecutive_ failures that moved nothing: an attempt that transferred
+bytes proves the source and the route are alive, so it resets the count. The delay grows
+with that count — 30s, 60s, 90s — so ten of them span an outage rather than a moment. When
+it does give up the partial file is kept, and re-adding the same URL resumes from it.
+
 ```json
 {
   "fetchAttempts": 10,
-  "fetchRetrySeconds": 5
+  "fetchRetrySeconds": 30
 }
 ```
 

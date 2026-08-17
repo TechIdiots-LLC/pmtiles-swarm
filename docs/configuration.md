@@ -566,6 +566,28 @@ Note what the client address means behind a proxy: without `X-Forwarded-For` it 
 the proxy's own address, which still answers whether a request arrived directly or
 through it, but not who sent it.
 
+### `traffic`
+
+What the swarm side has been moving, at `GET /api/traffic` and as the chart in the
+console. Upload and download speed per archive, sampled on a timer.
+
+| setting                 | default |                           |
+| ----------------------- | ------- | ------------------------- |
+| `traffic.sampleSeconds` | `15`    | how finely it looks       |
+| `traffic.keepHours`     | `168`   | how far back it remembers |
+
+Two knobs because they are two questions. Unlike `tileStats` this is kept in
+SQLite, in `stats.db` beside the catalog rather than beside the configuration, and
+the difference is deliberate: tile counters answer a question about now and are
+cheap to rebuild by waiting, while a bandwidth history answers a question about
+the past and cannot be rebuilt at all — restarting to pick up a new version would
+erase exactly the week somebody wanted to look at.
+
+A week of 15-second samples is roughly 40,000 rows per archive, a few megabytes
+for a node carrying twenty. Both settings reload in place. See
+[running-as-a-service.md](running-as-a-service.md#the-statistics-database) for
+sizing and for what a locked-down unit file has to allow.
+
 ## Checking for changed sources
 
 `originCheckIntervalSeconds` (default `0`, disabled) controls how often to
@@ -586,8 +608,8 @@ A changed source does not invalidate the existing torrent. See
 
 | setting                     | default |                                                        |
 | --------------------------- | ------- | ------------------------------------------------------ |
-| `fetchAttempts`             | `10`    | how many times to resume a download that stopped early |
-| `fetchRetrySeconds`         | `5`     | how long to wait before resuming                       |
+| `fetchAttempts`             | `10`    | consecutive failures without progress before giving up |
+| `fetchRetrySeconds`         | `30`    | base delay, multiplied by the consecutive count        |
 | `resumeSaveIntervalSeconds` | `300`   | how often to write resume data. `0` disables it        |
 
 A planet archive is hours of transfer, and a connection that drops partway is
@@ -597,6 +619,28 @@ than everything transferred so far — provided the server honours ranges and of
 an ETag or Last-Modified to prove the file has not changed underneath. Where it
 does not, the download restarts, because splicing two builds together produces a
 torrent for bytes that never existed.
+
+**The budget counts consecutive failures that moved nothing, not failures.** An
+attempt that transferred bytes proves the source and the route are alive, so it
+resets the count. Counting every failure made the budget a property of the whole
+download rather than of the trouble it is in, which for a large archive are not
+the same thing: a 700 GiB transfer reached 226 GB across six separate stalls and
+then spent its last four attempts on one bad minute, because a quarter of a
+terabyte of progress counted for nothing. Progress is measured against the
+high-water mark rather than the previous attempt, since an attempt can fail
+having written less than was already on disk.
+
+The delay grows with the consecutive count — at the default, 30s then 60s then
+90s, so ten of them span something over twenty minutes rather than the
+forty-five seconds a flat delay gave. Because progress resets the count, an
+unlucky download can go round more times than `fetchAttempts` names; that is
+intended, and bounded by a ceiling of ten times the budget so a source dribbling
+a few bytes before dropping cannot retry for ever.
+
+**Giving up keeps the partial file.** The staging path is derived from the URL,
+so re-adding the same URL in the console resumes from where it stopped instead of
+starting again, and the error says how many bytes are there to resume from. Only
+cancelling deletes it.
 
 Resume data is what lets a restart skip re-hashing the store — on an 800 GB
 archive, the difference between instant and half an hour. A clean stop always

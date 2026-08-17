@@ -223,6 +223,35 @@ unforwarded NAT can never connect to each other, so the ones that need you most 
 cannot serve. UPnP and NAT-PMP are on by default in both engines and will often open it for you;
 a router with either disabled will not say so.
 
+### The console says whether it worked
+
+Nothing about a node's own traffic reveals that half the swarm cannot reach it. It dials out, its
+transfers work, and it looks healthy — the cost is invisible and permanent. So the console header
+carries an indicator, also in `GET /api/status` as `reachability`:
+
+| Colour | State      | Means                                                  |
+| ------ | ---------- | ------------------------------------------------------ |
+| green  | `open`     | something has connected inward — the port is reachable |
+| amber  | `unproven` | listening, and nothing ever has                        |
+| red    | `offline`  | not listening at all                                   |
+| hidden | `unknown`  | the engine cannot answer                               |
+
+libtorrent answers from `net.has_incoming_connections`; WebTorrent has no such gauge, so it is
+assembled from the wires, each of which carries the direction it was made in. Both latch: the
+question is whether the swarm _can_ reach this node, not whether somebody is connected right now,
+so a reachable node that is merely quiet stays green rather than dropping to amber when its last
+peer leaves.
+
+Reported per engine, not blended. Two engines means two listening ports, forwarded separately, and
+one can be reachable while the other is not; the header shows the primary and names both on hover.
+
+**Amber is not a fault.** On a node no peer has tried, blocked and untried are the same
+observation, and nothing available separates them — which is why it reads "no incoming yet" rather
+than "firewalled". On a busy node it will turn green within minutes; if it does not, the port is
+worth checking. For the same reason an engine that cannot be asked hides the indicator instead of
+showing red: not being able to ask is not the same as being unreachable. The libtorrent side needs
+pmtiles-torrent 0.5.0 or newer.
+
 ### Every libtorrent network setting
 
 ```json
@@ -346,7 +375,9 @@ checked and the unreadable ones are joined by magnet instead.
 
 ## Writing another engine
 
-Implement `connect`, `add`, `remove`, `list`, `get`, `destroy`, and optionally `peers`.
+Implement `connect`, `add`, `remove`, `list`, `get`, `destroy`, and optionally `peers` and
+`reachability`. Anything optional that is missing is simply not offered — an engine without
+`reachability` hides the indicator rather than reporting a node unreachable.
 The interface is deliberately small; see
 [`src/engines/types.js`](../src/engines/types.js) for the contract and
 [`src/engines/webtorrent.js`](../src/engines/webtorrent.js) for the shortest example.

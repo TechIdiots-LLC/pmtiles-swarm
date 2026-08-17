@@ -566,6 +566,15 @@ own, and not `torrentPort`. `6883` sits clear of both.
 Note that each engine runs its own DHT as well, so a node with both engines has
 three UDP participants. Only this one is yours to place.
 
+### Checking the forward actually happened
+
+A forward that did not take is invisible from here: the node still dials out, its
+transfers still work, and nothing in its own numbers says half the swarm can
+never open a connection to it. The console header answers it — green once
+something has connected inward, amber while nothing has, red if the engine is not
+listening at all. Give a new node a few minutes of seeding before reading it;
+amber on a node no peer has tried yet means untried, not blocked.
+
 ## Updating
 
 ```sh
