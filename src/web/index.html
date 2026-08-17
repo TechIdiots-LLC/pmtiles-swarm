@@ -749,11 +749,14 @@
       const pct = (n) => `${Math.round((n ?? 0) * 100)}%`;
 
       /**
-       * When an archive was added, as something short enough for a column.
+       * When an archive was added: the same date and time on every row.
        *
-       * A date on its own for anything older than today, and a time for
-       * today: the question a list answers is "which of these is recent", and
-       * a full timestamp on every row is harder to scan than either.
+       * It used to shorten today's rows to a time and older ones to a date,
+       * on the theory that a column is easier to scan that way. It is not:
+       * a column of `8/13/2026` with an `08:14 AM` in the middle of it reads
+       * as two different quantities, and the eye has to stop and work out
+       * which. Seconds are dropped rather than the date, since nothing here
+       * is sorted finely enough for them to matter; the title keeps them.
        * @param {string} value - ISO timestamp.
        * @returns {string} - Markup for the cell.
        */
@@ -761,12 +764,15 @@
         if (!value) return '<span class="sub">—</span>';
         const when = new Date(value);
         if (Number.isNaN(when.getTime())) return '<span class="sub">—</span>';
-        const today = new Date().toDateString() === when.toDateString();
-        return `<span title="${escapeHtml(when.toLocaleString())}">${
-          today
-            ? when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-            : when.toLocaleDateString()
-        }</span>`;
+        return `<span title="${escapeHtml(when.toLocaleString())}">${escapeHtml(
+          when.toLocaleString([], {
+            year: 'numeric',
+            month: 'numeric',
+            day: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+        )}</span>`;
       };
 
       // The same three questions the public page asks, against an admin row.
@@ -1563,7 +1569,7 @@
             <button id="copy-magnet">Copy magnet</button>
             <button id="copy-hash">Copy infohash</button>
             ${servable ? `<button id="copy-tilejson">Copy TileJSON URL</button>
-            <button id="copy-tilejson-swarm" title="The same URL with the magnet in the fragment. A fragment is never sent to the server, so ordinary clients fetch the TileJSON exactly as before; a torrent-aware client reads the magnet from it and can still join the swarm when this server is unreachable.">Copy TileJSON URL + magnet</button>
+            <button id="copy-tilejson-swarm" title="The same URL with the .torrent and the magnet in the fragment. A fragment is never sent to the server, so ordinary clients fetch the TileJSON exactly as before; a torrent-aware client reads them from it, and a browser can fetch the metainfo over HTTP instead of waiting on a peer for it.">Copy TileJSON URL + swarm</button>
             <a href="${tileJson}" target="_blank" rel="noreferrer"><button type="button">Open TileJSON</button></a>
             <a href="${base}/archives/${entry.infoHash}/preview" target="_blank" rel="noreferrer"><button type="button">${
               summary.format === 'pbf' ? 'Inspect' : 'Preview'
@@ -1835,20 +1841,30 @@
         $('copy-magnet').onclick = () => copy(entry.magnet ?? '', 'Magnet link');
         if (servable) {
           $('copy-tilejson').onclick = () => copy(tileJson, 'TileJSON URL');
-          // The magnet rides in the fragment, which is client-side only and
+          // The handles ride in the fragment, which is client-side only and
           // never sent in the request. So the same string serves both: an
           // ordinary client fetches the TileJSON and ignores the fragment, and
-          // a torrent-aware one reads the magnet before making any call at all
-          // — which is what lets it start when this server is down.
+          // a torrent-aware one has somewhere to join before making any call at
+          // all — which is what lets it start when this server is down.
           //
-          // A magnet is legal in a fragment unencoded (RFC 3986 allows ?, &, =
-          // and : there), and leaving it readable matters for something people
-          // paste into a style file by hand.
-          $('copy-tilejson-swarm').onclick = () =>
+          // The .torrent URL is there because a browser cannot obtain piece
+          // hashes any other way: they come only from a peer over BEP 9, so a
+          // magnet alone leaves a page waiting on a WebRTC handshake before it
+          // can read a byte. Same fragment, same string, both handles.
+          //
+          // A lone magnet keeps the bare unencoded form — legal in a fragment
+          // (RFC 3986 allows ?, &, = and : there) and readable, which matters
+          // for something people paste into a style file by hand.
+          $('copy-tilejson-swarm').onclick = () => {
+            const parts = [`torrent=${encodeURIComponent(torrentUrl)}`];
+            if (entry.magnet) parts.push(`magnet=${encodeURIComponent(entry.magnet)}`);
             copy(
-              entry.magnet ? `${tileJson}#${entry.magnet}` : tileJson,
-              entry.magnet ? 'TileJSON URL with magnet' : 'TileJSON URL (no magnet on this archive)',
+              `${tileJson}#${parts.join('&')}`,
+              entry.magnet
+                ? 'TileJSON URL with torrent and magnet'
+                : 'TileJSON URL with torrent (no magnet on this archive)',
             );
+          };
         }
         $('copy-hash').onclick = () => copy(entry.infoHash, 'Infohash');
 
@@ -2572,12 +2588,15 @@
                                     url.length > 96 ? `${url.slice(0, 96)}…` : url,
                                   )}</code>${
                                     label === 'For a style'
-                                      ? `<div class="sub">the magnet rides in the fragment, which is
-                                         never sent to the server — an ordinary client fetches the
-                                         TileJSON and ignores it, a swarm-aware one reads it before
-                                         making any call${
-                                           url.includes('xs=urn:btpk')
-                                             ? ' and follows the category rather than this build'
+                                      ? `<div class="sub">the .torrent URL and the magnet ride in the
+                                         fragment, which is never sent to the server — an ordinary
+                                         client fetches the TileJSON and ignores them, a swarm-aware
+                                         one reads them before making any call${
+                                           // Matched unanchored because the magnet is
+                                           // percent-encoded in the fragment now that it
+                                           // shares one with the .torrent URL.
+                                           url.includes('btpk')
+                                             ? ', and both follow the category rather than this build'
                                              : ''
                                          }</div>`
                                       : ''

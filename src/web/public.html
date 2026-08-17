@@ -401,9 +401,9 @@
           card.append(links);
 
           const urls = el('div', 'urls');
-          // The one worth copying: the TileJSON URL with the magnet in its
-          // fragment, which a plain client fetches over HTTP and a swarm-aware
-          // one joins directly.
+          // The one worth copying: the TileJSON URL with the .torrent URL and
+          // the magnet in its fragment, which a plain client fetches over HTTP
+          // and a swarm-aware one joins directly.
           if (ends.styleUrl) {
             urls.append(
               urlRow('style URL', new URL(ends.styleUrl, location.href).href),

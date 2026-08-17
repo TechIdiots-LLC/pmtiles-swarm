@@ -255,19 +255,22 @@ remember where it had got to.
 
 ### Bootstrapping without the server
 
-A torrent-aware client still has to _learn_ the magnet from somewhere, and until
-it does, the swarm — the part that depends on no server — is unreachable
-precisely when the server is down. The fix is that the magnet travels in the
+A torrent-aware client still has to _learn_ where to join from somewhere, and
+until it does, the swarm — the part that depends on no server — is unreachable
+precisely when the server is down. The fix is that two handles travel in the
 **fragment** of the TileJSON URL a style already carries:
 
 ```
-https://swarm.example.org/latest/openmaptiles/tiles.json#magnet:?xs=urn:btpk:…&s=openmaptiles&ws=…
+https://…/latest/openmaptiles/tiles.json#torrent=<the .torrent URL>&magnet=<magnet:?xs=urn:btpk:…>
 ```
 
 A fragment is never sent in an HTTP request, so ordinary clients fetch the
-TileJSON and ignore it while a swarm-aware one reads the magnet before making any
-call. With a BEP 46 key in it (`xs=urn:btpk:`) rather than an infohash, that
-string does not go stale on the next build either. See
+TileJSON and ignore it while a swarm-aware one joins before making any call. The
+`.torrent` is the fast handle — a browser can get piece hashes no other way than
+from a peer, so fetching the metainfo over HTTPS is what lets a page start
+without waiting on one — and the magnet is the one that needs no server at all.
+With a BEP 46 key in it (`xs=urn:btpk:`) rather than an infohash, neither goes
+stale on the next build. See
 [serving-tiles.md](serving-tiles.md#a-fragment-that-survives-a-rebuild).
 
 ---

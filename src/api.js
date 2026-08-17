@@ -66,7 +66,43 @@ function route(handler) {
  * @returns {import('express').Express} - The configured app.
  */
 /**
- * A TileJSON URL carrying a magnet in its fragment.
+ * Attaches whatever swarm handles exist to a URL, in its fragment.
+ *
+ * Two handles, and they are not a ladder from worse to better — they fail in
+ * different directions:
+ *
+ * - `torrent=` is the metainfo, and needs this host. Not redundant with the URL
+ *   it is attached to: piece hashes reach a browser only from a peer over
+ *   BEP 9, so this is the one handle that works from a page on a network that
+ *   blocks the trackers, and the one that saves every client the metadata round
+ *   trip that a magnet costs.
+ * - `magnet=` needs no host at all, and needs a peer. The better handle for a
+ *   client with a DHT, the weaker one for a browser, which has neither DHT nor
+ *   UDP.
+ *
+ * Ordered by what a client should reach for first when it can fetch.
+ *
+ * Both are percent-encoded, which is a change from the bare `#magnet:?…` this
+ * used to emit: `&` separates the handles now, and a magnet is full of them.
+ * That does break a reader that took the whole fragment for a magnet, and the
+ * alternative -- keeping the bare form when there is only one handle -- is
+ * worse, because it makes the shape of the fragment depend on what happened to
+ * be available, so every reader has to handle both anyway. One shape,
+ * `URLSearchParams` reads it, and a magnet survives the round trip exactly.
+ *
+ * @param {string} url - The URL a style points at.
+ * @param {object} handles - `{torrent, magnet}`, either of which may be absent.
+ * @returns {string} - The URL, with a fragment if there is anything to put in one.
+ */
+function withSwarmHandles(url, { torrent, magnet }) {
+  const parts = [];
+  if (torrent) parts.push(`torrent=${encodeURIComponent(torrent)}`);
+  if (magnet) parts.push(`magnet=${encodeURIComponent(magnet)}`);
+  return parts.length > 0 ? `${url}#${parts.join('&')}` : url;
+}
+
+/**
+ * A TileJSON URL carrying the ways into the swarm in its fragment.
  * @param {string} category - Which category.
  * @param {object} newest - Its newest entry.
  * @param {string} base - Public base URL.
@@ -90,7 +126,14 @@ function styleUrlFor(category, newest, base) {
         webSeeds: newest.webSeeds,
       })
     : newest?.magnet;
-  return magnet ? `${url}#${magnet}` : url;
+  // Category-scoped rather than the newest build's immutable URL, for the same
+  // reason the TileJSON in front of it is: it redirects to whatever is current,
+  // so a style holding this keeps working across rebuilds. The magnet beside it
+  // only manages that when the node publishes a BEP 46 key; this handle manages
+  // it always, which makes it the more durable half of the pair as well as the
+  // faster one.
+  const torrent = `${base}/latest/${category}/archive.torrent`;
+  return withSwarmHandles(url, { torrent, magnet });
 }
 
 export function createApp({
@@ -1879,11 +1922,12 @@ export function createApp({
           servable,
           endpoints: {
             tileJson: servable ? `${base}/latest/${category}/tiles.json` : null,
-            // The same URL with a magnet in the fragment, which is what a
-            // style should carry. A fragment is never sent in a request, so
-            // an ordinary client fetches the TileJSON and ignores it, while
-            // a swarm-aware one has the magnet before it makes any call --
-            // and can therefore still start when this server cannot answer.
+            // The same URL with the ways into the swarm in the fragment,
+            // which is what a style should carry. A fragment is never sent in
+            // a request, so an ordinary client fetches the TileJSON and
+            // ignores it, while a swarm-aware one has somewhere to join before
+            // it makes any call -- and can therefore still start when this
+            // server cannot answer.
             //
             // The mutable magnet where there is one, because a category is
             // precisely where an infohash goes stale: it names the category

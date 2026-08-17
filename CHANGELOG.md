@@ -7,6 +7,39 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.30.0
+### ✨ Features and improvements
+- **The style URL now carries the `.torrent` URL as well as the magnet.** Piece hashes reach a
+  browser only from a peer, over BEP 9 — there is no other route to them — so a magnet alone
+  leaves a page waiting on a tracker connection and a WebRTC handshake before it can read a byte,
+  and never gets there at all on a network that blocks the trackers. One ordinary HTTPS request for
+  the metainfo removes that dependency, and saves a conventional client the same round trip.
+
+  Both handles now ride in the fragment of the `styleUrl` on `/api/categories` and `/latest/`, and
+  of what the console's **Copy TileJSON URL + swarm** button produces. A fragment is still never
+  sent in a request, so an ordinary client fetches the TileJSON and ignores all of it.
+
+  For a category the `.torrent` handle is category-scoped too — `/latest/<category>/archive.torrent`
+  redirects to whatever build is current — so unlike a plain magnet it does not go stale on the next
+  build. That was previously true only where the node publishes a BEP 46 key.
+
+  **This is a format change.** The fragment used to be a bare `#magnet:?…`; it is now
+  `#torrent=…&magnet=…` with both values percent-encoded, because `&` separates them and a magnet
+  is full of them. A reader that took the whole fragment for a magnet must read `magnet=` out of it
+  — `URLSearchParams` does it in one call. The bare form was not kept for the single-handle case: a
+  fragment whose shape depends on what happened to be available means every reader has to handle
+  both anyway.
+
+- **The Added column shows the same date and time on every row.** It used to shorten today's rows
+  to a time and older ones to a date, which reads as two different quantities in one column and
+  makes the eye stop to work out which it is looking at. Seconds are dropped rather than the date,
+  since nothing here is sorted finely enough for them to matter; hovering still gives them.
+
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
 ## 0.29.0
 ### ✨ Features and improvements
 - **A connection indicator in the header, for whether the swarm can reach this node.** A node

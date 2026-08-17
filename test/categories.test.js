@@ -39,7 +39,8 @@ async function serve(entries) {
 
   return {
     catalog,
-    get: (route) => fetch(`${base}${route}`),
+    base,
+    get: (route, options) => fetch(`${base}${route}`, options),
     patch: (route, body) =>
       fetch(`${base}${route}`, {
         method: 'PATCH',
@@ -246,11 +247,11 @@ describe('the URL a style should point at', () => {
     webSeeds: ['https://maps.example.org/planet.pmtiles'],
   };
 
-  it('carries the magnet in the fragment', async () => {
+  it('carries the .torrent URL and the magnet in the fragment', async () => {
     // A fragment is never sent in an HTTP request, so this one string works
     // for every client: ordinary ones fetch the TileJSON and ignore it, and a
-    // swarm-aware one has the magnet before it makes any call -- which is what
-    // lets it start when this server cannot answer.
+    // swarm-aware one has somewhere to join before it makes any call -- which
+    // is what lets it start when this server cannot answer.
     const api = await serve([
       entry({
         infoHash: 'a'.repeat(40),
@@ -263,7 +264,20 @@ describe('the URL a style should point at', () => {
       const [row] = await api.get('/api/categories').then((r) => r.json());
       const [url, fragment] = row.endpoints.styleUrl.split('#');
       assert.match(url, /\/latest\/planet\/tiles\.json$/);
-      assert.match(fragment, /^magnet:\?xt=urn:btih:a{40}/);
+
+      const handles = new URLSearchParams(fragment);
+      // The .torrent first: it is the handle a client should reach for when it
+      // can fetch at all, and the only one that gets piece hashes to a browser
+      // without a peer.
+      assert.match(
+        handles.get('torrent'),
+        /\/latest\/planet\/archive\.torrent$/,
+      );
+      assert.match(handles.get('magnet'), /^magnet:\?xt=urn:btih:a{40}/);
+      // Category-scoped, like the TileJSON it is attached to. An immutable
+      // /archives/<infohash>/ URL here would go stale on the next build while
+      // the URL in front of it did not.
+      assert.ok(!handles.get('torrent').includes('/archives/'));
     } finally {
       await api.close();
     }
@@ -288,14 +302,53 @@ describe('the URL a style should point at', () => {
     try {
       const [row] = await api.get('/api/categories').then((r) => r.json());
       const fragment = row.endpoints.styleUrl.split('#')[1];
-      assert.match(fragment, /^magnet:\?xt=urn:btih:b{40}&xs=urn:btpk:/);
-      assert.match(fragment, /&s=openmaptiles/);
+      const magnet = new URLSearchParams(fragment).get('magnet');
+      assert.match(magnet, /^magnet:\?xt=urn:btih:b{40}&xs=urn:btpk:/);
+      assert.match(magnet, /&s=openmaptiles/);
       // Carries the web seed, so a client with no peers can still range-read
       // the archive and derive what it needs.
-      assert.match(fragment, /&ws=https%3A/);
+      assert.match(magnet, /&ws=https%3A/);
       // The key is what survives a rebuild; it must not have been displaced by
       // the infohash that will not.
-      assert.match(fragment, /xs=urn:btpk:(de){32}(&|$)/);
+      assert.match(magnet, /xs=urn:btpk:(de){32}(&|$)/);
+      // Percent-encoded, because the fragment now has more than one thing in
+      // it and a magnet is full of the separator. Decoding must give back the
+      // magnet exactly, or what is pasted into a style is not a magnet.
+      assert.ok(fragment.includes(`magnet=${encodeURIComponent(magnet)}`));
+    } finally {
+      await api.close();
+    }
+  });
+
+  it('names a .torrent a client can actually fetch', async () => {
+    // The point of the handle is that a browser can get piece hashes without
+    // a peer, which is only true if the URL in the fragment answers. Asserting
+    // the string looks right would pass just as happily against a 404.
+    const api = await serve([
+      entry({
+        infoHash: 'd'.repeat(40),
+        name: 'planet.pmtiles',
+        categories: ['planet'],
+        ...servable,
+      }),
+    ]);
+    try {
+      const [row] = await api.get('/api/categories').then((r) => r.json());
+      const handles = new URLSearchParams(row.endpoints.styleUrl.split('#')[1]);
+      // Absolute, and pointing at this node: a handle a client is meant to
+      // fetch without having the page it came from is not one it can resolve
+      // against anything.
+      assert.ok(handles.get('torrent').startsWith(api.base));
+      const response = await fetch(handles.get('torrent'), {
+        redirect: 'manual',
+      });
+      // A redirect, because the category handle points at whatever is current
+      // and the immutable URL is what a client should end up holding.
+      assert.equal(response.status, 302);
+      assert.match(
+        response.headers.get('location'),
+        /\/archives\/d{40}\/archive\.torrent$/,
+      );
     } finally {
       await api.close();
     }

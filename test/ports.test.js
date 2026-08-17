@@ -460,7 +460,7 @@ describe('the public category index', () => {
       assert.equal(row.category, 'basemaps');
       assert.equal(typeof row.archives, 'number');
       assert.match(row.endpoints.tileJson, /\/latest\/basemaps\/tiles\.json$/);
-      assert.match(row.endpoints.styleUrl, /#magnet:\?/);
+      assert.match(row.endpoints.styleUrl, /#torrent=[^&]+&magnet=magnet%3A/);
     } finally {
       await node.close();
     }

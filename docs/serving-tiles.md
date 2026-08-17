@@ -192,20 +192,20 @@ Both peer-to-peer engines reuse the client already seeding the archive rather
 than starting a second one. One peer pool, one port, one DHT node — and for
 libtorrent, one sidecar process.
 
-## Carrying the magnet in the URL fragment
+## Carrying the swarm in the URL fragment
 
 The `torrent` block below solves the problem _after_ the TileJSON has been
 fetched. It does not solve the one before it: a torrent-aware client that cannot
 reach this server has nothing to work with, so the swarm — the part that does
 not depend on any server — is unreachable precisely when the server is down.
 
-The fix is to put the magnet in the URL **fragment**:
+The fix is to put the ways into the swarm in the URL **fragment**:
 
 ```json
 "sources": {
   "openmaptiles": {
     "type": "vector",
-    "url": "https://swarm.example.org/latest/openmaptiles/tiles.json#magnet:?xt=urn:btih:4813a0e6…&dn=…&tr=…&ws=…"
+    "url": "https://swarm.example.org/latest/openmaptiles/tiles.json#torrent=https%3A%2F%2Fswarm.example.org%2Flatest%2Fopenmaptiles%2Farchive.torrent&magnet=magnet%3A%3Fxt%3Durn%3Abtih%3A4813a0e6…"
   }
 }
 ```
@@ -213,34 +213,72 @@ The fix is to put the magnet in the URL **fragment**:
 A fragment is never sent in an HTTP request, so the same string works
 everywhere:
 
-| Client                            | What happens                                                                      |
-| --------------------------------- | --------------------------------------------------------------------------------- |
-| maplibre-gl-js, Leaflet, anything | fetches the TileJSON, ignores the fragment                                        |
-| maplibre-native without a plugin  | the same                                                                          |
-| torrent-aware                     | reads the magnet **before any network call**, and still has it if the fetch fails |
+| Client                            | What happens                                                        |
+| --------------------------------- | ------------------------------------------------------------------- |
+| maplibre-gl-js, Leaflet, anything | fetches the TileJSON, ignores the fragment                          |
+| maplibre-native without a plugin  | the same                                                            |
+| torrent-aware                     | joins **before any network call**, and still can if the fetch fails |
 
-The console's **Copy TileJSON URL + magnet** button produces exactly this.
+The console's **Copy TileJSON URL + swarm** button produces exactly this, and so
+does the `styleUrl` on every row of `/api/categories` and `/latest/`.
 
-A magnet needs no encoding in a fragment — RFC 3986 allows `?`, `&`, `=` and `:`
-there — and leaving it readable matters for something people paste into a style
-file by hand.
+### Two handles, and why both
+
+They are not a ladder from worse to better. They fail in different directions.
+
+| Handle     | Needs           | Gets you                                            |
+| ---------- | --------------- | --------------------------------------------------- |
+| `torrent=` | this host       | the metainfo itself, over one ordinary HTTP request |
+| `magnet=`  | a peer, no host | everything, eventually, from the swarm alone        |
+
+`torrent=` is not redundant with the URL it is attached to. **Piece hashes reach
+a browser only from a peer, over BEP 9** — there is no other route to them — so
+a magnet alone leaves a page waiting on a tracker connection and a WebRTC
+handshake before it can read a byte, and never gets there at all on a network
+that blocks the trackers. Fetching the metainfo over HTTPS removes that
+dependency entirely. It also saves a conventional client the same round trip.
+
+`magnet=` is the handle that needs nothing of this node, which is the case the
+fragment exists for in the first place. A client with a DHT should prefer it if
+this host is unreachable; a browser, which has neither DHT nor UDP, should reach
+for the `.torrent` first.
+
+For a `/latest/<category>/` URL the `.torrent` handle points at the category too,
+so it redirects to whatever build is current and does not go stale — see the
+caveat below, which it answers for the half of the fragment that a BEP 46 magnet
+otherwise has to.
+
+Both are percent-encoded, since `&` separates them and a magnet is full of them.
+`URLSearchParams` reads the fragment; `get('magnet')` gives back the magnet
+exactly.
+
+> **This changed in 0.30.0.** The fragment used to be a bare `#magnet:?…` with
+> nothing else in it. A reader that took the whole fragment for a magnet needs to
+> read `magnet=` out of it now. The bare form was not kept for the single-handle
+> case, because a fragment whose shape depends on what happened to be available
+> means every reader has to handle both anyway.
 
 ### What a client should do with it
 
-Three paths, each a strict fallback of the one above:
+Four paths, each a fallback of the one above:
 
 1. **The TileJSON URL.** One request, the full document including
    `vector_layers`. Fastest, and what an ordinary client does anyway.
-2. **The `ws=` web seed.** Two HTTP range requests — the header and root
-   directory near the start of the archive, the JSON metadata at the far end —
-   and the TileJSON can be derived from them. Works when this API is down but
-   the file is still on a web server, and it is the same order of cost as (1).
-3. **The swarm.** No HTTP at all. Slowest from cold, because BEP 9 has to
+2. **The `torrent=` metainfo.** One request, and it yields piece hashes, the
+   file name and the web seeds — enough to join and to range-read without any
+   peer having spoken yet. Works when the TileJSON route is down but this host
+   is up, and it is the only one of these a browser can use to start quickly.
+3. **The `ws=` web seed** inside the magnet. Two HTTP range requests — the header
+   and root directory near the start of the archive, the JSON metadata at the far
+   end — and the TileJSON can be derived from them. Works when this API is down
+   but the file is still on a web server.
+4. **The swarm.** No HTTP at all. Slowest from cold, because BEP 9 has to
    deliver the metainfo first, and the only one that survives the server
    disappearing entirely.
 
-Everything those need is in the magnet: `xt` identifies the archive, `dn` names
-the file, `tr` finds peers, `ws` gives the HTTP fallback.
+Everything those need is in the two handles: `xt` identifies the archive, `dn`
+names the file, `tr` finds peers, `ws` gives the HTTP fallback, and `torrent=`
+gives the metainfo without asking the swarm for it.
 
 ### One caveat on `/latest/` URLs
 
