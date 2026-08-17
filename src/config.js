@@ -156,6 +156,12 @@ const DEFAULTS = {
    */
   allowUnknownArchives: false,
   /**
+   * Also compute an MD5 of each archive created here. Costs a second full read
+   * of the file. Already honoured wherever a torrent is created; declared so it
+   * can be seen and set rather than only written into the file by hand.
+   */
+  md5: false,
+  /**
    * Who may administer this node. Tiles, TileJSON and the feed are always
    * public; everything under /api/ is gated whenever anything here is set. See
    * docs/configuration.md — "Authentication".

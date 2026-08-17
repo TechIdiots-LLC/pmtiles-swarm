@@ -688,8 +688,10 @@
             <div class="sub">
               For a quick manual check. The torrent already verifies the
               archive, and per piece rather than as a whole — this is the
-              familiar convenience, not the integrity guarantee.
+              familiar convenience, not the integrity guarantee. It costs a
+              second read of the whole file, so the add takes twice as long.
             </div>
+            <div class="sub" id="md5-default"></div>
           </div>
         </fieldset>
 
@@ -2265,8 +2267,13 @@ Every piece is hashed against the ` +
         $('extra-seeds').value = '';
         $('add-error').textContent = '';
         $('use-source-seed').checked = true;
-        $('want-md5').checked = false;
         $('extra-trackers').value = '';
+        // Set from the node's own setting below, not assumed here. The box is
+        // what gets sent now, so starting it at false on a node configured for
+        // MD5 would quietly turn the setting off for every add made from the
+        // console — the same disagreement the other way round.
+        $('want-md5').checked = false;
+        $('md5-default').textContent = '';
 
         try {
           const { config } = await api('/api/config');
@@ -2274,6 +2281,10 @@ Every piece is hashed against the ` +
           $('default-trackers').textContent = defaults.length
             ? `Every torrent created here announces to: ${defaults.join(', ')}`
             : 'No default trackers are configured.';
+          $('want-md5').checked = Boolean(config.md5);
+          $('md5-default').textContent = config.md5
+            ? 'This node computes one by default; unticking it applies to this add only.'
+            : '';
         } catch {
           $('default-trackers').textContent =
             'Defaults come from the trackers setting.';

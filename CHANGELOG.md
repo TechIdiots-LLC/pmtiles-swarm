@@ -2,7 +2,11 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **`md5` is a declared setting.** It was already honoured wherever a torrent is created, but it
+  appeared in no defaults list and no document, so it could only be written into the config file by
+  hand — `PATCH /api/config` refused it as an unknown setting, and nothing in the console showed
+  whether it was on. It now defaults to `false`, is documented, and can be changed without a
+  restart.
 
 ### 🐞 Bug fixes
 - **Adding a local archive answers when the file has been checked, not when it has been hashed.**
@@ -22,8 +26,11 @@
 - **The console's MD5 checkbox is now the decision it looks like.** It was only sent when ticked,
   and the server reads an absent `md5` as "unspecified" and falls back to the node's configured
   default — so on a node with `md5` on, an unticked box still hashed one, and the log said so while
-  the dialog appeared to have turned it off. The value is sent either way. Omitting it from an API
-  or CLI call still inherits the config default, which is what that fallback is for.
+  the dialog appeared to have turned it off. The value is sent either way, and the box now starts
+  from the node's own setting rather than always unticked — otherwise making it authoritative would
+  have turned a configured default off for every add made from the console, the same disagreement
+  the other way round. Omitting `md5` from an API or CLI call still inherits the config default,
+  which is what that fallback is for.
 - **The save-location picker is hidden when adding a local file.** It did nothing there: a local
   add registers the file's own directory as the save path whatever was chosen, which is exactly
   what "hashed in place, nothing is copied" says — but the picker sat next to that sentence

@@ -220,6 +220,7 @@ seeding.
 | `pieceLength`          | `4194304`  | 4 MiB                                        |
 | `torrentFormat`        | `'hybrid'` | `'hybrid'`, `'v1'` or `'v2'`                 |
 | `allowUnknownArchives` | `false`    | publish files not recognised as map archives |
+| `md5`                  | `false`    | also compute an MD5 of each archive created  |
 
 ### `pieceLength`
 
@@ -259,6 +260,19 @@ SQLite, whose pages are scattered rather than spatially clustered, so on-demand
 reading over a swarm does not work the way it does for a flat, Hilbert-ordered
 file; a finished local copy has no such problem. See
 [serving-tiles.md](serving-tiles.md#what-can-be-served).
+
+### `md5`
+
+Off by default, because it costs a second full read of the archive: with it on,
+adding a 700 GiB file takes twice as long and produces one convenience digest
+that nothing in BitTorrent uses. The torrent already verifies the content, and
+per piece rather than as a whole — this is for the manual check somebody wants to
+run against a published checksum, and it is carried in the feed for them.
+
+The console's **Also compute an MD5** box starts from this setting and is sent
+with the add either way, so unticking it applies to that add alone. An API or CLI
+call that omits `md5` inherits this; one that passes `true` or `false` decides
+for itself.
 
 ## Trackers
 
