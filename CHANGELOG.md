@@ -2,7 +2,30 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **Bandwidth history per archive, kept across restarts.** The tile side of this question already
+  had an answer; the swarm side had none. An archive could seed steadily for a day and leave no
+  trace but a speed in the console that is gone the moment you look away, which makes "what is
+  using the bandwidth" and "is this archive earning its disk" unanswerable.
+
+  Upload and download speed are now sampled per archive on a timer and kept in `stats.db`, beside
+  the catalog in `dataDir` — not beside the config, which is the operator's: hand-edited, diffed,
+  copied between nodes, and the thing you reach for when a node will not start. A database that
+  grows on its own does not belong there. `node:sqlite` is built in and already used for MBTiles,
+  so this costs no dependency, and it is imported lazily for the same reason `mbtiles.js` does it:
+  the first require prints an experimental warning nobody with this switched off should have to
+  explain.
+
+  Persisted rather than held in memory, unlike `tileStats`, because it answers a question about
+  the past — restarting to pick up a new version would erase exactly the week somebody wanted to
+  look at. Application logs stay in the journal; this is only for numbers that have to survive a
+  restart.
+
+  Two settings, because they are two questions: `traffic.sampleSeconds` is how finely it looks and
+  `traffic.keepHours` how far back it remembers, defaulting to every 15 seconds for a week. Read
+  back through `GET /api/traffic`, averaged into buckets so a week of samples is a graph rather
+  than forty thousand points, with `totals` ranking archives by bytes moved. `traffic: false`
+  turns the whole thing off, and a database that cannot be opened is reported rather than fatal —
+  a node that cannot record what it moved should still move it.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._

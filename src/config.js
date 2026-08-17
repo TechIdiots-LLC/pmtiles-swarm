@@ -217,6 +217,25 @@ const DEFAULTS = {
     recent: 200,
   },
   /**
+   * Upload and download speed per archive, sampled on a timer and kept in
+   * `stats.db` beside the catalog. `false` turns it off.
+   *
+   * Persisted rather than held in memory, unlike tileStats, because it answers
+   * a question about the past: restarting to pick up a new version would erase
+   * exactly the week somebody wanted to look at. Application logs stay in the
+   * journal -- this is only for numbers that have to survive a restart.
+   *
+   * Two settings because they are two questions: how finely it looks, and how
+   * far back it remembers. Sampling every 15 seconds for a week is roughly
+   * 40,000 rows per archive, a few megabytes for a node carrying twenty.
+   */
+  traffic: {
+    /** Seconds between samples. */
+    sampleSeconds: 15,
+    /** How far back to keep them, in hours. */
+    keepHours: 168,
+  },
+  /**
    * Tile serving: a TileJSON endpoint and z/x/y tiles per archive. A node
    * holding a complete copy reads its local file; one in cache mode reads
    * through the swarm. See docs/internals.md — "Reading an archive that is
@@ -583,6 +602,7 @@ export const RELOADABLE = new Map([
   // Read when something is added rather than held open, so a change applies to
   // the next add with nothing to restart.
   ['locations', 'none'],
+  ['traffic', 'traffic'],
   ['watch', 'watchers'],
   ['onAdded', 'hooks'],
   ['onComplete', 'hooks'],

@@ -20,6 +20,7 @@ import { closeServer, installSignalHandlers, runStoppers } from './shutdown.js';
 import { ScheduledSourceManager } from './sources.js';
 import { SubscriptionManager } from './subscriptions.js';
 import { TileStats } from './tile-stats.js';
+import { TrafficStats, openStatsDatabase } from './traffic-stats.js';
 import { TileStore } from './tiles.js';
 import { HeadWarmer } from './prewarm.js';
 import { WarmRunner } from './warm.js';
@@ -271,6 +272,29 @@ PMTILES_SWARM_PUBLIC_URL
       ? null
       : new TileStats({ recent: config.tileStats?.recent });
 
+  // What the swarm moved, as opposed to what the tile endpoint served.
+  // Persisted, because it answers a question about the past: restarting to
+  // pick up a new version would erase the week somebody wanted to look at.
+  let traffic = null;
+  if (config.traffic !== false) {
+    try {
+      traffic = new TrafficStats({
+        db: await openStatsDatabase(config),
+        engine,
+        config,
+      });
+      traffic.start();
+      console.log(
+        `[traffic] sampling every ${traffic.sampleSeconds}s, keeping ` +
+          `${traffic.keepHours}h`,
+      );
+    } catch (error) {
+      // Never fatal. A node that cannot record what it moved should still
+      // move it, and the alternative is refusing to start over a graph.
+      console.error(`[traffic] not recording: ${error.message}`);
+    }
+  }
+
   // Announcing the current build of each category over the DHT. Only ever on
   // the node that builds: the key signs what subscribers believe is current,
   // and two publishers under one key would fight over the sequence number.
@@ -364,6 +388,13 @@ PMTILES_SWARM_PUBLIC_URL
       watch.stop();
       watch.start(config.watch);
     },
+    traffic: () => {
+      // Rebuilt rather than restarted: sampleSeconds and keepHours are both
+      // read when the sampler is constructed, so this is the whole of what a
+      // restart would have achieved.
+      traffic?.stop();
+      traffic?.start();
+    },
     hooks: () => {
       hooks.stop();
       hooks.start();
@@ -402,6 +433,7 @@ PMTILES_SWARM_PUBLIC_URL
     config,
     speed,
     stats,
+    traffic,
     reloaders,
     shutdown: () => runStoppers(stoppers),
   });
@@ -537,6 +569,7 @@ PMTILES_SWARM_PUBLIC_URL
         subscriptions.stop();
         warm.stop();
         headWarmer.stop();
+        traffic?.stop();
       },
       ms: 1000,
     },

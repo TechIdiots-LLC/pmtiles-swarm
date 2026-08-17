@@ -105,6 +105,7 @@ export function createApp({
   config,
   speed,
   stats,
+  traffic,
   reloaders = {},
   shutdown,
 }) {
@@ -556,6 +557,33 @@ export function createApp({
   // is healthy. Admin-side: it names archives and client addresses, and a
   // public endpoint reporting who else is using a node is a privacy question
   // nobody asked for.
+  // What the swarm moved, over time. The tile side of this is /api/stats;
+  // this is the half that was invisible -- an archive could seed steadily for
+  // a day and leave no trace but a speed that vanishes when you look away.
+  app.get(
+    '/api/traffic',
+    route(async (req, res) => {
+      if (!traffic) {
+        return res
+          .status(501)
+          .json({ error: 'traffic statistics are disabled' });
+      }
+      const number = (value) =>
+        value === undefined ? undefined : Number(value);
+      const hours = number(req.query.hours);
+      const buckets = number(req.query.buckets);
+      res.json({
+        sampleSeconds: traffic.sampleSeconds,
+        keepHours: traffic.keepHours,
+        // One archive when asked for, every archive summed when not.
+        ...traffic.series({ infoHash: req.query.infoHash, hours, buckets }),
+        // Beside the series rather than behind a second request: who used the
+        // bandwidth is asked at the same moment as how much of it there was.
+        totals: traffic.totals({ hours }),
+      });
+    }),
+  );
+
   app.get(
     '/api/stats',
     route(async (req, res) => {
