@@ -7,6 +7,22 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.35.3
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **Requires pmtiles-torrent 0.7.1, which stops the sidecar segfaulting.** The alert pump 0.7.0
+  introduced queued libtorrent's alert objects for another thread to read. libtorrent frees an
+  alert on the next `pop_alerts()`, and the pump pops about twice a second while a reader waits up
+  to 500ms before looking — so the read was routinely of memory the session had reclaimed, which
+  is not an exception but the process going away. Seen here as `libtorrent sidecar killed by
+  SIGSEGV` every five minutes, on the resume-data timer: saving resume data posts a burst of
+  alerts across every archive at once, which is exactly the traffic that leaves one queued past
+  the pop after it.
+
+  `^0.7.0` already admits 0.7.1, so a fresh install of 0.35.2 picks the fix up on its own. The
+  floor is raised anyway, because a node installed from a lock file does not.
+
 ## 0.35.2
 ### ✨ Features and improvements
 
