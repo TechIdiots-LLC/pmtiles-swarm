@@ -204,6 +204,7 @@ describe('the archives table', () => {
     assert.deepEqual(headings, [
       'Archive',
       'Size',
+      'Added',
       'Mode',
       'Origin',
       'Progress',

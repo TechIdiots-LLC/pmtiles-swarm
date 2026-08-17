@@ -7,6 +7,24 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.28.0
+### ✨ Features and improvements
+- **The archive list can be searched and sorted, and says when each archive was added.** `Added` is
+  a column now — `createdAt` has always been on every entry and returned by `/api/catalog`, it was
+  simply never shown — with a date for anything older than today and a time for today, since the
+  question a list answers is which of these is recent rather than exactly when each arrived.
+
+  Beside it, the same filter and sort the public page has: by name, infohash or category, ordered
+  by newest added, oldest added, name or size. Newest first by default, because a list read
+  straight after adding something should have that thing at the top.
+
+  Both happen inside the render rather than where the data arrives. The list refreshes every three
+  seconds; filtering at the fetch would either clear what had been typed on each poll or refetch
+  the whole catalog on every keystroke. And the count beside the box says `4 of 37` while a filter
+  is narrowing things, because an empty table and a table filtered down to nothing look identical.
+
+### 🐞 Bug fixes
+
 ## 0.27.0
 ### ✨ Features and improvements
 - **Bandwidth history per archive, kept across restarts.** The tile side of this question already

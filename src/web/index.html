@@ -324,12 +324,33 @@
             <button type="button">Feed</button>
           </a>
         </div>
+        <div class="bar">
+          <input
+            id="archive-filter"
+            type="search"
+            placeholder="Filter by name, infohash or category"
+            autocomplete="off"
+            spellcheck="false"
+            style="flex:1;min-width:12rem"
+          />
+          <label>
+            Sort
+            <select id="archive-sort">
+              <option value="added">newest added</option>
+              <option value="oldest">oldest added</option>
+              <option value="name">name</option>
+              <option value="largest">largest</option>
+            </select>
+          </label>
+          <span class="sub" id="archive-count"></span>
+        </div>
 
         <table>
           <thead>
             <tr>
               <th>Archive</th>
               <th>Size</th>
+              <th>Added</th>
               <th>Mode</th>
               <th>Origin</th>
               <th>Progress</th>
@@ -710,6 +731,37 @@
       const rate = (n) => (n > 0 ? `${bytes(n)}/s` : '—');
       const pct = (n) => `${Math.round((n ?? 0) * 100)}%`;
 
+      /**
+       * When an archive was added, as something short enough for a column.
+       *
+       * A date on its own for anything older than today, and a time for
+       * today: the question a list answers is "which of these is recent", and
+       * a full timestamp on every row is harder to scan than either.
+       * @param {string} value - ISO timestamp.
+       * @returns {string} - Markup for the cell.
+       */
+      const added = (value) => {
+        if (!value) return '<span class="sub">—</span>';
+        const when = new Date(value);
+        if (Number.isNaN(when.getTime())) return '<span class="sub">—</span>';
+        const today = new Date().toDateString() === when.toDateString();
+        return `<span title="${escapeHtml(when.toLocaleString())}">${
+          today
+            ? when.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+            : when.toLocaleDateString()
+        }</span>`;
+      };
+
+      // The same three questions the public page asks, against an admin row.
+      // Newest first by default: a list read after adding something is a list
+      // where the thing just added should be at the top.
+      const archiveSorters = {
+        added: (a, b) => new Date(b.createdAt ?? 0) - new Date(a.createdAt ?? 0),
+        oldest: (a, b) => new Date(a.createdAt ?? 0) - new Date(b.createdAt ?? 0),
+        name: (a, b) => String(a.name ?? '').localeCompare(String(b.name ?? '')),
+        largest: (a, b) => (b.size ?? 0) - (a.size ?? 0),
+      };
+
       let toastTimer;
       const toast = (message) => {
         $('toast').textContent = message;
@@ -1004,9 +1056,34 @@
       function renderRows() {
         const rows = $('rows');
         rows.innerHTML = '';
-        $('empty').hidden = archives.length > 0;
 
-        for (const entry of archives) {
+        // Filtered and sorted here rather than where the data arrives, so the
+        // three-second poll keeps refreshing what is on screen without
+        // resetting what was typed. `archives` stays the node's answer; this
+        // is only the view of it.
+        const needle = ($('archive-filter')?.value ?? '').trim().toLowerCase();
+        const order = $('archive-sort')?.value ?? 'added';
+        const shown = archives
+          .filter(
+            (entry) =>
+              needle === '' ||
+              String(entry.name ?? '').toLowerCase().includes(needle) ||
+              String(entry.infoHash ?? '').toLowerCase().includes(needle) ||
+              (entry.categories ?? []).some((tag) =>
+                String(tag).toLowerCase().includes(needle),
+              ),
+          )
+          .sort(archiveSorters[order] ?? archiveSorters.added);
+
+        $('empty').hidden = archives.length > 0;
+        // Says when a filter is hiding things, because an empty table and a
+        // table filtered down to nothing look identical otherwise.
+        $('archive-count').textContent =
+          needle === ''
+            ? ''
+            : `${shown.length} of ${archives.length}`;
+
+        for (const entry of shown) {
           const s = entry.status ?? {};
           const progress = s.progress ?? 0;
           const mode = entry.mode ?? 'mirror';
@@ -1024,6 +1101,7 @@
                 ? `<div class="sub">${escapeHtml(entry.kind)} · not servable</div>`
                 : ''
             }</td>
+            <td>${added(entry.createdAt)}</td>
             <td><span class="pill ${mode}">${mode}</span></td>
             <td>${originCell(entry)}</td>
             <td>
@@ -4204,6 +4282,8 @@
       $('traffic-live').onchange = trafficPoll;
       trafficPoll();
 
+      $('archive-filter').addEventListener('input', renderRows);
+      $('archive-sort').addEventListener('change', renderRows);
       $('traffic-window').onchange = () => loadSwarmTraffic();
       $('traffic-reset').onclick = async () => {
         // Deliberately separate from reading: a page polling the endpoint must
