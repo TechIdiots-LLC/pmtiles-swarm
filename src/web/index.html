@@ -1641,6 +1641,7 @@
             <button id="set-location">Set location…</button>
             <button id="add-seed">Add web seed</button>
             <button id="clear-cache" ${mode === 'cache' ? '' : 'disabled title="only cache-mode archives have a cache to clear"'}>Clear cache</button>
+            <button id="recheck" title="Hash the files on disk again and believe the result. For an archive that reads 0% next to a file that is plainly there, or one that claims to be complete and is not — every other figure comes from something written down earlier, and this is the only thing that goes and looks.">Recheck files</button>
             <button id="pause">${entry.paused ? 'Resume' : 'Pause'}</button>
             <button id="remove" class="danger">Remove</button>
           </div>
@@ -1944,6 +1945,38 @@
             });
             toast(`reclaimed ${bytes(result.cleared)}`);
             refresh();
+          } catch (error) {
+            toast(error.message);
+          }
+        };
+
+        $('recheck').onclick = async () => {
+          if (
+            !window.confirm(
+              `Recheck ${entry.name}.
+
+Every piece is hashed against the ` +
+                'torrent, which for a large archive is minutes to tens of ' +
+                'minutes of disk. Nothing is deleted, and the archive keeps ' +
+                'serving whatever it can while the check runs.',
+            )
+          ) {
+            return;
+          }
+          try {
+            const result = await api(`/api/torrents/${infoHash}/recheck`, {
+              method: 'POST',
+            });
+            // Said rather than left to be inferred: this returns as soon as the
+            // check is under way, and the progress bar going backwards for the
+            // next twenty minutes is the operation working, not a fault.
+            toast(
+              result.method === 'readd'
+                ? 'rechecking — this engine verifies by re-adding, so it will start from 0%'
+                : 'rechecking — progress shows the fraction hashed',
+            );
+            refresh();
+            renderDetail(infoHash);
           } catch (error) {
             toast(error.message);
           }

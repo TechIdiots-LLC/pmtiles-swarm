@@ -344,6 +344,43 @@ Trackers live outside the torrent's `info` dictionary, so adding them **does not
 infohash** — but it only applies to torrents created after the change. An existing archive keeps
 announcing where its own torrent says to.
 
+## Rechecking what is on disk
+
+Every figure a node can give you about how much of an archive is present is derived from something
+written down earlier: the catalog's `complete` flag, the engine's resume data, the `seedOnly` claim
+made when the torrent was added. When one of those is wrong there is no path back on its own — the
+archive sits at 0% beside a finished file, downloading bytes it already has, and every restart
+repeats the same conclusion.
+
+**Recheck files** in the console (`POST /api/torrents/<infohash>/recheck`) is the one operation
+that goes and looks. It hashes every piece against the torrent and the result wins.
+
+| Engine      | How                                                             |
+| ----------- | --------------------------------------------------------------- |
+| libtorrent  | `force_recheck`, via the sidecar. Needs pmtiles-torrent ≥ 0.5.1 |
+| qBittorrent | `POST /api/v2/torrents/recheck` — the same library underneath   |
+| WebTorrent  | no such operation; re-added with `seedOnly` withheld instead    |
+
+It answers as soon as the check is under way. Hashing a planet build is tens of minutes, which is
+longer than any request should be held open for, so the archive reports state `checking` with
+progress as the fraction hashed. **Progress running backwards during that is the operation
+working**, not a fault. Nothing is deleted at any point.
+
+WebTorrent's route is cruder and is reported as `method: "readd"` rather than dressed up as the
+same thing: it verifies on add and never again, so the only way to make it look is to add the
+torrent a second time with the "the data is already here" claim withheld. It also refuses on a
+paused archive, since a re-add would start it.
+
+Nothing is written to the catalog when the check begins. The answer arrives where progress always
+does — the engine's own figures, which the completion sweep already reads. Note the one thing this
+does not repair on its own: the sweep promotes and never demotes, so a recheck finding _less_ than
+the record claims shows the truth in the console but leaves `complete: true` in place. Demoting on
+a progress figure would strip the finished name off any archive that happened to be mid-check.
+
+With two engines both are asked. Each keeps its own belief about the same file, so a stale one on
+the secondary is why a browser peer finds nothing while the primary seeds happily. A secondary that
+cannot check is reported and does not fail the operation; the primary failing does.
+
 ## Marking incomplete files
 
 An archive that is not whole yet is written under a marked name and renamed when
@@ -375,9 +412,10 @@ checked and the unreadable ones are joined by magnet instead.
 
 ## Writing another engine
 
-Implement `connect`, `add`, `remove`, `list`, `get`, `destroy`, and optionally `peers` and
-`reachability`. Anything optional that is missing is simply not offered — an engine without
-`reachability` hides the indicator rather than reporting a node unreachable.
+Implement `connect`, `add`, `remove`, `list`, `get`, `destroy`, and optionally `peers`,
+`reachability` and `recheck`. Anything optional that is missing is simply not offered — an engine
+without `reachability` hides the indicator rather than reporting a node unreachable, and one
+without `recheck` is rechecked by re-adding instead.
 The interface is deliberately small; see
 [`src/engines/types.js`](../src/engines/types.js) for the contract and
 [`src/engines/webtorrent.js`](../src/engines/webtorrent.js) for the shortest example.

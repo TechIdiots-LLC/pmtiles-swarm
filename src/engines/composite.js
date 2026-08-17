@@ -550,6 +550,50 @@ export class CompositeEngine {
   }
 
   /**
+   * Hashes what is on disk again, on every engine that can.
+   *
+   * Each engine keeps its own belief about the same file, so a stale one on the
+   * secondary is the same fault as a stale one on the primary -- it is why a
+   * browser peer would find nothing while the primary seeds happily. Both are
+   * asked.
+   *
+   * They hash concurrently, which sounds worse than it is: the second pass over
+   * a file the first just read is mostly page cache, and a recheck is a rare
+   * thing somebody asked for rather than something that runs on a timer.
+   *
+   * An engine without the operation is skipped rather than worked around. The
+   * re-add that WebTorrent needs instead is the library's to do, because it
+   * takes the catalog entry -- see Library.recheck.
+   * @param {string} infoHash - The archive to verify.
+   * @returns {Promise<object>} - The primary's answer, plus one row per engine.
+   */
+  async recheck(infoHash) {
+    const engines = [];
+    for (const engine of [this.#primary, ...this.#secondaries]) {
+      if (!engine.recheck) {
+        engines.push({ engine: engine.name, rechecking: false, skipped: true });
+        continue;
+      }
+      try {
+        const result = await engine.recheck(infoHash);
+        engines.push({ engine: engine.name, ...result });
+      } catch (error) {
+        // A secondary that cannot verify must not fail the primary's check.
+        // The primary holds the data the tiles are served from.
+        engines.push({
+          engine: engine.name,
+          rechecking: false,
+          error: error.message,
+        });
+      }
+    }
+
+    const primary = engines[0];
+    if (primary.error) throw new Error(primary.error);
+    return { ...primary, engines };
+  }
+
+  /**
    * Tells every engine about a web seed.
    * @param {string} infoHash - The archive.
    * @param {string} url - The web seed.

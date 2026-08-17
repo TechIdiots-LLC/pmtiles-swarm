@@ -303,6 +303,33 @@ export class LibtorrentEngine {
     }
   }
 
+  /**
+   * Hashes what is on disk again and believes the result over the record.
+   *
+   * Returns as soon as the check is under way, not when it finishes: a planet
+   * archive is tens of minutes of disk. The torrent reports state `checking`
+   * while it runs, with progress as the fraction hashed.
+   * @param {string} infoHash - The archive to verify.
+   * @returns {Promise<object>} - `{rechecking, wasPaused}`.
+   */
+  async recheck(infoHash) {
+    try {
+      return await this.#call('recheck', { infoHash });
+    } catch (error) {
+      // An older sidecar answers "unknown op", which is true and useless: it
+      // reads as a bug in the request rather than as a package that needs
+      // updating. Said plainly instead, because this is a button somebody just
+      // pressed and the next thing they do depends on which it is.
+      if (/unknown op/i.test(error.message)) {
+        throw new Error(
+          'this sidecar cannot recheck; pmtiles-torrent 0.5.1 or newer is needed',
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+  }
+
   async list() {
     // A node that is shutting down still has a console polling it and a sweep
     // or two in flight. Answering "the sidecar exited" to each of them fills

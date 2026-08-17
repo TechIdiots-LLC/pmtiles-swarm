@@ -1040,6 +1040,21 @@ export function createApp({
     }),
   );
 
+  // When the record and the disk disagree, this is the only thing that goes and
+  // looks. Answers as soon as the check is under way -- hashing a planet build
+  // is tens of minutes, and no request should be held open for it.
+  app.post(
+    '/api/torrents/:infoHash/recheck',
+    route(async (req, res) => {
+      try {
+        const result = await library.recheck(req.params.infoHash);
+        res.status(202).json(result);
+      } catch (error) {
+        res.status(error.status ?? 500).json({ error: error.message });
+      }
+    }),
+  );
+
   // Joining defaults to cache, deliberately. This is how that is changed
   // afterwards, without re-adding the archive by hand.
   app.patch(

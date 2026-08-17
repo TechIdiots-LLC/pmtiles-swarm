@@ -1658,6 +1658,68 @@ export class Library {
   }
 
   /**
+   * Hashes what is on disk again and believes the result over the record.
+   *
+   * Every other answer about how much of an archive is here comes from
+   * something written down earlier -- the catalog's `complete` flag, resume
+   * data, the `seedOnly` claim made when it was added. When one of those is
+   * wrong there is no path back on its own: an archive built here whose entry
+   * says `complete: false` is re-added without `seedOnly`, so the engine goes
+   * looking for bytes that are already under its nose and sits at 0% beside a
+   * finished file. This is the way out.
+   *
+   * Nothing is written to the catalog here. The check runs for as long as it
+   * takes to hash the archive -- tens of minutes for a planet build -- so the
+   * answer arrives long after this returns, and it arrives where it always
+   * does: the engine's own progress, which the completion sweep already reads
+   * and acts on. Recording a guess now would only have to be corrected later.
+   *
+   * Note what this cannot fix on its own. The sweep promotes, it never demotes,
+   * so a recheck that finds *less* than the record claims shows the truth in
+   * the console but leaves `complete: true` in place. That is deliberate: a
+   * torrent reports progress below 1 for perfectly ordinary reasons while it is
+   * checking, and demoting on that would strip the finished name off an archive
+   * that is merely being verified.
+   * @param {string} infoHash - The archive to verify.
+   * @returns {Promise<object>} - `{rechecking, method}`.
+   */
+  async recheck(infoHash) {
+    const entry = this.#catalog.get(infoHash);
+    if (!entry) {
+      const error = new Error('unknown archive');
+      error.status = 404;
+      throw error;
+    }
+
+    if (this.#engine.recheck) {
+      const result = await this.#engine.recheck(infoHash);
+      return { ...result, rechecking: true, method: 'recheck' };
+    }
+
+    // WebTorrent has no recheck at all: it verifies on add and never again. So
+    // the only way to make it look is to make it add the torrent again, with
+    // the claim that the data is already there withheld -- `seedOnly` is
+    // precisely "do not verify this", and it is computed from `complete`, so a
+    // copy of the entry saying otherwise is what turns the check on.
+    //
+    // Nothing is deleted and the catalog is not touched; this re-adds the same
+    // torrent against the same files. It is a slower and cruder mechanism than
+    // force_recheck, and it is reported as a different one rather than dressed
+    // up as the same thing.
+    if (entry.paused) {
+      const error = new Error(
+        'this engine rechecks by re-adding the archive, which a paused ' +
+          'archive cannot do. Resume it first.',
+      );
+      error.status = 409;
+      throw error;
+    }
+    await this.#engine.remove(infoHash, { deleteData: false }).catch(() => {});
+    await this.#readd({ ...entry, complete: false });
+    return { rechecking: true, method: 'readd' };
+  }
+
+  /**
    * Starts offering a paused archive again.
    * @param {string} infoHash - The archive.
    * @returns {Promise<object>} - The updated entry.

@@ -212,6 +212,20 @@ export class QBittorrentEngine {
   }
 
   /**
+   * Hashes what is on disk again and believes the result over the record.
+   *
+   * qBittorrent starts the check and answers immediately, the same as the
+   * libtorrent engine does -- which is the same library underneath.
+   * @param {string} infoHash - The archive to verify.
+   * @returns {Promise<object>} - `{rechecking: true}`.
+   */
+  async recheck(infoHash) {
+    const body = new URLSearchParams({ hashes: infoHash.toLowerCase() });
+    await this.#request('/api/v2/torrents/recheck', { method: 'POST', body });
+    return { rechecking: true };
+  }
+
+  /**
    * Lists every torrent qBittorrent holds.
    * @returns {Promise<import('./types.js').TorrentStatus[]>} - Normalised statuses.
    */

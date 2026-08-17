@@ -7,6 +7,36 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.31.0
+### ✨ Features and improvements
+- **A Recheck files button, for when an archive's progress and its files disagree.** Every figure a
+  node can give you about how much of an archive is present is derived from something written down
+  earlier: the catalog's `complete` flag, the engine's resume data, the `seedOnly` claim made when
+  the torrent was added. When one of those is wrong there is no path back on its own — an archive
+  built on this node whose entry says `complete: false` is re-added without `seedOnly`, so the
+  engine goes looking for bytes that are already under its nose and sits at 0% beside a finished
+  file. Every restart reaches the same conclusion.
+
+  `POST /api/torrents/<infohash>/recheck` hashes every piece against the torrent and the result
+  wins. libtorrent does it with `force_recheck` through the sidecar (pmtiles-torrent 0.5.1 or
+  newer); qBittorrent has the same operation in its WebUI API. WebTorrent has none — it verifies on
+  add and never again — so it is re-added with the "the data is already here" claim withheld, which
+  is reported as `method: "readd"` rather than dressed up as the same mechanism.
+
+  Answers as soon as the check is under way, because hashing a planet build is tens of minutes and
+  no request should be held open for it. The archive reports state `checking` with progress as the
+  fraction hashed; progress running backwards during that is the operation working. Nothing is
+  deleted, and nothing is written to the catalog — the answer arrives where progress always does,
+  and the completion sweep already acts on it.
+
+  With two engines both are asked, since each keeps its own belief about the same file and a stale
+  one on the secondary is why a browser peer would find nothing while the primary seeds happily.
+
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
 ## 0.30.0
 ### ✨ Features and improvements
 - **The style URL now carries the `.torrent` URL as well as the magnet.** Piece hashes reach a
