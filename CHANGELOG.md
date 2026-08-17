@@ -7,6 +7,22 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.32.3
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- **Requires pmtiles-torrent 0.5.2, which deletes a torrent's resume file with its data.** Resume
+  data was outliving the data it described: deleting an archive to re-fetch it left the record of
+  the old complete file behind, so the re-add handed libtorrent a description of a finished archive
+  against a path holding a fresh partial one. It answered `fastresume_rejected` and rechecked, and
+  until that settled nothing was verified — bytes arriving at full speed against a verified-piece
+  count stuck at 1, and every tile read told the piece it wanted was not in the slot list. Only when
+  the data goes too: a removal that keeps the files is how a pause is expressed for an engine with
+  no pause of its own, and discarding resume data there would turn every pause into a full re-hash.
+
+- _...Add new stuff here..._
+
 ## 0.32.2
 ### ✨ Features and improvements
 - _...Add new stuff here..._
