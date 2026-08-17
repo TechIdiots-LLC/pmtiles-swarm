@@ -340,6 +340,9 @@
               <option value="oldest">oldest added</option>
               <option value="name">name</option>
               <option value="largest">largest</option>
+              <option value="down">download speed</option>
+              <option value="up">upload speed</option>
+              <option value="ratio">share ratio</option>
             </select>
           </label>
           <span class="sub" id="archive-count"></span>
@@ -755,11 +758,30 @@
       // The same three questions the public page asks, against an admin row.
       // Newest first by default: a list read after adding something is a list
       // where the thing just added should be at the top.
+      /**
+       * A live figure off an archive's status, or zero.
+       *
+       * An archive the engine has not reported on yet has no status at all,
+       * and comparing undefined gives NaN -- which makes a sort silently do
+       * nothing rather than fail, so it is worth the guard.
+       * @param {object} entry - Catalog entry with its status attached.
+       * @param {string} field - Which figure.
+       * @returns {number} - The value, or zero.
+       */
+      const speedOf = (entry, field) => Number(entry?.status?.[field] ?? 0) || 0;
+
       const archiveSorters = {
         added: (a, b) => new Date(b.createdAt ?? 0) - new Date(a.createdAt ?? 0),
         oldest: (a, b) => new Date(a.createdAt ?? 0) - new Date(b.createdAt ?? 0),
         name: (a, b) => String(a.name ?? '').localeCompare(String(b.name ?? '')),
         largest: (a, b) => (b.size ?? 0) - (a.size ?? 0),
+        // Live values, read off the status the poll refreshes. Rows reorder
+        // themselves every few seconds under these, which is what a torrent
+        // client does and what somebody choosing "download speed" is asking
+        // for -- but it is also why they are not the default.
+        down: (a, b) => speedOf(b, 'downloadSpeed') - speedOf(a, 'downloadSpeed'),
+        up: (a, b) => speedOf(b, 'uploadSpeed') - speedOf(a, 'uploadSpeed'),
+        ratio: (a, b) => speedOf(b, 'ratio') - speedOf(a, 'ratio'),
       };
 
       let toastTimer;

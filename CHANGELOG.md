@@ -15,7 +15,10 @@
   question a list answers is which of these is recent rather than exactly when each arrived.
 
   Beside it, the same filter and sort the public page has: by name, infohash or category, ordered
-  by newest added, oldest added, name or size. Newest first by default, because a list read
+  by newest added, oldest added, name or size — and by download speed, upload speed or share
+  ratio, which are read off the live status the poll refreshes, so rows reorder themselves under
+  those every few seconds. That is what a torrent client does and what choosing "download speed"
+  asks for, and also why none of them is the default. Newest added is, because a list read
   straight after adding something should have that thing at the top.
 
   Both happen inside the render rather than where the data arrives. The list refreshes every three

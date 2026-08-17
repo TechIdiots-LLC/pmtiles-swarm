@@ -28,7 +28,13 @@ function lift(name) {
       if (depth === 0) break;
     }
   }
-  return new Function(`return ${page.slice(open, i + 1)}`)();
+  // The comparators call speedOf, so it has to come along; lifting the table
+  // alone produced functions that threw the moment they were used.
+  const helper = page.slice(
+    page.indexOf('const speedOf ='),
+    page.indexOf(';', page.indexOf('const speedOf =')) + 1,
+  );
+  return new Function(`${helper} return ${page.slice(open, i + 1)}`)();
 }
 
 const sorters = lift('archiveSorters');
@@ -100,6 +106,44 @@ describe('ordering the archive list', () => {
     // An entry written before createdAt existed, or one mid-write.
     assert.doesNotThrow(() => [entry(), { name: 'x' }].sort(sorters.added));
     assert.doesNotThrow(() => [entry(), { name: 'x' }].sort(sorters.oldest));
+  });
+});
+
+describe('ordering by what an archive is doing now', () => {
+  const live = (over) => ({ name: 'x', createdAt: '2026-01-01', status: over });
+
+  it('ranks by download speed, fastest first', () => {
+    const sorted = [
+      live({ downloadSpeed: 10 }),
+      live({ downloadSpeed: 9000 }),
+    ].sort(sorters.down);
+    assert.strictEqual(sorted[0].status.downloadSpeed, 9000);
+  });
+
+  it('ranks by upload speed independently of download', () => {
+    const sorted = [
+      live({ downloadSpeed: 9000, uploadSpeed: 1 }),
+      live({ downloadSpeed: 0, uploadSpeed: 500 }),
+    ].sort(sorters.up);
+    assert.strictEqual(sorted[0].status.uploadSpeed, 500);
+  });
+
+  it('ranks by share ratio', () => {
+    const sorted = [live({ ratio: 0.1 }), live({ ratio: 4.5 })].sort(
+      sorters.ratio,
+    );
+    assert.strictEqual(sorted[0].status.ratio, 4.5);
+  });
+
+  it('treats an archive the engine has not reported on as zero', () => {
+    // No status at all is normal just after adding one. Comparing undefined
+    // gives NaN, and a NaN comparator leaves the order untouched rather than
+    // failing -- so the sort would appear to do nothing.
+    const sorted = [{ name: 'unknown' }, live({ uploadSpeed: 7 })].sort(
+      sorters.up,
+    );
+    assert.strictEqual(sorted[0].status?.uploadSpeed, 7);
+    assert.doesNotThrow(() => [{}, {}].sort(sorters.ratio));
   });
 });
 
