@@ -154,6 +154,15 @@ stops needing the tile endpoint at all.
 The important part is that it does both at once — HTTP for the first paint, swarm
 in the background — so there is never a blank map waiting for metadata.
 
+Discovery comes first, and it comes from the style rather than from a response.
+The source URL carries its handles in a fragment
+(`…/tiles.json#torrent=…&magnet=…`, described under
+[bootstrapping](#bootstrapping-without-the-server)), so a client knows there is a
+swarm behind a source before it makes a single request — which is the point, as
+that is what still works when the server is down. The TileJSON is fetched anyway,
+because it carries the tile endpoint for the first paint and a fuller `torrent`
+block than a fragment can, but it is no longer how the swarm is _found_.
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -162,23 +171,27 @@ sequenceDiagram
     participant HTTP as pmtiles-swarm<br/>(via CDN)
     participant BT as BitTorrent swarm
 
-    App->>P: load style → tiles.json
-    P->>HTTP: GET /archives/{hash}/tiles.json
-    HTTP-->>P: TileJSON + torrent block
-
-    Note over P: claims the /archives/{hash}/ prefix,<br/>so only these URLs come to it
+    App->>P: load style
+    Note over P: reads the fragment on each source URL:<br/>torrent= and magnet=. No request yet.
 
     par Map is usable immediately
+        P->>HTTP: GET /latest/{category}/tiles.json
+        Note over P,HTTP: the fragment is never sent
+        HTTP-->>P: TileJSON + torrent block
         App->>P: tile 12/2145/1436
         P->>HTTP: GET …/12/2145/1436.pbf
         HTTP-->>App: tile bytes
     and Swarm warms up in the background
-        P->>BT: join (.torrent — metadata already in hand)
+        P->>HTTP: GET the .torrent
+        HTTP-->>P: metainfo (piece hashes, trackers, web seeds)
+        P->>BT: join — metadata already in hand
         BT-->>P: connected
         P->>BT: fetch PMTiles header + root directory
         BT-->>P: those pieces
         Note over P: now able to resolve any tile<br/>to a byte range locally
     end
+
+    Note over P: claims the TileJSON URL's prefix (without<br/>the fragment), so only these URLs come to it
 
     App->>P: tile 12/2146/1436
     Note over P: tile → byte range (PMTiles directory)<br/>→ piece index
@@ -201,18 +214,43 @@ is why the `torrent` block carries the archive's `.torrent` rather than per-tile
 URLs: **there is nothing tile-specific in the swarm.** The swarm holds one file,
 and both ends know how to read tiles out of it.
 
-Three consequences worth being clear about:
+Consequences worth being clear about:
 
 - **HTTP is never fully abandoned.** It is the fallback for anything the swarm
   cannot answer quickly, and the only path until the swarm is connected.
 - **The client becomes a seeder.** Every piece it pulls, it serves — so a popular
   region gets _faster_ as more clients view it, which is the opposite of how a
   tile server behaves under load.
-- **Prefer the `.torrent` over the magnet.** A magnet carries only an infohash, so
-  the client must find peers and complete a metadata exchange before it knows
-  anything about the archive — measured at 90 to 240 seconds against a 72 GiB
-  archive. The `.torrent` served alongside the TileJSON already contains the
-  metadata and is ready immediately.
+- **The document is preferred, the fragment is the fallback.** Where the TileJSON
+  is reachable and carries a `torrent` block, that block wins: it is the archive's
+  own account of itself, and it has web seeds, size and piece length that two
+  handles in a URL do not. The fragment is what answers when the document does not
+  — unreachable, not JSON, or carrying no block — which is exactly the case the
+  handles were put in the URL for. A client that used only one of the two would be
+  either poorly informed or dependent on the server it is meant to survive.
+- **Prefer the `.torrent` over the magnet, and for a browser this is not a
+  preference.** A magnet carries only an infohash, so the client must find peers
+  and complete a metadata exchange before it knows anything about the archive —
+  measured at 90 to 240 seconds against a 72 GiB archive. That is the cost for a
+  client with a DHT. A browser has neither DHT nor UDP, and piece hashes reach a
+  BitTorrent client only from a **peer**, over BEP 9 — a web seed serves file
+  payload and never metainfo. So a page that cannot reach a peer cannot use the
+  web seed either, however reachable that web seed is: it has bytes it is not
+  allowed to trust. Fetching the `.torrent` over the same HTTPS the TileJSON came
+  from takes the peer off the critical path entirely, which is the difference
+  between working on a restricted network and not working at all.
+- **A client with a DHT can join on a magnet alone**, and one without cannot. That
+  is the one place the two kinds of client genuinely diverge, and it is why the
+  convention names `torrent=` first: a browser treats a source carrying only a
+  magnet as no candidate at all, while a native client is happy with it.
+- **Holding the metainfo is not evidence that anything will serve it.** It makes
+  the engine ready with no peer involved, which removes the very thing that used
+  to prove an archive was worth binding a source to — waiting for metadata was
+  never only a wait. A client that registers on metainfo alone can bind a source
+  to a swarm with nothing behind it, and that does not fall back, it _stalls_, and
+  the tiles never draw. One `Range: bytes=0-0` against the web seed restores the
+  evidence: a 206 proves the host is reachable, serves ranges and permits the
+  origin, which is all the engine needs from it.
 
 ---
 
