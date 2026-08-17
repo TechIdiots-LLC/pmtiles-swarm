@@ -2032,7 +2032,7 @@ Every piece is hashed against the ` +
        */
       function locationPicker(id) {
         return `
-          <div class="field">
+          <div class="field" id="${id}-field">
             <label for="${id}-select">Save location</label>
             <select id="${id}-select"></select>
             <input id="${id}-path" hidden placeholder="M:\\archives" style="margin-top:0.4rem" />
@@ -2202,6 +2202,11 @@ Every piece is hashed against the ` +
         // Only a torrent created here can carry a digest; joining one takes
         // whatever that torrent already says.
         $('md5-options').hidden = kind !== 'url' && kind !== 'path';
+        // A local file is hashed where it lies and seeded from there:
+        // addLocalArchive registers the file's own directory as the save path,
+        // whatever was picked here. Offering the choice invited the reasonable
+        // reading that the archive was about to be copied or moved somewhere.
+        $('add-loc-field').hidden = kind === 'path';
         // Only joining has a mode to choose. Creating a torrent here always
         // means holding the file, so the question does not arise.
         $('join-options').hidden = kind !== 'magnet' && kind !== 'torrentUrl';
@@ -2299,7 +2304,11 @@ Every piece is hashed against the ` +
           .filter(Boolean);
         if (trackers.length > 0) body.addTrackers = trackers;
 
-        if ($('want-md5').checked) body.md5 = true;
+        // Sent either way, because the server reads a missing md5 as "unspecified"
+        // and falls back to the node's configured default. An unticked box was
+        // therefore not a decision not to, and on a node configured for md5 the
+        // log reported hashing that the dialog appeared to have turned off.
+        body.md5 = $('want-md5').checked;
         if (kind === 'magnet' || kind === 'torrentUrl') {
           body.mode = document.querySelector('input[name="join-mode"]:checked').value;
         }
