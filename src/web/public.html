@@ -482,6 +482,23 @@
         largest: (a, b) => (b.size ?? 0) - (a.size ?? 0),
       };
 
+      // The same three orderings against a category, which keeps its facts in a
+      // different shape: its own name, and the build it currently points at.
+      //
+      // Sorting only the archives was the same thing as not sorting at all for
+      // most visitors. Categories are the list worth reading -- they follow the
+      // newest build, which is what a style should hold -- so they are rendered
+      // first and are what somebody watches while changing the control. A node
+      // carrying twenty of them and a handful of archives looked completely
+      // unresponsive to it.
+      const categorySorters = {
+        name: (a, b) =>
+          String(a.category ?? '').localeCompare(String(b.category ?? '')),
+        newest: (a, b) =>
+          new Date(b.newest?.createdAt ?? 0) - new Date(a.newest?.createdAt ?? 0),
+        largest: (a, b) => (b.newest?.size ?? 0) - (a.newest?.size ?? 0),
+      };
+
       // Re-renders both lists against the current filter and sort.
       const apply = () => {
         const needle = (document.getElementById('filter').value ?? '')
@@ -499,12 +516,14 @@
           )
           .sort(sorters[order] ?? sorters.name);
 
-        const categories = loadedCategories.filter(
-          (entry) =>
-            needle === '' ||
-            matches(entry.category, needle) ||
-            matches(entry.newest?.name, needle),
-        );
+        const categories = loadedCategories
+          .filter(
+            (entry) =>
+              needle === '' ||
+              matches(entry.category, needle) ||
+              matches(entry.newest?.name, needle),
+          )
+          .sort(categorySorters[order] ?? categorySorters.name);
 
         renderCategories(categories);
         render(archives);

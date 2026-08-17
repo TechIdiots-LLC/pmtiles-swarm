@@ -1,6 +1,6 @@
 {
   "name": "pmtiles-swarm",
-  "version": "0.26.1",
+  "version": "0.26.2",
   "description": "BitTorrent distribution for PMTiles map archives: create torrents, watch folders, publish and subscribe to RSS feeds, and seed through qBittorrent or an embedded client",
   "type": "module",
   "main": "src/index.js",

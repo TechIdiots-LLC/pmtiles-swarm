@@ -7,6 +7,20 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.26.2
+### 🐞 Bug fixes
+- **The public page's sort left the categories alone.** `apply()` sorted the archives and handed
+  the categories straight to the renderer, which does not sort either — so on a node carrying
+  twenty categories and a few archives the control looked completely dead. Categories are rendered
+  first and are the list worth reading, since they follow the newest build, so sorting only the
+  other list amounted to not sorting at all for most visitors.
+
+  All three orderings now apply to both, against the fields a category actually keeps: its own
+  name, and the date and size of the build it points at. The existing test could not have caught
+  this — it checked that every option in the select had a comparator behind it, which was true, and
+  said nothing about whether the categories were ever handed to one. The comparators are now lifted
+  out of the page and called directly.
+
 ## 0.26.1
 ### 🐞 Bug fixes
 - **A download that finished was fetched all over again.** Resuming looked only at the
