@@ -49,6 +49,19 @@
       h2 { font-size: 0.95rem; margin: 0 0 0.6rem; font-weight: 600; }
       .status { color: var(--muted); font-size: 0.85rem; }
       .status b { color: var(--fg); font-weight: 600; }
+      /* A dot rather than an image: it inherits the theme, needs no asset,
+         and stays legible at the size a header allows. */
+      .reach {
+        display: inline-flex; align-items: center; gap: 0.35rem;
+        font-size: 0.8rem; color: var(--muted); cursor: default;
+      }
+      .reach::before {
+        content: ""; width: 0.6rem; height: 0.6rem; border-radius: 50%;
+        background: var(--muted);
+      }
+      .reach.open::before { background: var(--ok); }
+      .reach.unproven::before { background: var(--warn); }
+      .reach.offline::before { background: var(--bad); }
       nav { margin-left: auto; display: flex; gap: 0.35rem; }
       nav button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
       main { padding: 1.25rem; }
@@ -305,6 +318,7 @@
     <header>
       <h1>pmtiles-swarm</h1>
       <div class="status" id="status">connecting…</div>
+      <span id="reach" class="reach" hidden></span>
       <button id="speed-toggle" class="speed" hidden title="Switch between the normal and alternative speed limits"></button>
       <nav>
         <button id="tab-archives" class="on">Archives</button>
@@ -987,6 +1001,50 @@
         }
       };
 
+      /**
+       * The connection indicator: can the swarm reach us, or only we it?
+       *
+       * A node nothing can connect to still downloads and still uploads, so
+       * none of its own traffic reveals the problem -- it simply gets fewer
+       * peers, slower starts, and nobody fetching from it unless introduced
+       * first. That is the whole reason for showing it at all.
+       *
+       * The middle state says "no incoming yet" rather than "firewalled",
+       * because those are the same observation on a node no peer has tried.
+       * Calling it firewalled would put a warning on a healthy node that is
+       * merely new or quiet, which is worse than saying less.
+       *
+       * @param {object} report - status.reachability.
+       * @returns {void}
+       */
+      function renderReach(report) {
+        const host = $('reach');
+        if (!report || !report.state || report.state === 'unknown') {
+          host.hidden = true;
+          return;
+        }
+        host.hidden = false;
+        host.className = `reach ${report.state}`;
+
+        const label = {
+          open: 'reachable',
+          unproven: 'no incoming yet',
+          offline: 'not listening',
+        }[report.state];
+        host.textContent = label;
+
+        const detail = (report.engines ?? [report]).map((one) => {
+          const which = one.engine ? `${one.engine}: ` : '';
+          const port = one.port ? ` on port ${one.port}` : '';
+          if (one.state === 'offline') return `${which}not listening`;
+          if (one.state === 'open') {
+            return `${which}${one.incomingConnections ?? 0} peer(s) have connected in${port}`;
+          }
+          return `${which}listening${port}, but nothing has connected in yet — it may be firewalled, or simply untried`;
+        });
+        host.title = detail.join('\n');
+      }
+
       async function refresh() {
         try {
           const [status, list, speed, adds] = await Promise.all([
@@ -1002,6 +1060,7 @@
           // nothing renames it. The engine decides, not the setting alone.
           incompleteMarker = status.incompleteMarker ?? null;
           const engine = status.engine;
+          renderReach(status.reachability);
           $('status').innerHTML =
             `engine <b>${engine.name}</b> ${engine.ok ? 'ready' : 'unavailable'}` +
             ` · <b>${status.archives}</b> archives`;

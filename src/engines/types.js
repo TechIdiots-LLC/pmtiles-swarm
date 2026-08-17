@@ -60,6 +60,7 @@
  * @property {(filePath: string, options?: object) => Promise<object>} [createTorrent] - Builds a torrent from a local file, where the engine can do it better than the default — libtorrent produces hybrid v1+v2, which create-torrent cannot.
  * @property {(infoHash: string) => Promise<object[]>} [trackerStatus] - Per-tracker announce results, where the engine keeps them.
  * @property {(infoHash: string) => Promise<Uint8Array | null>} [metadata] - The torrent's metainfo once known, so an archive joined by magnet can be written down rather than re-fetched over BEP 9 on every start.
+ * @property {() => Promise<object | null>} [reachability] - Whether peers can open a connection to this node, or only the reverse. Three states: `open` (something has connected inward), `unproven` (listening, but nothing ever has) and `offline` (not listening at all). The middle is deliberately not called firewalled -- on a node with no peers, blocked and untried are the same observation.
  * @property {() => Promise<void>} destroy - Releases resources.
  */
 

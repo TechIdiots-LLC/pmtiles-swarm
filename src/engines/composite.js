@@ -303,6 +303,29 @@ export class CompositeEngine {
    * Every archive, with the peers and speeds of all engines added together.
    * @returns {Promise<import('./types.js').TorrentStatus[]>} - Merged status.
    */
+  /**
+   * Reachability, per engine rather than blended into one verdict.
+   *
+   * Two engines means two listening ports, and they are forwarded separately.
+   * One can be reachable while the other is not, so a single answer would have
+   * to either pick a winner or average two facts into something that is not
+   * true of either -- and the one it got wrong is the one somebody needs to
+   * fix. The primary leads because it is the engine that downloads.
+   * @returns {Promise<object>} - `{state, engines}`.
+   */
+  async reachability() {
+    const engines = [];
+    for (const engine of [this.#primary, ...this.#secondaries]) {
+      if (typeof engine.reachability !== 'function') continue;
+      const report = await engine.reachability().catch((error) => ({
+        state: 'unknown',
+        error: error.message,
+      }));
+      if (report) engines.push({ engine: engine.name, ...report });
+    }
+    return { ...(engines[0] ?? { state: 'unknown' }), engines };
+  }
+
   async list() {
     if (this.#stopping) return [];
     const primary = await this.#primary.list();

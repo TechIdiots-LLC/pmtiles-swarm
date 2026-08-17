@@ -34,6 +34,7 @@ import {
 export class WebTorrentSeedEngine {
   #options;
   #client = null;
+  #everIncoming = false;
   /**
    * A client error that means nothing will ever work.
    *
@@ -319,6 +320,43 @@ export class WebTorrentSeedEngine {
    * Lists every torrent the client holds.
    * @returns {Promise<import('./types.js').TorrentStatus[]>} - Normalised statuses.
    */
+  /**
+   * Whether peers can open a connection to this node, or only the reverse.
+   *
+   * WebTorrent keeps no equivalent of libtorrent's has_incoming_connections
+   * gauge, so it is assembled from the wires: every one carries the direction
+   * it was made in, and a type ending "Incoming" is somebody who reached us.
+   *
+   * Latched rather than sampled, which is the whole reason for the field. A
+   * wire is gone the moment the peer leaves, so asking "is one open now" would
+   * report a reachable node as unproven every time it went quiet. What is worth
+   * knowing is whether it has ever happened at all.
+   * @returns {Promise<object|null>} - The report, or null when not started.
+   */
+  async reachability() {
+    const client = this.#client;
+    if (!client) return null;
+
+    if (!this.#everIncoming) {
+      this.#everIncoming = (client.torrents ?? []).some((torrent) =>
+        (torrent.wires ?? []).some((wire) =>
+          String(wire.type ?? '').endsWith('Incoming'),
+        ),
+      );
+    }
+
+    const listening = Boolean(client.listening);
+    return {
+      state: !listening ? 'offline' : this.#everIncoming ? 'open' : 'unproven',
+      listening,
+      port: client.torrentPort ?? null,
+      peersConnected: (client.torrents ?? []).reduce(
+        (sum, torrent) => sum + (torrent.numPeers ?? 0),
+        0,
+      ),
+    };
+  }
+
   async list() {
     if (!this.#client) return [];
     return this.#client.torrents.map((torrent) => this.#normalise(torrent));

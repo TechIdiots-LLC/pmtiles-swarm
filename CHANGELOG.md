@@ -7,6 +7,35 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.29.0
+### ✨ Features and improvements
+- **A connection indicator in the header, for whether the swarm can reach this node.** A node
+  nothing can connect to still downloads and still uploads — it dials out and its transfers work —
+  so none of its own traffic reveals that half the swarm can never start a conversation with it.
+  What it loses is invisible and permanent: fewer peers, slower starts, and a seed nobody fetches
+  from unless they were introduced to it first.
+
+  Green when something has connected inward, amber when the node is listening and nothing ever
+  has, red when it is not listening at all. libtorrent answers from
+  `net.has_incoming_connections`, which latches for the session, so a reachable node that is
+  merely quiet stays green rather than flickering when its last peer leaves. WebTorrent keeps no
+  such gauge, so it is assembled from the wires — each carries the direction it was made in — and
+  latched for the same reason.
+
+  Reported per engine rather than blended. Two engines means two listening ports, forwarded
+  separately, and one can be reachable while the other is not; a single verdict would have to hide
+  the one somebody needs to fix. The header shows the primary and names both on hover.
+
+  The amber state reads "no incoming yet", not "firewalled". On a node no peer has tried those are
+  the same observation, and claiming the first would put a warning on a node that is merely new.
+  An engine that cannot answer hides the indicator instead of showing red — not being able to ask
+  is not the same as being unreachable, and a red light on a healthy node is worse than none.
+
+  Needs pmtiles-torrent 0.5.0 for the libtorrent engine; against an older sidecar the indicator
+  simply stays hidden.
+
+### 🐞 Bug fixes
+
 ## 0.28.0
 ### ✨ Features and improvements
 - **The archive list can be searched and sorted, and says when each archive was added.** `Added` is

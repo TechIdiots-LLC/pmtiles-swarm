@@ -284,6 +284,25 @@ export class LibtorrentEngine {
     return result?.trackers ?? [];
   }
 
+  /**
+   * Whether peers can open a connection to this node, or only the reverse.
+   *
+   * See the sidecar's op_reachability for what the three states mean and why
+   * the middle one is "unproven" rather than "firewalled": on a node with no
+   * peers, blocked and untried are the same observation.
+   * @returns {Promise<object|null>} - The report, or null when unavailable.
+   */
+  async reachability() {
+    if (this.#stopping) return null;
+    try {
+      return await this.#call('reachability', {});
+    } catch (error) {
+      // An engine that cannot answer is not an engine that is unreachable, and
+      // reporting it as offline would put a red light on a healthy node.
+      return { state: 'unknown', error: error.message };
+    }
+  }
+
   async list() {
     // A node that is shutting down still has a console polling it and a sweep
     // or two in flight. Answering "the sidecar exited" to each of them fills

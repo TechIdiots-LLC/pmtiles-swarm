@@ -530,6 +530,17 @@ export function createApp({
           ? config.incompleteSuffix || null
           : null,
         engine: { name: engine.name, ok: engineOk, error: engineError },
+        // Whether the swarm can reach us, as opposed to whether we can reach
+        // it. A node that cannot be connected to still downloads and still
+        // uploads, so nothing about its own traffic reveals that half the
+        // swarm can never start a conversation with it.
+        reachability:
+          typeof engine.reachability === 'function'
+            ? await engine.reachability().catch((error) => ({
+                state: 'unknown',
+                error: error.message,
+              }))
+            : null,
         archives: catalog.list().length,
         categories: catalog.categories(),
         watching: config.watch.map((w) => w.path),
