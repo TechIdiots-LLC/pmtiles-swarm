@@ -5,7 +5,30 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **Adding a local archive answers when the file has been checked, not when it has been hashed.**
+  `POST /api/torrents` with a `path` held the response open for the whole hash — every byte of the
+  archive, twice with `md5` on — so the console's add dialog sat there for minutes with no sign
+  that anything was happening. Worse than the URL case it mirrors, because nothing was downloading
+  either: the file was already on the disk and visibly not moving, which reads as a submit button
+  that did nothing. It now answers `202` once the path has been identified and accepted, and the
+  hash reports itself through `/api/adds` like a download does. A path that is not there or is not
+  an archive still fails in the response. An archive already held answers `200` with its entry,
+  which the URL branch now does too rather than promising work that was already done. **Scripts
+  reading the created entry straight back from a `path` add need `/api/adds` or `/api/torrents`
+  instead** — magnets and `.torrent` URLs are unchanged and still answer `201`.
+- **A second add of a file already being hashed joins the first rather than starting its own.**
+  Only reachable now that the dialog closes quickly enough to submit twice, and two passes over the
+  same planet archive is an hour of disk for one result.
+- **The console's MD5 checkbox is now the decision it looks like.** It was only sent when ticked,
+  and the server reads an absent `md5` as "unspecified" and falls back to the node's configured
+  default — so on a node with `md5` on, an unticked box still hashed one, and the log said so while
+  the dialog appeared to have turned it off. The value is sent either way. Omitting it from an API
+  or CLI call still inherits the config default, which is what that fallback is for.
+- **The save-location picker is hidden when adding a local file.** It did nothing there: a local
+  add registers the file's own directory as the save path whatever was chosen, which is exactly
+  what "hashed in place, nothing is copied" says — but the picker sat next to that sentence
+  implying otherwise, and offered no way to say "leave it where it is" because that is the only
+  thing it does.
 
 ## 0.33.0
 ### ✨ Features and improvements

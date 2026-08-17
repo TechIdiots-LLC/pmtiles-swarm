@@ -54,6 +54,31 @@ curl -X POST localhost:8090/api/torrents \
 curl -X POST localhost:8090/api/adopt
 ```
 
+The first two of those answer differently, and a script should know which it is
+reading. A local path and a URL both take as long as it takes to read every byte
+of the archive — minutes for a local file, hours for a planet download, doubled
+again if `md5` is on — so they answer **`202 Accepted`** the moment the source
+has been checked, and the work carries on behind it:
+
+```json
+{
+  "accepted": true,
+  "path": "/mnt/maps/planet.pmtiles",
+  "message": "hashing; progress is reported by /api/adds"
+}
+```
+
+There is no infohash in that, because there is not one yet. `GET /api/adds`
+lists what is still running, and the archive appears in `GET /api/torrents` once
+it finishes. A source that fails its checks — a path that is not there, a URL
+that does not answer, a file that is not an archive — fails in the response
+instead, since that is what somebody can do something about. An archive already
+in the catalog answers `200` with the existing entry.
+
+A magnet, a `.torrent` URL and an uploaded `.torrent` are metadata rather than
+data, so there is nothing slow to wait for: those still answer `201` with the
+entry.
+
 ### When the source URL is not published
 
 Adding from a URL registers that URL as a web seed by default, because it is by

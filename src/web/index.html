@@ -902,12 +902,16 @@
       }
 
       /**
-       * Shows downloads that have no archive yet.
+       * Shows adds that have no archive yet.
        *
        * An archive added from a URL is fetched whole before there is anything
        * to hash a torrent out of, so for the length of that download there is
        * no catalog entry and nothing in the table. For a planet build that is
        * hours in which a watched location looks like it silently did nothing.
+       *
+       * A local file has the same gap without the download: the bytes are
+       * already here, but they still all go past the hasher, and until that
+       * finishes there is no infohash to file it under either.
        * @param {object[]} running - From /api/adds.
        * @returns {void}
        */
@@ -917,30 +921,48 @@
           box.innerHTML = '';
           return;
         }
+        const cancellable = running.filter((add) => add.cancellable !== false);
         box.innerHTML = `
-          <h3 style="margin:1.2rem 0 0.5rem">Downloading, before a torrent exists</h3>
+          <h3 style="margin:1.2rem 0 0.5rem">Being added, before a torrent exists</h3>
           <div class="sub" style="margin-bottom:0.6rem">
-            These have no infohash yet — an archive has to be here in full
-            before it can be hashed. They appear in the table above once that
+            These have no infohash yet — an archive has to be read end to end
+            before it can be hashed, whether it is arriving from a URL or
+            already on the disk. They appear in the table above once that
             finishes.
           </div>
           ${running
             .map((add) => {
-              const pct = add.total ? (add.received / add.total) * 100 : null;
+              // Hashing reports nothing until it is done, so there is no
+              // percentage to draw — only how big the file is and how long it
+              // has been going. A bar pinned at zero for twenty minutes says
+              // "stuck" when the honest answer is "no idea, still working".
+              const hashing = add.phase === 'hashing';
+              const pct =
+                add.total && add.received != null
+                  ? (add.received / add.total) * 100
+                  : null;
+              const elapsed = add.startedAt
+                ? duration(Date.now() - new Date(add.startedAt).getTime())
+                : null;
+              const value = hashing
+                ? `hashing${add.total ? ` ${bytes(add.total)}` : ''}${
+                    elapsed ? ` · ${elapsed}` : ''
+                  }`
+                : pct == null
+                  ? bytes(add.received)
+                  : `${pct.toFixed(1)}%`;
               return `
                 <div class="piecerow">
                   <span class="label" title="${escapeHtml(add.url)}">${escapeHtml(
                     add.name ?? add.url.split('/').pop() ?? add.url,
                   )}</span>
                   <span class="track"><i style="width:${pct == null ? 0 : pct.toFixed(1)}%"></i></span>
-                  <span class="value">${
-                    pct == null ? bytes(add.received) : `${pct.toFixed(1)}%`
-                  }</span>
+                  <span class="value">${value}</span>
                 </div>`;
             })
             .join('')}
           <div class="bar" style="margin-top:0.5rem">
-            ${running
+            ${cancellable
               .map(
                 (add) =>
                   `<button data-cancel="${escapeHtml(add.url)}">Cancel ${escapeHtml(
@@ -2330,7 +2352,16 @@ Every piece is hashed against the ` +
             body: { ...body, ...chosenLocation('add-loc') },
           });
           $('add-dialog').close();
-          toast(kind === 'url' ? 'fetching — watch the log' : 'added');
+          // The two slow kinds close on validation, not on completion, so
+          // saying "added" would be claiming something that has not happened
+          // yet. What has happened is that it was accepted and started.
+          toast(
+            kind === 'url'
+              ? 'fetching — watch the log'
+              : kind === 'path'
+                ? 'hashing — watch the log'
+                : 'added',
+          );
           refresh();
         } catch (error) {
           $('add-error').textContent = error.message;

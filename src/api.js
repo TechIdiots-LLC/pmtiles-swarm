@@ -54,6 +54,55 @@ function route(handler) {
 }
 
 /**
+ * Starts an add that takes minutes to hours, and answers as soon as it is safe
+ * to say it has been accepted.
+ *
+ * Everything a caller can do something about is known long before the work is
+ * finished: the source answers, and it is an archive of a kind this will
+ * publish. What remains is transfer and hashing. Awaiting all of it held the
+ * response open for the whole thing, so the console's add dialog stayed on
+ * screen for the duration — over an archive that was visibly appearing behind
+ * it in the URL case, and over a file that had never moved in the local one,
+ * where it read as a submit button that had done nothing at all.
+ *
+ * Progress has its own route already: `runningAdds()` feeds `/api/adds`, the
+ * console polls it, and `DELETE /api/adds` cancels the ones that can be.
+ * @param {object} res - The response to answer.
+ * @param {Function} start - Called with `{onValidated}`; returns the add's promise.
+ * @param {object} accepted - Fields describing the source, for the 202 body.
+ * @param {string} message - What the 202 tells the caller is now happening.
+ * @param {string} what - Prefixed log tag and source, for a failure nobody is waiting on.
+ * @returns {Promise<void>} - Resolves once the response has been sent.
+ */
+async function acceptAdd(res, { start, accepted, message, what }) {
+  const validated = Promise.withResolvers();
+  const running = start({ onValidated: validated.resolve })
+    // A failure after validation has nowhere to be reported: the response has
+    // gone. It is logged where the rest of the work is, and swallowed here so
+    // it cannot take the process down as an unhandled rejection.
+    .catch((error) => {
+      validated.reject(error);
+      console.error(`${what}: ${error.message}`);
+    });
+
+  // Whichever comes first: the checks passing, or the whole attempt failing. A
+  // source that does not answer, or is not an archive, still reports itself in
+  // the dialog where somebody can correct it.
+  const outcome = await validated.promise;
+
+  // Already held, so there is no work to wait on and the entry itself is the
+  // better answer. Deliberately not extended to `joined`, where the promise
+  // belongs to somebody else's transfer and awaiting it would hold the
+  // response open for exactly as long as this exists to avoid.
+  if (outcome?.held) {
+    return void res.status(200).json(await running);
+  }
+
+  void running;
+  res.status(202).json({ accepted: true, ...accepted, message });
+}
+
+/**
  * Builds the HTTP application: JSON API, RSS feeds and the web UI.
  * @param {object} deps - Collaborators.
  * @param {import('./library.js').Library} deps.library - The library service.
@@ -1481,41 +1530,24 @@ export function createApp({
 
       let entry;
       if (body.path) {
-        entry = await library.addLocalArchive(body.path, options);
+        // Nothing is copied and nothing is downloaded, but every byte is still
+        // read to compute the piece hashes — twice with md5 on. That is the
+        // whole wait for a local add, and it is no shorter for the file being
+        // on this disk already. See acceptAdd().
+        return await acceptAdd(res, {
+          start: (hooks) =>
+            library.addLocalArchive(body.path, { ...options, ...hooks }),
+          accepted: { path: body.path },
+          message: 'hashing; progress is reported by /api/adds',
+          what: `[hash] ${body.path}`,
+        });
       } else if (body.url) {
-        // Answered as soon as the URL has been checked, not when the transfer
-        // finishes. Awaiting the whole thing held the response open for the
-        // length of the download -- hours for a planet archive -- so the
-        // console's add dialog stayed on screen throughout, over an archive
-        // that was visibly appearing behind it.
-        //
-        // Progress has its own route already: runningAdds() feeds /api/adds,
-        // the console polls it, and DELETE /api/adds cancels one. This is the
-        // piece that was missing rather than a new mechanism.
-        const validated = Promise.withResolvers();
-        const running = library
-          .addRemoteArchive(body.url, {
-            ...options,
-            onValidated: validated.resolve,
-          })
-          // A failure after validation has nowhere to be reported: the
-          // response has gone. It is logged where the rest of the fetch is,
-          // and swallowed here so it cannot take the process down as an
-          // unhandled rejection.
-          .catch((error) => {
-            validated.reject(error);
-            console.error(`[fetch] ${body.url}: ${error.message}`);
-          });
-
-        // Whichever comes first: the checks passing, or the whole attempt
-        // failing. A URL that does not answer, or is not an archive, still
-        // reports itself in the dialog where somebody can correct it.
-        await validated.promise;
-        void running;
-        return res.status(202).json({
-          accepted: true,
-          url: body.url,
+        return await acceptAdd(res, {
+          start: (hooks) =>
+            library.addRemoteArchive(body.url, { ...options, ...hooks }),
+          accepted: { url: body.url },
           message: 'fetching; progress is reported by /api/adds',
+          what: `[fetch] ${body.url}`,
         });
       } else if (body.magnet) {
         entry = await library.addExistingTorrent(

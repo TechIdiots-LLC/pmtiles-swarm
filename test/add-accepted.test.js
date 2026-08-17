@@ -140,7 +140,9 @@ describe('adding an archive from a URL', () => {
     );
   });
 
-  it('still answers for a URL already in the catalog', async () => {
+  it('answers with the entry for a URL already in the catalog', async () => {
+    // Held already, so there is no transfer to wait on and the entry itself is
+    // the better answer — a 202 would be promising work that is already done.
     await withNode(
       {
         addRemoteArchive: async (url, options) => {
@@ -155,20 +157,116 @@ describe('adding an archive from a URL', () => {
             setTimeout(() => reject(new Error('never answered')), 3000),
           ),
         ]);
+        assert.strictEqual(response.status, 200);
+        assert.strictEqual((await response.json()).infoHash, 'b'.repeat(40));
+      },
+    );
+  });
+
+  it('leaves the instant kinds answering with the entry', async () => {
+    // A magnet or a .torrent URL is metadata, so there is nothing slow to wait
+    // on — and a script reading the created entry straight back still can.
+    await withNode(
+      { addExistingTorrent: async () => ({ infoHash: 'c'.repeat(40) }) },
+      async (node) => {
+        const response = await node.post({ magnet: 'magnet:?xt=urn:btih:abc' });
+        assert.strictEqual(response.status, 201);
+        assert.strictEqual((await response.json()).infoHash, 'c'.repeat(40));
+      },
+    );
+  });
+});
+
+const PATH_UNDER_TEST = '/archives/planet.pmtiles';
+
+describe('adding an archive already on the disk', () => {
+  it('answers once the file is checked, not when the hash ends', async () => {
+    // The same report as the URL case, and mistaken for a dead button rather
+    // than a slow one: nothing is downloading, so the dialog sat open over a
+    // file that had not moved and gave no sign anything was happening.
+    let finish;
+    const hashing = new Promise((resolve) => {
+      finish = resolve;
+    });
+    await withNode(
+      {
+        addLocalArchive: async (filePath, options) => {
+          options.onValidated?.({ path: filePath });
+          await hashing;
+          return { infoHash: 'd'.repeat(40) };
+        },
+      },
+      async (node) => {
+        const response = await Promise.race([
+          node.post({ path: PATH_UNDER_TEST }),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error('the response waited for the hash')),
+              3000,
+            ),
+          ),
+        ]);
+        assert.strictEqual(response.status, 202);
+        const body = await response.json();
+        assert.strictEqual(body.accepted, true);
+        assert.strictEqual(body.path, PATH_UNDER_TEST);
+        finish();
+      },
+    );
+  });
+
+  it('reports a file that fails its checks, rather than accepting it', async () => {
+    // A path that is not there, or is not an archive, is known before any of
+    // the reading starts, so it belongs in the response somebody is looking at.
+    await withNode(
+      {
+        addLocalArchive: async () => {
+          throw new Error('not a PMTiles archive');
+        },
+      },
+      async (node) => {
+        const response = await node.post({ path: PATH_UNDER_TEST });
+        assert.notStrictEqual(response.status, 202);
+        assert.match((await response.json()).error, /not a PMTiles archive/);
+      },
+    );
+  });
+
+  it('does not wait for a hash somebody else already started', async () => {
+    await withNode(
+      {
+        addLocalArchive: async (filePath, options) => {
+          options.onValidated?.({ path: filePath, joined: true });
+          return new Promise(() => {});
+        },
+      },
+      async (node) => {
+        const response = await Promise.race([
+          node.post({ path: PATH_UNDER_TEST }),
+          new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error('waited for the joined hash')),
+              3000,
+            ),
+          ),
+        ]);
         assert.strictEqual(response.status, 202);
       },
     );
   });
 
-  it('leaves the other kinds answering with the entry as before', async () => {
-    // Local paths, magnets and .torrent URLs are fast, so nothing about them
-    // needed changing — and a script reading the created entry back still can.
+  it('answers with the entry for a file already in the catalog', async () => {
     await withNode(
-      { addLocalArchive: async () => ({ infoHash: 'c'.repeat(40) }) },
+      {
+        addLocalArchive: async (filePath, options) => {
+          options.onValidated?.({ path: filePath, held: true });
+          return { infoHash: 'e'.repeat(40) };
+        },
+      },
       async (node) => {
-        const response = await node.post({ path: '/tmp/x.pmtiles' });
-        assert.strictEqual(response.status, 201);
-        assert.strictEqual((await response.json()).infoHash, 'c'.repeat(40));
+        const response = await node.post({ path: PATH_UNDER_TEST });
+        assert.strictEqual(response.status, 200);
+        assert.strictEqual((await response.json()).infoHash, 'e'.repeat(40));
       },
     );
   });

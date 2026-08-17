@@ -71,9 +71,9 @@ export class Library {
   #rebuildQueue = Promise.resolve();
   /** Moves in flight, and the last outcome for each archive. */
   #moves = new Map();
-  /** In-flight remote adds, by URL, so they can be cancelled. */
+  /** Adds in flight, by URL or absolute path, so they can be watched and stopped. */
   #running = new Map();
-  /** Downloads in progress, by URL, so a second request joins the first. */
+  /** The same adds as promises, so a second request for one joins the first. */
   #inFlight = new Map();
   /** The tile reader, told to forget an archive whose source may have changed. */
   #tiles;
@@ -144,16 +144,60 @@ export class Library {
    * Adds a local PMTiles archive, creating a torrent for it.
    *
    * The data is left where it is and the torrent points at it, so publishing a
-   * 700 GiB archive copies nothing.
+   * 700 GiB archive copies nothing. Reading it is another matter: every byte
+   * goes past the hasher, which is why this reports progress and why a caller
+   * can stop waiting on it. See `onValidated`.
    * @param {string} filePath - Path to the .pmtiles file.
    * @param {object} [options] - Category, trackers, web seeds, piece length.
    * @returns {Promise<object>} - The catalog entry.
    */
   async addLocalArchive(filePath, options = {}) {
     const requested = path.resolve(filePath);
-    const existing = this.#catalog.findBySource(requested);
-    if (existing) return existing;
 
+    // Both shortcuts here have to fire onValidated before returning, and for
+    // the same reason as the remote ones: a caller waiting on it to answer a
+    // request would otherwise wait for something that has already happened.
+    const existing = this.#catalog.findBySource(requested);
+    if (existing) {
+      options.onValidated?.({
+        path: requested,
+        kind: existing.kind,
+        held: true,
+      });
+      return existing;
+    }
+
+    // A second request for a file already being hashed joins the first. The
+    // catalog cannot answer this, since the entry exists only once hashing has
+    // finished — and until this returned early, nothing was quick enough to
+    // double-submit. Now that the dialog closes on validation it is, and two
+    // passes over the same planet archive is an hour of disk for one result.
+    const inFlight = this.#inFlight.get(requested);
+    if (inFlight) {
+      console.log(
+        `[hash] ${requested} is already being hashed; joining that one`,
+      );
+      options.onValidated?.({ path: requested, joined: true });
+      return inFlight;
+    }
+
+    const attempt = this.#hashLocalArchive(requested, options).finally(() =>
+      this.#inFlight.delete(requested),
+    );
+    this.#inFlight.set(requested, attempt);
+    return attempt;
+  }
+
+  /**
+   * Identifies, hashes and registers one local archive.
+   *
+   * Separate from `addLocalArchive` so that the deduplication above wraps a
+   * single call and cannot be bypassed by a second entry point later.
+   * @param {string} requested - Absolute path to the .pmtiles file.
+   * @param {object} [options] - Category, trackers, web seeds, piece length.
+   * @returns {Promise<object>} - The catalog entry.
+   */
+  async #hashLocalArchive(requested, options = {}) {
     // Move before hashing, not after. A rename on one filesystem is metadata
     // and costs nothing, while hashing the archive is minutes — so the cheap
     // irreversible step goes first, and the torrent is built from where the
@@ -179,41 +223,74 @@ export class Library {
       allowUnknown: options.allowUnknown ?? this.#config.allowUnknownArchives,
     });
 
-    // Only PMTiles can have its tiles served, so only PMTiles gets probed.
-    const summary =
-      identified.kind === 'pmtiles'
-        ? await probePMTiles(absolute).catch(() => undefined)
-        : undefined;
+    // Everything a caller can do something about has now been checked: the
+    // path exists, it is an archive of a kind this will publish, and it is not
+    // something else that happened to be readable. What remains is reading it
+    // end to end, which for a planet archive is minutes at best — twice that
+    // with md5 on — and no amount of waiting changes the outcome.
+    //
+    // A caller that wants to stop waiting there says so with onValidated,
+    // exactly as the remote add does. Without it the console's add dialog sat
+    // open for the whole hash, over a file that was already on the disk and
+    // going nowhere, which read as a submit button that had done nothing.
+    options.onValidated?.({ path: absolute, kind: identified.kind });
 
-    const created = await createTorrentFromFile(absolute, {
-      creator: this.#creator(),
-      pieceLength: options.pieceLength ?? this.#config.pieceLength,
-      trackers: this.#trackersFor(options),
-      webSeeds: [...new Set(webSeeds)],
-      comment: options.comment,
-      md5: options.md5 ?? this.#config.md5,
+    // Tracked from here so the console has something to show while the hash
+    // runs. Registered without an AbortController, unlike a remote add: there
+    // is no cancelling a hash in progress, since neither libtorrent's creator
+    // nor create-torrent takes a signal. cancelAdd() skips entries without a
+    // controller, so this is inert there rather than a button that lies.
+    const { size } = await fs.stat(absolute).catch(() => ({ size: undefined }));
+    this.#running.set(requested, {
+      name: path.basename(absolute),
+      startedAt: new Date().toISOString(),
+      // No byte count: hashing reports nothing until it is done, so a progress
+      // bar here would sit at zero and then vanish. `total` is the size it is
+      // working through, which with the start time is enough to show it moving.
+      received: undefined,
+      total: size,
+      phase: 'hashing',
     });
 
-    return this.#register(created, {
-      categories: options.categories ?? options.category,
-      // `watch` names the folder that imported this, where one did. Not the
-      // same thing as the directory it sits in: with publishDir it has already
-      // moved somewhere else, and an archive dropped into a watched folder by
-      // hand is still that folder's to retire.
-      source: { type: 'file', location: absolute, watch: options.watch },
-      // The torrent names the file, so the save path is its parent directory.
-      savePath: path.dirname(absolute),
-      pmtiles: summary,
-      // Read out of the archive, not taken from anybody's word for it. The
-      // prewarmer needs the difference: a summary that arrived in a feed says
-      // nothing about whether the header is on this disk. See prewarm.due().
-      summarySource: 'header',
-      kind: identified.kind,
-      sparse: options.sparse,
-      md5: created.md5,
-      webSeeds: [...new Set(webSeeds)],
-      seedOnly: true,
-    });
+    try {
+      // Only PMTiles can have its tiles served, so only PMTiles gets probed.
+      const summary =
+        identified.kind === 'pmtiles'
+          ? await probePMTiles(absolute).catch(() => undefined)
+          : undefined;
+
+      const created = await createTorrentFromFile(absolute, {
+        creator: this.#creator(),
+        pieceLength: options.pieceLength ?? this.#config.pieceLength,
+        trackers: this.#trackersFor(options),
+        webSeeds: [...new Set(webSeeds)],
+        comment: options.comment,
+        md5: options.md5 ?? this.#config.md5,
+      });
+
+      return await this.#register(created, {
+        categories: options.categories ?? options.category,
+        // `watch` names the folder that imported this, where one did. Not the
+        // same thing as the directory it sits in: with publishDir it has
+        // already moved somewhere else, and an archive dropped into a watched
+        // folder by hand is still that folder's to retire.
+        source: { type: 'file', location: absolute, watch: options.watch },
+        // The torrent names the file, so the save path is its parent directory.
+        savePath: path.dirname(absolute),
+        pmtiles: summary,
+        // Read out of the archive, not taken from anybody's word for it. The
+        // prewarmer needs the difference: a summary that arrived in a feed says
+        // nothing about whether the header is on this disk. See prewarm.due().
+        summarySource: 'header',
+        kind: identified.kind,
+        sparse: options.sparse,
+        md5: created.md5,
+        webSeeds: [...new Set(webSeeds)],
+        seedOnly: true,
+      });
+    } finally {
+      this.#running.delete(requested);
+    }
   }
 
   /**
@@ -504,6 +581,11 @@ export class Library {
 
   /**
    * Stops an in-flight remote add.
+   *
+   * Only a remote one. A local add is listed alongside them but holds no
+   * controller, because a hash in progress cannot be interrupted — neither
+   * libtorrent's creator nor create-torrent takes a signal. It is skipped
+   * below rather than special-cased, and reports as nothing cancelled.
    * @param {string} [url] - The source URL, or all of them when omitted.
    * @returns {string[]} - The URLs cancelled.
    */
@@ -521,20 +603,26 @@ export class Library {
   }
 
   /**
-   * Remote adds currently running.
-   * @returns {string[]} - Their source URLs.
+   * Adds currently running, remote and local alike.
+   * @returns {object[]} - One record per add, with whatever progress there is.
    */
   runningAdds() {
     // Reported with progress, not just named. An archive added from a URL has
     // to be downloaded whole before there is anything to hash a torrent out
     // of, so for hours there is no catalog entry and nothing in the list —
-    // which looks exactly like a source that silently did nothing.
+    // which looks exactly like a source that silently did nothing. A local add
+    // has the same gap for the length of the hash, without the download.
     return [...this.#running.entries()].map(([url, state]) => ({
       url,
       name: state.name,
-      received: state.received ?? 0,
+      // Left absent rather than zeroed for a hash, which reports nothing until
+      // it finishes. A zero here is indistinguishable from a download that has
+      // not moved, and the console draws the two differently.
+      received: state.phase === 'hashing' ? undefined : (state.received ?? 0),
       total: state.total,
       startedAt: state.startedAt,
+      phase: state.phase ?? 'fetching',
+      cancellable: Boolean(state.controller),
     }));
   }
 
