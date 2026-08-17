@@ -7,6 +7,27 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.35.0
+### ✨ Features and improvements
+- **Requires pmtiles-torrent 0.7.0, which stops the libtorrent sidecar going deaf while it works.**
+  Its request loop ran each call to completion before reading the next, so a long one starved
+  everything behind it. Two of them are long. `create` hashes a whole archive, which for a 698 GiB
+  local add is hours — reported here as `libtorrent list timed out after 60000ms` every minute, a
+  console header stuck at "connecting…", and archive details that never loaded. `read_piece` waits
+  up to 60s for a piece to arrive from the swarm, and every tile served from a cache-mode archive
+  goes through one, so a serving node spent most of its life unable to answer anything else.
+
+  Both now run off that loop. The second needed alert delivery reworked to a single pump with
+  subscribers first, because every consumer used to drain the session's one alert queue — so two
+  concurrent reads would have swallowed each other's `read_piece_alert` and both timed out. A read
+  also matches its alert on the torrent now, not just the piece number, and a storage fault is
+  reported once by the pump rather than only when a read happened to be waiting to notice it.
+
+  **Upgrade both together.** This release does not itself require the new behaviour, but it is the
+  version that asks for it, and a node running a 0.6.x sidecar keeps the stalls.
+
+### 🐞 Bug fixes
+
 ## 0.34.0
 ### ✨ Features and improvements
 - **`md5` is a declared setting.** It was already honoured wherever a torrent is created, but it
