@@ -7,6 +7,25 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.35.2
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **A killed sidecar is reported with the signal that killed it.** `child.on('exit')` gives a null
+  code when a process dies by signal and puts the name in the *second* argument, which 0.35.1 did
+  not read — so the one case where the code carries no information printed `exited (code null)`
+  and withheld the word that does. It now says `killed by SIGKILL` or `killed by SIGTERM`, and
+  only mentions the OOM killer for `SIGKILL`, that being the one it cannot ask for politely. The
+  0.35.1 wording guessed at memory whatever had happened, which on a box with 122 GiB free sent
+  the reader somewhere there was nothing to find.
+- **The in-process hashing fallback says what it costs.** When libtorrent cannot build a torrent,
+  creation falls back to hashing in the node process — correct, since a torrent matters more than
+  its format, but not a smaller version of the same thing: it reads the whole archive in the
+  process that also serves tiles and the console. For a 698 GiB archive that is a console which
+  has apparently locked up, with nothing in the log joining it to the sidecar that died some time
+  earlier. The warning now names the size, says the hash is happening here, and says that fixing
+  libtorrent is worth more than waiting for it.
+
 ## 0.35.1
 ### ✨ Features and improvements
 

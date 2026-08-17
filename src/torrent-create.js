@@ -671,7 +671,21 @@ async function buildTorrent(input, name, size, options) {
       };
     } catch (error) {
       // A torrent is more important than the format of a torrent.
-      console.warn(`[create] ${error.message}; falling back to a v1 torrent`);
+      //
+      // Said with what it costs, though, because the fallback is not a smaller
+      // version of the same thing. libtorrent hashes in its own process; this
+      // hashes in *this* one, so an archive large enough to be worth handing
+      // to libtorrent is now being read end to end by the process also serving
+      // tiles and the console — which is how a sidecar dying mid-create turns
+      // into a console that has apparently locked up, with nothing in the log
+      // connecting the two.
+      const gib = size ? ` (${(size / 1024 ** 3).toFixed(1)} GiB)` : '';
+      console.warn(
+        `[create] ${error.message}; hashing${gib} in this process instead, ` +
+          'which is slower, holds no hybrid v2 layers, and competes with ' +
+          'everything else this node is doing. Fixing whatever stopped ' +
+          'libtorrent is worth more than waiting for this.',
+      );
     }
   }
 

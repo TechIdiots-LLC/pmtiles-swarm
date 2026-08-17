@@ -247,7 +247,7 @@ export class LibtorrentEngine {
         );
       });
 
-      child.on('exit', (code) => {
+      child.on('exit', (code, signal) => {
         clearTimeout(timer);
         this.#child = null;
 
@@ -270,13 +270,24 @@ export class LibtorrentEngine {
         // left nothing in the log at all. What the operator saw instead was
         // "libtorrent sidecar is not running" once a second, for ever, with no
         // line anywhere saying when it stopped or why.
-        console.error(
-          `[libtorrent] sidecar exited (code ${code}). No stderr above this ` +
-            'means it was killed rather than failing — the OOM killer is the ' +
-            'usual reason on a node hashing or downloading a large archive.',
-        );
+        // The signal, not just the code. A process killed by one exits with a
+        // null code, so reporting the code alone said "exited (code null)" —
+        // which names the one case where the code carries no information and
+        // withholds the word that does. SIGKILL is the OOM killer or someone
+        // with a big hammer; SIGTERM is something asking politely, which for a
+        // sidecar nobody meant to stop is usually the service manager taking
+        // the whole cgroup down.
+        const how = signal ? `killed by ${signal}` : `exited with code ${code}`;
+        const why = signal
+          ? signal === 'SIGKILL'
+            ? ' Nothing asks for SIGKILL politely: on a node hashing or ' +
+              'downloading a large archive this is the OOM killer, and ' +
+              '`dmesg -T | grep -i oom` will say so outright.'
+            : ''
+          : ' No stderr above this means it failed without saying why.';
+        console.error(`[libtorrent] sidecar ${how}.${why}`);
 
-        const error = new Error(`libtorrent sidecar exited (code ${code})`);
+        const error = new Error(`libtorrent sidecar ${how}`);
         for (const { reject: fail } of this.#pending.values()) fail(error);
         this.#pending.clear();
 
