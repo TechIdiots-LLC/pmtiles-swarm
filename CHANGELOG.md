@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.34.0
+### ✨ Features and improvements
 - **`md5` is a declared setting.** It was already honoured wherever a torrent is created, but it
   appeared in no defaults list and no document, so it could only be written into the config file by
   hand — `PATCH /api/config` refused it as an unknown setting, and nothing in the console showed
@@ -56,6 +63,11 @@
   what "hashed in place, nothing is copied" says — but the picker sat next to that sentence
   implying otherwise, and offered no way to say "leave it where it is" because that is the only
   thing it does.
+- **"What a torrent-aware client does" describes what they now do.** The section predated the swarm
+  handles moving into the TileJSON URL's fragment and still had a client learning where to join
+  from a TileJSON response — the one thing the fragment exists to avoid, since the swarm is the
+  part that depends on no server. It contradicted "bootstrapping without the server" two sections
+  below it.
 
 ## 0.33.0
 ### ✨ Features and improvements
@@ -71,7 +83,6 @@
 
 ## 0.32.3
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 ### 🐞 Bug fixes
 - **Requires pmtiles-torrent 0.5.2, which deletes a torrent's resume file with its data.** Resume
@@ -83,11 +94,9 @@
   the data goes too: a removal that keeps the files is how a pause is expressed for an engine with
   no pause of its own, and discarding resume data there would turn every pause into a full re-hash.
 
-- _...Add new stuff here..._
 
 ## 0.32.2
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 ### 🐞 Bug fixes
 - **The head warmer no longer skips every archive it was built for.** It decided an archive was done
@@ -106,11 +115,9 @@
   header off local disk for nothing, while assuming the opposite would leave every existing
   subscription stuck exactly as it is.
 
-- _...Add new stuff here..._
 
 ## 0.32.1
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 ### 🐞 Bug fixes
 - **Requires pmtiles-torrent 0.5.1, so the connection indicator and Recheck files actually work.**
@@ -120,11 +127,9 @@
   cannot answer is deliberately not reported as unreachable, so there was nothing to see and
   nothing to explain why.
 
-- _...Add new stuff here..._
 
 ## 0.32.0
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 ### 🐞 Bug fixes
 - **A mutable magnet no longer carries a web seed.** A `ws=` URL names one build; a BEP 46 magnet
@@ -150,7 +155,6 @@
   **Restyle anything holding one.** A style carrying an older mutable magnet keeps working, but
   carries the stale web seed until it is regenerated.
 
-- _...Add new stuff here..._
 
 ## 0.31.0
 ### ✨ Features and improvements
@@ -177,10 +181,8 @@
   With two engines both are asked, since each keeps its own belief about the same file and a stale
   one on the secondary is why a browser peer would find nothing while the primary seeds happily.
 
-- _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.30.0
 ### ✨ Features and improvements
@@ -210,10 +212,8 @@
   makes the eye stop to work out which it is looking at. Seconds are dropped rather than the date,
   since nothing here is sorted finely enough for them to matter; hovering still gives them.
 
-- _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.29.0
 ### ✨ Features and improvements
