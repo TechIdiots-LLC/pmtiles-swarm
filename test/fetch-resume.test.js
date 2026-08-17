@@ -341,3 +341,136 @@ describe('resuming a download that stopped', () => {
     }
   });
 });
+
+describe('resuming a download the process did not survive', () => {
+  /**
+   * Runs one download attempt into a directory a caller keeps hold of, so a
+   * second call can be made against the same bytes.
+   *
+   * A separate call to createTorrentFromUrl is what a restart looks like from
+   * here: every local the download kept — the byte count, the retry budget,
+   * and the validator it started with — is gone, and all that is left is what
+   * is on the disk.
+   * @param {object} node - The server.
+   * @param {string} dir - The staging directory, reused across calls.
+   * @param {object} [options] - Passed to createTorrentFromUrl.
+   * @returns {Promise<object|null>} - The created torrent, or null if it gave up.
+   */
+  async function attempt(node, dir, options = {}) {
+    try {
+      return await createTorrentFromUrl(node.url, {
+        retainPath: dir,
+        pieceLength: 16384,
+        fetchRetryDelayMs: 1,
+        ...options,
+      });
+    } catch {
+      // Giving up is the point of the first call here.
+      return null;
+    }
+  }
+
+  it('continues from the bytes an earlier run left behind', async () => {
+    // The report this exists for: a large download from a scheduled source
+    // restarted from zero every time the node was restarted. Three things had
+    // to be true and only the first was — the bytes were kept, but shutdown
+    // deleted them, startup swept whatever survived, and the validator the
+    // resume is checked against lived in a local that died with the process.
+    // The last is this one: with the bytes intact and nothing to compare them
+    // to, the resume was refused as "the server offers no ETag or
+    // Last-Modified" and the partial was deleted by the very attempt meant to
+    // continue it.
+    const node = await server({ dropFirst: 1 });
+    const dir = await fs.mkdtemp(path.join(workspace, 'restart-'));
+    // The download is written under the marker until it is whole; that, not
+    // the final name, is what a restart finds.
+    const partial = path.join(dir, 'planet.pmtiles.incomplete');
+    try {
+      // Stopped the way a shutdown stops it: aborted mid-transfer, with bytes
+      // already on the disk. Aborting only once they are actually there, so
+      // this is not a race against the first chunk being flushed.
+      const controller = new AbortController();
+      const stopper = (async () => {
+        for (let i = 0; i < 600; i += 1) {
+          const size = await fs
+            .stat(partial)
+            .then((stat) => stat.size)
+            .catch(() => 0);
+          if (size > 0) return controller.abort();
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      })();
+
+      const gaveUp = await attempt(node, dir, { signal: controller.signal });
+      await stopper;
+      assert.equal(gaveUp, null, 'the first run was supposed to be stopped');
+
+      const onDisk = (await fs.stat(partial)).size;
+      assert.ok(onDisk > 0, 'nothing was kept to resume from');
+      assert.ok(onDisk < BODY.length, 'it was not actually partial');
+
+      // The validator is beside it, which is what a new process needs.
+      const saved = JSON.parse(await fs.readFile(`${partial}.resume`, 'utf8'));
+      assert.equal(saved.etag, ETAG);
+      assert.equal(saved.url, node.url);
+
+      const before = node.requests.length;
+      const created = await attempt(node, dir);
+      assert.ok(created, 'the second run did not finish the download');
+      assert.deepEqual(
+        await fs.readFile(created.retainedAt),
+        BODY,
+        'the file must be byte-identical',
+      );
+
+      // Nothing in the second run asked for the whole file again.
+      const afterRestart = node.requests.slice(before);
+      assert.ok(
+        afterRestart.every((request) => request.from > 0),
+        `it started over: ${JSON.stringify(afterRestart)}`,
+      );
+      assert.equal(
+        afterRestart[0].from,
+        onDisk,
+        'the resume did not begin at what was on disk',
+      );
+
+      // And the sidecar goes when there is nothing left to resume, so it
+      // cannot keep the staging directory from being cleared away.
+      await assert.rejects(() => fs.stat(`${partial}.resume`));
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('starts again when the file changed while it was down', async () => {
+    // The one case where throwing the partial away is right: splicing the head
+    // of one build onto the tail of another produces a torrent for bytes that
+    // never existed anywhere, and it hashes perfectly well locally.
+    const node = await server({ dropFirst: 2, changingEtag: true });
+    const dir = await fs.mkdtemp(path.join(workspace, 'changed-'));
+    try {
+      const controller = new AbortController();
+      const partial = path.join(dir, 'planet.pmtiles.incomplete');
+      const stopper = (async () => {
+        for (let i = 0; i < 600; i += 1) {
+          const size = await fs
+            .stat(partial)
+            .then((stat) => stat.size)
+            .catch(() => 0);
+          if (size > 0) return controller.abort();
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      })();
+      await attempt(node, dir, { signal: controller.signal });
+      await stopper;
+      assert.ok((await fs.stat(partial)).size > 0);
+
+      const created = await attempt(node, dir);
+      assert.ok(created, 'it should still get there, from the beginning');
+      assert.deepEqual(await fs.readFile(created.retainedAt), BODY);
+    } finally {
+      await node.close();
+    }
+  });
+});

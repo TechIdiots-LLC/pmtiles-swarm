@@ -162,6 +162,11 @@ const DEFAULTS = {
    */
   md5: false,
   /**
+   * How long an unfinished download is kept before startup treats it as
+   * abandoned. Until then, re-adding the same URL resumes it.
+   */
+  incomingRetentionDays: 14,
+  /**
    * Who may administer this node. Tiles, TileJSON and the feed are always
    * public; everything under /api/ is gated whenever anything here is set. See
    * docs/configuration.md — "Authentication".

@@ -41,6 +41,16 @@ import {
 export const INCOMING = '.incoming';
 
 /**
+ * Why an in-flight download was aborted, when the answer is "we are stopping".
+ *
+ * Passed as the abort reason rather than tracked alongside, so it arrives with
+ * the signal at the one place that has to tell the difference — and cannot be
+ * left behind by a path that clears its bookkeeping before it handles the
+ * error, which is exactly what the fetch does.
+ */
+export const STOPPING = { stopping: true };
+
+/**
  * Moves a finished archive out of staging and into its final directory.
  *
  * A rename within one filesystem, so it costs nothing however large the
@@ -61,6 +71,32 @@ export async function settleFromStaging({ staging, savePath, name }) {
   // a recursive delete near a path that holds archives.
   await fs.rmdir(staging).catch(() => {});
   return to;
+}
+
+/**
+ * When anything inside a directory was last written, as a timestamp.
+ *
+ * One level down is enough: a staging directory holds the archive being
+ * written and the sidecar describing it, and nothing nests below that.
+ * @param {string} dir - The directory to look in.
+ * @returns {Promise<number | null>} - Milliseconds, or null if it cannot be read.
+ */
+async function newestMtime(dir) {
+  const entries = await fs
+    .readdir(dir, { withFileTypes: true })
+    .catch(() => null);
+  if (!entries) return null;
+
+  let newest = await fs
+    .stat(dir)
+    .then((stat) => stat.mtimeMs)
+    .catch(() => null);
+  for (const entry of entries) {
+    const stat = await fs.stat(path.join(dir, entry.name)).catch(() => null);
+    if (stat && (newest === null || stat.mtimeMs > newest))
+      newest = stat.mtimeMs;
+  }
+  return newest;
 }
 
 export class Library {
@@ -580,7 +616,7 @@ export class Library {
   }
 
   /**
-   * Stops an in-flight remote add.
+   * Stops an in-flight remote add, and discards what it had downloaded.
    *
    * Only a remote one. A local add is listed alongside them but holds no
    * controller, because a hash in progress cannot be interrupted — neither
@@ -590,16 +626,44 @@ export class Library {
    * @returns {string[]} - The URLs cancelled.
    */
   cancelAdd(url) {
+    return this.#abortAdds(url, undefined);
+  }
+
+  /**
+   * Stops in-flight adds because the process is going down, keeping the bytes.
+   *
+   * The distinction matters more than it looks. Cancelling deletes the partial
+   * download, deliberately: somebody said stop, and leaving a few hundred
+   * gigabytes behind after that is the invisible waste the cleanup exists to
+   * avoid. A restart is not that decision — nobody stopped wanting the
+   * archive — but shutdown used to express itself through the same call, so
+   * every restart deleted whatever was in flight, and the scheduled source
+   * that had asked for it started again from zero on the next poll. The
+   * staging directory is named for its URL precisely so the next attempt finds
+   * it; this is what lets it.
+   * @returns {string[]} - The URLs stopped.
+   */
+  stopAdds() {
+    return this.#abortAdds(undefined, STOPPING);
+  }
+
+  /**
+   * Aborts adds, saying why so the fetch can tell the two apart.
+   * @param {string} [url] - One source URL, or all of them when omitted.
+   * @param {object} [reason] - Passed to abort(); STOPPING keeps the partial.
+   * @returns {string[]} - The URLs aborted.
+   */
+  #abortAdds(url, reason) {
     const targets = url ? [url] : [...this.#running.keys()];
-    const cancelled = [];
+    const aborted = [];
     for (const target of targets) {
       const { controller } = this.#running.get(target) ?? {};
       if (!controller) continue;
-      controller.abort();
+      controller.abort(reason);
       this.#running.delete(target);
-      cancelled.push(target);
+      aborted.push(target);
     }
-    return cancelled;
+    return aborted;
   }
 
   /**
@@ -784,6 +848,7 @@ export class Library {
         },
       });
     } catch (error) {
+      const reached = this.#running.get(url)?.received ?? 0;
       this.#running.delete(url);
       // Cancelling is a decision to stop wanting this; running out of attempts
       // is not. The two used to be cleaned up identically, so a download that
@@ -794,8 +859,19 @@ export class Library {
       // A cancelled fetch is still removed. Somebody said stop, and leaving
       // gigabytes behind after that is the invisible waste this was written to
       // avoid in the first place.
-      const cancelled = controller.signal.aborted;
-      if (staging && cancelled) {
+      //
+      // Stopping is neither. The process going down is not a decision about
+      // this archive, so it keeps its bytes and says where they are; the next
+      // poll of whatever asked for it resumes from there. Read off the abort
+      // reason because #running has already been cleared by then.
+      const stopping = controller.signal.reason === STOPPING;
+      const cancelled = controller.signal.aborted && !stopping;
+      if (staging && stopping) {
+        console.log(
+          `[fetch] ${url} stopped at ${reached} bytes for shutdown; kept in ` +
+            `${staging}, and the next add of this URL resumes from there`,
+        );
+      } else if (staging && cancelled) {
         await fs.rm(staging, { recursive: true, force: true }).catch(() => {});
       } else if (staging) {
         console.warn(
@@ -2298,11 +2374,22 @@ export class Library {
   }
 
   /**
-   * Clears out staging directories left by downloads that never finished.
+   * Clears out staging directories nothing is going to come back for.
    *
-   * The failure path removes its own, but a process killed outright cannot.
-   * What it leaves is a partial archive in a directory nothing will ever look
-   * in again — invisible, and for a planet build measured in gigabytes.
+   * This used to remove everything it found, on the reasoning that a partial
+   * archive left by a killed process sits "in a directory nothing will ever
+   * look in again". That stopped being true when the staging directory was
+   * named for a hash of its URL: the next add of the same URL looks in exactly
+   * that directory and continues from what is in it. Sweeping unconditionally
+   * therefore deleted the one thing the naming scheme exists to preserve, and
+   * every restart cost a scheduled source its whole download — the worst case
+   * being the one this is supposed to help with, since a process killed
+   * outright is precisely when hours of transfer are worth keeping.
+   *
+   * What is genuinely abandoned is what nothing has touched for a while: a
+   * source that was removed from the config, a URL that will never be asked
+   * for again. Age is the only honest test available here, because whether a
+   * URL is still wanted is a question about configuration this cannot see.
    *
    * Safe to run at startup precisely because nothing else may be writing here:
    * the data directory lock means one node owns it, and this node has not
@@ -2310,17 +2397,48 @@ export class Library {
    * @returns {Promise<number>} - How many were removed.
    */
   async sweepIncoming() {
-    const root = path.join(this.#config.savePath ?? '', INCOMING);
-    const stale = await fs.readdir(root).catch(() => []);
+    const days = this.#config.incomingRetentionDays ?? 14;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+
+    // Both roots: a source can name its own save path, and cache-mode adds go
+    // to cacheSavePath, so the one configured savePath was never the whole of
+    // where staging lands.
+    const roots = [
+      ...new Set(
+        [this.#config.savePath, this.#config.cacheSavePath]
+          .filter(Boolean)
+          .map((root) => path.join(root, INCOMING)),
+      ),
+    ];
 
     let removed = 0;
-    for (const name of stale) {
-      await fs.rm(path.join(root, name), { recursive: true, force: true });
-      removed += 1;
+    let kept = 0;
+    for (const root of roots) {
+      for (const name of await fs.readdir(root).catch(() => [])) {
+        const at = path.join(root, name);
+        // The newest thing in it, not the directory's own timestamp: on some
+        // filesystems a directory's mtime does not move when a file inside it
+        // is appended to, which for a download in progress is every write.
+        const touched = await newestMtime(at);
+        if (touched !== null && touched >= cutoff) {
+          kept += 1;
+          continue;
+        }
+        await fs.rm(at, { recursive: true, force: true });
+        removed += 1;
+      }
     }
+
     if (removed > 0) {
       console.log(
-        `[library] cleared ${removed} unfinished download(s) from ${INCOMING}`,
+        `[library] cleared ${removed} abandoned download(s) from ${INCOMING} ` +
+          `(nothing written to them for ${days} days)`,
+      );
+    }
+    if (kept > 0) {
+      console.log(
+        `[library] keeping ${kept} unfinished download(s) in ${INCOMING}; ` +
+          'adding the same URL again continues from where each stopped',
       );
     }
     return removed;

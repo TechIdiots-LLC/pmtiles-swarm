@@ -237,9 +237,17 @@ PMTILES_SWARM_PUBLIC_URL
   stoppers.unshift({
     label: 'downloads in progress',
     stop: () => {
-      const cancelled = library.cancelAdd();
-      if (cancelled.length > 0) {
-        console.log(`[shutdown] cancelled ${cancelled.length} download(s)`);
+      // stopAdds, not cancelAdd: a restart is not a decision to stop wanting
+      // the archive, and cancelling deletes the partial download. Through
+      // cancelAdd every restart threw away whatever was in flight, and the
+      // scheduled source that asked for it began again from zero on the next
+      // poll — which for a planet build is hours of transfer per restart.
+      const stopped = library.stopAdds();
+      if (stopped.length > 0) {
+        console.log(
+          `[shutdown] stopped ${stopped.length} download(s); their bytes are ` +
+            'kept and resume when the source is next polled',
+        );
       }
     },
     ms: 1000,

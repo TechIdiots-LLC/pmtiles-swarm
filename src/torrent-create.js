@@ -294,6 +294,85 @@ function rangeStart(contentRange) {
 }
 
 /**
+ * Where the validator for a partial download is remembered.
+ * @param {string} target - The file being written.
+ * @returns {string} - The sidecar path.
+ */
+function resumePathFor(target) {
+  return `${target}.resume`;
+}
+
+/**
+ * Remembers what the source said about the file, beside the partial itself.
+ *
+ * `stillTheSameFile` compares the validator seen when the download began
+ * against the one offered now, and a validator held only in a local was a
+ * validator that died with the process. The bytes survived a restart and the
+ * comparison could not, so the resume was refused for the one reason that is
+ * not recoverable -- "the server offers no ETag or Last-Modified" -- and hours
+ * of transfer were deleted by the attempt that was meant to continue them.
+ *
+ * Written beside the partial rather than into the catalog because that is where
+ * it is true: the pair is the resumable thing, and neither half means anything
+ * without the other.
+ * @param {string} target - The file being written.
+ * @param {string} url - The source, so a stale sidecar cannot be mistaken for this one's.
+ * @param {Headers} headers - The response the download began with.
+ * @returns {Promise<void>} - Resolves once written.
+ */
+async function rememberValidator(target, url, headers) {
+  const etag = headers?.get('etag') ?? null;
+  const lastModified = headers?.get('last-modified') ?? null;
+  // Nothing worth remembering: with neither validator a resume would be
+  // refused anyway, and an empty sidecar only invites believing in it.
+  if (!etag && !lastModified) return;
+  await fs
+    .writeFile(
+      resumePathFor(target),
+      JSON.stringify({ url, etag, lastModified, at: new Date().toISOString() }),
+    )
+    .catch((error) => {
+      // Not fatal. The download still works; only a restart costs more.
+      console.warn(
+        `[fetch] could not record resume data for ${url}: ${error.message}`,
+      );
+    });
+}
+
+/**
+ * Reads back what a previous attempt saw, if it was for this same URL.
+ * @param {string} target - The file being written.
+ * @param {string} url - The source now being fetched.
+ * @returns {Promise<Headers | null>} - Headers to compare against, or null.
+ */
+async function recallValidator(target, url) {
+  try {
+    const saved = JSON.parse(await fs.readFile(resumePathFor(target), 'utf8'));
+    // A staging directory is named for its URL, so a mismatch here means the
+    // file has been reused for something else. Refusing is the safe read.
+    if (saved.url !== url) return null;
+    const headers = new Headers();
+    if (saved.etag) headers.set('etag', saved.etag);
+    if (saved.lastModified) headers.set('last-modified', saved.lastModified);
+    return headers.has('etag') || headers.has('last-modified') ? headers : null;
+  } catch {
+    // No sidecar, or an unreadable one. Both mean the same thing: there is
+    // nothing to compare against, so this behaves as it did before.
+    return null;
+  }
+}
+
+/**
+ * Drops a partial download and the validator that described it.
+ * @param {string} target - The file being written.
+ * @returns {Promise<void>} - Resolves once both are gone.
+ */
+async function discardPartial(target) {
+  await fs.rm(target, { force: true });
+  await fs.rm(resumePathFor(target), { force: true }).catch(() => {});
+}
+
+/**
  * Streams a URL to a file, resuming where a previous attempt stopped.
  *
  * Three things must hold before appending is safe — the server honoured the
@@ -337,6 +416,19 @@ async function downloadTo(url, target, onProgress, signal, options = {}) {
   // is not progress.
   let consumed = 0;
   let best = await bytesOnDisk(target);
+
+  // Picked up from the last process where there was one. This is what makes a
+  // partial survive a restart rather than only a stall: the bytes were always
+  // kept, but without the validator that described them the resume below had
+  // nothing to compare and threw them away.
+  if (best > 0) {
+    firstHeaders = await recallValidator(target, url);
+    if (firstHeaders) {
+      console.log(
+        `[fetch] ${url}: continuing from ${best} bytes left by an earlier run`,
+      );
+    }
+  }
   // Reset does mean an unlucky download can go round more times than the
   // budget names, which is the point, so there is a ceiling as well: a source
   // dribbling a few bytes before dropping every time would otherwise retry
@@ -349,7 +441,10 @@ async function downloadTo(url, target, onProgress, signal, options = {}) {
     const from = await bytesOnDisk(target);
     // A file already at full length is one a previous attempt finished, and
     // that the caller died before renaming. Re-fetching it buys nothing.
-    if (total && from >= total) return from;
+    if (total && from >= total) {
+      await fs.rm(resumePathFor(target), { force: true }).catch(() => {});
+      return from;
+    }
 
     let response;
     try {
@@ -403,14 +498,20 @@ async function downloadTo(url, target, onProgress, signal, options = {}) {
         // because it looks like a complete download. The next attempt sees an
         // empty target, sends no Range, and gets the whole file.
         await response.body.cancel().catch(() => {});
-        await fs.rm(target, { force: true });
+        await discardPartial(target);
         total = 0;
+        best = 0;
         firstHeaders = null;
         continue;
       }
     }
 
-    if (!firstHeaders) firstHeaders = response.headers;
+    if (!firstHeaders) {
+      firstHeaders = response.headers;
+      // Recorded before a byte is written, because the useful moment to have
+      // it is the one where this process is no longer running.
+      await rememberValidator(target, url, firstHeaders);
+    }
     const length = Number(response.headers.get('content-length') ?? 0);
     // On a 206 the length is what remains, not the size of the whole file.
     if (length) total = appending ? from + length : length;
@@ -437,6 +538,9 @@ async function downloadTo(url, target, onProgress, signal, options = {}) {
         { signal },
       );
       onProgress?.({ received, total, done: true });
+      // Nothing left to resume. Left behind it would also stop the staging
+      // directory being removed, since that is only unlinked once empty.
+      await fs.rm(resumePathFor(target), { force: true }).catch(() => {});
       return received;
     } catch (error) {
       if (signal?.aborted) throw error;

@@ -122,33 +122,100 @@ describe('filing a download once it has an infohash', () => {
 });
 
 describe('clearing staging at startup', () => {
-  it('removes what a killed process left behind', async () => {
-    // The failure path cleans up after itself; a process killed outright
-    // cannot. What it leaves is a partial archive in a directory nothing will
-    // ever look in again.
+  /**
+   * A library over a staging root.
+   * @param {string} root - The save path.
+   * @param {object} [config] - Extra config.
+   * @returns {Promise<object>} - The library.
+   */
+  async function sweeper(root, config = {}) {
     const { Library } = await import('../src/library.js');
+    return new Library({
+      catalog: { list: () => [], get: () => null },
+      engine: { name: 'test', list: async () => [] },
+      config: { dataDir: root, savePath: root, ...config },
+    });
+  }
+
+  it('keeps a partial a killed process left behind, so it can resume', async () => {
+    // This used to remove everything it found, which deleted the one thing the
+    // staging layout exists to preserve. The directory is named for a hash of
+    // its URL, so the next add of that URL looks in exactly this place and
+    // continues from what is in it — and a process killed outright is when
+    // that matters most, not least.
     const root = await fs.mkdtemp(path.join(workspace, 'sweep-'));
-    const orphan = path.join(root, INCOMING, 'deadbeef');
-    await fs.mkdir(orphan, { recursive: true });
-    await fs.writeFile(path.join(orphan, 'half.pmtiles'), 'partial');
+    const partial = path.join(root, INCOMING, 'deadbeef');
+    await fs.mkdir(partial, { recursive: true });
+    await fs.writeFile(path.join(partial, 'half.pmtiles'), 'partial');
+
+    const library = await sweeper(root);
+
+    assert.equal(await library.sweepIncoming(), 0);
+    assert.equal(
+      await fs.readFile(path.join(partial, 'half.pmtiles'), 'utf8'),
+      'partial',
+    );
+  });
+
+  it('removes one nothing has written to for a long time', async () => {
+    // Age is the only test available: whether a URL is still wanted is a
+    // question about configuration this cannot see. A source removed from the
+    // config would otherwise leave gigabytes behind for ever.
+    const root = await fs.mkdtemp(path.join(workspace, 'abandoned-'));
+    const abandoned = path.join(root, INCOMING, 'deadbeef');
+    await fs.mkdir(abandoned, { recursive: true });
+    const stale = path.join(abandoned, 'half.pmtiles');
+    await fs.writeFile(stale, 'partial');
+
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    await fs.utimes(stale, old, old);
+    await fs.utimes(abandoned, old, old);
 
     // A real archive beside it, which must survive.
     const kept = path.join(root, 'a'.repeat(40));
     await fs.mkdir(kept, { recursive: true });
     await fs.writeFile(path.join(kept, 'planet.pmtiles'), 'whole');
 
-    const library = new Library({
-      catalog: { list: () => [], get: () => null },
-      engine: { name: 'test', list: async () => [] },
-      config: { dataDir: root, savePath: root },
-    });
+    const library = await sweeper(root);
 
     assert.equal(await library.sweepIncoming(), 1);
-    await assert.rejects(() => fs.stat(orphan));
+    await assert.rejects(() => fs.stat(abandoned));
     assert.equal(
       await fs.readFile(path.join(kept, 'planet.pmtiles'), 'utf8'),
       'whole',
     );
+  });
+
+  it('judges by the newest file in it, not the directory', async () => {
+    // A directory's own mtime does not necessarily move when a file inside it
+    // is appended to, which for a download in progress is every write — so
+    // reading only the directory would age out a transfer that is running.
+    const root = await fs.mkdtemp(path.join(workspace, 'mtime-'));
+    const active = path.join(root, INCOMING, 'deadbeef');
+    await fs.mkdir(active, { recursive: true });
+    await fs.writeFile(path.join(active, 'half.pmtiles'), 'partial');
+
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    await fs.utimes(active, old, old);
+
+    const library = await sweeper(root);
+    assert.equal(await library.sweepIncoming(), 0);
+  });
+
+  it('also looks where cache-mode downloads stage', async () => {
+    const root = await fs.mkdtemp(path.join(workspace, 'roots-'));
+    const cache = await fs.mkdtemp(path.join(workspace, 'cacheroot-'));
+    const abandoned = path.join(cache, INCOMING, 'deadbeef');
+    await fs.mkdir(abandoned, { recursive: true });
+    const stale = path.join(abandoned, 'half.pmtiles');
+    await fs.writeFile(stale, 'partial');
+
+    const old = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    await fs.utimes(stale, old, old);
+    await fs.utimes(abandoned, old, old);
+
+    const library = await sweeper(root, { cacheSavePath: cache });
+    assert.equal(await library.sweepIncoming(), 1);
   });
 
   it('is quiet when there is nothing to clear', async () => {

@@ -556,6 +556,35 @@ assumed:
 
 Any of those failing restarts the download rather than guessing.
 
+### Across a restart, not only across a stall
+
+All of that worked within one process and none of it survived leaving one, which
+made a restart during a long download cost the whole download. Three separate
+things had to be true, and only the first was:
+
+1. **The bytes are kept.** They always were — the staging directory is named for
+   `sha256(url)`, so the next add of the same URL finds it.
+2. **Nothing deletes them on the way past.** Two things did. Shutdown expressed
+   itself through `cancelAdd()`, and cancelling deletes the partial on purpose —
+   somebody said stop. A restart is not that decision, so shutdown now calls
+   `stopAdds()`, which aborts with a reason the fetch can tell apart. Startup
+   then swept `.incoming` unconditionally, on the reasoning that a killed
+   process leaves a partial "nothing will ever look in again" — true when
+   staging names were random, false since they became a hash of the URL. It now
+   reaps only what nothing has written to for `incomingRetentionDays`.
+3. **The validator outlives the process.** `stillTheSameFile` compares the
+   `ETag` seen when the download began against the one offered now, and that
+   header lived in a local. A new process had nothing to compare, so the resume
+   was refused for the one reason that cannot be recovered from — "the server
+   offers no ETag or Last-Modified" — and the partial was deleted by the very
+   attempt meant to continue it. It is now written to `<partial>.resume` beside
+   the bytes, carrying the URL it belongs to, and removed when the download
+   finishes so it cannot keep the staging directory from being cleared.
+
+The URL is recorded in the sidecar as well as implied by the directory name, so
+a staging directory that has been reused for something else is refused rather
+than spliced.
+
 ## Retiring and pruning a subscription
 
 Two different questions, which is why an RSS feed can have the first and not the

@@ -7,8 +7,28 @@
   hand — `PATCH /api/config` refused it as an unknown setting, and nothing in the console showed
   whether it was on. It now defaults to `false`, is documented, and can be changed without a
   restart.
+- **`incomingRetentionDays`** sets how long an unfinished download stays resumable. Defaults to 14.
 
 ### 🐞 Bug fixes
+- **A large download survives a restart instead of starting again from zero.** A scheduled web
+  source fetching a multi-hour archive lost the whole transfer every time the node restarted, and
+  began again from nothing on the next poll. Three things had to hold and only one did. The bytes
+  were always kept — the staging directory is named for a hash of its URL so the next add finds
+  it — but **shutdown deleted them**, because it stopped in-flight adds through `cancelAdd()`, and
+  cancelling discards the partial on purpose: somebody said stop. A restart is not that decision,
+  so shutdown now uses `stopAdds()`, which the fetch can tell apart. **Startup then swept whatever
+  survived**, on the reasoning that a killed process leaves a partial "nothing will ever look in
+  again" — true when staging names were random, false since they became a hash of the URL. And
+  **the validator did not outlive the process**: the `ETag` a resume is checked against lived in a
+  local, so a new process had nothing to compare and refused the resume as "the server offers no
+  ETag or Last-Modified", deleting the partial by the very attempt meant to continue it. It is now
+  written beside the bytes and removed when the download completes. A restart during a 700 GiB
+  transfer now costs the seconds since the last write.
+- **`.incoming` is swept by age rather than emptied.** Only a staging directory nothing has
+  written to for `incomingRetentionDays` (default 14) is cleared, so an unfinished download stays
+  resumable. The sweep also looks under `cacheSavePath`, which it never did — staging lands there
+  for cache-mode adds and under a source's own `savePath`, so the one configured `savePath` was
+  never the whole of where it could be.
 - **Adding a local archive answers when the file has been checked, not when it has been hashed.**
   `POST /api/torrents` with a `path` held the response open for the whole hash — every byte of the
   archive, twice with `md5` on — so the console's add dialog sat there for minutes with no sign

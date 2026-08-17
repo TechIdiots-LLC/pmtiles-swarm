@@ -215,12 +215,13 @@ seeding.
 
 ## Creating torrents
 
-| setting                | default    |                                              |
-| ---------------------- | ---------- | -------------------------------------------- |
-| `pieceLength`          | `4194304`  | 4 MiB                                        |
-| `torrentFormat`        | `'hybrid'` | `'hybrid'`, `'v1'` or `'v2'`                 |
-| `allowUnknownArchives` | `false`    | publish files not recognised as map archives |
-| `md5`                  | `false`    | also compute an MD5 of each archive created  |
+| setting                 | default    |                                                 |
+| ----------------------- | ---------- | ----------------------------------------------- |
+| `pieceLength`           | `4194304`  | 4 MiB                                           |
+| `torrentFormat`         | `'hybrid'` | `'hybrid'`, `'v1'` or `'v2'`                    |
+| `allowUnknownArchives`  | `false`    | publish files not recognised as map archives    |
+| `md5`                   | `false`    | also compute an MD5 of each archive created     |
+| `incomingRetentionDays` | `14`       | how long an unfinished download stays resumable |
 
 ### `pieceLength`
 
@@ -260,6 +261,18 @@ SQLite, whose pages are scattered rather than spatially clustered, so on-demand
 reading over a swarm does not work the way it does for a flat, Hilbert-ordered
 file; a finished local copy has no such problem. See
 [serving-tiles.md](serving-tiles.md#what-can-be-served).
+
+### `incomingRetentionDays`
+
+An unfinished download is kept in `.incoming` for this long, and adding the same
+URL again resumes it — which is what makes a restart during a multi-hour
+transfer cost minutes rather than the whole download. A scheduled source picks
+its own back up on the next poll without being asked.
+
+Only what nothing has written to for this many days is cleared at startup, since
+whether a URL is still wanted is a question about configuration that the sweep
+cannot see. Set it lower on a small disk, or higher if an upstream can be
+unreachable for weeks.
 
 ### `md5`
 
