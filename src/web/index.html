@@ -306,6 +306,12 @@
         background: var(--bg);
       }
       .piecebar.thin { height: 14px; }
+      #warm-map { height: 320px; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+      #warm-map .maplibregl-canvas { cursor: crosshair; }
+      .warmgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.6rem; margin: 0.6rem 0; }
+      .warmgrid > label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.8rem; color: var(--muted); }
+      .warmgrid > label > input { width: 100%; }
+      @media (max-width: 620px) { .warmgrid { grid-template-columns: repeat(2, 1fr); } }
       .piecerow { display: grid; grid-template-columns: 7rem 1fr 4rem; gap: 0.6rem; align-items: center; margin-bottom: 0.5rem; }
       .piecerow > .label { font-size: 0.8rem; color: var(--muted); }
       .piecerow > .value { font-size: 0.8rem; color: var(--muted); text-align: right; }
@@ -455,6 +461,54 @@
       <span>·</span>
       <a href="https://github.com/TechIdiots-LLC/pmtiles-swarm" rel="noreferrer">source</a>
     </footer>
+
+    <dialog id="warm-dialog">
+      <form method="dialog" id="warm-form">
+        <h2>Warm region</h2>
+        <div class="sub" style="margin-bottom:0.8rem">
+          Reads tiles ahead of anyone asking for them, so the first visitor to
+          an area does not wait on the swarm for it. Pick the area and the zoom
+          range: the tile count quadruples with every level, so the whole world
+          to deep zoom is millions of reads and almost never what is wanted.
+        </div>
+
+        <div class="warmgrid">
+          <label>West<input id="warm-west" type="number" step="any" min="-180" max="180" required /></label>
+          <label>South<input id="warm-south" type="number" step="any" min="-85.05" max="85.05" required /></label>
+          <label>East<input id="warm-east" type="number" step="any" min="-180" max="180" required /></label>
+          <label>North<input id="warm-north" type="number" step="any" min="-85.05" max="85.05" required /></label>
+        </div>
+
+        <div class="bar" style="margin:0.5rem 0">
+          <button type="button" id="warm-pick">Pick on a map</button>
+          <button type="button" id="warm-use-archive">The whole archive</button>
+        </div>
+
+        <div id="warm-map-wrap" hidden>
+          <div id="warm-map"></div>
+          <div class="sub" id="warm-map-note">
+            Drag to draw an area; alt-drag to move the map.
+          </div>
+          <div class="bar" style="margin:0.5rem 0">
+            <button type="button" id="warm-use-view">Use the whole view</button>
+          </div>
+        </div>
+
+        <div class="warmgrid">
+          <label>Zoom from<input id="warm-minz" type="number" step="1" min="0" max="22" required /></label>
+          <label>Zoom to<input id="warm-maxz" type="number" step="1" min="0" max="22" required /></label>
+          <label>At most<input id="warm-max" type="number" step="1" min="1" required /></label>
+          <label>At a time<input id="warm-conc" type="number" step="1" min="1" max="64" /></label>
+        </div>
+
+        <div class="sub" id="warm-estimate"></div>
+        <div class="sub" id="warm-error" style="color:var(--danger)"></div>
+        <menu>
+          <button value="cancel">Cancel</button>
+          <button id="warm-go" value="default">Start warming</button>
+        </menu>
+      </form>
+    </dialog>
 
     <dialog id="move-dialog">
       <form method="dialog" id="move-form">
@@ -1911,14 +1965,7 @@
         $('copy-hash').onclick = () => copy(entry.infoHash, 'Infohash');
 
         if (servable) {
-          $('warm').onclick = async () => {
-            try {
-              await api(`/api/torrents/${infoHash}/warm`, { method: 'POST', body: {} });
-              toast('warming started');
-            } catch (error) {
-              toast(error.message);
-            }
-          };
+          $('warm').onclick = () => openWarmDialog(entry);
         }
 
         $('set-location').onclick = async () => {
@@ -2210,6 +2257,450 @@ Every piece is hashed against the ` +
           `<div class="preview">${cells.join('')}</div>` +
           `<div class="sub">zoom ${z} · served through this node</div>`;
       }
+
+      // ── Warming ───────────────────────────────────────────────────────────
+
+      // The same arithmetic warm.js walks, without walking it. A count is all
+      // that is wanted here, and the enumeration is one tile at a time — for a
+      // continent at zoom 12 that is millions of objects to arrive at a
+      // number. Kept deliberately beside the server's version: if the two ever
+      // disagree, the dialog is lying about what the button will do.
+      const lonToTileX = (lon, z) => Math.floor(((lon + 180) / 360) * 2 ** z);
+      const latToTileY = (lat, z) => {
+        const clamped = Math.max(-85.05112878, Math.min(85.05112878, lat));
+        const radians = (clamped * Math.PI) / 180;
+        return Math.floor(
+          ((1 - Math.log(Math.tan(radians) + 1 / Math.cos(radians)) / Math.PI) /
+            2) *
+            2 ** z,
+        );
+      };
+
+      /**
+       * How many tiles a warm would read, capped the way the server caps it.
+       * @param {number[]} bounds - [west, south, east, north].
+       * @param {number} minZoom - First zoom level.
+       * @param {number} maxZoom - Last zoom level.
+       * @param {number} limit - The ceiling; counting stops there.
+       * @returns {{count: number, capped: boolean}} - The estimate.
+       */
+      function countTiles(bounds, minZoom, maxZoom, limit) {
+        const [west, south, east, north] = bounds;
+        let total = 0;
+        for (let z = minZoom; z <= maxZoom; z++) {
+          const span = 2 ** z;
+          const clamp = (v) => Math.max(0, Math.min(span - 1, v));
+          const x0 = clamp(lonToTileX(west, z));
+          const x1 = clamp(lonToTileX(east, z));
+          const y0 = clamp(latToTileY(north, z));
+          const y1 = clamp(latToTileY(south, z));
+          total += (x1 - x0 + 1) * (y1 - y0 + 1);
+          if (total >= limit) return { count: limit, capped: true };
+        }
+        return { count: total, capped: false };
+      }
+
+      /**
+       * The box as a GeoJSON feature, for drawing it on the map.
+       * @param {number[]} box - [west, south, east, north].
+       * @returns {object} - A polygon feature.
+       */
+      const boxFeature = ([w, s, e, n]) => ({
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'Polygon',
+          coordinates: [
+            [
+              [w, s],
+              [e, s],
+              [e, n],
+              [w, n],
+              [w, s],
+            ],
+          ],
+        },
+      });
+
+      let warmMap;
+
+      /**
+       * Opens the warm dialog for one archive.
+       *
+       * The API has taken bounds, a zoom range and a ceiling since it was
+       * written; the console sent `{}` and took every default, so the button
+       * warmed the archive's whole extent to a zoom chosen for it and there
+       * was no way to ask for anything else. This is that request, made
+       * visible.
+       * @param {object} entry - The catalog entry being warmed.
+       * @returns {Promise<void>} - Resolves once the dialog is up.
+       */
+      async function openWarmDialog(entry) {
+        const summary = entry.pmtiles ?? {};
+        const archive = summary.bounds ?? [-180, -85.051129, 180, 85.051129];
+        const minZoom = summary.minZoom ?? 0;
+
+        const edges = {
+          west: $('warm-west'),
+          south: $('warm-south'),
+          east: $('warm-east'),
+          north: $('warm-north'),
+        };
+
+        const readBounds = () => {
+          const values = ['west', 'south', 'east', 'north'].map((k) =>
+            Number(edges[k].value),
+          );
+          if (values.some((v) => !Number.isFinite(v))) return null;
+          const [west, south, east, north] = values;
+          // Read as a box however it was typed, so edges the wrong way round
+          // are understood rather than refused.
+          return [
+            Math.min(west, east),
+            Math.min(south, north),
+            Math.max(west, east),
+            Math.max(south, north),
+          ];
+        };
+
+        /** Redraws the box and the estimate from whatever the fields say. */
+        function draw() {
+          const bounds = readBounds();
+          const note = $('warm-estimate');
+          if (!bounds) {
+            note.textContent = 'Give all four edges to see how much this is.';
+            return;
+          }
+          const from = Number($('warm-minz').value);
+          const to = Number($('warm-maxz').value);
+          const limit = Number($('warm-max').value) || 5000;
+          if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) {
+            note.textContent = 'The top zoom must not be below the first.';
+            return;
+          }
+          const { count, capped } = countTiles(bounds, from, to, limit);
+          note.textContent = capped
+            ? `More than ${limit.toLocaleString()} tiles in this — warming stops at that ceiling. Raise it, draw a smaller area, or lower the top zoom.`
+            : `About ${count.toLocaleString()} tiles.`;
+          warmMap?.getSource('warm-box')?.setData(boxFeature(bounds));
+        }
+
+        const setBounds = (box) => {
+          const [w, s, e, n] = box;
+          edges.west.value = w.toFixed(4);
+          edges.south.value = s.toFixed(4);
+          edges.east.value = e.toFixed(4);
+          edges.north.value = n.toFixed(4);
+          draw();
+        };
+
+        setBounds(archive);
+        $('warm-minz').value = minZoom;
+        // The same default the server picks, for the same reason: each level
+        // is four times the last, so stopping short of the archive's maximum
+        // is nearly always what was meant.
+        $('warm-maxz').value = Math.min(summary.maxZoom ?? 6, minZoom + 6);
+        $('warm-max').value = 5000;
+        $('warm-conc').value = '';
+        $('warm-error').textContent = '';
+
+        for (const input of [
+          ...Object.values(edges),
+          $('warm-minz'),
+          $('warm-maxz'),
+          $('warm-max'),
+        ]) {
+          input.oninput = draw;
+        }
+
+        $('warm-use-archive').onclick = () => setBounds(archive);
+        $('warm-use-view').onclick = () => {
+          if (!warmMap) return;
+          const b = warmMap.getBounds();
+          setBounds([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+        };
+
+        $('warm-form').onsubmit = async (event) => {
+          if (event.submitter?.value === 'cancel') return;
+          event.preventDefault();
+          const bounds = readBounds();
+          if (!bounds) {
+            $('warm-error').textContent = 'All four edges are needed.';
+            return;
+          }
+          try {
+            await api(`/api/torrents/${entry.infoHash}/warm`, {
+              method: 'POST',
+              body: {
+                bounds,
+                minZoom: Number($('warm-minz').value),
+                maxZoom: Number($('warm-maxz').value),
+                maxTiles: Number($('warm-max').value) || undefined,
+                concurrency: Number($('warm-conc').value) || undefined,
+              },
+            });
+            $('warm-dialog').close();
+            toast('warming started');
+            refresh();
+          } catch (error) {
+            $('warm-error').textContent = error.message;
+          }
+        };
+
+        // Shown closed. The numbers are the whole of what the request needs,
+        // and somebody who already has a bounding box should not have to wait
+        // on a renderer to paste it in.
+        const wrap = $('warm-map-wrap');
+        wrap.hidden = true;
+        $('warm-pick').textContent = 'Pick on a map';
+        $('warm-pick').onclick = async () => {
+          wrap.hidden = !wrap.hidden;
+          $('warm-pick').textContent = wrap.hidden
+            ? 'Pick on a map'
+            : 'Hide the map';
+          if (wrap.hidden) return;
+          // Mounted only once it is visible: a map sized inside a hidden
+          // element measures zero and stays that way.
+          await mountWarmMap(entry, readBounds() ?? archive, draw, setBounds);
+          draw();
+        };
+
+        $('warm-dialog').showModal();
+        draw();
+      }
+
+      /**
+       * A style that draws the archive being warmed, from this node.
+       *
+       * Its TileJSON is already a complete source description, so there is
+       * nothing to reconstruct. A raster archive draws directly. A vector one
+       * needs `source-layer` names, which only the layer list supplies -- and
+       * that lives in a metadata block some writers put after every tile, so
+       * on a partial download it is among the last bytes to arrive. Without it
+       * there is nothing to style, and saying so beats a black rectangle.
+       * @param {object} entry - The archive.
+       * @returns {Promise<{spec: object, note?: string}>} - Style and any caveat.
+       */
+      async function archiveStyle(entry) {
+        const backdrop = {
+          id: 'bg',
+          type: 'background',
+          paint: { 'background-color': '#12141a' },
+        };
+        const url = `/archives/${entry.infoHash}/tiles.json`;
+        let tilejson;
+        try {
+          const response = await fetch(url);
+          if (!response.ok) throw new Error(String(response.status));
+          tilejson = await response.json();
+        } catch {
+          return {
+            spec: { version: 8, sources: {}, layers: [backdrop] },
+            note:
+              'This archive is not serving tiles yet, so the map has nothing ' +
+              'to draw. The box and the numbers still work.',
+          };
+        }
+
+        const layers = tilejson.vector_layers ?? [];
+        const vector =
+          layers.length > 0 ||
+          /\.(pbf|mvt)(\?|$)/.test(tilejson.tiles?.[0] ?? '');
+        const spec = {
+          version: 8,
+          sources: { archive: { type: vector ? 'vector' : 'raster', url } },
+          layers: [backdrop],
+        };
+
+        if (!vector) {
+          spec.layers.push({ id: 'archive', type: 'raster', source: 'archive' });
+          return { spec };
+        }
+
+        // One flat line-and-fill pass over every layer the archive declares.
+        // Not a cartographic style and not trying to be: what is wanted here
+        // is enough shape to recognise a coastline and find a city, and that
+        // is exactly what drawing every geometry in one colour gives.
+        for (const layer of layers) {
+          spec.layers.push(
+            {
+              id: `archive-${layer.id}-fill`,
+              type: 'fill',
+              source: 'archive',
+              'source-layer': layer.id,
+              filter: ['==', ['geometry-type'], 'Polygon'],
+              paint: { 'fill-color': '#2b3550', 'fill-outline-color': '#41527d' },
+            },
+            {
+              id: `archive-${layer.id}-line`,
+              type: 'line',
+              source: 'archive',
+              'source-layer': layer.id,
+              filter: ['==', ['geometry-type'], 'LineString'],
+              paint: { 'line-color': '#41527d', 'line-width': 0.7 },
+            },
+          );
+        }
+
+        return layers.length > 0
+          ? { spec }
+          : {
+              spec,
+              note:
+                'This archive has not reported its vector layers yet, so ' +
+                'there is nothing to draw. Give the edges in degrees, or try ' +
+                'again once the metadata has arrived from the swarm.',
+            };
+      }
+
+      /**
+       * Puts a map in the dialog, loading MapLibre only when one is wanted.
+       *
+       * Imported here rather than with the page: the console is mostly a
+       * table, and a mapping library is a large thing to make every session
+       * fetch for a button most of them never press.
+       * @param {object} entry - The archive, which is also the basemap.
+       * @param {number[]} bounds - Where to open.
+       * @param {Function} draw - Redraws the box and the estimate.
+       * @param {Function} setBounds - Writes a new box into the fields.
+       * @returns {Promise<void>} - Resolves once there is a map, or there is not.
+       */
+      async function mountWarmMap(entry, bounds, draw, setBounds) {
+        const target = $('warm-map');
+        if (!target) return;
+        const corners = [
+          [bounds[0], bounds[1]],
+          [bounds[2], bounds[3]],
+        ];
+        if (warmMap) {
+          warmMap.resize();
+          warmMap.fitBounds(corners, { padding: 20, animate: false });
+          return;
+        }
+
+        let maplibregl;
+        try {
+          maplibregl = await import('/vendor/maplibre-gl/maplibre-gl.mjs');
+        } catch {
+          // No map, but the numbers still work. A node may be running without
+          // the vendor bundle deployed, and a missing library is no reason to
+          // refuse to warm anything.
+          target.remove();
+          $('warm-map-note').textContent =
+            'No map here; give the edges in degrees.';
+          return;
+        }
+
+        if (!document.getElementById('maplibre-css')) {
+          const link = document.createElement('link');
+          link.id = 'maplibre-css';
+          link.rel = 'stylesheet';
+          link.href = '/vendor/maplibre-gl/maplibre-gl.css';
+          document.head.append(link);
+        }
+
+        // The archive is the basemap.
+        //
+        // A remote style is the obvious choice and the wrong one: this node
+        // may have no route to the internet at all, and a box floating over a
+        // tile-loading error is worse than no map, because it was supposed to
+        // be the thing you could see. The archive is served by this node,
+        // right here, and it is also the thing being warmed -- so it shows
+        // where the data actually is, which a generic basemap cannot. An
+        // archive with a hole over half a country looks like one.
+        //
+        // Drawing it does read tiles, through the same path a visitor would.
+        // At the zooms you pick an area at that is a handful, and they are
+        // tiles the warm was about to read anyway.
+        const style = await archiveStyle(entry);
+        warmMap = new maplibregl.Map({
+          container: target,
+          style: style.spec,
+          bounds: corners,
+          fitBoundsOptions: { padding: 20 },
+          attributionControl: false,
+        });
+        if (style.note) $('warm-map-note').textContent = style.note;
+        warmMap.addControl(new maplibregl.NavigationControl(), 'top-left');
+        // Shift-drag is box-zoom by default, and dragging is wanted for
+        // drawing instead.
+        warmMap.boxZoom.disable();
+
+        await new Promise((resolve) => warmMap.on('load', resolve));
+        warmMap.addSource('warm-box', {
+          type: 'geojson',
+          data: boxFeature(bounds),
+        });
+        warmMap.addLayer({
+          id: 'warm-box-fill',
+          type: 'fill',
+          source: 'warm-box',
+          paint: { 'fill-color': '#4f8cff', 'fill-opacity': 0.2 },
+        });
+        warmMap.addLayer({
+          id: 'warm-box-line',
+          type: 'line',
+          source: 'warm-box',
+          paint: { 'line-color': '#4f8cff', 'line-width': 2 },
+        });
+
+        // Drag draws the area. Panning stays available on alt-drag and on the
+        // navigation control, because a map that can only be drawn on cannot
+        // be aimed -- and the archive may cover the world.
+        let anchor = null;
+        const canvas = warmMap.getCanvasContainer();
+        const at = (event) => {
+          const box = canvas.getBoundingClientRect();
+          return warmMap.unproject([
+            event.clientX - box.left,
+            event.clientY - box.top,
+          ]);
+        };
+
+        canvas.addEventListener('mousedown', (event) => {
+          if (event.button !== 0 || event.altKey) return;
+          event.preventDefault();
+          warmMap.dragPan.disable();
+          anchor = at(event);
+        });
+        canvas.addEventListener('mousemove', (event) => {
+          if (!anchor) return;
+          const now = at(event);
+          warmMap
+            .getSource('warm-box')
+            .setData(
+              boxFeature([
+                Math.min(anchor.lng, now.lng),
+                Math.min(anchor.lat, now.lat),
+                Math.max(anchor.lng, now.lng),
+                Math.max(anchor.lat, now.lat),
+              ]),
+            );
+        });
+
+        const finish = (event) => {
+          if (!anchor) return;
+          const now = at(event);
+          const drawn = [
+            Math.min(anchor.lng, now.lng),
+            Math.min(anchor.lat, now.lat),
+            Math.max(anchor.lng, now.lng),
+            Math.max(anchor.lat, now.lat),
+          ];
+          anchor = null;
+          warmMap.dragPan.enable();
+          // A click is not an area. Without this, tapping the map would set a
+          // box of no width and warm nothing at all.
+          if (drawn[2] - drawn[0] < 1e-6 || drawn[3] - drawn[1] < 1e-6) {
+            draw();
+            return;
+          }
+          setBounds(drawn);
+        };
+        canvas.addEventListener('mouseup', finish);
+        canvas.addEventListener('mouseleave', finish);
+      }
+
 
       // ── Adding ────────────────────────────────────────────────────────────
       let chosenCategories = new Set();

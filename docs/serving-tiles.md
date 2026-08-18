@@ -598,6 +598,39 @@ rather than grinding through the region to prove the archive is unreadable.
 in flight (4 by default). Raising concurrency helps when the bottleneck is swarm
 latency rather than bandwidth.
 
+### From the console
+
+**Warm region** on an archive opens the same request with the choices visible.
+
+The four edges are number fields, so a bounding box from anywhere else pastes
+straight in, and edges given the wrong way round are read as a box rather than
+refused. **Pick on a map** opens a map beside them if you would rather draw the
+area: drag to draw, alt-drag to move the map, **Use the whole view** to take
+the current frame. Whichever you use, the numbers are what gets sent.
+
+It tells you how many tiles the choice comes to before you start, counted the
+same way the run counts them — which is the number worth seeing, because every
+zoom level is four times the one below it. If the area exceeds `maxTiles`, it
+says so rather than letting the job stop silently at the ceiling.
+
+**The map draws the archive itself**, served by this node. Not a remote
+basemap: a node may have no route to the internet, and a box floating over a
+tile-loading error is worse than no map at all. Drawing the archive also shows
+where its data actually is, which a generic basemap cannot — an archive with a
+hole over half a country looks like one, and warming that area would be a
+wasted job.
+
+Two consequences worth knowing. Drawing reads tiles through the same path a
+visitor would, so on a cache-mode archive it pulls a few pieces from the swarm
+— at the zooms you pick an area at that is a handful, and they are tiles the
+warm was about to read anyway. And a vector archive that has not yet reported
+its layer list cannot be drawn, because a vector style needs `source-layer`
+names; the dialog says so and leaves the number fields working.
+
+MapLibre is loaded only when the map is opened, so the console does not carry a
+mapping library for a button most sessions never press. If it is not installed
+at all, the map is dropped and the number fields remain.
+
 **Warming a mirror node does nothing useful** — it already holds everything and
 reads its local file. The endpoint still works; it just finishes almost
 immediately.

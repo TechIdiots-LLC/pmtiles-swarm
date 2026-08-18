@@ -7,6 +7,32 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.38.0
+### ✨ Features and improvements
+- **Warm region now asks which region.** The API has taken `bounds`, a zoom range, `maxTiles` and
+  `concurrency` since it was written; the console posted `{}` and took every default, so the button
+  warmed the archive's whole extent to a zoom chosen for it and there was no way from the interface
+  to ask for a city.
+
+  It now opens a dialog. The four edges are number fields, so a bounding box from anywhere else
+  pastes straight in and edges given the wrong way round are read as a box rather than refused;
+  **Pick on a map** opens a map beside them for drawing the area instead — drag to draw, alt-drag to
+  move, or take the whole view. Whichever is used, the numbers are what gets sent.
+
+  It says how many tiles the choice comes to before anything starts, counted by the same arithmetic
+  the run uses — which is the figure worth having, since each zoom level is four times the one
+  below it — and warns when the area exceeds the ceiling instead of letting the job stop there
+  quietly.
+
+  The map draws the archive itself, served by this node, rather than a remote basemap — which a node
+  with no route to the internet cannot fetch, leaving a box floating over a tile-loading error.
+  Drawing the archive also shows where its data actually is, which a generic basemap cannot: an
+  archive with a hole over half a country looks like one. MapLibre is imported only when the map is
+  opened, so the console does not carry a mapping library for a button most sessions never press,
+  and a node without the vendor bundle keeps the number fields.
+
+### 🐞 Bug fixes
+
 ## 0.37.3
 ### ✨ Features and improvements
 
