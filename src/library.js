@@ -1866,11 +1866,24 @@ export class Library {
       throw error;
     }
 
-    if (this.#engine.pause) {
-      await this.#engine.pause(infoHash);
-    } else {
+    // Whether it actually stopped, not whether something was asked.
+    //
+    // This tested only that the engine *had* a pause method and threw the
+    // answer away. A composite has one whatever its engines can do, so a
+    // primary with no pause of its own returned false into a void: the
+    // fallback below never ran, `paused: true` went into the catalog, and the
+    // console -- which prefers that flag to the engine's live state -- showed
+    // `paused` beside an archive still transferring at 8 MiB/s. The button did
+    // nothing and said it had worked.
+    const stopped = this.#engine.pause
+      ? await this.#engine.pause(infoHash)
+      : false;
+    if (!stopped) {
       // Removing without its data is a pause an engine cannot refuse; resume
-      // adds it back and it rechecks what is already on disk.
+      // adds it back and it rechecks what is already on disk. A last resort,
+      // because that recheck is the whole store -- tens of minutes for a
+      // planet archive -- which is why an engine that can really pause is
+      // worth the two operations it takes.
       await this.#engine
         .remove(infoHash, { deleteData: false })
         .catch(() => {});
@@ -1954,9 +1967,14 @@ export class Library {
       throw error;
     }
 
-    if (this.#engine.resume) {
-      await this.#engine.resume(infoHash);
-    } else {
+    // Same as pause: the answer decides, not the presence of a method. An
+    // archive stopped by the fallback above is not in the engine at all, so a
+    // resume it merely claimed would leave the catalog saying the archive was
+    // running while nothing held it.
+    const started = this.#engine.resume
+      ? await this.#engine.resume(infoHash)
+      : false;
+    if (!started) {
       await this.#readd({ ...entry, paused: false });
     }
     await this.#tiles?.invalidate(infoHash).catch(() => {});

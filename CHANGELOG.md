@@ -7,6 +7,31 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.37.2
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **Pausing an archive now stops it.** Reported from the field: an archive was paused, the row read
+  `paused`, and it went on downloading at 8.4 MiB/s. Nothing in the chain refused — the pause was
+  asked for, reported as done, and never happened.
+
+  Three faults in a line. `LibtorrentEngine` had no `pause` or `resume` at all, so there was no way
+  to stop a libtorrent torrent from here. `CompositeEngine.pause` answered for its primary alone,
+  so an archive held by a secondary reported as not stopped when it was. And `Library.pause` tested
+  only that the engine *had* a pause method and threw away what it answered — a composite has one
+  whatever its engines can do, so the `false` went into a void, the fallback never ran, and
+  `paused: true` went into the catalog regardless. The console prefers that flag to the engine's
+  live state, which is why the row said `paused` while Down and Up kept moving.
+
+  Requires pmtiles-torrent 0.9.0, which adds the `pause` and `resume` the sidecar never had — and
+  makes them stick. `handle.pause()` alone is not a stop: libtorrent's auto-manager clears the
+  paused flag again within about a second, so pausing that way produces a torrent that describes
+  itself as paused while it transfers. That would have reproduced this exact symptom one layer
+  deeper.
+
+  Nothing was left in a bad state by this: because the pause never took effect, no archive was
+  half-stopped and no resume data is wrong. They were seeding and downloading throughout.
+
 ## 0.37.1
 ### ✨ Features and improvements
 - **Cancel now sits in the row it cancels.** Collected into a bar underneath the list, each button

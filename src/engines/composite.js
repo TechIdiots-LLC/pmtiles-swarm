@@ -543,26 +543,40 @@ export class CompositeEngine {
 
   /**
    * Stops offering an archive, everywhere.
+   *
+   * Answers for the whole composite rather than for the primary alone. An
+   * archive can be held by a secondary and not by the primary, and reporting
+   * the primary's "no" for it told the caller nothing was stopped when
+   * something was -- which is a false negative that costs data, since the
+   * caller's answer to a pause it cannot get is to remove the torrent instead.
    * @param {string} infoHash - The archive.
-   * @returns {Promise<boolean>} - Whether the primary paused it.
+   * @returns {Promise<boolean>} - Whether any engine stopped it.
    */
   async pause(infoHash) {
+    let stopped = false;
     for (const engine of this.#secondaries) {
-      await engine.pause?.(infoHash).catch(() => {});
+      stopped = (await engine.pause?.(infoHash).catch(() => false)) || stopped;
     }
-    return this.#primary.pause ? this.#primary.pause(infoHash) : false;
+    const primary = this.#primary.pause
+      ? await this.#primary.pause(infoHash)
+      : false;
+    return primary || stopped;
   }
 
   /**
    * Offers it again, everywhere.
    * @param {string} infoHash - The archive.
-   * @returns {Promise<boolean>} - Whether the primary resumed it.
+   * @returns {Promise<boolean>} - Whether any engine started it.
    */
   async resume(infoHash) {
+    let started = false;
     for (const engine of this.#secondaries) {
-      await engine.resume?.(infoHash).catch(() => {});
+      started = (await engine.resume?.(infoHash).catch(() => false)) || started;
     }
-    return this.#primary.resume ? this.#primary.resume(infoHash) : false;
+    const primary = this.#primary.resume
+      ? await this.#primary.resume(infoHash)
+      : false;
+    return primary || started;
   }
 
   /**

@@ -415,6 +415,57 @@ export class LibtorrentEngine {
     }
   }
 
+  /**
+   * Stops a torrent, leaving its data and its place in the session alone.
+   *
+   * Not removal. The bytes stay, the resume data stays, and starting it again
+   * costs nothing -- which is the whole reason this exists rather than the
+   * remove-and-re-add a missing pause used to fall back to. Re-adding a
+   * 698 GiB archive means hashing the store again to arrive where it already
+   * was.
+   * @param {string} infoHash - The archive to stop.
+   * @returns {Promise<boolean>} - Whether it was stopped.
+   */
+  async pause(infoHash) {
+    await this.#stopStart('pause', infoHash);
+    return true;
+  }
+
+  /**
+   * Offers a stopped torrent again.
+   * @param {string} infoHash - The archive to start.
+   * @returns {Promise<boolean>} - Whether it was started.
+   */
+  async resume(infoHash) {
+    await this.#stopStart('resume', infoHash);
+    return true;
+  }
+
+  /**
+   * Pause and resume differ only in the word, including how they fail.
+   * @param {string} op - 'pause' or 'resume'.
+   * @param {string} infoHash - The archive.
+   * @returns {Promise<object>} - The sidecar's answer.
+   */
+  async #stopStart(op, infoHash) {
+    try {
+      return await this.#call(op, { infoHash });
+    } catch (error) {
+      // An older sidecar answers "unknown op", which is true and useless: it
+      // reads as a bug in the request rather than as a package that needs
+      // updating. Worth saying plainly, because before 0.9.0 there was no
+      // pause here at all -- the request reached the catalog and stopped, so
+      // the console showed `paused` beside an archive still transferring.
+      if (/unknown op/i.test(error.message)) {
+        throw new Error(
+          `this sidecar cannot ${op}; pmtiles-torrent 0.9.0 or newer is needed`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+  }
+
   async list() {
     // A node that is shutting down still has a console polling it and a sweep
     // or two in flight. Answering "the sidecar exited" to each of them fills
