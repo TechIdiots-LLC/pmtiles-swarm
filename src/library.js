@@ -311,20 +311,7 @@ export class Library {
         comment: options.comment,
         md5: options.md5 ?? this.#config.md5,
         signal: controller.signal,
-        // Pieces in, bytes out. The console draws one progress bar for adds and
-        // labels it in bytes, and a piece count means nothing beside a download
-        // measured in gigabytes — so it is converted here, where the file size
-        // is known, rather than teaching the console a second unit. Accurate to
-        // within one piece, which at 4 MiB against a planet archive is four
-        // parts in a million.
-        onHashProgress: ({ piece, pieces }) => {
-          const state = this.#running.get(requested);
-          if (!state || !pieces || !size) return;
-          state.received = Math.min(
-            size,
-            Math.round(((piece + 1) / pieces) * size),
-          );
-        },
+        onHashProgress: this.#hashProgress(requested),
       });
 
       return await this.#register(created, {
@@ -350,6 +337,28 @@ export class Library {
     } finally {
       this.#running.delete(requested);
     }
+  }
+
+  /**
+   * Reports a hash's progress as bytes, which is what the console draws.
+   *
+   * Pieces are what a hasher counts; the adds list has one bar and labels it in
+   * bytes, and a piece count means nothing beside a download measured in
+   * gigabytes. Converted here, where the size is known, rather than teaching
+   * the console a second unit. Accurate to within one piece — at 4 MiB against
+   * a planet archive, four parts in a million.
+   * @param {string} key - How the add is registered in #running.
+   * @returns {Function} - An onHashProgress callback.
+   */
+  #hashProgress(key) {
+    return ({ piece, pieces }) => {
+      const state = this.#running.get(key);
+      if (!state || !pieces || !state.total) return;
+      state.received = Math.min(
+        state.total,
+        Math.round(((piece + 1) / pieces) * state.total),
+      );
+    };
   }
 
   /**
@@ -884,8 +893,33 @@ export class Library {
         fetchAttempts: this.#config.fetchAttempts,
         fetchRetryDelayMs: (this.#config.fetchRetrySeconds ?? 5) * 1000,
         signal: controller.signal,
-        onProgress: ({ received, total, done }) => {
+        // The same hasher a local add gets, which this route never asked for.
+        //
+        // Without it the hash ran in this process -- the one serving tiles and
+        // the console -- for every archive a schedule ever built, could not be
+        // cancelled because create-torrent takes no signal, reported nothing
+        // while it ran, and produced a v1 torrent rather than a hybrid. So an
+        // archive arriving from a feed got a lesser torrent, built the slower
+        // way, than the same file added by path.
+        creator: this.#creator(),
+        onHashProgress: this.#hashProgress(url),
+        onProgress: ({ phase, received, total, done }) => {
           const state = this.#running.get(url);
+          if (phase === 'hashing') {
+            // The transfer is over and a different job has started, measured
+            // in the same units. Handing the bar over rather than leaving it
+            // at 100%: a finished download that sits at 100% for the length of
+            // a 128 GiB hash reads as one that completed and then hung, which
+            // is how it was reported.
+            if (state) {
+              Object.assign(state, {
+                phase: 'hashing',
+                received: undefined,
+                total,
+              });
+            }
+            return;
+          }
           if (state) Object.assign(state, { received, total });
           const pct = total ? ((received / total) * 100).toFixed(1) : '?';
           console.log(

@@ -7,6 +7,25 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.37.3
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **An archive fetched from a URL is now hashed the same way one already on disk is.** `creator` was
+  passed on the local path and nowhere else, so every archive a schedule ever built was hashed
+  inside this process — the one serving tiles and the console — rather than in the sidecar's
+  one-shot hasher. Four things followed from that one omission: the hash competed with serving,
+  it could not be cancelled (`create-torrent` takes no signal, so the add's AbortController reached
+  the download and stopped there), it reported nothing while it ran, and it produced a v1 torrent
+  rather than a hybrid. An archive arriving from a feed got a lesser torrent, built the slower way,
+  than the same file added by path.
+- **A fetched archive now says when it has stopped downloading and started hashing.** The remote
+  add's progress callback dropped the `phase` the hasher reports, and its entry carried no phase at
+  all, so `runningAdds()` called it `fetching` from beginning to end. With the byte counts equal at
+  that point, the row sat at 100% "fetching" for the whole hash — which reads as a transfer that
+  completed and then hung, and was reported as exactly that. The bar now hands over to the hash and
+  fills again as pieces are read.
+
 ## 0.37.2
 ### ✨ Features and improvements
 
