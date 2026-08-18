@@ -7,6 +7,34 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.37.0
+### ✨ Features and improvements
+- **An archive being hashed can now be cancelled, and says how far through it is.** 0.36.0 moved
+  hashing into a process of its own, which made both possible; this connects them to the console.
+  A local add is now registered with an AbortController, so `DELETE /api/adds?url=<path>` ends the
+  hasher and the Cancel button beside it works. Nothing is lost by pressing it: the archive is the
+  caller's own file and hashing only ever read it.
+
+  Shutdown reaches these too. A hasher left behind when the node exits is an orphan reading the
+  disk for hours, answering to nothing.
+
+  The piece the hasher has reached is converted to bytes against the file size — the console draws
+  one progress bar for adds and labels it in bytes — so a long hash reads `hashing 698 GiB · 41.2%
+  · 12m` instead of `hashing 698 GiB · 3m`. The hourly log line carries the percentage as well. An
+  add hashing in this process rather than out of it still reports no figure, because there is none
+  to report, and the bar is left off rather than pinned at zero.
+
+### 🐞 Bug fixes
+- **Cancelling a hash no longer answers by hashing the same archive here instead.** A creator that
+  fails falls back to hashing in the node's own process, deliberately, since a torrent matters more
+  than the format of a torrent — and a cancelled hash arrives as a creator that failed. So the
+  button would have answered "stop reading 698 GiB" by reading 698 GiB again, in the process
+  serving tiles, where nothing can interrupt it at all. A creator that fails for any other reason
+  still falls back.
+- **A cancel arriving during the MD5 pass is no longer ignored until it finishes.** With `md5` on,
+  the archive is read twice, and only the second read took a signal — so cancelling during the
+  first one waited out most of an hour of disk on a planet archive before it took effect.
+
 ## 0.36.0
 ### ✨ Features and improvements
 - **Hashing an archive now happens in a process of its own.** Building the torrent for a 698 GiB

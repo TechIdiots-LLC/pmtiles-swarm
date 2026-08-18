@@ -60,9 +60,12 @@ describe('hashing an archive in a process of its own', () => {
     ]);
 
     const seen = [];
-    const result = await engineFor(script).createTorrent('/archives/planet.pmtiles', {
-      onProgress: (progress) => seen.push(progress),
-    });
+    const result = await engineFor(script).createTorrent(
+      '/archives/planet.pmtiles',
+      {
+        onProgress: (progress) => seen.push(progress),
+      },
+    );
 
     assert.deepEqual(seen, [
       { piece: 0, pieces: 8192 },
@@ -79,10 +82,13 @@ describe('hashing an archive in a process of its own', () => {
       '    "pieceLength": 1, "pieceCount": 1, "format": params.get("format")}})',
     ]);
 
-    const result = await engineFor(script).createTorrent('/archives/planet.pmtiles', {
-      pieceLength: 4194304,
-      format: 'hybrid',
-    });
+    const result = await engineFor(script).createTorrent(
+      '/archives/planet.pmtiles',
+      {
+        pieceLength: 4194304,
+        format: 'hybrid',
+      },
+    );
 
     assert.equal(result.infoHash, '/archives/planet.pmtiles');
     assert.equal(result.format, 'hybrid');
@@ -101,10 +107,13 @@ describe('hashing an archive in a process of its own', () => {
 
     const controller = new AbortController();
     const started = Date.now();
-    const hashing = engineFor(script).createTorrent('/archives/planet.pmtiles', {
-      signal: controller.signal,
-      onProgress: () => controller.abort(),
-    });
+    const hashing = engineFor(script).createTorrent(
+      '/archives/planet.pmtiles',
+      {
+        signal: controller.signal,
+        onProgress: () => controller.abort(),
+      },
+    );
 
     await assert.rejects(() => hashing, /cancelled/);
     assert.ok(

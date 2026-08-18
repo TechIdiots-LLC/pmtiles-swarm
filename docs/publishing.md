@@ -79,6 +79,25 @@ A magnet, a `.torrent` URL and an uploaded `.torrent` are metadata rather than
 data, so there is nothing slow to wait for: those still answer `201` with the
 entry.
 
+### Stopping one that is running
+
+`DELETE /api/adds?url=…` stops an add before it has produced a torrent, and the
+console offers it as a Cancel button beside each one. The identifier is whatever
+the add was started with — the URL for a remote one, the path for a local one.
+
+What it costs differs by kind. A **remote** add is deleting a partial download,
+deliberately: somebody said stop, and leaving a few hundred gigabytes behind
+after that is waste nobody will ever find again. A **local** add deletes
+nothing. The archive is your own file and hashing only ever read it, so
+cancelling costs the hashing done so far and not a byte of data. If `publishDir`
+moved the file, that already happened — it is the cheap irreversible step and it
+goes first — so the archive stays where it was published to.
+
+`GET /api/adds` reports each one's progress while it runs. A local add hashing
+out of process says how far through the archive it is; one that has fallen back
+to hashing in the node's own process reports no figure at all, because there is
+none to report, and cancelling it stops the wait rather than the read.
+
 ### When the source URL is not published
 
 Adding from a URL registers that URL as a web seed by default, because it is by

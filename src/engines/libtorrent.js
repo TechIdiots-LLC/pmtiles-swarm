@@ -627,9 +627,7 @@ export class LibtorrentEngine {
       child.on('close', (code, signal) => {
         if (failure) return finish(failure);
         if (result) return finish();
-        const why = signal
-          ? `killed by ${signal}`
-          : `exited with code ${code}`;
+        const why = signal ? `killed by ${signal}` : `exited with code ${code}`;
         finish(
           new Error(
             `hashing produced nothing (${why})${stderr ? `: ${stderr.trim()}` : ''}`,

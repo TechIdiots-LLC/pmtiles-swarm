@@ -934,9 +934,10 @@
           </div>
           ${running
             .map((add) => {
-              // Hashing reports nothing until it is done, so there is no
-              // percentage to draw — only how big the file is and how long it
-              // has been going. A bar pinned at zero for twenty minutes says
+              // A hash says how far through it is when it runs out of process,
+              // and says nothing when it falls back to hashing in this one. So
+              // the percentage is drawn where there is one and left out where
+              // there is not — a bar pinned at zero for twenty minutes says
               // "stuck" when the honest answer is "no idea, still working".
               const hashing = add.phase === 'hashing';
               const pct =
@@ -947,9 +948,13 @@
                 ? duration(Date.now() - new Date(add.startedAt).getTime())
                 : null;
               const value = hashing
-                ? `hashing${add.total ? ` ${bytes(add.total)}` : ''}${
-                    elapsed ? ` · ${elapsed}` : ''
-                  }`
+                ? [
+                    `hashing${add.total ? ` ${bytes(add.total)}` : ''}`,
+                    pct == null ? null : `${pct.toFixed(1)}%`,
+                    elapsed,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')
                 : pct == null
                   ? bytes(add.received)
                   : `${pct.toFixed(1)}%`;
@@ -2370,7 +2375,7 @@ Every piece is hashed against the ` +
             kind === 'url'
               ? 'fetching — watch the log'
               : kind === 'path'
-                ? 'hashing — watch the log'
+                ? 'hashing — progress is below'
                 : 'added',
           );
           refresh();

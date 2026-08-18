@@ -19,7 +19,9 @@ import { DEFAULT_SUFFIX } from './incomplete.js';
  * @property {number} [pieceLength] - Piece size in bytes; must be a power of two.
  * @property {string[]} [trackers] - Announce URLs.
  * @property {string[]} [webSeeds] - BEP 19 url-list entries.
- * @property {AbortSignal} [signal] - Cancels a download in progress.
+ * @property {AbortSignal} [signal] - Cancels a download or a hash in progress.
+ * @property {Function} [onProgress] - Called with {phase, received, total} as the archive arrives.
+ * @property {Function} [onHashProgress] - Called with {piece, pieces} as it is hashed.
  * @property {boolean} [md5] - Also compute an MD5 of the archive.
  * @property {boolean} [includeSourceAsWebSeed] - Publish the source URL as a web seed. Default true.
  * @property {string} [comment] - Free-text comment.
@@ -64,9 +66,22 @@ export async function createTorrentFromFile(filePath, options = {}) {
     `[hash] ${what}: reading ${stat.size} bytes ${passes} to build the torrent`,
   );
   const startedAt = Date.now();
+
+  // Where the hash has got to, for the heartbeat. A hasher that reports pieces
+  // turns "still hashing after 41m" into something that says whether waiting
+  // longer is worth it; one that does not says exactly what it said before.
+  let reached;
+  const onHashProgress = (progress) => {
+    reached = progress;
+    options.onHashProgress?.(progress);
+  };
+
   const heartbeat = setInterval(() => {
     const minutes = Math.round((Date.now() - startedAt) / 60000);
-    console.log(`[hash] ${what}: still hashing after ${minutes}m`);
+    const far = reached?.pieces
+      ? ` (${(((reached.piece + 1) / reached.pieces) * 100).toFixed(1)}%)`
+      : '';
+    console.log(`[hash] ${what}: still hashing after ${minutes}m${far}`);
   }, 60000);
   heartbeat.unref?.();
   options.onProgress?.({
@@ -78,12 +93,14 @@ export async function createTorrentFromFile(filePath, options = {}) {
   try {
     // A second read of the archive, which is why it is opt-in. Nothing else
     // here touches these bytes again once the piece hashes are done.
-    const md5Digest = options.md5 ? await md5File(filePath) : undefined;
+    const md5Digest = options.md5
+      ? await md5File(filePath, options.signal)
+      : undefined;
     const built = await buildTorrent(
       filePath,
       path.basename(filePath),
       stat.size,
-      { ...options, md5Digest },
+      { ...options, md5Digest, onHashProgress },
     );
     const seconds = Math.round((Date.now() - startedAt) / 1000);
     console.log(`[hash] ${what}: torrent built in ${seconds}s`);
@@ -618,13 +635,18 @@ function delay(ms, signal) {
  * on disk it is a second full read. See docs/internals.md — "Why the MD5 is
  * opt-in".
  * @param {string} filePath - The file to hash.
+ * @param {AbortSignal} [signal] - Stops the read.
  * @returns {Promise<string>} - Lowercase hex digest.
  */
-async function md5File(filePath) {
+async function md5File(filePath, signal) {
   const { createReadStream } = await import('node:fs');
   const { createHash } = await import('node:crypto');
   const hash = createHash('md5');
-  await pipelineAsync(createReadStream(filePath), hash);
+  // Cancellable like the piece hashing it precedes. This is a second full read
+  // of the archive, so a cancel arriving during it would otherwise be ignored
+  // for as long as the pass it was meant to stop — for a planet archive, most
+  // of an hour of disk after somebody pressed the button.
+  await pipelineAsync(createReadStream(filePath), hash, { signal });
   return hash.digest('hex');
 }
 
@@ -655,6 +677,13 @@ async function buildTorrent(input, name, size, options) {
         private: options.private ?? false,
         createdBy: 'pmtiles-swarm',
         format: options.format ?? 'hybrid',
+        // Both only mean anything to a creator that hashes out of process,
+        // which is the whole reason there is one. `onProgress` here is the
+        // creator's own shape — {piece, pieces} — and is deliberately not the
+        // {phase, received, total} one this module reports to its caller; they
+        // describe different things and were briefly the same name.
+        signal: options.signal,
+        onProgress: options.onHashProgress,
       });
 
       const madeBy = await parseTorrent(built.torrentFile);
@@ -670,6 +699,15 @@ async function buildTorrent(input, name, size, options) {
         md5: options.md5Digest,
       };
     } catch (error) {
+      // Unless what stopped it was somebody stopping it.
+      //
+      // Falling back here would answer "cancel this hash" by starting the same
+      // hash again in this process, where it cannot be cancelled at all — so
+      // the button would make a 698 GiB read strictly worse than leaving it
+      // alone. Cancelling is a decision about the archive, not a fault to
+      // route around.
+      if (options.signal?.aborted) throw error;
+
       // A torrent is more important than the format of a torrent.
       //
       // Said with what it costs, though, because the fallback is not a smaller

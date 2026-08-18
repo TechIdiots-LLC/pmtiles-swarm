@@ -272,17 +272,25 @@ export class Library {
     options.onValidated?.({ path: absolute, kind: identified.kind });
 
     // Tracked from here so the console has something to show while the hash
-    // runs. Registered without an AbortController, unlike a remote add: there
-    // is no cancelling a hash in progress, since neither libtorrent's creator
-    // nor create-torrent takes a signal. cancelAdd() skips entries without a
-    // controller, so this is inert there rather than a button that lies.
+    // runs, and so it can be stopped. Hashing an archive this size is minutes
+    // at best and hours for a planet, all of it reading the disk everything
+    // else is served from; realising it was the wrong file should not mean
+    // waiting it out or killing the process.
+    //
+    // What it cancels is the hash. A publishDir move has already happened by
+    // here — deliberately, since it is the cheap irreversible step — so a
+    // cancelled add leaves the archive where it was published to, not where it
+    // was picked from. Nothing else is touched: hashing only ever reads.
+    const controller = new AbortController();
     const { size } = await fs.stat(absolute).catch(() => ({ size: undefined }));
     this.#running.set(requested, {
+      controller,
       name: path.basename(absolute),
       startedAt: new Date().toISOString(),
-      // No byte count: hashing reports nothing until it is done, so a progress
-      // bar here would sit at zero and then vanish. `total` is the size it is
-      // working through, which with the start time is enough to show it moving.
+      // Absent until the hasher says otherwise, rather than zero: a zero is
+      // drawn as a bar that has not moved, and an out-of-process hasher is not
+      // guaranteed — config can ask for v1, and create-torrent reports nothing
+      // at all. Then it is honestly unknown rather than stuck at 0%.
       received: undefined,
       total: size,
       phase: 'hashing',
@@ -302,6 +310,21 @@ export class Library {
         webSeeds: [...new Set(webSeeds)],
         comment: options.comment,
         md5: options.md5 ?? this.#config.md5,
+        signal: controller.signal,
+        // Pieces in, bytes out. The console draws one progress bar for adds and
+        // labels it in bytes, and a piece count means nothing beside a download
+        // measured in gigabytes — so it is converted here, where the file size
+        // is known, rather than teaching the console a second unit. Accurate to
+        // within one piece, which at 4 MiB against a planet archive is four
+        // parts in a million.
+        onHashProgress: ({ piece, pieces }) => {
+          const state = this.#running.get(requested);
+          if (!state || !pieces || !size) return;
+          state.received = Math.min(
+            size,
+            Math.round(((piece + 1) / pieces) * size),
+          );
+        },
       });
 
       return await this.#register(created, {
@@ -380,6 +403,10 @@ export class Library {
    * trade-off: v2 clients gain per-file merkle trees and 16 KiB block
    * verification, and v1 clients see an ordinary torrent. An engine that is
    * only seeding is still the right one to ask for that.
+   *
+   * Everything the caller passes goes through, `signal` and `onProgress`
+   * included. Those are what make a hash out here cancellable and visible, and
+   * naming the fields it forwards would quietly drop them.
    * @returns {Function | undefined} - A creator, or undefined to use the default.
    */
   #creator() {
@@ -616,13 +643,18 @@ export class Library {
   }
 
   /**
-   * Stops an in-flight remote add, and discards what it had downloaded.
+   * Stops an in-flight add, and discards what it had downloaded.
    *
-   * Only a remote one. A local add is listed alongside them but holds no
-   * controller, because a hash in progress cannot be interrupted — neither
-   * libtorrent's creator nor create-torrent takes a signal. It is skipped
-   * below rather than special-cased, and reports as nothing cancelled.
-   * @param {string} [url] - The source URL, or all of them when omitted.
+   * Local adds too, now that hashing happens in a process of its own and that
+   * process can be ended. A local add discards nothing — the archive is the
+   * caller's own file and was only ever read — so what it costs is the hashing
+   * done so far and nothing else.
+   *
+   * An add hashing in this process rather than out of it still cannot be
+   * interrupted, and libtorrent's hashing never checks for interruption
+   * either. Cancelling such an add stops the caller waiting and frees the
+   * console of it; the read finishes on its own.
+   * @param {string} [url] - The source URL or path, or all of them when omitted.
    * @returns {string[]} - The URLs cancelled.
    */
   cancelAdd(url) {
@@ -679,10 +711,12 @@ export class Library {
     return [...this.#running.entries()].map(([url, state]) => ({
       url,
       name: state.name,
-      // Left absent rather than zeroed for a hash, which reports nothing until
-      // it finishes. A zero here is indistinguishable from a download that has
-      // not moved, and the console draws the two differently.
-      received: state.phase === 'hashing' ? undefined : (state.received ?? 0),
+      // Absent means unknown, not zero. A hash reports where it has got to
+      // only when it runs out of process; the in-process fallback reports
+      // nothing at all, and a bar pinned at 0% for forty minutes says "stuck"
+      // when the honest answer is "no idea, still working". A download always
+      // knows, so it is 0 there from the start.
+      received: state.received ?? (state.phase === 'hashing' ? undefined : 0),
       total: state.total,
       startedAt: state.startedAt,
       phase: state.phase ?? 'fetching',
