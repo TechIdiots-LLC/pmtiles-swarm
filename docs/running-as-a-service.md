@@ -180,6 +180,11 @@ RestartSec=5
 # lock and cancels downloads in flight. Worst case is about 20 seconds.
 TimeoutStopSec=45
 
+# The node stops the sidecar itself, and needs it alive to do so. The default
+# signals both at once, which kills the sidecar before it can write its resume
+# data — see "The two lines that matter".
+KillMode=mixed
+
 # A seeding node holds a socket per peer, and the tile reader holds file
 # descriptors of its own.
 LimitNOFILE=65535
@@ -215,12 +220,23 @@ down and **exits 0**, expecting to be brought back.
 `Restart=on-failure` ignores an exit 0, so the first use of that button would
 stop the node and leave the unit reporting success.
 
+**`KillMode=mixed`, not the default.** The default is `control-group`, which
+sends `SIGTERM` to _every_ process in the unit at the same instant — the node
+and the Python sidecar together. The node's shutdown then asks a sidecar that is
+already dying to write its resume data, into a pipe that is closing, and the
+answer never comes. Resume data is how an archive comes back knowing what it
+holds; without it, archives return at 0% after a restart and have to be
+rechecked to find out they were complete all along.
+
+`mixed` sends the signal to the main process only. The node stops the sidecar
+itself, in order, and waits for the resume data to be written. Nothing is left
+running: anything still alive when `TimeoutStopSec` expires is killed, sidecar
+included.
+
 **No `ExecStop=`.** systemd already sends `SIGTERM`, and the node handles it
 from the moment it starts. `ExecStop=/bin/kill -15 $MAINPID` is redundant, and
-becomes wrong if the unit ever uses `KillMode=process` — it would stop the node
-while the Python sidecar kept running and kept the data directory locked.
-
-Leave `KillMode` at its default, so the sidecar goes with its parent.
+becomes wrong under `KillMode=process` — that one leaves the rest of the unit
+running indefinitely, so the sidecar would keep the data directory locked.
 
 ## Where it writes
 
@@ -587,8 +603,10 @@ and lives as long as it does, so a new sidecar sits on disk doing nothing until
 the service is restarted. Most of what changes between releases is in there.
 
 Nothing under `/etc/pmtiles-swarm` is touched, and restarting does not re-check
-the archives: a clean stop writes resume data, and `TimeoutStopSec` above
-leaves room for it.
+the archives: a clean stop writes resume data, and `TimeoutStopSec` above leaves
+room for it. That depends on `KillMode=mixed` — without it the sidecar is
+signalled at the same moment as the node and dies before it can write anything,
+which is what a library that comes back at 0% after every restart looks like.
 
 Confirm both halves moved, since the sidecar has its own version:
 

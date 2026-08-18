@@ -7,6 +7,27 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.41.1
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **`KillMode=mixed` in the documented unit, and it should have been there from the start.** systemd's
+  default is `control-group`, which sends `SIGTERM` to every process in the unit at the same instant —
+  the node and the Python sidecar together. The node's shutdown then asks a sidecar that is already
+  dying to write its resume data, into a pipe that is closing, and the answer never comes.
+
+  Resume data is how an archive comes back knowing what it holds. Without it, archives return at 0%
+  after a restart and only a recheck discovers they were complete all along. `mixed` signals the main
+  process only; the node stops the sidecar itself and waits for the write. Nothing is left running —
+  anything still alive at `TimeoutStopSec` is killed, sidecar included. **Existing installs need this
+  added by hand**, followed by `systemctl daemon-reload`.
+- **The check added in 0.40.0 asked its first question only of archives recorded as complete**, and so
+  missed the case that prompted it. An archive interrupted mid-download comes back recorded as
+  incomplete, so a restore that failed to hand it over left it absent from the engine and unreported
+  by the very check meant to notice — which is what a row reading 0% with no state at all is. Whether
+  the engine is holding an archive is now asked of everything restore handed over; whether the
+  `seedOnly` claim held is still asked only of the archives that make one.
+
 ## 0.41.0
 ### ✨ Features and improvements
 - **An archive's details now open directly under the row you clicked**, instead of below the whole

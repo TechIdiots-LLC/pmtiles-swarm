@@ -18,7 +18,7 @@ after(() => fs.rm(workspace, { recursive: true, force: true }));
  * @param {object} options - `onDisk` bytes to write, `status` the engine's answer.
  * @returns {Promise<object>} - The library, the log, and the rechecks asked for.
  */
-async function node({ onDisk, status, size = 8 }) {
+async function node({ onDisk, status, size = 8, complete = true }) {
   const dir = await fs.mkdtemp(path.join(workspace, 'node-'));
   const infoHash = 'a'.repeat(40);
   const name = 'planet-260818.pmtiles';
@@ -34,7 +34,7 @@ async function node({ onDisk, status, size = 8 }) {
     name,
     size,
     mode: 'mirror',
-    complete: true,
+    complete,
     savePath: dir,
     magnet: `magnet:?xt=urn:btih:${infoHash}`,
   });
@@ -146,6 +146,36 @@ describe('checking that a restored archive is really being seeded', () => {
     );
   });
 
+  it('reports an unfinished one the engine is not holding either', async () => {
+    // The first version of this check asked only about archives recorded as
+    // complete, and so missed the case that prompted it: an archive
+    // interrupted mid-download comes back recorded as incomplete, so a restore
+    // that failed to hand it over left it absent from the engine and
+    // unreported. Held at all is a different question from held whole.
+    const harness = await node({ onDisk: 4, complete: false, status: null });
+    const said = await restoreQuietly(harness);
+
+    assert.ok(
+      said.some((line) => line.includes('the engine is not holding it')),
+      said.join(' | '),
+    );
+  });
+
+  it('leaves an unfinished one alone while it is downloading', async () => {
+    // An incomplete archive is supposed to read as a partial download. Its
+    // progress says nothing about whether anything is wrong, and treating a
+    // half-finished 698 GiB fetch as a fault would report every real one.
+    const harness = await node({
+      onDisk: 4,
+      complete: false,
+      status: { progress: 0.3, state: 'downloading' },
+    });
+    const said = await restoreQuietly(harness);
+
+    assert.deepEqual(harness.rechecked, []);
+    assert.deepEqual(said, []);
+  });
+
   it('reports one the engine is not holding at all', async () => {
     // Restore counts an archive it handed over, which is a different question
     // from whether the engine took it. When they disagree the log said only
@@ -154,7 +184,7 @@ describe('checking that a restored archive is really being seeded', () => {
     const said = await restoreQuietly(harness);
 
     assert.ok(
-      said.some((line) => line.includes('not holding it at all')),
+      said.some((line) => line.includes('the engine is not holding it')),
       said.join('\n'),
     );
   });

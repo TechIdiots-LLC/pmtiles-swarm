@@ -1840,10 +1840,7 @@ export class Library {
    * @returns {Promise<void>} - Resolves once every claim has been checked.
    */
   async #verifySeeding(entries) {
-    const claimed = entries.filter(
-      (entry) => entry.complete !== false && entry.mode !== 'cache',
-    );
-    if (claimed.length === 0) return;
+    if (entries.length === 0) return;
 
     // One listing rather than a status call each: this runs over the whole
     // library on every start, and a round trip per archive is a cost paid by
@@ -1854,24 +1851,36 @@ export class Library {
     }
 
     let wrong = 0;
-    for (const entry of claimed) {
+    for (const entry of entries) {
       const status = held.get(entry.infoHash);
-
-      // Checking is the engine doing the right thing already, and progress
-      // during it is the fraction hashed rather than the fraction held.
-      if (status && (status.progress >= 1 || status.state === 'checking')) {
-        continue;
-      }
-      wrong += 1;
       const label = `[seeding] ${entry.name}`;
 
+      // Held at all is a different question from held whole, and it is asked
+      // of everything restore handed over. Asking it only of complete archives
+      // was the first version of this check, and it missed the case that
+      // prompted it: an archive interrupted mid-download comes back recorded
+      // as incomplete, so a restore that silently failed to hand it over left
+      // it absent from the engine and unreported by the very check meant to
+      // notice. Absent is absent — it is neither seeding nor downloading.
       if (!status) {
+        wrong += 1;
         console.error(
-          `${label}: recorded as complete, but the engine is not holding it ` +
-            'at all — restore counted it and nothing is seeding it.',
+          `${label}: restore handed this to the engine and the engine is not ` +
+            'holding it. It is neither seeding nor downloading, and nothing ' +
+            'will start it before the next restart.',
         );
         continue;
       }
+
+      // Everything below is about the `seedOnly` claim, and only a complete
+      // archive makes one. An incomplete one is supposed to read as a partial
+      // download, so its progress says nothing about whether anything is wrong.
+      if (entry.complete === false || entry.mode === 'cache') continue;
+
+      // Checking is the engine doing the right thing already, and progress
+      // during it is the fraction hashed rather than the fraction held.
+      if (status.progress >= 1 || status.state === 'checking') continue;
+      wrong += 1;
 
       const file = entry.savePath
         ? path.join(entry.savePath, entry.name)
@@ -1921,8 +1930,8 @@ export class Library {
 
     if (wrong > 0) {
       console.error(
-        `[seeding] ${wrong} of ${claimed.length} archives recorded as ` +
-          'complete are not being seeded. The lines above say which and why.',
+        `[seeding] ${wrong} of ${entries.length} restored archives are not ` +
+          'in the state the catalog describes. The lines above say which and why.',
       );
     }
   }
