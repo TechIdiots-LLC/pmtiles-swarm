@@ -7,6 +7,27 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.35.5
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **Requires pmtiles-torrent 0.7.4, which stops archives dropping out of the engine a few more with
+  every restart.** Seen here as `[restore] <archive>: mismatching info-hash`, beginning with one
+  archive and reaching eighteen of twenty. An archive that failed this way was never handed to the
+  engine at all, so the console showed it at 0% with no state, a recheck answered `no such
+  torrent`, and its data sat complete on the disk the whole time — the preview rendered from it
+  perfectly well.
+
+  The sidecar was writing resume data under the wrong torrent's name: saving it was the last thing
+  still popping libtorrent's alert queue on its own thread while the alert pump popped on another,
+  and the pump's next pop freed the batch that loop was reading. `add` then refuses such a file
+  with "mismatching info-hash". 0.7.2 did not introduce it but made the pump pop far more often,
+  which is why it appeared immediately after that upgrade.
+
+  Restarting on this version is the whole recovery: an add refused over resume data is retried
+  without it, and the recheck finds every byte already on disk. Nothing is downloaded again,
+  though rechecking a large archive is not quick.
+
 ## 0.35.4
 ### ✨ Features and improvements
 
