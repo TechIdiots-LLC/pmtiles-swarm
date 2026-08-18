@@ -105,6 +105,8 @@ export class Library {
   #config;
   /** Serialises rebuilds so a sweep cannot start several multi-hour hashes at once. */
   #rebuildQueue = Promise.resolve();
+  /** Serialises restores, so a crash mid-restore cannot run two of them at once. */
+  #restoreQueue = Promise.resolve();
   /** Moves in flight, and the last outcome for each archive. */
   #moves = new Map();
   /** Adds in flight, by URL or absolute path, so they can be watched and stopped. */
@@ -1798,6 +1800,30 @@ export class Library {
    * @returns {Promise<{restored: number, failed: number}>} - What happened.
    */
   async restore() {
+    // One at a time. A sidecar that dies partway through a restore brings a
+    // replacement up holding nothing, and the reconnect asks for the library
+    // back — while the first pass is still working down the same catalogue.
+    // Both loops then re-add the same archives at once, against an engine
+    // that has just lost the ones the first pass had already given it.
+    //
+    // Queued rather than dropped: the second pass is genuinely wanted, since
+    // the process it is filling is not the one the first pass was talking to.
+    const queued = this.#restoreQueue.then(
+      () => this.#restoreOnce(),
+      () => this.#restoreOnce(),
+    );
+    this.#restoreQueue = queued.then(
+      () => {},
+      () => {},
+    );
+    return queued;
+  }
+
+  /**
+   * One pass over the catalogue.
+   * @returns {Promise<{restored: number, failed: number}>} - What happened.
+   */
+  async #restoreOnce() {
     const entries = this.#catalog.list();
     const tally = { restored: 0, failed: 0 };
 

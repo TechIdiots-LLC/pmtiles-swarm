@@ -7,6 +7,29 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.38.1
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **A sidecar that crashed could not be replaced, so one crash cost the whole library.** The engine
+  has known how to start a replacement since 0.35.1, and it worked when the sidecar exited tidily.
+  A crash is not tidy. Being killed does not wait for a newline, so a sidecar cut off partway
+  through a reply left half a line in the reader — and the replacement's first line, the `ready`
+  that says it is usable, was appended to that half and thrown away as unparseable. The start then
+  timed out, and every attempt after it inherited the same fragment.
+
+  What that looked like on the node was a restore that stopped dead at whichever archive was in
+  front when the sidecar died: `2 of 20 archives handed back to the engine (18 could not be)`, then
+  `libtorrent sidecar is not running` for everything afterwards, for the life of the process. The
+  18 were not damaged and not incomplete — they had simply never been handed to an engine, which is
+  why they showed 0% until a restart that happened not to crash brought them all back at 100%. Each
+  sidecar now starts with a reader of its own.
+- **A crash partway through a restore ran two restores at once.** The replacement sidecar holds
+  nothing, so coming up asks for the library back — while the first pass is still working down the
+  same catalogue, re-adding archives to a process that no longer exists. The two loops interleaved,
+  and neither one's tally described what the engine actually held. Restores are now queued: the
+  second waits for the first and then runs in full, which is what a replacement needs.
+
 ## 0.38.0
 ### ✨ Features and improvements
 - **Warm region now asks which region.** The API has taken `bounds`, a zoom range, `maxTiles` and

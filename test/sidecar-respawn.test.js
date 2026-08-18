@@ -106,3 +106,66 @@ describe('a sidecar that dies after it was working', () => {
     await engine.destroy().catch(() => {});
   });
 });
+
+/**
+ * A sidecar that is cut off mid-sentence.
+ *
+ * Being killed does not wait for a newline. A process that dies partway
+ * through writing a reply leaves half a line in the reader, and half a line is
+ * what the replacement's first line gets glued onto.
+ * @param {string} name - Distinguishes the file per test.
+ * @param {string} marker - Written to a file each time this script starts.
+ * @returns {Promise<string>} - Path to the script.
+ */
+async function sidecarThatDiesMidLine(name, marker) {
+  const script = path.join(workspace, `${name}.py`);
+  await fs.writeFile(
+    script,
+    [
+      'import json, os, sys',
+      `marker = ${JSON.stringify(marker)}`,
+      'starts = 0',
+      'if os.path.exists(marker):',
+      '    starts = int(open(marker).read() or "0")',
+      'starts += 1',
+      'open(marker, "w").write(str(starts))',
+      'print(json.dumps({"event": "ready", "libtorrent": "test"}), flush=True)',
+      'for line in sys.stdin:',
+      '    line = line.strip()',
+      '    if not line:',
+      '        continue',
+      '    request = json.loads(line)',
+      '    if starts == 1:',
+      '        # Killed partway through a reply: no newline, then gone.',
+      '        reply = json.dumps({"id": request["id"], "ok": True, "result": []})',
+      '        sys.stdout.write(reply[:12])',
+      '        sys.stdout.flush()',
+      '        sys.exit(9)',
+      '    print(json.dumps({"id": request["id"], "ok": True, "result": []}), flush=True)',
+    ].join(NEWLINE),
+  );
+  return script;
+}
+
+describe('a sidecar killed partway through a line', () => {
+  it('does not leave the fragment where the replacement writes', async () => {
+    // The read buffer outlived the process it was reading. A sidecar killed
+    // mid-write left half a line in it, the replacement's `ready` was appended
+    // to that half, and the result parsed as nothing -- so the line that says
+    // a sidecar is usable was dropped on the floor and the start timed out.
+    // Every respawn after a messy death failed the same way, which is how a
+    // crash that the engine knows how to recover from stayed unrecovered.
+    const marker = path.join(workspace, 'starts-3.txt');
+    const engine = new LibtorrentEngine({
+      savePath: workspace,
+      script: await sidecarThatDiesMidLine('dies-mid-line', marker),
+      startTimeoutMs: 4000,
+    });
+
+    await engine.connect();
+    await engine.list().catch(() => {});
+
+    assert.deepEqual(await engine.list(), []);
+    await engine.destroy().catch(() => {});
+  });
+});

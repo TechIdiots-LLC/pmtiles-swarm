@@ -141,6 +141,17 @@ export class LibtorrentEngine {
       });
       this.#child = child;
 
+      // Nothing of the last sidecar's is carried into this one. Being killed
+      // does not wait for a newline, so a sidecar that died partway through a
+      // reply left half a line in the reader — and the replacement's first
+      // line, the `ready` that says it is usable, was appended to that half
+      // and thrown away as unparseable. The start then timed out, and the next
+      // attempt inherited the same fragment, so the engine could recover from
+      // an orderly death and never from a messy one. A crash is always the
+      // messy kind.
+      this.#buffer = '';
+      this.#version = null;
+
       // A pipe to a process that has gone raises 'error' on the stream, and an
       // unhandled 'error' event is not a rejected promise — it is a throw that
       // takes the whole node down with it. That is what happened on every
