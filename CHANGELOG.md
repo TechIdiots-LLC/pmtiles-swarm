@@ -7,6 +7,25 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.40.0
+### ✨ Features and improvements
+- **Restore now checks that what it handed over is actually being seeded.** "20 of 20 archives handed
+  back to the engine" answers a different question from "20 archives are being seeded", and when the
+  two disagreed the log printed only the reassuring half. A node could report a clean startup on
+  every restart while its whole library sat at 0%.
+
+  A complete archive is added with `seedOnly` — libtorrent's `seed_mode`, the claim that the data is
+  already on disk so it need not be re-hashed. When that claim is wrong the flag is dropped and the
+  torrent reverts to downloading what it already has, at 0%, next to a complete file, and nothing
+  recovers on its own. Restore now compares each claim against the disk afterwards and says which of
+  four things happened: the file is there and the right size, so the claim was mislaid and it is
+  **rechecked automatically**; the file is missing or unreadable, so rechecking cannot help and the
+  message says so rather than sending you to press a button that will report 0% again; the file is a
+  different size, so it was rebuilt in place and nothing on that disk will ever match the torrent; or
+  the engine is not holding the archive at all. Silent when the library is healthy.
+
+### 🐞 Bug fixes
+
 ## 0.39.0
 ### ✨ Features and improvements
 - **A watched folder and a scheduled source can each decide their own MD5.** `md5` was a node-wide

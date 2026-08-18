@@ -1820,6 +1820,114 @@ export class Library {
   }
 
   /**
+   * Checks that what restore just claimed is actually being seeded.
+   *
+   * Restore reports what it handed the engine, which is not the same question
+   * as what the engine is doing with it. A complete archive is added with
+   * `seedOnly` — libtorrent's `seed_mode`, the claim that the data is already
+   * on disk so it need not spend a quarter of an hour rediscovering that. When
+   * that claim is wrong the flag is dropped and the torrent reverts to
+   * downloading what it already has, at 0%, next to a complete file. Nothing
+   * recovers from that on its own, and restore had already logged success.
+   *
+   * So the claim is checked against the disk rather than against the engine's
+   * agreement with it. The difference matters: rechecking is the cure when the
+   * data is there and the claim was mislaid, and no cure at all when the data
+   * is somewhere else — it goes and looks, finds nothing, and reports 0% again.
+   * Telling those apart is the whole point, because they need opposite actions
+   * from whoever reads the log.
+   * @param {object[]} entries - The entries restore worked through.
+   * @returns {Promise<void>} - Resolves once every claim has been checked.
+   */
+  async #verifySeeding(entries) {
+    const claimed = entries.filter(
+      (entry) => entry.complete !== false && entry.mode !== 'cache',
+    );
+    if (claimed.length === 0) return;
+
+    // One listing rather than a status call each: this runs over the whole
+    // library on every start, and a round trip per archive is a cost paid by
+    // every node to catch a fault most of them do not have.
+    const held = new Map();
+    for (const status of await this.#engine.list().catch(() => [])) {
+      held.set(status.infoHash, status);
+    }
+
+    let wrong = 0;
+    for (const entry of claimed) {
+      const status = held.get(entry.infoHash);
+
+      // Checking is the engine doing the right thing already, and progress
+      // during it is the fraction hashed rather than the fraction held.
+      if (status && (status.progress >= 1 || status.state === 'checking')) {
+        continue;
+      }
+      wrong += 1;
+      const label = `[seeding] ${entry.name}`;
+
+      if (!status) {
+        console.error(
+          `${label}: recorded as complete, but the engine is not holding it ` +
+            'at all — restore counted it and nothing is seeding it.',
+        );
+        continue;
+      }
+
+      const file = entry.savePath
+        ? path.join(entry.savePath, entry.name)
+        : null;
+      const found = file
+        ? await fs.stat(file).catch((error) => error)
+        : new Error('this archive has no save path');
+
+      if (found instanceof Error) {
+        const why =
+          found.code === 'ENOENT'
+            ? 'is not there'
+            : found.code === 'EACCES'
+              ? 'cannot be read by this service'
+              : `could not be opened (${found.code ?? found.message})`;
+        console.error(
+          `${label}: recorded as complete, but ${file ?? 'its file'} ${why}. ` +
+            'Rechecking cannot help while that is true — it goes and looks, ' +
+            'finds nothing, and reports 0% again. Point the archive at the ' +
+            'data with Set location, or make that path reachable.',
+        );
+        continue;
+      }
+
+      if (entry.size && found.size !== entry.size) {
+        console.error(
+          `${label}: recorded as complete at ${entry.size} bytes, but ${file} ` +
+            `is ${found.size}. The file on disk is not the one this torrent ` +
+            'describes, so no amount of rechecking will make it match. It was ' +
+            'probably rebuilt in place under the same name.',
+        );
+        continue;
+      }
+
+      // The data is there and it is the right size, so the claim should have
+      // held and the engine's disagreement is the thing that is wrong. This is
+      // the one case rechecking is for.
+      console.warn(
+        `${label}: recorded as complete and ${file} is the right size, but ` +
+          `the engine reports ${status.state} at ` +
+          `${Math.round((status.progress ?? 0) * 100)}%. Rechecking it.`,
+      );
+      await this.recheck(entry.infoHash).catch((error) =>
+        console.error(`${label}: could not recheck it: ${error.message}`),
+      );
+    }
+
+    if (wrong > 0) {
+      console.error(
+        `[seeding] ${wrong} of ${claimed.length} archives recorded as ` +
+          'complete are not being seeded. The lines above say which and why.',
+      );
+    }
+  }
+
+  /**
    * One pass over the catalogue.
    * @returns {Promise<{restored: number, failed: number}>} - What happened.
    */
@@ -1844,10 +1952,23 @@ export class Library {
     progress.unref?.();
 
     try {
-      return await this.#restoreEach(entries, tally);
+      await this.#restoreEach(entries, tally);
     } finally {
       clearInterval(progress);
     }
+
+    // After the loop, not inside it: the question is what the engine ended up
+    // holding, and asking that while archives are still being handed over
+    // reports on a library half restored. Never allowed to fail the restore —
+    // this is a report about seeding, and a node that could not produce it is
+    // still a node that restored what it could.
+    await this.#verifySeeding(entries).catch((error) =>
+      console.warn(
+        `[seeding] could not check what is being seeded: ${error.message}`,
+      ),
+    );
+
+    return tally;
   }
 
   /**
