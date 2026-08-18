@@ -7,6 +7,25 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.39.0
+### ✨ Features and improvements
+- **A watched folder and a scheduled source can each decide their own MD5.** `md5` was a node-wide
+  answer to a question that is not asked node-wide: it costs a second full read of every archive,
+  which is worth paying for a city extract published beside a checksum and not worth paying for a
+  nightly planet build. A node doing both had to choose once, for everything.
+
+  Both now take an `md5` of their own, obeyed in both directions — on where the node says off, off
+  where the node says on — and inherit the node's setting when they say nothing, so no existing
+  config changes behaviour. The console offers it as **Compute MD5** on each row, with `default` as
+  the third state so a row that has never been touched keeps inheriting rather than quietly
+  deciding. Subscriptions take no such field: they adopt a torrent somebody else built, so there is
+  no hashing pass here to attach one to.
+
+### 🐞 Bug fixes
+- **The watched folders panel set its footnote twice**, and an object literal keeps the last of a
+  repeated key — so the guidance about **Poll every** being for network shares only was overwritten
+  before it was ever read, and never reached the screen. The two are now one footnote.
+
 ## 0.38.1
 ### ✨ Features and improvements
 

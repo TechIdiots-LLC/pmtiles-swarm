@@ -789,3 +789,51 @@ describe('the list of adds in progress', () => {
     assert.strictEqual((html.match(/data-cancel/g) ?? []).length, 2);
   });
 });
+
+describe('the settings editors and the MD5 they can override', () => {
+  const watch = page.slice(
+    page.indexOf("key: 'watch'"),
+    page.indexOf("key: 'sources'"),
+  );
+  const sources = page.slice(
+    page.indexOf("key: 'sources'"),
+    page.indexOf("key: 'feeds'"),
+  );
+
+  it('offers the choice everywhere a torrent is built here', () => {
+    // Which is the test for whether the setting belongs on a row at all: an
+    // MD5 is computed during the hashing pass, so a section that adopts a
+    // torrent somebody else built has nothing to attach it to.
+    for (const [name, section] of [
+      ['watched folders', watch],
+      ['scheduled sources', sources],
+    ]) {
+      assert.ok(section.includes("field: 'md5'"), `${name} cannot override it`);
+    }
+  });
+
+  it('offers it as three states, not a checkbox', () => {
+    // A checkbox has two, and the third is the one that matters: a row that
+    // says nothing has to keep inheriting the node's setting rather than
+    // silently deciding false for every folder that already exists.
+    for (const section of [watch, sources]) {
+      const column = section.slice(section.indexOf("field: 'md5'"));
+      assert.match(column.slice(0, 300), /\['', 'default'\]/);
+      assert.match(column.slice(0, 300), /\['true', 'yes'\]/);
+      assert.match(column.slice(0, 300), /\['false', 'no'\]/);
+    }
+  });
+
+  it('does not set a footnote twice in one editor', () => {
+    // It did, in the watched folders panel — and an object literal keeps the
+    // last of a repeated key, so the poll-interval guidance was overwritten
+    // before it was ever read and never reached the screen.
+    for (const [name, section] of [
+      ['watched folders', watch],
+      ['scheduled sources', sources],
+    ]) {
+      const count = (section.match(/^\s+footnote:$/gm) ?? []).length;
+      assert.equal(count, 1, `${name} sets footnote ${count} times`);
+    }
+  });
+});

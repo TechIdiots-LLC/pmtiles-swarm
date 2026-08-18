@@ -4171,13 +4171,6 @@ Every piece is hashed against the ` +
             'HTTP only needs a web seed base; one that is not can be given a ' +
             'publish directory, and each archive is moved there before its ' +
             'torrent is built so the seed works from the first moment.',
-          footnote:
-            'Poll every is for network shares only. A local folder needs ' +
-            'nothing there — the filesystem says when something lands, and it ' +
-            'is picked up as it appears. SMB and NFS do not deliver those ' +
-            'notifications, so a watch on one can sit silent while files ' +
-            'arrive; 15 to 60 seconds suits those. Setting it on a local ' +
-            'folder only costs I/O to learn nothing.',
           restart: true,
           columns: [
             { field: 'path', label: 'Folder', placeholder: '/mnt/maps/incoming', wide: true },
@@ -4202,6 +4195,16 @@ Every piece is hashed against the ` +
               label: 'Torrent comment',
               placeholder: 'attribution and licence',
               wide: true,
+            },
+            {
+              field: 'md5',
+              label: 'Compute MD5',
+              boolean: true,
+              options: [
+                ['', 'default'],
+                ['true', 'yes'],
+                ['false', 'no'],
+              ],
             },
             { field: 'pollSeconds', label: 'Poll every (s)', placeholder: 'events', number: true },
             {
@@ -4232,6 +4235,16 @@ Every piece is hashed against the ` +
           ],
           rows: config.watch ?? [],
           footnote:
+            'Compute MD5 overrides the node-wide setting for this folder ' +
+            'alone, in both directions. It costs a second full read of every ' +
+            'archive imported here, which is worth it for builds published ' +
+            'beside a checksum and not worth it for a nightly planet. ' +
+            'Poll every is for network shares only. A local folder needs ' +
+            'nothing there — the filesystem says when something lands, and it ' +
+            'is picked up as it appears. SMB and NFS do not deliver those ' +
+            'notifications, so a watch on one can sit silent while files ' +
+            'arrive; 15 to 60 seconds suits those. Setting it on a local ' +
+            'folder only costs I/O to learn nothing. ' +
             'Stable name gives the newest build a second name that does not ' +
             'change — planet-latest.pmtiles — so a page can link to it. The ' +
             'dated file stays the real one and keeps its own torrent; the ' +
@@ -4306,6 +4319,16 @@ Every piece is hashed against the ` +
               ],
             },
             {
+              field: 'md5',
+              label: 'Compute MD5',
+              boolean: true,
+              options: [
+                ['', 'default'],
+                ['true', 'yes'],
+                ['false', 'no'],
+              ],
+            },
+            {
               field: 'keep',
               label: 'Builds to keep',
               placeholder: 'all',
@@ -4345,7 +4368,11 @@ Every piece is hashed against the ` +
             'for a daily 137 GB planet build is the difference between a disk ' +
             'that lasts and one that fills within the week. It deletes their ' +
             'data, so it is off unless you set it, and it only ever touches ' +
-            'archives this same source imported.',
+            'archives this same source imported. ' +
+            'Compute MD5 overrides the node-wide setting for this source ' +
+            'alone, in both directions — worth turning on for an upstream ' +
+            'that publishes a checksum to check the download against, and off ' +
+            'for one whose builds are too large to read twice.',
         });
 
         const feedGlobals = document.createElement('div');

@@ -219,6 +219,11 @@ export class WatchManager {
         // random reads by a tile server. Which is right depends on the folder,
         // not on the node.
         pieceLength: folder.pieceLength,
+        // Per folder, because both the cost and the reason for it are. A
+        // folder of city extracts can afford the second full read; the one
+        // taking a nightly planet build cannot, whatever the node's default
+        // says. Left unset the node's `md5` decides, as it always did.
+        md5: folder.md5,
         comment: folder.comment,
         // Marks this as the folder's, so retention below has a family to work
         // within and nothing outside it can be caught up in one.

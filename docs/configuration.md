@@ -287,6 +287,17 @@ with the add either way, so unticking it applies to that add alone. An API or CL
 call that omits `md5` inherits this; one that passes `true` or `false` decides
 for itself.
 
+A [watched folder](#watched-folders) and a [scheduled source](#scheduled-sources)
+may each carry their own `md5`, obeyed in both directions — because whether the
+second read is worth paying for is a property of what is being read, not of the
+node reading it. A folder of city extracts published beside a checksum wants one;
+the source taking a nightly planet build does not, and until now a node could only
+answer for both at once. Leave the field unset to inherit this setting.
+
+Nothing computes an MD5 for a [subscription](#subscriptions): those adopt a
+torrent somebody else built, so there is no hashing pass here to extend. What
+their feed publishes as `<pmtiles:md5>` is recorded as it arrives.
+
 ## Trackers
 
 `trackers` is baked into every torrent this node creates. It defaults to the
@@ -347,7 +358,7 @@ their own name. Archives with no category are excluded whenever this is set.
 ## Watched folders
 
 `watch` is a list of `{ path, category, match, webSeedBase, publishDir, sparse,
-latestLink, latestLinkType, keep, keepDays }`.
+latestLink, latestLinkType, keep, keepDays, md5 }`.
 
 | field               |                                                                                       |
 | ------------------- | ------------------------------------------------------------------------------------- |
@@ -357,6 +368,7 @@ latestLink, latestLinkType, keep, keepDays }`.
 | `latestLink`        | a stable second name for the newest build                                             |
 | `latestLinkType`    | `'symbolic'` (default) or `'hard'`                                                    |
 | `keep` / `keepDays` | retire what the folder has outgrown                                                   |
+| `md5`               | overrides the node's [`md5`](#md5) for this folder alone                              |
 
 `publishDir` and `webSeedBase` together give every imported archive a working web
 seed, which is what makes a brand-new archive usable before any peer has a copy of
@@ -401,6 +413,7 @@ entry gives either a `url` template or an `index` directory:
 | `newest`     | how many listed files an index source will consider. Defaults to 1                                            |
 | `at`         | a time of day in UTC, or a list of them — `"03:30"`                                                           |
 | `everyHours` | an interval instead                                                                                           |
+| `md5`        | overrides the node's [`md5`](#md5) for this source alone                                                      |
 
 Prefer a template where the naming is predictable: it asks a direct question,
 gets a direct answer, and needs the upstream to publish no listing at all.

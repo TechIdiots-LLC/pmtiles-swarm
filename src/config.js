@@ -159,6 +159,10 @@ const DEFAULTS = {
    * Also compute an MD5 of each archive created here. Costs a second full read
    * of the file. Already honoured wherever a torrent is created; declared so it
    * can be seen and set rather than only written into the file by hand.
+   *
+   * The node's answer, not the only one: a watched folder or a scheduled
+   * source may carry its own `md5` and is obeyed in both directions, since
+   * whether a second full read is worth it depends on what is being read.
    */
   md5: false,
   /**
@@ -309,7 +313,7 @@ const DEFAULTS = {
   /**
    * Folders scanned for new archives. Each entry is `{ path, categories,
    * match, webSeedBase, publishDir, latestLink, latestLinkType, keep,
-   * keepDays, sparse }` — see docs/configuration.md, "Watched folders".
+   * keepDays, sparse, md5 }` — see docs/configuration.md, "Watched folders".
    */
   watch: [],
   /**

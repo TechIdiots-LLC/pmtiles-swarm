@@ -408,6 +408,11 @@ export class ScheduledSourceManager {
           trackers: source.trackers,
           addTrackers: source.addTrackers,
           pieceLength: source.pieceLength,
+          // Per source for the same reason as per folder: an upstream
+          // publishing a checksum beside its build is worth checking against,
+          // and one publishing a 700 GiB planet nightly is not worth reading
+          // twice. Unset inherits the node's `md5`.
+          md5: source.md5,
           retain: source.retain !== false,
           // Left undefined the library decides, which is to publish the URL
           // unless it carries credentials. Set explicitly it is obeyed either
@@ -508,6 +513,7 @@ export class ScheduledSourceManager {
           trackers: source.trackers,
           addTrackers: source.addTrackers,
           pieceLength: source.pieceLength,
+          md5: source.md5,
           retain: source.retain !== false,
           webSeed: source.webSeed,
           webSeeds: source.webSeeds,
