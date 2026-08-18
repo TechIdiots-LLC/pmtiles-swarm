@@ -7,6 +7,31 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.41.2
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **An archive that finished downloading during an unclean stop no longer comes back at 0% for ever.**
+  A downloaded archive is written under a marker — `planet.pmtiles.incomplete` — and renamed the
+  instant it is whole. The rename and the catalog entry recording it are two steps, so a stop between
+  them leaves an archive that is finished on disk and unfinished in the record.
+
+  That disagreement was permanent, and worse than it looks. Restore re-added the entry with the marker
+  attached, so the engine opened a filename nothing was at any more, found no data, and began
+  downloading an archive the node already held. The sweep that would have noticed takes the engine's
+  word over the disk's whenever the engine has one — and the engine's word was now 0%. Rechecking did
+  not help either, since it hashes the marked name, which is the wrong file to look at. No number of
+  restarts recovered it.
+
+  Restore now checks the disk before handing over anything recorded as unfinished: marked file gone
+  and the real one whole means the rename happened and the record of it did not, so the entry is
+  corrected and the archive handed over as the complete thing it is. A genuine partial download is
+  left exactly as it was — claiming otherwise would offer peers an archive this node cannot serve.
+
+  This is why the archives that arrive from a feed or a URL were the ones that sat at 0%: an archive
+  built here is recorded complete the moment it is registered, having just been read end to end, so it
+  never carries a marker to disagree about.
+
 ## 0.41.1
 ### ✨ Features and improvements
 

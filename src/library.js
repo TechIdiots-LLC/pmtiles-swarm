@@ -1820,6 +1820,72 @@ export class Library {
   }
 
   /**
+   * Reconciles what the catalog says about an archive with what is on disk.
+   *
+   * An archive downloaded here is written under a marker — `planet.pmtiles`
+   * becomes `planet.pmtiles.incomplete` — and renamed the instant it is whole.
+   * The rename and the catalog entry that records it are two steps, so a stop
+   * between them leaves an archive that is finished on disk and unfinished in
+   * the record.
+   *
+   * That disagreement does not settle itself, and it is worse than it looks.
+   * Restore re-adds an entry it believes incomplete with the marker attached,
+   * so the engine opens `planet.pmtiles.incomplete` — a name nothing is at any
+   * more — finds no data, and begins downloading a 128 GiB archive this node
+   * already holds. The sweep that would notice takes the engine's word over
+   * the disk's whenever the engine has one, and the engine's word is now 0%.
+   * Rechecking does not help either: it hashes the marked name, which is the
+   * wrong file to be looking at. Nothing recovers, through any number of
+   * restarts.
+   *
+   * Only archives that were downloaded can be in this state — one built here
+   * is recorded complete the moment it is registered, having just been read
+   * end to end — which is why the archives that come from a feed or a URL are
+   * the ones that sit at 0%.
+   * @param {object} entry - The catalog entry restore is about to hand over.
+   * @returns {Promise<object>} - That entry, or the corrected one.
+   */
+  async #reconcileMarker(entry) {
+    if (entry.complete !== false || !entry.savePath || !entry.name) {
+      return entry;
+    }
+
+    const marked = onDiskPath(entry, this.#config);
+    const real = path.join(entry.savePath, entry.name);
+    // Markers turned off, so there is no second name to disagree with.
+    if (!marked || marked === real) return entry;
+
+    // Still under the marker, which is what an unfinished download should look
+    // like. Nothing to correct, whatever its progress.
+    const partial = await fs.stat(marked).then(
+      () => true,
+      () => false,
+    );
+    if (partial) return entry;
+
+    // The marked name is gone and the real one is whole: the rename happened
+    // and the record of it did not.
+    const whole = await alreadyComplete({
+      savePath: entry.savePath,
+      name: entry.name,
+      size: entry.size,
+    });
+    if (!whole) return entry;
+
+    console.warn(
+      `[complete] ${entry.name} is whole under its own name but was recorded ` +
+        'as unfinished — a stop between the rename and the record. Handing it ' +
+        'to the engine as the complete archive it is.',
+    );
+    return (
+      (await this.#catalog.put({
+        infoHash: entry.infoHash,
+        complete: true,
+      })) ?? { ...entry, complete: true }
+    );
+  }
+
+  /**
    * Checks that what restore just claimed is actually being seeded.
    *
    * Restore reports what it handed the engine, which is not the same question
@@ -1960,8 +2026,9 @@ export class Library {
     }, 15_000);
     progress.unref?.();
 
+    const handed = [];
     try {
-      await this.#restoreEach(entries, tally);
+      await this.#restoreEach(entries, tally, handed);
     } finally {
       clearInterval(progress);
     }
@@ -1971,7 +2038,7 @@ export class Library {
     // reports on a library half restored. Never allowed to fail the restore —
     // this is a report about seeding, and a node that could not produce it is
     // still a node that restored what it could.
-    await this.#verifySeeding(entries).catch((error) =>
+    await this.#verifySeeding(handed).catch((error) =>
       console.warn(
         `[seeding] could not check what is being seeded: ${error.message}`,
       ),
@@ -1989,7 +2056,7 @@ export class Library {
    * @param {{restored: number, failed: number}} tally - Mutated as it goes.
    * @returns {Promise<{restored: number, failed: number}>} - That tally.
    */
-  async #restoreEach(entries, tally) {
+  async #restoreEach(entries, tally, handed) {
     for (const entry of entries) {
       // An engine that cannot open its port will fail every one of these, each
       // after its own timeout. Stopping at the first is the difference between
@@ -2024,11 +2091,18 @@ export class Library {
           }
         }
 
+        // Before the add, because the add is what acts on the disagreement:
+        // an entry wrongly recorded as unfinished is handed to the engine
+        // under a filename nothing is at, and the engine starts downloading
+        // an archive that is already here.
+        const settled = await this.#reconcileMarker(entry);
+
         // Through the same path as every other re-add, so an archive stored
         // with no trackers is repaired here too. Restoring used to build its
         // own add and skip that, which is why an archive that could not find a
         // peer stayed unable to find one across every restart.
-        await this.#readd(entry);
+        await this.#readd(settled);
+        handed.push(settled);
         tally.restored++;
       } catch (error) {
         tally.failed++;
