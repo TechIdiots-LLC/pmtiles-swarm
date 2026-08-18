@@ -309,6 +309,16 @@
       .piecerow { display: grid; grid-template-columns: 7rem 1fr 4rem; gap: 0.6rem; align-items: center; margin-bottom: 0.5rem; }
       .piecerow > .label { font-size: 0.8rem; color: var(--muted); }
       .piecerow > .value { font-size: 0.8rem; color: var(--muted); text-align: right; }
+      /* Like a piecerow, but the label is a filename rather than a fixed word,
+         and each row carries its own Cancel. A separate class because the
+         piecerow's 7rem label and 4rem value are sized for "downloaded" and
+         "41%": an archive name in 7rem wraps onto three lines, and the naming
+         of the buttons had to repeat the whole filename to say which was
+         which. */
+      .addrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 0.6rem; align-items: center; margin-bottom: 0.5rem; }
+      .addrow > .label { font-size: 0.8rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .addrow > .value { font-size: 0.8rem; color: var(--muted); text-align: right; white-space: nowrap; }
+      .addrow > button { padding: 0.15rem 0.55rem; font-size: 0.75rem; }
 
       button.speed { border-color: var(--line); color: var(--muted); }
       button.speed.on { border-color: var(--warn); color: var(--warn); }
@@ -923,7 +933,6 @@
           box.innerHTML = '';
           return;
         }
-        const cancellable = running.filter((add) => add.cancellable !== false);
         box.innerHTML = `
           <h3 style="margin:1.2rem 0 0.5rem">Being added, before a torrent exists</h3>
           <div class="sub" style="margin-bottom:0.6rem">
@@ -958,26 +967,29 @@
                 : pct == null
                   ? bytes(add.received)
                   : `${pct.toFixed(1)}%`;
+              const name = add.name ?? add.url.split('/').pop() ?? add.url;
+              // Cancel sits in the row it cancels, so the button does not have
+              // to name the archive to say which one it is. Named, they were as
+              // wide as the filename — two of them filled a line, and reading
+              // one meant matching a long name against the list above it.
+              //
+              // An add with no controller keeps an empty cell rather than
+              // losing one, so the rows above and below it stay lined up.
+              const stop =
+                add.cancellable === false
+                  ? '<span></span>'
+                  : `<button data-cancel="${escapeHtml(add.url)}" title="Cancel ${escapeHtml(
+                      name,
+                    )}" aria-label="Cancel ${escapeHtml(name)}">Cancel</button>`;
               return `
-                <div class="piecerow">
-                  <span class="label" title="${escapeHtml(add.url)}">${escapeHtml(
-                    add.name ?? add.url.split('/').pop() ?? add.url,
-                  )}</span>
+                <div class="addrow">
+                  <span class="label" title="${escapeHtml(add.url)}">${escapeHtml(name)}</span>
                   <span class="track"><i style="width:${pct == null ? 0 : pct.toFixed(1)}%"></i></span>
                   <span class="value">${value}</span>
+                  ${stop}
                 </div>`;
             })
-            .join('')}
-          <div class="bar" style="margin-top:0.5rem">
-            ${cancellable
-              .map(
-                (add) =>
-                  `<button data-cancel="${escapeHtml(add.url)}">Cancel ${escapeHtml(
-                    add.name ?? add.url.split('/').pop() ?? '',
-                  )}</button>`,
-              )
-              .join('')}
-          </div>`;
+            .join('')}`;
 
         for (const button of box.querySelectorAll('[data-cancel]')) {
           button.onclick = async () => {

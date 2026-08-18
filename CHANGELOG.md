@@ -7,6 +7,15 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.37.1
+### ✨ Features and improvements
+- **Cancel now sits in the row it cancels.** Collected into a bar underneath the list, each button
+  had to repeat the whole filename to say which add it stopped — two of those filled a line, and
+  pressing the right one meant matching a long name against the list above it. The rows carry their
+  own, and an add that cannot be cancelled keeps an empty cell so the columns stay lined up.
+
+### 🐞 Bug fixes
+
 ## 0.37.0
 ### ✨ Features and improvements
 - **An archive being hashed can now be cancelled, and says how far through it is.** 0.36.0 moved

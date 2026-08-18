@@ -689,3 +689,103 @@ describe('feeds and peers as two sections', () => {
     assert.match(page, /row\.protocol === 'api' \|\|/);
   });
 });
+
+describe('the list of adds in progress', () => {
+  /**
+   * Lifts one function out of the page, with the browser bits it reaches for
+   * supplied rather than lifted — what is under test is the markup it builds,
+   * not how a byte count is worded.
+   * @param {string} name - The function to lift.
+   * @param {object} globals - Free identifiers the lifted code calls.
+   * @returns {Function} - The function.
+   */
+  function lift(name, globals) {
+    const start = page.indexOf(`function ${name}(`);
+    assert.notStrictEqual(start, -1, `${name} is not in the page`);
+    let depth = 0;
+    let i = page.indexOf('{', start);
+    for (; i < page.length; i += 1) {
+      if (page[i] === '{') depth += 1;
+      if (page[i] === '}') {
+        depth -= 1;
+        if (depth === 0) break;
+      }
+    }
+    const keys = Object.keys(globals);
+    return new Function(
+      ...keys,
+      `${page.slice(start, i + 1)}; return ${name};`,
+    )(...Object.values(globals));
+  }
+
+  /**
+   * Draws the section and hands back the HTML it produced.
+   * @param {object[]} running - As /api/adds reports them.
+   * @returns {string} - The markup.
+   */
+  function draw(running) {
+    const box = { innerHTML: '', querySelectorAll: () => [] };
+    lift('renderFetching', {
+      $: () => box,
+      escapeHtml: (value) => String(value).replaceAll('"', '&quot;'),
+      bytes: (n) => `${Math.round(n / 1024 ** 3)} GiB`,
+      duration: () => 'now',
+    })(running);
+    return box.innerHTML;
+  }
+
+  const hashing = {
+    url: '/mnt/hd-16TB/Planet_Merged_Sparse_2024_z0-Z16_cubic_webp_v2.pmtiles',
+    name: 'Planet_Merged_Sparse_2024_z0-Z16_cubic_webp_v2.pmtiles',
+    phase: 'hashing',
+    received: 78 * 1024 ** 3,
+    total: 698 * 1024 ** 3,
+    startedAt: new Date().toISOString(),
+    cancellable: true,
+  };
+
+  it('puts each Cancel in the row it cancels', () => {
+    // Collected into a bar underneath, every button had to repeat the whole
+    // filename to say which add it stopped — two of those filled a line, and
+    // pressing the right one meant matching a long name against the list above.
+    const html = draw([hashing]);
+    const rows = [...html.matchAll(/<div class="addrow">[\s\S]*?<\/div>/g)];
+
+    assert.strictEqual(rows.length, 1);
+    assert.match(rows[0][0], /<button data-cancel=/);
+    assert.ok(
+      !/class="bar"/.test(html),
+      'the buttons are still collected into a bar of their own',
+    );
+  });
+
+  it('names the archive in the button without printing it again', () => {
+    const html = draw([hashing]);
+    assert.match(html, />Cancel<\/button>/);
+    assert.match(html, /aria-label="Cancel Planet_Merged_Sparse/);
+  });
+
+  it('keeps the cell for an add that cannot be cancelled', () => {
+    // Dropping it instead would shift that row's columns out of line with
+    // every other row.
+    const html = draw([{ ...hashing, cancellable: false }]);
+    assert.ok(!html.includes('data-cancel'), 'offered a button anyway');
+    assert.match(html, /<span class="value">[\s\S]*?<\/span>\s*<span><\/span>/);
+  });
+
+  it('draws one row per add, whatever they are', () => {
+    const html = draw([
+      hashing,
+      {
+        url: 'https://example.org/20260817.pmtiles',
+        name: '20260817.pmtiles',
+        received: 1024,
+        total: 8192,
+        startedAt: new Date().toISOString(),
+        cancellable: true,
+      },
+    ]);
+    assert.strictEqual((html.match(/class="addrow"/g) ?? []).length, 2);
+    assert.strictEqual((html.match(/data-cancel/g) ?? []).length, 2);
+  });
+});
