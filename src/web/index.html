@@ -89,6 +89,19 @@
       tbody tr { cursor: pointer; }
       tbody tr:hover { background: var(--panel); }
       tbody tr.on { background: var(--panel); box-shadow: inset 3px 0 0 var(--accent); }
+      /* The open archive's details, sitting in the table under the row they
+         belong to. Not a row anybody clicks: it carries the panel rather than
+         describing an archive, so it takes none of the row affordances. */
+      tbody tr.detailrow { cursor: default; }
+      tbody tr.detailrow:hover { background: none; }
+      tbody tr.detailrow > td {
+        padding: 0;
+        white-space: normal;
+        border-bottom: 1px solid var(--line);
+      }
+      /* Flush with the row above it, where the margin that separated it from
+         the table would now be a gap in the middle of one. */
+      tbody tr.detailrow .panel { margin-top: 0; border-radius: 0; border-width: 0; }
       td.name { white-space: normal; word-break: break-word; min-width: 16rem; }
       .sub { color: var(--muted); font-size: 0.8rem; }
       .track {
@@ -396,6 +409,21 @@
             </tr>
           </thead>
           <tbody id="rows"></tbody>
+          <!-- The open archive's details, in a tbody of their own between the
+               rows above it and the rows below. A table may have several, and
+               that is what makes this work: the three-second refresh rebuilds
+               the rows on either side without touching the panel. Putting it
+               in with them and moving it each render would blur whatever was
+               focused inside it, every three seconds, while it was being
+               typed into. -->
+          <tbody id="detail-body" hidden>
+            <tr class="detailrow">
+              <td colspan="12">
+                <div class="panel" id="detail" hidden></div>
+              </td>
+            </tr>
+          </tbody>
+          <tbody id="rows-below"></tbody>
         </table>
         <div id="fetching"></div>
         <div class="empty" id="empty" hidden>
@@ -403,7 +431,7 @@
           pull in what your torrent client already seeds.
         </div>
 
-        <div class="panel" id="detail" hidden></div>
+
       </section>
 
       <section id="view-categories" hidden>
@@ -1235,9 +1263,28 @@
         return `${minutes}m`;
       }
 
+      /**
+       * Closes the details, panel and row together.
+       *
+       * Two elements have to agree now that the panel sits in the table: the
+       * panel carries the content, and the tbody around it is what makes a row
+       * of the list. Hiding only the panel leaves an empty bordered row in the
+       * middle of the archives until the next refresh tidies it.
+       * @returns {void}
+       */
+      function closeDetail() {
+        $('detail').hidden = true;
+        $('detail-body').hidden = true;
+      }
+
       function renderRows() {
         const rows = $('rows');
+        const below = $('rows-below');
         rows.innerHTML = '';
+        below.innerHTML = '';
+        // Filled into the first until the open archive has been written, and
+        // into the second afterwards, so its details sit between the two.
+        let target = rows;
 
         // Filtered and sorted here rather than where the data arrives, so the
         // three-second poll keeps refreshing what is on screen without
@@ -1308,10 +1355,18 @@
             selected = selected === entry.infoHash ? null : entry.infoHash;
             renderRows();
             if (selected) renderDetail(selected, false);
-            else $('detail').hidden = true;
+            else closeDetail();
           };
-          rows.append(tr);
+          target.append(tr);
+
+          // Everything after the open archive goes below its details. The
+          // panel itself is never appended here — see the tbody it lives in.
+          if (entry.infoHash === selected) target = below;
         }
+
+        $('detail-body').hidden = !shown.some(
+          (entry) => entry.infoHash === selected,
+        );
       }
 
       /**
@@ -2092,7 +2147,7 @@ Every piece is hashed against the ` +
               { method: 'DELETE' },
             );
             selected = null;
-            $('detail').hidden = true;
+            closeDetail();
             refresh();
           } catch (error) {
             toast(error.message);

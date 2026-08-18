@@ -837,3 +837,47 @@ describe('the settings editors and the MD5 they can override', () => {
     }
   });
 });
+
+describe('where an archive opens its details', () => {
+  it('puts them in a tbody between the rows, not after the table', () => {
+    // They used to render below the whole table. On a node with a page of
+    // archives that is off-screen, so clicking a row appeared to do nothing
+    // but highlight it.
+    const table = page.slice(
+      page.indexOf('<tbody id="rows">'),
+      page.indexOf('</table>', page.indexOf('<tbody id="rows">')),
+    );
+    assert.ok(table.includes('<tbody id="detail-body"'), 'no detail tbody');
+    assert.ok(table.includes('id="detail"'), 'the panel is not in the table');
+    assert.ok(
+      table.indexOf('id="rows-below"') > table.indexOf('id="detail-body"'),
+      'the rows below the open archive come before its details',
+    );
+  });
+
+  it('rebuilds the rows around the panel without touching it', () => {
+    // The refresh runs every three seconds. Emptying one tbody holding both
+    // the rows and the panel would take the panel with them, and re-inserting
+    // it blurs whatever was focused inside — so an archive's details could not
+    // be typed into for longer than one poll.
+    const render = page.slice(
+      page.indexOf('function renderRows()'),
+      page.indexOf('function originOf('),
+    );
+    assert.match(render, /rows\.innerHTML = '';/);
+    assert.match(render, /below\.innerHTML = '';/);
+    assert.ok(
+      !/detail-body'\)\.innerHTML/.test(render),
+      'the refresh empties the panel it is supposed to leave alone',
+    );
+  });
+
+  it('hides the panel and its row together', () => {
+    // Two elements have to agree. Hiding only the panel leaves an empty
+    // bordered row sitting in the middle of the list.
+    assert.match(page, /function closeDetail\(\) \{/);
+    const close = page.slice(page.indexOf('function closeDetail()'));
+    assert.match(close.slice(0, 200), /\$\('detail'\)\.hidden = true;/);
+    assert.match(close.slice(0, 200), /\$\('detail-body'\)\.hidden = true;/);
+  });
+});

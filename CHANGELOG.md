@@ -7,6 +7,20 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.41.0
+### ✨ Features and improvements
+- **An archive's details now open directly under the row you clicked**, instead of below the whole
+  table. On a node with a page of archives the panel appeared off-screen, so clicking a row looked
+  like it had done nothing but highlight it.
+
+  The panel sits in a `<tbody>` of its own, between the rows above it and the rows below — a table
+  may have several, and that is what keeps the three-second refresh from disturbing it. Rebuilding
+  the rows around the panel leaves it alone; holding it among them and re-inserting it each render
+  would blur whatever was focused inside, which would have made the seeding limit fields impossible
+  to type into for longer than one poll.
+
+### 🐞 Bug fixes
+
 ## 0.40.0
 ### ✨ Features and improvements
 - **Restore now checks that what it handed over is actually being seeded.** "20 of 20 archives handed
