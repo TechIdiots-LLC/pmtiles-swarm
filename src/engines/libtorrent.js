@@ -491,13 +491,23 @@ export class LibtorrentEngine {
 
   /**
    * Creates a torrent from a local file.
+   *
+   * In a process of its own rather than over the pipe. libtorrent's hashing
+   * never checks for interruption, so a hash running inside the sidecar could
+   * not be stopped -- and the sidecar itself cannot be ended to stop one,
+   * because it holds the session and every torrent seeding from it. A 698 GiB
+   * build started by a misclick therefore ran its full six hours, saturating
+   * the disk the rest of the library was being served from.
+   *
+   * A process started for one hash can simply be killed. Hashing only reads,
+   * so nothing is left half-written, and the archive is untouched.
    * @param {string} filePath - The file to hash.
-   * @param {object} [options] - Piece length, trackers, web seeds, format.
+   * @param {object} [options] - Piece length, trackers, web seeds, format,
+   *   `signal` to cancel with, and `onProgress({piece, pieces})`.
    * @returns {Promise<object>} - The torrent file and what it describes.
    */
   async createTorrent(filePath, options = {}) {
-    const result = await this.#call(
-      'create',
+    const result = await this.#hashApart(
       {
         path: filePath,
         pieceLength: options.pieceLength,
@@ -508,13 +518,128 @@ export class LibtorrentEngine {
         createdBy: options.createdBy,
         format: options.format ?? 'hybrid',
       },
-      // Hashing a large archive takes as long as it takes.
-      options.timeoutMs ?? 6 * 60 * 60 * 1000,
+      options,
     );
     return {
       ...result,
       torrentFile: new Uint8Array(Buffer.from(result.torrentFile, 'base64')),
     };
+  }
+
+  /**
+   * Runs one `--create` to completion, or until it is no longer wanted.
+   * @param {object} params - What to hash and how.
+   * @param {object} options - signal, onProgress, timeoutMs.
+   * @returns {Promise<object>} - The sidecar's result object.
+   */
+  #hashApart(params, options) {
+    return new Promise((resolve, reject) => {
+      const script = this.#options.script ?? resolveSidecar();
+      const child = spawn(this.#options.python, [script, '--create'], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+
+      let settled = false;
+      let result;
+      let failure;
+      let pending = '';
+      let stderr = '';
+
+      /**
+       * Ends this hash once, whatever ends it.
+       * @param {Error} [error] - Why, if it failed.
+       */
+      const finish = (error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        options.signal?.removeEventListener('abort', cancel);
+        if (error) reject(error);
+        else resolve(result);
+      };
+
+      const cancel = () => {
+        // The hash cannot be asked to stop, so it is ended. Nothing is lost:
+        // hashing reads and this process holds nothing else.
+        child.kill();
+        // Said the same way however it was cancelled. An AbortController with
+        // no reason gives "This operation was aborted", which in a log next to
+        // an archive name explains nothing; callers that care which kind of
+        // stop this was read `signal.reason`, which is carried as the cause.
+        finish(
+          new Error('hashing was cancelled', { cause: options.signal?.reason }),
+        );
+      };
+
+      // Hashing a large archive takes as long as it takes, but not forever:
+      // a hash that has stopped reporting is stuck, and holding the add open
+      // for six hours to discover that helps nobody.
+      const timer = setTimeout(
+        () => {
+          child.kill();
+          finish(new Error('hashing timed out'));
+        },
+        options.timeoutMs ?? 6 * 60 * 60 * 1000,
+      );
+      timer.unref?.();
+
+      if (options.signal?.aborted) return cancel();
+      options.signal?.addEventListener('abort', cancel, { once: true });
+
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', (chunk) => {
+        pending += chunk;
+        const lines = pending.split('\n');
+        pending = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let message;
+          try {
+            message = JSON.parse(line);
+          } catch {
+            // A line that is not ours. Python's own output on the way to a
+            // crash arrives here, and is worth keeping for the error.
+            stderr += `${line}\n`;
+            continue;
+          }
+          if (message.event === 'progress') {
+            options.onProgress?.({
+              piece: message.piece,
+              pieces: message.pieces,
+            });
+          } else if (message.ok) {
+            result = message.result;
+          } else if (message.ok === false) {
+            failure = new Error(message.error ?? 'hashing failed');
+          }
+        }
+      });
+
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+
+      child.on('error', (error) =>
+        finish(new Error(`could not start the hasher: ${error.message}`)),
+      );
+
+      child.on('close', (code, signal) => {
+        if (failure) return finish(failure);
+        if (result) return finish();
+        const why = signal
+          ? `killed by ${signal}`
+          : `exited with code ${code}`;
+        finish(
+          new Error(
+            `hashing produced nothing (${why})${stderr ? `: ${stderr.trim()}` : ''}`,
+          ),
+        );
+      });
+
+      child.stdin.on('error', () => {});
+      child.stdin.end(JSON.stringify(params));
+    });
   }
 
   /**

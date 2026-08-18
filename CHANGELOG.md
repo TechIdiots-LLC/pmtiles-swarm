@@ -7,6 +7,27 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.36.0
+### ✨ Features and improvements
+- **Hashing an archive now happens in a process of its own.** Building the torrent for a 698 GiB
+  archive ran inside the libtorrent sidecar, competing with the session for the disk and for
+  Python's interpreter lock while every archive on the node was being served from that same disk.
+  It also could not be stopped: libtorrent's hashing never checks for interruption, and the sidecar
+  cannot be ended to end a hash because it holds the session and every torrent seeding from it. A
+  build started by a misclick ran its full six hours.
+
+  It is now `libtorrent_sidecar.py --create`, started per hash, holding no session and no port.
+  Killing it costs the hash and nothing else, and hashing only ever reads, so the archive is
+  untouched. It reports the piece it has reached as it goes, so a caller can draw a real fraction
+  rather than "hashing 698 GiB · 3m".
+
+  Requires pmtiles-torrent 0.8.0. Also picks up 0.7.5, which stops an archive that is hashing its
+  store from reporting itself as "paused" — libtorrent hashes one store at a time and flags every
+  torrent queued behind it as paused, so a library busy verifying itself read as one somebody had
+  stopped.
+
+### 🐞 Bug fixes
+
 ## 0.35.5
 ### ✨ Features and improvements
 
