@@ -228,7 +228,7 @@
         display: flex;
         gap: 0.25rem;
         border-bottom: 1px solid var(--line);
-        margin: -0.25rem 0 1rem;
+        margin: 0 0 1rem;
         flex-wrap: wrap;
       }
       .tabs button {
@@ -1668,8 +1668,13 @@
         const summary = entry.pmtiles ?? {};
         const mode = entry.mode ?? 'mirror';
 
+        // No heading. The panel opens directly under the row that names the
+        // archive, so a title here repeated what the eye had just read one
+        // line above it. Named to assistive technology instead, which has no
+        // "just above" to rely on.
+        panel.setAttribute('role', 'region');
+        panel.setAttribute('aria-label', entry.name);
         panel.innerHTML = `
-          <h2>${escapeHtml(entry.name)}</h2>
           <div class="tabs">
             <button data-tab="general" class="on">General</button>
             <button data-tab="trackers">Trackers</button>

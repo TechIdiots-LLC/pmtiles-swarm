@@ -881,3 +881,22 @@ describe('where an archive opens its details', () => {
     assert.match(close.slice(0, 200), /\$\('detail-body'\)\.hidden = true;/);
   });
 });
+
+describe('the details panel and the name above it', () => {
+  it('does not repeat the archive name it opens under', () => {
+    // The panel sits directly beneath the row that names the archive, so a
+    // heading here was the same words twice, one line apart.
+    const render = page.slice(
+      page.indexOf("const panel = $('detail')"),
+      page.indexOf('class="tabs"', page.indexOf("const panel = $('detail')")),
+    );
+    assert.ok(!render.includes('<h2>'), 'the panel still opens with a heading');
+  });
+
+  it('still names the archive to assistive technology', () => {
+    // Which has no "just above" to rely on: dropping the heading without this
+    // would leave the panel an unlabelled region.
+    const render = page.slice(page.indexOf("const panel = $('detail')"));
+    assert.match(render.slice(0, 2000), /aria-label', entry\.name/);
+  });
+});

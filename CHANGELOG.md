@@ -7,6 +7,15 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.41.3
+### ✨ Features and improvements
+- **The details panel no longer repeats the archive's name.** It opens directly under the row that
+  names it, so the heading was the same words twice, one line apart — it was there because the panel
+  used to render below the whole table, where nothing said which archive it belonged to. The panel is
+  labelled for assistive technology instead, which has no "just above" to read from.
+
+### 🐞 Bug fixes
+
 ## 0.41.2
 ### ✨ Features and improvements
 
