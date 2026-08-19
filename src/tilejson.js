@@ -55,6 +55,16 @@ export function buildTileJson(entry, baseUrl) {
   // Passed on so the next node to mirror this archive reads the same answer we
   // did, rather than falling back to a guess from the tile format.
   if (summary.sparse !== undefined) doc.sparse = summary.sparse;
+  // How to read the pixels of a raster-dem archive. tileserver-gl reads the
+  // same key, so an archive built to be served there carries the answer with
+  // it — and a style pointing at this TileJSON no longer has to restate an
+  // encoding that the archive already knows, which is how a style and its data
+  // drift into disagreeing.
+  if (summary.encoding) doc.encoding = summary.encoding;
+  // `custom` is unreadable without them, so they go wherever it does.
+  if (summary.encoding === 'custom' && summary.encodingFactors) {
+    Object.assign(doc, summary.encodingFactors);
+  }
   if (summary.format === 'pbf') doc.format = 'pbf';
   else if (summary.format) doc.format = summary.format;
 

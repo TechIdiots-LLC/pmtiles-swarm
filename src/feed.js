@@ -18,6 +18,7 @@
  */
 
 import { mutableMagnet } from './mutable.js';
+import { metadataEncoding } from './pmtiles-probe.js';
 
 const PMTILES_NS = 'https://github.com/TechIdiots-LLC/pmtiles-swarm/ns/1.0';
 
@@ -118,6 +119,14 @@ function renderItem(entry, baseUrl) {
           : '',
         map.attribution
           ? `      <pmtiles:attribution>${xml(map.attribution)}</pmtiles:attribution>`
+          : '',
+        // So a subscriber can serve elevation correctly from the moment it
+        // joins, rather than reading noise until it has probed the header
+        // itself. The custom factors are deliberately not carried: an archive
+        // that needs four numbers to be legible is one a mirror should read
+        // for itself rather than take on trust from a feed.
+        map.encoding
+          ? `      <pmtiles:encoding>${xml(map.encoding)}</pmtiles:encoding>`
           : '',
       ]
         .filter(Boolean)
@@ -233,6 +242,11 @@ function mapSummary(block) {
     bounds: bounds.length === 4 ? bounds : undefined,
     tileCount: number('pmtiles:tiles'),
     attribution: tag(block, 'pmtiles:attribution'),
+    // Carried because a subscriber serves tiles from this summary before it
+    // has read a byte of the archive, and for a raster-dem archive the
+    // encoding is the difference between elevation and noise. Validated on the
+    // way in, since a feed is somebody else's document.
+    encoding: metadataEncoding(tag(block, 'pmtiles:encoding')),
     // Says where this came from, because a summary taken on trust from another
     // node is not the same fact as one read off the archive's own header, and
     // the difference matters when the two disagree.

@@ -16,6 +16,7 @@ page is what they mean.
   - [One string, both kinds of client](#one-string-both-kinds-of-client)
   - [Where this magnet shows up](#where-this-magnet-shows-up)
 - [`sparse`](#sparse)
+- [`encoding`](#encoding)
 - [A complete example](#a-complete-example)
 - [What a plain client sees](#what-a-plain-client-sees)
 
@@ -144,6 +145,48 @@ likely to have picked it up. It is carried so that a node mirroring this archive
 reads the same answer rather than falling back to guessing from the tile format.
 See
 [internals.md](internals.md#answering-for-a-tile-that-is-not-there).
+
+## `encoding`
+
+How a `raster-dem` archive packs elevation into pixels: `terrarium`, `mapbox` or
+`custom`. Present only when the archive itself said so in its metadata.
+
+Nothing in a PMTiles header carries this — the header knows the tile is WebP,
+not what its three channels mean — so the metadata is the only place it can come
+from, and the PMTiles specification explicitly allows metadata beyond the keys
+it names. Without it a consumer falls back to a default, and the default is
+wrong for exactly the archives that most need to speak up: a terrarium-packed
+DEM read as `mapbox` decodes every mountain into noise, silently, with a
+plausible-looking map on screen and nothing to point at.
+
+Same key and same meaning as tileserver-gl, which reads `tileJSON.encoding` and
+accepts `terrarium` or `mapbox`. The difference is where it comes from: there it
+is configuration, set per layer in the server's own config, so the answer lives
+beside the server rather than beside the data. Here it travels with the archive,
+which is the point — a node mirroring it reads the same answer without being
+configured again, and a style pointing at this TileJSON no longer has to restate
+an encoding the archive already knows. Restating it is how a style and its data
+drift into disagreeing.
+
+MapLibre applies every TileJSON member to the source after the source is
+constructed, so an `encoding` here **overrides** one written in the style. That
+is the intended direction: the archive is the thing that knows.
+
+Anything other than the three values the style specification defines is dropped
+rather than passed on. A client handed an encoding it does not recognise is
+worse off than one handed nothing, because nothing at least leaves it free to
+use its own default.
+
+### `redFactor`, `greenFactor`, `blueFactor`, `baseShift`
+
+Carried only alongside `encoding: "custom"`, and only when all four are present.
+`custom` means "the channels mean what these numbers say", so publishing the
+word without the numbers publishes an archive nobody can read — and three
+numbers with one missing is no better, so the whole claim is dropped instead.
+
+The feed carries `<pmtiles:encoding>` but not these: an archive that needs four
+numbers to be legible is one a mirror should read for itself rather than take on
+trust from somebody else's document.
 
 ## A complete example
 

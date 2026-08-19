@@ -59,6 +59,49 @@ export function metadataFlag(value) {
 }
 
 /**
+ * What a `raster-dem` archive says about how its elevations are packed.
+ *
+ * Nothing in a PMTiles header says this — the header knows the tile is WebP,
+ * not what the three channels mean — so the only place it can come from is the
+ * archive's own metadata. Without it a consumer falls back to a default, and
+ * the default is wrong for exactly the archives that most need to say
+ * something: a terrarium-packed DEM read as `mapbox` decodes every mountain
+ * into noise, silently, with a plausible-looking map on screen.
+ *
+ * The values are the ones the style specification defines, and anything else
+ * is dropped rather than passed on. A tile client handed an encoding it does
+ * not recognise is worse off than one handed nothing, because nothing at least
+ * leaves it free to use its own default.
+ * @param {unknown} value - Whatever the metadata held.
+ * @returns {string | undefined} - A known encoding, or undefined.
+ */
+export function metadataEncoding(value) {
+  if (typeof value !== 'string') return undefined;
+  const text = value.trim().toLowerCase();
+  return ['terrarium', 'mapbox', 'custom'].includes(text) ? text : undefined;
+}
+
+/**
+ * The numbers a `custom` encoding is meaningless without.
+ *
+ * `encoding: "custom"` says "the channels mean what these four factors say",
+ * so carrying the word and not the factors publishes an archive nobody can
+ * read. They travel together or not at all.
+ * @param {object} metadata - The archive's metadata.
+ * @returns {object | undefined} - The four factors, or undefined.
+ */
+export function customEncodingFactors(metadata) {
+  const named = ['redFactor', 'greenFactor', 'blueFactor', 'baseShift'];
+  const out = {};
+  for (const name of named) {
+    const value = Number(metadata[name]);
+    if (!Number.isFinite(value)) return undefined;
+    out[name] = value;
+  }
+  return out;
+}
+
+/**
  * Reads an archive's header and metadata.
  *
  * Only the header and directory are read, not the tile data, so this is cheap
@@ -103,6 +146,16 @@ export function summarize(header, metadata = {}) {
     // the same key, so an archive built to be served there carries the answer
     // with it and does not have to be configured again here.
     sparse: metadataFlag(metadata.sparse),
+    // How a raster-dem archive packs elevation into pixels: terrarium, mapbox
+    // or custom. Read from the archive rather than configured here, for the
+    // same reason `sparse` is — the archive knows, and a mirror of it should
+    // not have to be told again.
+    encoding: metadataEncoding(metadata.encoding),
+    // Only where the encoding is custom, since they mean nothing otherwise.
+    encodingFactors:
+      metadataEncoding(metadata.encoding) === 'custom'
+        ? customEncodingFactors(metadata)
+        : undefined,
   };
 }
 

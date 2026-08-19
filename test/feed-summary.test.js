@@ -87,3 +87,51 @@ describe('the summary a feed publishes', () => {
     assert.equal(item.pmtiles.vectorLayers, undefined);
   });
 });
+
+describe('an elevation encoding through a feed', () => {
+  it('survives the round trip', async () => {
+    // A subscriber serves tiles from the feed's summary before it has read a
+    // byte of the archive, and for a raster-dem archive the encoding is the
+    // difference between elevation and noise for that whole window.
+    const xml = renderFeed(
+      [
+        {
+          infoHash: 'a'.repeat(40),
+          name: 'terrain.pmtiles',
+          size: 10,
+          magnet: `magnet:?xt=urn:btih:${'a'.repeat(40)}`,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          pmtiles: {
+            format: 'webp',
+            minZoom: 0,
+            maxZoom: 8,
+            bounds: [-180, -90, 180, 90],
+            encoding: 'terrarium',
+          },
+        },
+      ],
+      { title: 'x', baseUrl: 'https://x.test' },
+    );
+    assert.match(xml, /<pmtiles:encoding>terrarium<\/pmtiles:encoding>/);
+    assert.equal(parseFeed(xml)[0].pmtiles.encoding, 'terrarium');
+  });
+
+  it('does not take an unknown one on trust', async () => {
+    // A feed is somebody else's document, and a value nothing recognises is
+    // worse than none: it takes away the reader's own default.
+    const xml = renderFeed(
+      [
+        {
+          infoHash: 'b'.repeat(40),
+          name: 'terrain.pmtiles',
+          size: 10,
+          magnet: `magnet:?xt=urn:btih:${'b'.repeat(40)}`,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          pmtiles: { format: 'webp', encoding: 'terrainrgb' },
+        },
+      ],
+      { title: 'x', baseUrl: 'https://x.test' },
+    );
+    assert.equal(parseFeed(xml)[0].pmtiles.encoding, undefined);
+  });
+});

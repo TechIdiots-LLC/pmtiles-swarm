@@ -7,6 +7,36 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.55.0
+### ✨ Features and improvements
+- **The TileJSON now carries a `raster-dem` archive's `encoding`**, read out of the archive's own
+  metadata the same way `sparse` already is. Nothing in a PMTiles header carries this — the header
+  knows the tile is WebP, not what its three channels mean — so the metadata is the only place it can
+  come from, and without it a consumer falls back to a default that is wrong for exactly the archives
+  that most need to speak up: a terrarium-packed DEM read as `mapbox` decodes every mountain into
+  noise, silently, with a plausible-looking map on screen.
+
+  Same key and meaning as tileserver-gl, which reads `tileJSON.encoding` and accepts `terrarium` or
+  `mapbox`. The difference is where it comes from — there it is configuration, set per layer beside
+  the server; here it travels with the archive, so a mirror reads the same answer without being
+  configured again and a style no longer has to restate what the archive already knows. Restating it
+  is how a style and its data drift into disagreeing. MapLibre applies TileJSON members to the source
+  after construction, so this overrides an encoding written in the style, which is the intended
+  direction.
+
+  `custom` brings `redFactor`, `greenFactor`, `blueFactor` and `baseShift` with it, and only when all
+  four are present: `custom` means "the channels mean what these numbers say", so the word without
+  the numbers is an archive nobody can read. Anything outside the three values the style
+  specification defines is dropped rather than passed on — a client handed an encoding it does not
+  recognise is worse off than one handed nothing.
+
+  Carried through the feed as `<pmtiles:encoding>` too, so a subscriber serves elevation correctly
+  from the moment it joins rather than reading noise until it has probed the header itself. The
+  custom factors deliberately are not: an archive needing four numbers to be legible is one a mirror
+  should read for itself rather than take on trust from somebody else's document.
+
+### 🐞 Bug fixes
+
 ## 0.54.2
 ### ✨ Features and improvements
 - **Written down and tested: a range read is cached exactly as a tile read is**, because it is the
