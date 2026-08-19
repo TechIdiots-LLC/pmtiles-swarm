@@ -581,3 +581,73 @@ describe('an archive that arrives from a feed', () => {
     assert.deepEqual(node.catalog.get(node.entry.infoHash).webSeeds, []);
   });
 });
+
+describe('a category where nothing is held locally', () => {
+  it('does not offer a download of a file this node has not got', async () => {
+    // The bug: publicDownload put a link labelled "download" on the public
+    // page for a cache-mode archive. Following it answers 409, or — with
+    // serveArchiveFromSwarm on — refuses a request with no Range, which reads
+    // as a broken node rather than as a deliberate limit. serveArchive is
+    // rightly independent of holding the file, since a bounded range can be
+    // fetched from the swarm; a whole-file download cannot.
+    const dir = await fs.mkdtemp(path.join(workspace, 'cachecat-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put({
+      infoHash: 'e'.repeat(40),
+      name: 'planet.pmtiles',
+      size: 4096,
+      kind: 'pmtiles',
+      complete: false,
+      mode: 'cache',
+      savePath: dir,
+      categories: ['basemap'],
+      magnet: `magnet:?xt=urn:btih:${'e'.repeat(40)}`,
+    });
+
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog,
+      engine: { name: 'libtorrent', list: async () => [] },
+      subscriptions: {},
+      tiles: {},
+      config: {
+        watch: [],
+        subscriptions: [],
+        serveArchive: true,
+        publicDownload: true,
+        serveArchiveFromSwarm: true,
+      },
+    });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    try {
+      const body = await (
+        await fetch(`http://127.0.0.1:${server.address().port}/api/catalog`)
+      ).json();
+      assert.equal(body.archives[0].archive, undefined);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('offers it the moment the download finishes', async () => {
+    // Not stored as false, only resolved as false — so the intention survives
+    // and takes effect on its own rather than needing to be set again.
+    const held = { complete: true, publicDownload: true, serveArchive: true };
+    assert.equal(publishingFor(held, {}).publicDownload, true);
+    assert.equal(
+      publishingFor({ ...held, complete: false }, {}).publicDownload,
+      false,
+    );
+  });
+
+  it('still serves a bounded range, which is the whole point of cache mode', async () => {
+    // serveArchive must not depend on holding the file, or
+    // serveArchiveFromSwarm could never do anything.
+    assert.equal(
+      publishingFor({ complete: false }, { serveArchive: true }).serveArchive,
+      true,
+    );
+  });
+});

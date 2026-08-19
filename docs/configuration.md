@@ -464,6 +464,15 @@ is off, whatever the file says. A web seed URL that answers `403` is worse than 
 web seed, because a client spends its retries on it, and a download link that
 `403`s is worse than no link.
 
+**`publicDownload` also needs the file to actually be here.** A cache-mode
+archive is offered no download link, because there is nothing to download: the
+node holds none of it, and a link labelled "download" that answers `409` reads as
+a broken node rather than as a deliberate limit. `serveArchive` is deliberately
+_not_ conditioned that way — a bounded range can be fetched from the swarm, which
+is what [`serveArchiveFromSwarm`](#servearchivefromswarm) is for — and neither
+setting is stored as `false` on that account, so both take effect on their own the
+moment a download finishes.
+
 ### Per archive, per folder, per source
 
 The node's setting is the default. A [watched folder](#watched-folders), a

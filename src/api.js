@@ -2382,7 +2382,11 @@ export function createApp({
     const asked = req.headers.range;
     if (!asked) {
       res.setHeader('accept-ranges', 'bytes');
-      return res.status(411).json({
+      // 409 rather than 411. The request is well formed -- 411 is about a
+      // missing Content-Length on the way in -- and what is wrong is the state
+      // of the thing being asked for: the whole file is not here, and fetching
+      // it through the swarm to stream back out is not an answer.
+      return res.status(409).json({
         error:
           'this node does not hold this archive, so it can only answer a ' +
           'byte range. Send a Range header.',

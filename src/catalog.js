@@ -82,12 +82,26 @@ export function normalizeCategories(source) {
  */
 export function publishingFor(entry, config) {
   const serveArchive = entry?.serveArchive ?? config?.serveArchive ?? false;
+  // Whether the whole file is here. `serveArchive` does not depend on it —
+  // `serveArchiveFromSwarm` exists precisely so a node holding nothing can
+  // still answer a bounded range — but a download link does. A link labelled
+  // "download" on a public page has to hand over the file, and a cache-mode
+  // node cannot: it answers 409, or refuses a request with no Range, which
+  // reads as a broken node rather than as a deliberate limit.
+  //
+  // `selfWebSeed` is guarded separately, in setPublishing, because it has a
+  // lifecycle rather than a state: the URL is written into a .torrent and has
+  // to be added and withdrawn at the right moments, not merely reported as
+  // off. Resolving it to false here would withdraw a published seed the first
+  // time an archive was rechecked.
+  const held = entry?.complete !== false;
   return {
     serveArchive,
     selfWebSeed:
       serveArchive && (entry?.selfWebSeed ?? config?.selfWebSeed ?? false),
     publicDownload:
       serveArchive &&
+      held &&
       (entry?.publicDownload ?? config?.publicDownload ?? false),
   };
 }

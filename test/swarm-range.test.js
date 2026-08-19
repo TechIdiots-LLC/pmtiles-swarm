@@ -135,7 +135,7 @@ describe('an archive this node does not hold', () => {
     // would mean pulling every piece through the swarm to stream it back out.
     await withNode({ serveArchiveFromSwarm: true }, async (node) => {
       const response = await node.get();
-      assert.equal(response.status, 411);
+      assert.equal(response.status, 409);
       assert.match((await response.json()).error, /Send a Range header/);
       assert.deepEqual(node.asked, [], 'it asked the swarm anyway');
     });

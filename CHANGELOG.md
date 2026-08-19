@@ -7,6 +7,22 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.54.1
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **The public page offered a download of an archive the node did not hold.** With `publicDownload`
+  on, a cache-mode archive got a link labelled **download** that answers `409` — or, with
+  `serveArchiveFromSwarm` on, refuses a request carrying no `Range`, which reads as a broken node
+  rather than as a deliberate limit. `publicDownload` now needs the file to be here. `serveArchive`
+  is deliberately not conditioned that way, since a bounded range can be fetched from the swarm, and
+  neither setting is stored as `false` on this account — so both take effect on their own the moment
+  a download finishes.
+
+- **A range request with no `Range` header answered `411`.** That code is about a missing
+  `Content-Length` on the way in; the request here is well formed and it is the state of the resource
+  that makes it unanswerable, so it is now a `409` like the other "not here" refusals beside it.
+
 ## 0.54.0
 ### ✨ Features and improvements
 - **`serveArchiveFromSwarm` — a byte range for an archive this node does not hold.** Experimental,
