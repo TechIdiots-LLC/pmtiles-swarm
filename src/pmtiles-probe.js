@@ -110,6 +110,24 @@ export function customEncodingFactors(metadata) {
  * @param {string} location - Local path or http(s) URL.
  * @returns {Promise<PMTilesSummary>} - The summary.
  */
+/**
+ * What this prober reads, as a number that goes up when that changes.
+ *
+ * A summary is stored in the catalog and never read again, which is right --
+ * re-reading a header out of the swarm is not free, and the answer does not
+ * change for a given infohash. It goes wrong the moment the prober learns to
+ * read something new: every archive probed before that keeps a summary with a
+ * hole in it, for ever, and the only way out was to remove and re-add it.
+ *
+ * `encoding` was the case that made this obvious. It sat in the metadata of
+ * archives this node had been serving for months, and adding the code to read
+ * it changed nothing at all, because nothing ever asked again.
+ *
+ * So: stamp what the prober knew at the time, and re-read once when that is
+ * behind. Raise this whenever a field is added to the summary below.
+ */
+export const SUMMARY_VERSION = 2;
+
 export function summarize(header, metadata = {}) {
   const type = TILE_TYPES[header.tileType] ?? TILE_TYPES[0];
 
@@ -123,6 +141,7 @@ export function summarize(header, metadata = {}) {
   );
 
   return {
+    summaryVersion: SUMMARY_VERSION,
     specVersion: header.specVersion,
     format: type.format,
     contentType: type.contentType,

@@ -1,11 +1,22 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { after } from 'node:test';
 import {
+  SUMMARY_VERSION,
   customEncodingFactors,
   metadataEncoding,
   summarize,
 } from '../src/pmtiles-probe.js';
+import { createApp } from '../src/api.js';
+import { Catalog } from '../src/catalog.js';
 import { buildTileJson } from '../src/tilejson.js';
+
+const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-enc-'));
+after(() => fs.rm(workspace, { recursive: true, force: true }));
+const INFOHASH = 'd'.repeat(40);
 
 /** A header shaped like the prober's input, for a raster archive. */
 const HEADER = {
@@ -104,5 +115,117 @@ describe('what an archive says about its own elevations', () => {
     // The same metadata routinely arrives having been through MBTiles, where
     // every value is TEXT and whitespace survives.
     assert.equal(metadataEncoding('  Terrarium  '), 'terrarium');
+  });
+});
+
+describe('a summary written by an older prober', () => {
+  it('is read again, so a new field reaches archives already in the catalog', async () => {
+    // The case that exposed this: `encoding` sat in the metadata of archives
+    // this node had served for months, the prober learned to read it, and
+    // nothing changed — because a summary is stored once and never questioned.
+    // Every re-read path was gated on the summary being absent, and these
+    // summaries were present, merely old.
+    const dir = await fs.mkdtemp(path.join(workspace, 'stale-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put({
+      infoHash: INFOHASH,
+      name: 'terrain.pmtiles',
+      size: 4096,
+      kind: 'pmtiles',
+      complete: true,
+      savePath: dir,
+      categories: ['terrain'],
+      // What an older release wrote: no summaryVersion, no encoding.
+      pmtiles: {
+        format: 'webp',
+        minZoom: 0,
+        maxZoom: 8,
+        bounds: [-1, -1, 1, 1],
+      },
+    });
+
+    let asked = 0;
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog,
+      engine: { name: 'libtorrent', list: async () => [] },
+      subscriptions: {},
+      tiles: {
+        status: () => null,
+        summarize: async () => {
+          asked += 1;
+          return summarize(
+            {
+              specVersion: 3,
+              tileType: 5,
+              minZoom: 0,
+              maxZoom: 8,
+              minLon: -1,
+              minLat: -1,
+              maxLon: 1,
+              maxLat: 1,
+              centerLon: 0,
+              centerLat: 0,
+              centerZoom: 4,
+              numAddressedTiles: 1,
+              clustered: true,
+            },
+            { encoding: 'mapbox' },
+          );
+        },
+      },
+      config: { watch: [], subscriptions: [] },
+    });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+
+    try {
+      // The first request answers from what is stored, and starts the re-read
+      // behind it rather than holding the reply.
+      await (await fetch(`${base}/archives/${INFOHASH}/tiles.json`)).json();
+      for (let waited = 0; waited < 40 && asked === 0; waited += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(asked, 1, 'the stale summary was never re-read');
+
+      // Give the write-back a turn, then ask again.
+      for (let waited = 0; waited < 40; waited += 1) {
+        if (catalog.get(INFOHASH).pmtiles.encoding) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      const doc = await (
+        await fetch(`${base}/archives/${INFOHASH}/tiles.json`)
+      ).json();
+      assert.equal(doc.encoding, 'mapbox');
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+
+  it('is left alone once it is current', async () => {
+    // Re-reading a header out of the swarm is not free, and the answer cannot
+    // change for a given infohash — so this must happen once, not per request.
+    const current = summarize(
+      {
+        specVersion: 3,
+        tileType: 5,
+        minZoom: 0,
+        maxZoom: 8,
+        minLon: -1,
+        minLat: -1,
+        maxLon: 1,
+        maxLat: 1,
+        centerLon: 0,
+        centerLat: 0,
+        centerZoom: 4,
+        numAddressedTiles: 1,
+        clustered: true,
+      },
+      { encoding: 'mapbox' },
+    );
+    assert.equal(current.summaryVersion, SUMMARY_VERSION);
+    assert.equal(current.encoding, 'mapbox');
   });
 });

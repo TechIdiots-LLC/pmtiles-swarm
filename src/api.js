@@ -33,6 +33,7 @@ import {
 } from './sources.js';
 import { limitFor, remaining } from './seeding.js';
 import { buildTileJson, extensionMatches } from './tilejson.js';
+import { SUMMARY_VERSION } from './pmtiles-probe.js';
 import { TileReadError } from './tiles.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -363,9 +364,18 @@ export function createApp({
    * @returns {boolean} - True to attempt a read now.
    */
   const metadataRetries = new Map();
-  const needsVectorLayers = (summary, infoHash) => {
-    if (!summary || summary.format !== 'pbf' || summary.vectorLayers)
-      return false;
+  const needsReread = (summary, infoHash) => {
+    if (!summary) return false;
+    // Two reasons to go back to the archive. The first is the one this began
+    // as: a vector archive whose layers have not been read yet. The second is
+    // the general case it turned out to be — a summary written by an older
+    // prober, missing whatever that prober did not know to look for. Without
+    // it, adding a field to the summary reaches new archives only, and every
+    // archive already in the catalog keeps its hole until somebody removes and
+    // re-adds it by hand.
+    const stale = summary.summaryVersion !== SUMMARY_VERSION;
+    const missingLayers = summary.format === 'pbf' && !summary.vectorLayers;
+    if (!stale && !missingLayers) return false;
     const last = metadataRetries.get(infoHash) ?? 0;
     if (Date.now() - last < 60000) return false;
     metadataRetries.set(infoHash, Date.now());
@@ -388,13 +398,18 @@ export function createApp({
     // .torrent endpoints work without one. Enriching a summary is the least
     // important thing here and must never be what takes a reply down.
     if (typeof tiles?.summarize !== 'function') return;
-    if (!needsVectorLayers(entry.pmtiles, entry.infoHash)) return;
+    if (!needsReread(entry.pmtiles, entry.infoHash)) return;
 
     const timeoutMs = config.tiles?.metadataTimeoutMs ?? 120000;
     tiles
       .summarize(entry.infoHash, { timeoutMs })
       .then(async (summary) => {
-        if (!summary.vectorLayers) return;
+        // Written back whenever the read produced something newer than what
+        // was stored. Returning early unless vector layers turned up was right
+        // when layers were the only thing this looked for; it would now throw
+        // away the encoding it went to fetch.
+        const fresh = summary.summaryVersion !== entry.pmtiles?.summaryVersion;
+        if (!summary.vectorLayers && !fresh) return;
         await catalog.put({
           infoHash: entry.infoHash,
           pmtiles: { ...entry.pmtiles, ...summary },

@@ -7,6 +7,23 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.55.1
+### 🐞 Bug fixes
+- **0.55.0 reached new archives only.** `encoding` sits in the metadata of archives some nodes have
+  been serving for months, the prober learned to read it, and nothing changed — because a summary is
+  written into the catalog once and never questioned. Every path that re-read one was gated on the
+  summary being *absent*, and these summaries were present, merely old.
+
+  The summary now carries a `summaryVersion`, and one written by an older prober is re-read once, in
+  the background, on the next TileJSON request for that archive. Rate-limited to once a minute per
+  archive, as the vector-layer backfill beside it already was, and written back on any read that
+  produced something newer — the old early return threw away everything except vector layers, which
+  would have discarded the encoding it went to fetch.
+
+  This is general, not a fix for one field: raise `SUMMARY_VERSION` whenever the prober learns to
+  read something new, and every archive already in the catalog picks it up on its own. Nothing is
+  needed on an upgrade beyond asking for the archive's TileJSON, which anything using it does anyway.
+
 ## 0.55.0
 ### ✨ Features and improvements
 - **The TileJSON now carries a `raster-dem` archive's `encoding`**, read out of the archive's own
