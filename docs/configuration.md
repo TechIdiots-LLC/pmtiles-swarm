@@ -373,6 +373,17 @@ The response carries the same `ETag` and the same year-long `immutable` caching 
 complete copy would give, because it is the same content: the infohash names
 those bytes wherever they were read from.
 
+**The pieces are cached exactly as a tile read caches them**, because it is the
+same read. A range goes through the same acquisition, the same `TorrentSource`
+and therefore the same piece cache, so `tiles.pieceCacheBytes`,
+`tiles.maxOpenArchives` and `tiles.directoryCacheEntries` all apply to it
+unchanged — and a node tuned for its memory stays tuned when this endpoint is
+used. It also means the two doors warm each other: somebody pulling the header
+over HTTP leaves the tile endpoint warm for free, and a tile already read costs
+a range request nothing. Underneath, in cache mode, the pieces land in
+[`cacheSavePath`](#cachesavepath) the same way, so what a reader asks for over
+HTTP hydrates the partial archive on disk just as a tile request does.
+
 **A node cannot be a web seed for an archive it does not hold**, whatever this is
 set to. [`selfWebSeed`](#selfwebseed) is refused on an incomplete archive and
 offered again when the download finishes — answering from the swarm and then

@@ -7,6 +7,18 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.54.2
+### ✨ Features and improvements
+- **Written down and tested: a range read is cached exactly as a tile read is**, because it is the
+  same read. `serveArchiveFromSwarm` goes through the same acquisition, the same `TorrentSource` and
+  therefore the same piece cache, so `tiles.pieceCacheBytes`, `tiles.maxOpenArchives` and
+  `tiles.directoryCacheEntries` all bound it unchanged. The two doors warm each other: pulling the
+  header over HTTP leaves the tile endpoint warm for free, and a tile already read costs a range
+  request nothing. Five tests now hold that in place by counting what actually reaches the swarm —
+  including one that shrinks the byte budget to a single piece and watches the eviction happen.
+
+### 🐞 Bug fixes
+
 ## 0.54.1
 ### ✨ Features and improvements
 
