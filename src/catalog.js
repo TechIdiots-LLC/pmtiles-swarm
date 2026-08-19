@@ -21,6 +21,12 @@ import path from 'node:path';
  * @property {string} torrentPath - Generated .torrent on disk.
  * @property {string} magnet - Magnet URI for the current infohash.
  * @property {string[]} webSeeds - BEP 19 url-list entries.
+ * @property {boolean} [serveArchive] - Answer /archives/<hash>/archive.pmtiles
+ *   for this archive. Unset defers to the node.
+ * @property {boolean} [selfWebSeed] - Publish this node's own archive URL in
+ *   the torrent's url-list. Unset defers to the node.
+ * @property {boolean} [publicDownload] - Offer it as a download on the public
+ *   catalogue page. Unset defers to the node.
  * @property {object} [pmtiles] - Header and metadata summary.
  * @property {object} [mutable] - BEP 46 identity: {publicKey, salt, seq}.
  * @property {string} [originMtime] - The archive's mtime on the node that built
@@ -49,6 +55,41 @@ export function normalizeCategories(source) {
     .map((value) => value.trim())
     .filter(Boolean);
   return [...new Set(clean)].sort();
+}
+
+/**
+ * What this node offers of an archive's own bytes, over plain HTTP.
+ *
+ * Three separate decisions, because they are three separate exposures and
+ * conflating them takes the choice away from whoever runs the node:
+ *
+ * - `serveArchive` — whether `/archives/<hash>/archive.pmtiles` answers at
+ *   all. This is the one that decides whether a stranger who knows an infohash
+ *   can pull 700 GiB off the box.
+ * - `selfWebSeed` — whether this node's own URL is written into the torrent's
+ *   `url-list`, so every peer in the swarm fetches from it.
+ * - `publicDownload` — whether the public catalogue page offers it as a
+ *   download. Serving a file to a reader that already knows the URL and
+ *   advertising it on a page are not the same act.
+ *
+ * The last two are ANDed with the first rather than merely defaulting from it.
+ * A node cannot be a web seed for a file it will not serve, and a download link
+ * that 403s is worse than no link — so a catalog edited by hand into that state
+ * is read as the safe thing rather than obeyed into an incoherent one.
+ * @param {object} [entry] - A catalog entry, whose fields win where set.
+ * @param {object} [config] - The node's defaults.
+ * @returns {{serveArchive: boolean, selfWebSeed: boolean, publicDownload: boolean}} - Resolved.
+ */
+export function publishingFor(entry, config) {
+  const serveArchive = entry?.serveArchive ?? config?.serveArchive ?? false;
+  return {
+    serveArchive,
+    selfWebSeed:
+      serveArchive && (entry?.selfWebSeed ?? config?.selfWebSeed ?? false),
+    publicDownload:
+      serveArchive &&
+      (entry?.publicDownload ?? config?.publicDownload ?? false),
+  };
 }
 
 /**

@@ -13,7 +13,7 @@ import {
   hashToken,
   isPublicSurface,
 } from './auth.js';
-import { normalizeCategories } from './catalog.js';
+import { normalizeCategories, publishingFor } from './catalog.js';
 import { mutableMagnet, trackersFromMagnet } from './mutable.js';
 import { guessKind } from './library.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
@@ -1005,7 +1005,17 @@ export function createApp({
       // being read through the swarm while serving thousands of tiles is a
       // different situation from one doing neither.
       const served = stats?.forArchive(entry.infoHash) ?? null;
-      res.json({ ...entry, status, reading, diskBytes, served });
+      // Resolved rather than raw, because an entry that says nothing is not
+      // "off" — it defers to the node, and the console has to show what is
+      // actually happening rather than what this record happens to store.
+      res.json({
+        ...entry,
+        status,
+        reading,
+        diskBytes,
+        served,
+        publishing: publishingFor(entry, config),
+      });
     }),
   );
 
@@ -1088,6 +1098,54 @@ export function createApp({
           req.params.infoHash,
           Array.isArray(urls) ? urls : [urls],
           { replace: body.replace === true },
+        );
+        res.json(result);
+      } catch (error) {
+        const status = /unknown archive/.test(error.message) ? 404 : 400;
+        res.status(status).json({ error: error.message });
+      }
+    }),
+  );
+
+  // Removes web seeds from an archive already in circulation. The same
+  // rewrite as adding one, and safe for the same reason: url-list sits outside
+  // the info dictionary, so the infohash is untouched.
+  app.delete(
+    '/api/torrents/:infoHash/webseeds',
+    route(async (req, res) => {
+      const body = req.body ?? {};
+      const urls = body.webSeeds ?? body.urls ?? body.url;
+      try {
+        const result = await library.removeWebSeeds(
+          req.params.infoHash,
+          Array.isArray(urls) ? urls : [urls],
+        );
+        res.json(result);
+      } catch (error) {
+        const status = /unknown archive/.test(error.message) ? 404 : 400;
+        res.status(status).json({ error: error.message });
+      }
+    }),
+  );
+
+  // What this node offers of one archive's own bytes over HTTP: whether it
+  // serves the file at all, whether it publishes itself as a web seed for it,
+  // and whether the public page offers it as a download. Three switches
+  // because they are three exposures — see publishingFor in catalog.js.
+  app.post(
+    '/api/torrents/:infoHash/publish',
+    route(async (req, res) => {
+      const body = req.body ?? {};
+      try {
+        const result = await library.setPublishing(
+          req.params.infoHash,
+          body,
+          // A node with no publicUrl still has to name itself to be a web
+          // seed, and the request it is being asked on is the best evidence
+          // available — the same reasoning the TileJSON already uses. Given
+          // the public port, never the admin one: a seed URL on a listener
+          // bound to localhost is a URL no peer can reach.
+          { baseUrl: baseUrl(req) },
         );
         res.json(result);
       } catch (error) {
@@ -1601,6 +1659,9 @@ export function createApp({
         webSeedBase: body.webSeedBase,
         allowUnknown: body.allowUnknown,
         md5: body.md5,
+        serveArchive: body.serveArchive,
+        selfWebSeed: body.selfWebSeed,
+        publicDownload: body.publicDownload,
         webSeed: body.webSeed,
       };
 
@@ -1951,6 +2012,14 @@ export function createApp({
           magnet: entry.magnet,
           torrent: `${baseUrl(req)}/archives/${entry.infoHash}/archive.torrent`,
           webSeeds: entry.webSeeds ?? [],
+          // Present only when this archive is offered as a download. Absent
+          // otherwise rather than null: a public document should say what is
+          // on offer, not enumerate what is being withheld.
+          ...(publishingFor(entry, config).publicDownload
+            ? {
+                archive: `${baseUrl(req)}/archives/${entry.infoHash}/archive.pmtiles`,
+              }
+            : {}),
           pmtiles: entry.pmtiles,
           kind: entry.kind,
           md5: entry.md5,
@@ -2261,6 +2330,18 @@ export function createApp({
   app.get('/latest/:category/archive.pmtiles', (req, res) => {
     const entry = newestIn(req.params.category, req);
     if (!entry) return res.status(404).json({ error: 'no such category' });
+
+    // Whether this node hands out whole archives at all is the operator's
+    // call, not a consequence of having the file. Everything else published
+    // here is either small or metered by the request; this is up to 700 GiB to
+    // anyone who knows an infohash, so it is asked for rather than assumed.
+    if (!publishingFor(entry, config).serveArchive) {
+      return res.status(403).json({
+        error:
+          'this node does not serve archive files over HTTP. Set ' +
+          '`serveArchive` on the node, or turn it on for this archive.',
+      });
+    }
 
     if (entry.complete === false) {
       return res.status(409).json({
@@ -2594,6 +2675,18 @@ export function createApp({
   app.get('/archives/:infoHash/archive.pmtiles', (req, res) => {
     const entry = catalog.get(req.params.infoHash);
     if (!entry) return res.status(404).json({ error: 'not found' });
+
+    // Whether this node hands out whole archives at all is the operator's
+    // call, not a consequence of having the file. Everything else published
+    // here is either small or metered by the request; this is up to 700 GiB to
+    // anyone who knows an infohash, so it is asked for rather than assumed.
+    if (!publishingFor(entry, config).serveArchive) {
+      return res.status(403).json({
+        error:
+          'this node does not serve archive files over HTTP. Set ' +
+          '`serveArchive` on the node, or turn it on for this archive.',
+      });
+    }
 
     if (entry.complete === false) {
       return res.status(409).json({

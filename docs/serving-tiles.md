@@ -121,6 +121,12 @@ GET /latest/{category}.xml               a feed holding only the current build
 Point a style at `/latest/basemaps/tiles.json` and it keeps working across every
 rebuild, with no edit.
 
+`archive.pmtiles` is the one of these that has to be asked for. It is off until
+[`serveArchive`](configuration.md#servearchive) is set, on the node or on the
+archive, because it is the only thing here that is neither small nor metered by
+the request — everything else on this page is kilobytes or one tile, and this is
+the whole file.
+
 **The tiles it names are still infohash URLs.** That is the whole point of the
 layering: this document is the only mutable thing in the system, and everything
 it refers to stays content-addressed and cached for a year. Pointing the tile

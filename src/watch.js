@@ -224,6 +224,10 @@ export class WatchManager {
         // taking a nightly planet build cannot, whatever the node's default
         // says. Left unset the node's `md5` decides, as it always did.
         md5: folder.md5,
+        // Same three-level rule as md5: unset here means the node decides.
+        serveArchive: folder.serveArchive,
+        selfWebSeed: folder.selfWebSeed,
+        publicDownload: folder.publicDownload,
         comment: folder.comment,
         // Marks this as the folder's, so retention below has a family to work
         // within and nothing outside it can be caught up in one.

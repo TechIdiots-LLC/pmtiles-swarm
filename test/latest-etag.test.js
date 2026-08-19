@@ -22,10 +22,15 @@ const WILLING_TO_CACHE = { 'cache-control': 'max-age=60' };
 
 /**
  * A node publishing one category with one build in it.
- * @param {object} options - `complete` and `onDisk`.
+ * @param {object} options - `complete`, `onDisk`, `serving` and `override`.
  * @returns {Promise<object>} - A fetcher and a closer.
  */
-async function serve({ complete = true, onDisk = true } = {}) {
+async function serve({
+  complete = true,
+  onDisk = true,
+  serving = true,
+  override,
+} = {}) {
   const dir = await fs.mkdtemp(path.join(workspace, 'node-'));
   if (onDisk) await fs.writeFile(path.join(dir, 'planet.pmtiles'), BODY);
 
@@ -38,6 +43,7 @@ async function serve({ complete = true, onDisk = true } = {}) {
     kind: 'pmtiles',
     complete,
     savePath: dir,
+    serveArchive: override,
     categories: ['basemap'],
     magnet: `magnet:?xt=urn:btih:${INFOHASH}`,
     pmtiles: { format: 'pbf', minZoom: 0, maxZoom: 14, bounds: [-1, -1, 1, 1] },
@@ -49,7 +55,9 @@ async function serve({ complete = true, onDisk = true } = {}) {
     engine: { name: 'webtorrent', list: async () => [] },
     subscriptions: {},
     tiles: {},
-    config: { watch: [], subscriptions: [] },
+    // Serving whole archives is off unless a node asks for it, so a test
+    // about serving them has to ask.
+    config: { watch: [], subscriptions: [], serveArchive: serving },
   });
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));

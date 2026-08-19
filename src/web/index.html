@@ -377,6 +377,21 @@
       button.state { border-color: var(--line); color: var(--muted); }
       button.speed.on,
       button.state.on { border-color: var(--warn); color: var(--warn); }
+      /* The three switches on the HTTP sources tab. Decisions about exposure
+         rather than settings, so each gets room to say what it does instead of
+         sitting in a row of bare labels. Ordinary .choice labels underneath —
+         these rules only undo the parts of that written for a one-line one. */
+      .publish { display: grid; gap: 0.7rem; margin-bottom: 1.25rem; }
+      /* .choice centres the box against its label, which is right for one line
+         and wrong for four: the box drifts down beside the middle of the hint. */
+      .publish label { align-items: flex-start; }
+      .publish input { margin-top: 0.25rem; }
+      .publish .sub { display: block; margin-top: 0.15rem; }
+      .publish code { word-break: break-all; }
+      /* A switch whose gate is off. Dimmed rather than removed: taking it out
+         would rearrange the panel under a click, and would leave no sign of
+         why the option had gone. */
+      .publish input:disabled + span { opacity: 0.55; }
     </style>
   </head>
   <body>
@@ -1802,7 +1817,61 @@
 
           if (name === 'sources') {
             const seeds = entry.webSeeds ?? [];
+            // Resolved by the node, not read off the record: an archive that
+            // says nothing defers to the node's own answer, and what belongs
+            // in a checkbox is what is actually happening.
+            const on = entry.publishing ?? {};
+            const archiveUrl = `${base}/archives/${entry.infoHash}/archive.pmtiles`;
+
+            // Three switches rather than one, because they are three separate
+            // exposures. Serving the file to a reader that was handed the URL,
+            // putting that URL in front of every peer in the swarm, and
+            // advertising it to every visitor of the public page are different
+            // decisions, and a node can reasonably want any one without the
+            // others.
+            const toggle = (key, label, hint, disabled) => `
+              <label class="choice">
+                <input
+                  type="checkbox"
+                  data-publish="${key}"
+                  ${on[key] ? 'checked' : ''}
+                  ${disabled ? 'disabled' : ''}
+                />
+                <span>
+                  <b>${label}</b>
+                  <span class="sub">${hint}</span>
+                </span>
+              </label>`;
+
             pane.innerHTML =
+              `<div class="publish">
+                 ${toggle(
+                   'serveArchive',
+                   'Serve this archive over HTTP',
+                   `<code>${escapeHtml(archiveUrl)}</code> — the file itself,
+                    by byte range, which is what any PMTiles reader wants.
+                    Off means this node answers 403 for it.`,
+                   false,
+                 )}
+                 ${toggle(
+                   'selfWebSeed',
+                   'Publish this node as a web seed for it',
+                   `Writes that URL into the torrent, so every peer holding it
+                    fetches from here. Turning it off takes the URL back out,
+                    but peers already holding the torrent keep trying it for a
+                    while.`,
+                   !on.serveArchive,
+                 )}
+                 ${toggle(
+                   'publicDownload',
+                   'Offer it as a download on the public page',
+                   `A link on the catalogue page anyone can reach. Separate
+                    from serving it: the endpoint can exist for a style or a
+                    peer without being advertised to every visitor.`,
+                   !on.serveArchive,
+                 )}
+               </div>` +
+              `<h2>Web seeds</h2>` +
               table(
                 ['URL'],
                 seeds.map((url) => [escapeHtml(url)]),
@@ -1830,6 +1899,50 @@
             // Attached here rather than in the panel, because this pane is
             // rebuilt whenever it is shown and the handler has to survive that.
             // Safe: sources is not one of the panes the refresh redraws.
+            for (const box of pane.querySelectorAll('[data-publish]')) {
+              box.onchange = async () => {
+                const key = box.dataset.publish;
+                const want = box.checked;
+                // Asked before the request, not after: this is the one that
+                // changes what strangers can pull off the disk, and a checkbox
+                // is a very quiet way to hand out 700 GiB.
+                if (
+                  key === 'serveArchive' &&
+                  want &&
+                  !window.confirm(
+                    'Serve this archive over HTTP.\n\n' +
+                      'Anyone who knows the infohash can then download the ' +
+                      'whole file — ' +
+                      (bytes(entry.size) || 'the entire archive') +
+                      ' — from this node.',
+                  )
+                ) {
+                  box.checked = false;
+                  return;
+                }
+                box.disabled = true;
+                try {
+                  const result = await api(
+                    `/api/torrents/${infoHash}/publish`,
+                    { method: 'POST', body: { [key]: want } },
+                  );
+                  // The withdrawal is worth saying out loud. The others are
+                  // visible in the checkbox that was just clicked.
+                  if (result.withdrewWebSeed) {
+                    toast(
+                      'web seed withdrawn; peers holding the torrent will ' +
+                        'keep trying it until they refresh it',
+                    );
+                  }
+                  renderDetail(infoHash);
+                } catch (error) {
+                  toast(error.message);
+                  box.checked = !want;
+                  box.disabled = false;
+                }
+              };
+            }
+
             const add = async () => {
               const url = pane.querySelector('#seed-url').value.trim();
               if (!url) return;

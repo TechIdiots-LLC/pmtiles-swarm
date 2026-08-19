@@ -334,11 +334,26 @@
           }
           add(`${root}/archive.torrent`, '.torrent');
           if (archive.magnet) add(archive.magnet, 'magnet');
+          // Only where the node offers this archive as a download. The
+          // catalogue names it rather than the page deciding, because whether
+          // a 700 GiB file is advertised to every visitor is the operator's
+          // call and not something a page can infer from the file existing.
+          if (archive.archive) {
+            const download = el('a', null, 'download');
+            download.href = archive.archive;
+            // Named after the archive rather than after the route, which for
+            // every archive on the node is the same word.
+            download.download = archive.name ?? '';
+            links.append(download);
+          }
           card.append(links);
 
           const urls = el('div', 'urls');
           if (servable) {
             urls.append(urlRow('TileJSON', new URL(`${root}/tiles.json`, location.href).href));
+          }
+          if (archive.archive) {
+            urls.append(urlRow('archive', archive.archive));
           }
           for (const seed of archive.webSeeds ?? []) {
             urls.append(urlRow('web seed', seed));

@@ -413,6 +413,9 @@ export class ScheduledSourceManager {
           // and one publishing a 700 GiB planet nightly is not worth reading
           // twice. Unset inherits the node's `md5`.
           md5: source.md5,
+          serveArchive: source.serveArchive,
+          selfWebSeed: source.selfWebSeed,
+          publicDownload: source.publicDownload,
           retain: source.retain !== false,
           // Left undefined the library decides, which is to publish the URL
           // unless it carries credentials. Set explicitly it is obeyed either
@@ -514,6 +517,9 @@ export class ScheduledSourceManager {
           addTrackers: source.addTrackers,
           pieceLength: source.pieceLength,
           md5: source.md5,
+          serveArchive: source.serveArchive,
+          selfWebSeed: source.selfWebSeed,
+          publicDownload: source.publicDownload,
           retain: source.retain !== false,
           webSeed: source.webSeed,
           webSeeds: source.webSeeds,

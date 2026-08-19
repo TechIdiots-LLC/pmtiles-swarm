@@ -13,6 +13,7 @@ Some settings only take effect on restart. Those are marked **restart**.
 - [Storage](#storage)
 - [Engines](#engines)
 - [Creating torrents](#creating-torrents)
+- [Offering the archive file itself](#offering-the-archive-file-itself)
 - [Trackers](#trackers)
 - [Feeds](#feeds)
 - [Watched folders](#watched-folders)
@@ -312,6 +313,77 @@ idled. Use **Pause all** for the other half.
 It lives in the configuration rather than in memory, so a node taken out of
 rotation stays out across the restart you were probably about to do.
 
+## Offering the archive file itself
+
+| setting          | default |                                                       |
+| ---------------- | ------- | ----------------------------------------------------- |
+| `serveArchive`   | `false` | answer `/archives/<infohash>/archive.pmtiles`         |
+| `selfWebSeed`    | `false` | publish this node as a web seed for archives it holds |
+| `publicDownload` | `false` | offer them as downloads on the public catalogue page  |
+
+Three switches rather than one, because they are three different exposures and a
+node can reasonably want any of them without the others.
+
+### `serveArchive`
+
+Off by default. This is the archive as a file, by byte range — which is what
+every PMTiles reader actually wants, and what makes this node usable as an origin
+without a copy of the file somewhere else.
+
+It is off by default because it is the only thing a node publishes that is not
+either small or metered by the request. TileJSON, a `.torrent`, a feed: kilobytes.
+A tile: one tile. This is up to 700 GiB to anyone who knows an infohash, so
+turning a node on has never meant offering its disk to strangers, and still does
+not.
+
+With it on, both range endpoints answer:
+
+```
+GET /archives/<infohash>/archive.pmtiles   one build, immutable, cached for a year
+GET /latest/<category>/archive.pmtiles     whichever is current, with an ETag
+```
+
+With it off, both answer `403`.
+
+### `selfWebSeed`
+
+Writes this node's own `archive.pmtiles` URL into the torrent's `url-list`, so
+every peer holding the torrent fetches from here over HTTP. A web seed is the
+difference between a cold tile taking tens of seconds and taking under one, and
+it is what makes a brand-new archive usable before it has any peers at all.
+
+It is also an open invitation, which is why it is separate: a seed URL is
+followed by everyone who holds the torrent, not only by people who came to this
+node. Turning it off takes the URL back out of the `.torrent` and the magnet —
+but peers already holding either keep trying it until they refresh, so this
+withdraws an advertisement rather than closing a door.
+
+The node has to know what it is called. Set [`publicUrl`](#publicurl), or turn
+the switch on from the console, where the request itself names the node. Without
+either, the setting is refused rather than guessed at: a guessed web seed URL is
+published and then followed.
+
+### `publicDownload`
+
+Adds a **download** link to the public catalogue page. Separate from
+`serveArchive` because serving a file to a reader that was handed the URL and
+advertising it to every visitor are different decisions — the endpoint can exist
+for a style or a peer without being put in front of a browser.
+
+Both `selfWebSeed` and `publicDownload` are read as off wherever `serveArchive`
+is off, whatever the file says. A web seed URL that answers `403` is worse than no
+web seed, because a client spends its retries on it, and a download link that
+`403`s is worse than no link.
+
+### Per archive, per folder, per source
+
+The same three-level rule as [`md5`](#md5). The node's setting is the default; a
+[watched folder](#watched-folders) or a [scheduled source](#scheduled-sources)
+may carry its own; and any individual archive can be switched in the console,
+under **HTTP sources** in its details. An archive that says nothing goes on
+following the node, so changing the node's answer reaches every archive that
+never had one of its own.
+
 ## Trackers
 
 `trackers` is baked into every torrent this node creates. It defaults to the
@@ -372,7 +444,8 @@ their own name. Archives with no category are excluded whenever this is set.
 ## Watched folders
 
 `watch` is a list of `{ path, category, match, webSeedBase, publishDir, sparse,
-latestLink, latestLinkType, keep, keepDays, md5 }`.
+latestLink, latestLinkType, keep, keepDays, md5, serveArchive, selfWebSeed,
+publicDownload }`.
 
 | field               |                                                                                       |
 | ------------------- | ------------------------------------------------------------------------------------- |
@@ -383,6 +456,9 @@ latestLink, latestLinkType, keep, keepDays, md5 }`.
 | `latestLinkType`    | `'symbolic'` (default) or `'hard'`                                                    |
 | `keep` / `keepDays` | retire what the folder has outgrown                                                   |
 | `md5`               | overrides the node's [`md5`](#md5) for this folder alone                              |
+| `serveArchive`      | overrides [`serveArchive`](#servearchive) for archives from this folder               |
+| `selfWebSeed`       | overrides [`selfWebSeed`](#selfwebseed) for them                                      |
+| `publicDownload`    | overrides [`publicDownload`](#publicdownload) for them                                |
 
 `publishDir` and `webSeedBase` together give every imported archive a working web
 seed, which is what makes a brand-new archive usable before any peer has a copy of
@@ -420,14 +496,15 @@ remove the newest build however old it gets. See
 `sources` is a list of upstreams that publish a new archive on a schedule. Each
 entry gives either a `url` template or an `index` directory:
 
-| field        |                                                                                                               |
-| ------------ | ------------------------------------------------------------------------------------------------------------- |
-| `url`        | a template with the date in it — `{YYYYMMDD}`, `{YYYY-MM-DD}`, `{YYYY}`, `{MM}`, `{DD}` — expanded and probed |
-| `index`      | a directory URL, listed and filtered                                                                          |
-| `newest`     | how many listed files an index source will consider. Defaults to 1                                            |
-| `at`         | a time of day in UTC, or a list of them — `"03:30"`                                                           |
-| `everyHours` | an interval instead                                                                                           |
-| `md5`        | overrides the node's [`md5`](#md5) for this source alone                                                      |
+| field                                           |                                                                                                               |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `url`                                           | a template with the date in it — `{YYYYMMDD}`, `{YYYY-MM-DD}`, `{YYYY}`, `{MM}`, `{DD}` — expanded and probed |
+| `index`                                         | a directory URL, listed and filtered                                                                          |
+| `newest`                                        | how many listed files an index source will consider. Defaults to 1                                            |
+| `at`                                            | a time of day in UTC, or a list of them — `"03:30"`                                                           |
+| `everyHours`                                    | an interval instead                                                                                           |
+| `md5`                                           | overrides the node's [`md5`](#md5) for this source alone                                                      |
+| `serveArchive`, `selfWebSeed`, `publicDownload` | override what this node offers of the archives this source fetches                                            |
 
 Prefer a template where the naming is predictable: it asks a direct question,
 gets a direct answer, and needs the upstream to publish no listing at all.

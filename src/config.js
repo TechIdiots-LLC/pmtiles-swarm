@@ -166,6 +166,45 @@ const DEFAULTS = {
    */
   md5: false,
   /**
+   * Answer `/archives/<infohash>/archive.pmtiles` — the archive itself, by
+   * byte range, which is what every PMTiles reader actually wants.
+   *
+   * Off by default, and deliberately so: this is the whole file, and an
+   * archive here can be 700 GiB. Everything else this node publishes is either
+   * small (TileJSON, a .torrent, a feed) or metered by the request (one tile),
+   * so turning a node on has never meant offering its disk to anyone who knows
+   * an infohash. This would, so it is asked for rather than assumed.
+   *
+   * The node's answer, not the only one: a watched folder, a scheduled source
+   * or an individual archive may carry its own, and is obeyed either way.
+   */
+  serveArchive: false,
+  /**
+   * Write this node's own archive URL into the torrent's `url-list`, so every
+   * peer in the swarm can fetch from it over HTTP.
+   *
+   * A web seed is the difference between a cold tile taking tens of seconds
+   * and taking under one, and it is what makes an archive usable before it has
+   * any peers at all. It is also an open invitation: a seed URL is followed by
+   * everyone who holds the torrent, not only by people who visit this node.
+   *
+   * Means nothing without `serveArchive`, and is read as off without it — a
+   * web seed URL that refuses the request is worse than none, because a client
+   * spends its retries on it.
+   */
+  selfWebSeed: false,
+  /**
+   * Offer the archive as a download on the public catalogue page.
+   *
+   * Separate from `serveArchive` on purpose. Serving a file to a reader that
+   * was given the URL and advertising it on a page are different acts, and a
+   * node can reasonably want the first without the second: the endpoint exists
+   * for a style or a peer, and putting a 700 GiB link in front of every casual
+   * visitor is a different decision. Read as off without `serveArchive`, since
+   * a link that answers 403 is worse than no link.
+   */
+  publicDownload: false,
+  /**
    * How long an unfinished download is kept before startup treats it as
    * abandoned. Until then, re-adding the same URL resumes it.
    */
@@ -313,7 +352,8 @@ const DEFAULTS = {
   /**
    * Folders scanned for new archives. Each entry is `{ path, categories,
    * match, webSeedBase, publishDir, latestLink, latestLinkType, keep,
-   * keepDays, sparse, md5 }` — see docs/configuration.md, "Watched folders".
+   * keepDays, sparse, md5, serveArchive, selfWebSeed, publicDownload }` — see
+   * docs/configuration.md, "Watched folders".
    */
   watch: [],
   /**

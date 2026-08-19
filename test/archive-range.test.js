@@ -14,10 +14,15 @@ const BODY = Buffer.from('PMTiles-ish bytes, enough of them to slice.', 'utf8');
 
 /**
  * A node holding one archive, complete or not, with or without its file.
- * @param {object} options - `complete` and `onDisk`.
+ * @param {object} options - `complete`, `onDisk`, `serving` and `override`.
  * @returns {Promise<object>} - A fetcher and a closer.
  */
-async function serve({ complete = true, onDisk = true } = {}) {
+async function serve({
+  complete = true,
+  onDisk = true,
+  serving = true,
+  override,
+} = {}) {
   const dir = await fs.mkdtemp(path.join(workspace, 'node-'));
   if (onDisk) await fs.writeFile(path.join(dir, 'planet.pmtiles'), BODY);
 
@@ -30,6 +35,7 @@ async function serve({ complete = true, onDisk = true } = {}) {
     kind: 'pmtiles',
     complete,
     savePath: dir,
+    serveArchive: override,
   });
 
   const app = createApp({
@@ -38,7 +44,9 @@ async function serve({ complete = true, onDisk = true } = {}) {
     engine: { name: 'webtorrent', list: async () => [] },
     subscriptions: {},
     tiles: {},
-    config: { watch: [], subscriptions: [] },
+    // Serving whole archives is off unless a node asks for it, so a test
+    // about serving them has to ask.
+    config: { watch: [], subscriptions: [], serveArchive: serving },
   });
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
@@ -144,6 +152,36 @@ describe('reading an archive as a file', () => {
         response.headers.get('access-control-expose-headers') ?? '',
         /ETag/,
       );
+      await response.arrayBuffer();
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('does not serve archives at all unless the node asks it to', async () => {
+    // Everything else this node publishes is either small — TileJSON, a
+    // .torrent, a feed — or metered by the request, one tile at a time. This
+    // is the whole file, and an archive here can be 700 GiB, so turning a node
+    // on has never meant offering its disk to anyone holding an infohash. It
+    // still does not.
+    const node = await serve({ serving: false });
+    try {
+      const response = await node.get('archive.pmtiles');
+      assert.equal(response.status, 403);
+      assert.match((await response.json()).error, /does not serve archive/);
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('lets one archive answer differently from the node', async () => {
+    // Which is the point of it being a per-archive field: a node holding one
+    // small public basemap and one enormous private raster should not have to
+    // choose the same answer for both.
+    const node = await serve({ serving: false, override: true });
+    try {
+      const response = await node.get('archive.pmtiles');
+      assert.equal(response.status, 200);
       await response.arrayBuffer();
     } finally {
       await node.close();

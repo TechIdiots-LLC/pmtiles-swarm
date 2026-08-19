@@ -7,6 +7,38 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.50.0
+### ✨ Features and improvements
+- **Three switches for what a node offers of an archive's own bytes**, on the node, on a watched
+  folder, on a scheduled source, and on any individual archive from **HTTP sources** in its details.
+  They are separate because they are three different exposures, and a node can reasonably want any
+  one of them without the others:
+
+  - `serveArchive` — whether `/archives/<infohash>/archive.pmtiles` answers at all. This is the one
+    that decides whether a stranger who knows an infohash can pull 700 GiB off the box.
+  - `selfWebSeed` — whether this node's own URL goes into the torrent's `url-list`, so every peer
+    holding the torrent fetches from here. Turning it on writes the URL into the `.torrent` and the
+    magnet; turning it off takes that URL back out.
+  - `publicDownload` — whether the public catalogue page offers it as a download. Serving a file to a
+    reader that was handed the URL and advertising it to every visitor are different decisions.
+
+  The last two are read as off wherever the first is, whatever the record says. A web seed URL that
+  answers `403` is worse than no web seed, because a client spends its retries on it, and a download
+  link that `403`s is worse than no link. An archive that says nothing about a setting goes on
+  following the node, so changing the node's answer reaches everything that never had one of its own.
+
+- **`DELETE /api/torrents/<infohash>/webseeds`** drops web seeds, the same rewrite as adding them and
+  safe for the same reason: `url-list` sits outside the info dictionary, so the infohash — and every
+  magnet and peer depending on it — is untouched.
+
+### 🐞 Bug fixes
+- **Serving whole archives over HTTP is no longer on for everyone.** 0.48.0 added
+  `/archives/<infohash>/archive.pmtiles` and left it answering for every complete archive, on every
+  node, to anyone who knew an infohash. Everything else this node publishes is either small — TileJSON,
+  a `.torrent`, a feed — or metered by the request, one tile at a time, so turning a node on had never
+  meant offering its disk to strangers. It does not now either: `serveArchive` defaults to off and
+  both range endpoints answer `403` until it is set.
+
 ## 0.49.0
 ### ✨ Features and improvements
 - **The current build of a category can be read as a file.** `GET /latest/<category>/archive.pmtiles`
