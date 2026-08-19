@@ -7,6 +7,21 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.47.0
+### ✨ Features and improvements
+- **The console's Categories tab now matches the public page.** They were two views of one thing that
+  had drifted into two shapes: a label/value table with Copy and Open on every row here, links and a
+  printed style URL there, different labels for the same endpoints, and a preview link on one and not
+  the other.
+
+  Both now offer each endpoint the way it is used — `.torrent` downloads, preview opens, and
+  TileJSON, magnet, RSS and the style URL copy. The console keeps `RSS, newest only`, which is its
+  own, and gains the preview link it was missing. The style URL is no longer printed on either page:
+  here it was truncated to 96 characters, which is long enough to fill the row and too short to be
+  the thing anybody wanted.
+
+### 🐞 Bug fixes
+
 ## 0.46.0
 ### ✨ Features and improvements
 - **Each category endpoint on the public page is now offered the way it is used.** A `.torrent` is a

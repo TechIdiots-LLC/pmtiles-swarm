@@ -224,6 +224,23 @@
       }
       .tag.on { background: var(--accent); color: #fff; border-color: var(--accent); }
       #add-error { color: var(--bad); min-height: 1.2rem; }
+      /* One row of endpoints per category, matching the public page. */
+      #category-list .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem 0.9rem;
+        align-items: center;
+      }
+      /* A copy button reads as a link's sibling, not as a form control. */
+      button.copy {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: none;
+        color: var(--muted);
+        font-size: 0.74rem;
+        padding: 0 0.45rem;
+      }
+      button.copy:hover { color: var(--fg); border-color: var(--fg); }
       /* Category endpoints. `th, td` is nowrap for the archive table, where a
          wrapped number is worse than a wide one — but here the cell holds a
          style URL and a paragraph explaining it, so nowrap pushed the table
@@ -3477,20 +3494,33 @@ Every piece is hashed against the ` +
         list.innerHTML = categories
           .map((entry, index) => {
             const newest = entry.newest;
-            const rows = [
-              ['TileJSON', entry.endpoints.tileJson],
-              ['For a style', entry.endpoints.styleUrl],
-              ['Torrent', entry.endpoints.torrent],
-              ['Magnet', entry.endpoints.magnet],
-              ['Feed', entry.endpoints.feed],
-              ['Latest only', entry.endpoints.latestFeed],
-            ];
+            // The same shape as the public page, and for the same reason: what
+            // an endpoint is for decides how it is offered. A `.torrent` is a
+            // file, so it downloads; a preview is a page, so it opens. The
+            // rest are addresses that belong somewhere else — a style, a
+            // torrent client, a feed reader — and following one from here
+            // achieves nothing, so they copy.
+            //
+            // The style URL is not printed. It is a TileJSON URL carrying a
+            // `.torrent` URL and a percent-encoded magnet in its fragment,
+            // several hundred characters of it, and it was truncated to 96
+            // here — long enough to fill the row and too short to be the
+            // thing anybody wanted.
+            const ends = entry.endpoints;
+            const link = (url, text, download) =>
+              url
+                ? `<a href="${escapeHtml(url)}"${download ? ' download' : ' target="_blank" rel="noreferrer"'}>${text}</a>`
+                : '';
+            const copyable = (url, text) =>
+              url
+                ? `<button class="copy" data-copy-url="${escapeHtml(url)}" title="${escapeHtml(url)}">${text}</button>`
+                : '';
 
             return `
               <div class="panel" style="margin-bottom:0.8rem">
                 <h2 style="margin-top:0">
                   ${escapeHtml(entry.category)}
-                  <span class="sub">· ${entry.archives} archive${entry.archives === 1 ? '' : 's'}</span>
+                  <span class="sub">· ${entry.archives} build${entry.archives === 1 ? '' : 's'}</span>
                 </h2>
                 <div class="sub" style="margin-bottom:0.6rem">
                   ${
@@ -3499,60 +3529,32 @@ Every piece is hashed against the ` +
                       : 'nothing published under this tag yet'
                   }
                 </div>
-                <table>
-                  <tbody>
-                    ${rows
-                      .map(
-                        ([label, url], row) => `
-                          <tr>
-                            <td style="width:8rem">${label}</td>
-                            <td>${
-                              url
-                                ? `<code>${escapeHtml(
-                                    url.length > 96 ? `${url.slice(0, 96)}…` : url,
-                                  )}</code>${
-                                    label === 'For a style'
-                                      ? `<div class="sub">the .torrent URL and the magnet ride in the
-                                         fragment, which is never sent to the server — an ordinary
-                                         client fetches the TileJSON and ignores them, a swarm-aware
-                                         one reads them before making any call${
-                                           // Matched unanchored because the magnet is
-                                           // percent-encoded in the fragment now that it
-                                           // shares one with the .torrent URL.
-                                           url.includes('btpk')
-                                             ? ', and both follow the category rather than this build'
-                                             : ''
-                                         }</div>`
-                                      : ''
-                                  }`
-                                : '<span class="sub">not a PMTiles archive, so there is no tile endpoint</span>'
-                            }</td>
-                            <td style="width:11rem">${
-                              url
-                                ? `<button data-copy="${index}-${row}">Copy</button>
-                                   <a href="${escapeHtml(url)}" target="_blank" rel="noreferrer"><button type="button">Open</button></a>`
-                                : ''
-                            }</td>
-                          </tr>`,
-                      )
-                      .join('')}
-                  </tbody>
-                </table>
+                ${
+                  ends.tileJson
+                    ? `<div class="links">
+                         ${copyable(ends.tileJson, 'TileJSON')}
+                         ${link(ends.preview, 'preview')}
+                         ${link(ends.torrent, '.torrent', true)}
+                         ${copyable(ends.magnet, 'magnet')}
+                         ${copyable(ends.feed, 'RSS')}
+                         ${copyable(ends.latestFeed, 'RSS, newest only')}
+                         ${copyable(ends.styleUrl, 'style URL')}
+                       </div>
+                       <div class="sub" style="margin-top:0.5rem">
+                         The style URL is the TileJSON with the .torrent URL and
+                         the magnet in its fragment, which is never sent to the
+                         server — an ordinary client fetches the TileJSON and
+                         ignores them, a swarm-aware one reads them first, and
+                         both follow the category rather than this build.
+                       </div>`
+                    : '<div class="sub">not a PMTiles archive, so there is no tile endpoint</div>'
+                }
               </div>`;
           })
           .join('');
 
-        for (const button of list.querySelectorAll('[data-copy]')) {
-          const [index, row] = button.dataset.copy.split('-').map(Number);
-          const url = [
-            categories[index].endpoints.tileJson,
-            categories[index].endpoints.styleUrl,
-            categories[index].endpoints.torrent,
-            categories[index].endpoints.magnet,
-            categories[index].endpoints.feed,
-            categories[index].endpoints.latestFeed,
-          ][row];
-          button.onclick = () => copy(url, 'URL');
+        for (const button of list.querySelectorAll('[data-copy-url]')) {
+          button.onclick = () => copy(button.dataset.copyUrl, 'URL');
         }
       }
 

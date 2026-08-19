@@ -1055,7 +1055,38 @@ describe('the category endpoints table', () => {
     // worse than a wide one. Here the cell holds a style URL and a paragraph
     // explaining it, so nowrap pushed the table past the window and carried
     // Copy and Open off the far edge.
-    assert.match(styles, /#category-list table \{ table-layout: fixed; \}/);
-    assert.match(styles, /#category-list td \{ white-space: normal; \}/);
+    // The table is gone entirely now — the endpoints are a row of links and
+    // copy buttons, the same shape the public page uses.
+    assert.match(styles, /#category-list \.links \{/);
+  });
+});
+
+describe('the console categories and the public page', () => {
+  const console_ = page.slice(
+    page.indexOf('async function loadCategories()'),
+    page.indexOf('function renderRowEditor('),
+  );
+
+  it('offer each endpoint the same way', () => {
+    // Two views of one thing that had drifted into two shapes: a label/value
+    // table with Copy and Open on every row here, links and a printed style
+    // URL there. What an endpoint is for decides how it is offered, and that
+    // is the same answer on both pages.
+    assert.match(console_, /copyable\(ends\.tileJson, 'TileJSON'\)/);
+    assert.match(console_, /link\(ends\.preview, 'preview'\)/);
+    assert.match(console_, /link\(ends\.torrent, '\.torrent', true\)/);
+    assert.match(console_, /copyable\(ends\.magnet, 'magnet'\)/);
+    assert.match(console_, /copyable\(ends\.styleUrl, 'style URL'\)/);
+  });
+
+  it('does not print the style URL here either', () => {
+    // It was truncated to 96 characters — long enough to fill the row and too
+    // short to be the thing anybody wanted.
+    assert.ok(!console_.includes('slice(0, 96)'), 'still printing it');
+  });
+
+  it('gives the console the preview link it was missing', () => {
+    // The public page had it and this did not, which is the drift in one line.
+    assert.ok(console_.includes('ends.preview'));
   });
 });
