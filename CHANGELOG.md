@@ -7,6 +7,14 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.55.2
+### 🐞 Bug fixes
+- **The stale-summary re-read never ran for a category URL.** 0.55.1 added it to
+  `/archives/<infohash>/tiles.json` and nowhere else, which missed exactly the archives that matter:
+  `/latest/<category>/tiles.json` is the URL a style points at, so a category consumed through the
+  documented path was the one place a summary stayed stale for ever. An archive only healed if
+  somebody happened to ask for it by infohash.
+
 ## 0.55.1
 ### 🐞 Bug fixes
 - **0.55.0 reached new archives only.** `encoding` sits in the metadata of archives some nodes have

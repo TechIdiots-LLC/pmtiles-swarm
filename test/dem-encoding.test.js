@@ -228,4 +228,63 @@ describe('a summary written by an older prober', () => {
     assert.equal(current.summaryVersion, SUMMARY_VERSION);
     assert.equal(current.encoding, 'mapbox');
   });
+
+  it('heals a stale summary through the category URL as well', async () => {
+    // /latest/<category>/tiles.json is the URL a style points at, and it was
+    // the one route that never asked for a re-read — so the archives most
+    // likely to be consumed through the documented path were the ones whose
+    // summaries stayed stale for ever.
+    const dir = await fs.mkdtemp(path.join(workspace, 'latest-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put({
+      infoHash: INFOHASH,
+      name: 'terrain.pmtiles',
+      size: 4096,
+      kind: 'pmtiles',
+      complete: true,
+      savePath: dir,
+      categories: ['terrain'],
+      pmtiles: {
+        format: 'webp',
+        minZoom: 0,
+        maxZoom: 8,
+        bounds: [-1, -1, 1, 1],
+      },
+    });
+
+    let asked = 0;
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog,
+      engine: { name: 'libtorrent', list: async () => [] },
+      subscriptions: {},
+      tiles: {
+        status: () => null,
+        summarize: async () => {
+          asked += 1;
+          return summarize(HEADER, { encoding: 'mapbox' });
+        },
+      },
+      config: { watch: [], subscriptions: [] },
+    });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const base = `http://127.0.0.1:${server.address().port}`;
+
+    try {
+      await (await fetch(`${base}/latest/terrain/tiles.json`)).json();
+      for (let waited = 0; waited < 40; waited += 1) {
+        if (catalog.get(INFOHASH).pmtiles.encoding) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      assert.equal(asked, 1, 'the category URL never asked for a re-read');
+      const doc = await (
+        await fetch(`${base}/latest/terrain/tiles.json`)
+      ).json();
+      assert.equal(doc.encoding, 'mapbox');
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
 });

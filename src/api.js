@@ -2274,6 +2274,12 @@ export function createApp({
         });
       }
 
+      // The same background re-read the per-archive route does. Left out
+      // here, it missed exactly the archives that matter most: /latest/ is the
+      // URL a style points at, so a category anyone actually consumes through
+      // the documented path was the one place a stale summary never healed.
+      startMetadataBackfill(entry);
+
       res.setHeader('access-control-allow-origin', '*');
       // Short-lived, and the only mutable document in the system: everything
       // it points at is content-addressed and cached for a year, and this is
