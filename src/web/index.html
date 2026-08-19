@@ -226,12 +226,6 @@
       #add-error { color: var(--bad); min-height: 1.2rem; }
       /* Separates what acts on one archive from what acts on all of them. */
       .bar-gap { flex: 1 1 1.5rem; min-width: 0.75rem; }
-      /* A node deliberately out of rotation should not read as a healthy one.
-         Loud rather than subtle: this is a state somebody meant to leave. */
-      button#offline-toggle.on {
-        color: var(--warn);
-        border-color: var(--warn);
-      }
       .tabs {
         display: flex;
         gap: 0.25rem;
@@ -347,8 +341,10 @@
       .addrow > .value { font-size: 0.8rem; color: var(--muted); text-align: right; white-space: nowrap; }
       .addrow > button { padding: 0.15rem 0.55rem; font-size: 0.75rem; }
 
-      button.speed { border-color: var(--line); color: var(--muted); }
-      button.speed.on { border-color: var(--warn); color: var(--warn); }
+      button.speed,
+      button.state { border-color: var(--line); color: var(--muted); }
+      button.speed.on,
+      button.state.on { border-color: var(--warn); color: var(--warn); }
     </style>
   </head>
   <body>
@@ -357,6 +353,7 @@
       <div class="status" id="status">connecting…</div>
       <span id="reach" class="reach" hidden></span>
       <button id="speed-toggle" class="speed" hidden title="Switch between the normal and alternative speed limits"></button>
+      <button id="offline-toggle" class="state" hidden title="Take this node out of rotation. /health answers 503 while it is off, which is what a load balancer reads to stop sending traffic here — seeding, the console and the library carry on."></button>
       <nav>
         <button id="tab-archives" class="on">Archives</button>
         <button id="tab-categories">Categories</button>
@@ -378,7 +375,6 @@
           <button id="recheck-all" title="Hash every archive against its torrent and believe the result. What you want after a disk repair — nothing else goes and looks. Progress reads as the fraction hashed while it runs.">Recheck all</button>
           <button id="pause-all" title="Stop offering every archive. The data and the catalog stay; this is &quot;not right now&quot;, not &quot;not any more&quot;.">Pause all</button>
           <button id="resume-all" title="Start every archive that is paused.">Resume all</button>
-          <button id="offline-toggle" title="Take this node out of rotation. /health answers 503 while it is off, which is what a load balancer reads to stop sending traffic here — seeding and the console carry on.">Take offline</button>
         </div>
         <div class="bar">
           <input
@@ -1367,6 +1363,7 @@
        */
       function renderOffline(offline) {
         const button = $('offline-toggle');
+        button.hidden = false;
         button.classList.toggle('on', offline);
         button.textContent = offline ? 'Bring online' : 'Take offline';
       }

@@ -20,8 +20,9 @@
   here comes from something written down earlier, and this is the only thing that goes and looks.
   `POST /api/library/recheck`, `/api/library/pause` and `/api/library/resume` are the same three from
   a script.
-- **A node can be taken out of rotation without being stopped.** `offline` — or **Take offline** in
-  the console — makes `/health` answer `503` with `status: "offline"`, which is what a load balancer
+- **A node can be taken out of rotation without being stopped.** `offline` — or the **Take offline**
+  switch in the console header, beside the engine and the reachability dot, where the things that
+  describe the node rather than an archive live — makes `/health` answer `503` with `status: "offline"`, which is what a load balancer
   reads to stop sending traffic here. It is answered before the engine is asked, so a node stays
   drained whatever the engine happens to think.
 

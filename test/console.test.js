@@ -900,3 +900,40 @@ describe('the details panel and the name above it', () => {
     assert.match(render.slice(0, 2000), /aria-label', entry\.name/);
   });
 });
+
+describe('where the whole-node switch lives', () => {
+  const header = page.slice(
+    page.indexOf('<header>'),
+    page.indexOf('</header>'),
+  );
+  const archives = page.slice(
+    page.indexOf('<section id="view-archives">'),
+    page.indexOf('<section id="view-categories"'),
+  );
+
+  it('sits in the header with the rest of the node status', () => {
+    // It says what the node is, not what to do with an archive — the same
+    // kind of thing as the engine, the reachability dot and the speed switch.
+    assert.ok(header.includes('id="offline-toggle"'), 'not in the header');
+    assert.ok(
+      !archives.includes('id="offline-toggle"'),
+      'still in the archives toolbar as well',
+    );
+  });
+
+  it('keeps the whole-library actions with the archives', () => {
+    // Those do act on archives, so they belong where the archives are.
+    for (const id of ['recheck-all', 'pause-all', 'resume-all']) {
+      assert.ok(archives.includes(`id="${id}"`), `${id} left the toolbar`);
+      assert.ok(!header.includes(`id="${id}"`), `${id} is in the header`);
+    }
+  });
+
+  it('says nothing until the node has said which way it is', () => {
+    // Guessing would show "Take offline" on a node already out of rotation,
+    // and one click would put it back in without anybody meaning to.
+    assert.match(header, /id="offline-toggle"[^>]*\shidden/);
+    const render = page.slice(page.indexOf('function renderOffline('));
+    assert.match(render.slice(0, 300), /button\.hidden = false;/);
+  });
+});
