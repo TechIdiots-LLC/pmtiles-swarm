@@ -433,12 +433,23 @@ web seed, because a client spends its retries on it, and a download link that
 
 ### Per archive, per folder, per source
 
-The same three-level rule as [`md5`](#md5). The node's setting is the default; a
-[watched folder](#watched-folders) or a [scheduled source](#scheduled-sources)
-may carry its own; and any individual archive can be switched in the console,
-under **HTTP sources** in its details. An archive that says nothing goes on
-following the node, so changing the node's answer reaches every archive that
-never had one of its own.
+The node's setting is the default. A [watched folder](#watched-folders), a
+[scheduled source](#scheduled-sources), an [RSS feed](#subscriptions) and a
+remote node may each carry their own — the **Serve file**, **Web seed** and
+**Listed** columns on those tables, where `node` means "no opinion" rather than
+"off". And any individual archive can be switched in the console, under **HTTP
+sources** in its details.
+
+An archive that says nothing goes on following the node, so changing the node's
+answer reaches every archive that never had one of its own.
+
+Unlike `md5`, these do apply to a subscription. `md5` is a hashing pass that only
+happens where a torrent is built, and a subscription adopts one somebody else
+built; this is about what happens to the archive afterwards, which is this node's
+business whoever made it. **`selfWebSeed` waits for the download to finish**: a
+web seed URL for an archive still arriving answers `409`, and a peer handed a URL
+that refuses spends its retries on it — worse than no web seed, and unfixable
+afterwards, because by then the URL is in every copy of the `.torrent`.
 
 ## Trackers
 

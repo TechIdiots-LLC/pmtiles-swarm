@@ -4654,6 +4654,34 @@ Every piece is hashed against the ` +
         await renderTokenEditor(body);
         renderHookEditor(body, config, restartKeys);
 
+        // The three switches the details panel offers, as import defaults.
+        // Each has a blank option as well as yes and no, because unset is a
+        // real answer here: it means the archive follows the node, and a row
+        // that has never said anything must keep not saying it. See
+        // publishingFor() -- the node's setting reaches everything that never
+        // had one of its own, and that only works if "no opinion" is storable.
+        const publishing = ['', 'node'];
+        const publishingColumns = [
+          {
+            field: 'serveArchive',
+            label: 'Serve file',
+            boolean: true,
+            options: [publishing, ['true', 'yes'], ['false', 'no']],
+          },
+          {
+            field: 'selfWebSeed',
+            label: 'Web seed',
+            boolean: true,
+            options: [publishing, ['true', 'yes'], ['false', 'no']],
+          },
+          {
+            field: 'publicDownload',
+            label: 'Listed',
+            boolean: true,
+            options: [publishing, ['true', 'yes'], ['false', 'no']],
+          },
+        ];
+
         renderRowEditor({
           into: body,
           key: 'locations',
@@ -4747,6 +4775,7 @@ Every piece is hashed against the ` +
               placeholder: 'for ever',
               number: true,
             },
+                      ...publishingColumns,
           ],
           rows: config.watch ?? [],
           footnote:
@@ -4855,6 +4884,7 @@ Every piece is hashed against the ` +
               placeholder: 'for ever',
               number: true,
             },
+                      ...publishingColumns,
           ],
           rows: config.sources ?? [],
           checkNow: '/api/sources/check',
@@ -4979,6 +5009,7 @@ Every piece is hashed against the ` +
                 ['false', 'no'],
               ],
             },
+                      ...publishingColumns,
           ],
           rows: following.filter((row) => !isPeer(row)),
           checkNow: '/api/subscriptions/refresh',
@@ -5053,6 +5084,7 @@ Every piece is hashed against the ` +
                 ['false', 'no'],
               ],
             },
+                      ...publishingColumns,
           ],
           rows: following.filter(isPeer),
           checkNow: '/api/subscriptions/refresh',

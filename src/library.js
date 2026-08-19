@@ -526,6 +526,39 @@ export class Library {
    * @returns {Promise<object>} - The updated catalog entry.
    */
   async finalize(infoHash) {
+    const settled = await this.#finalizeOnce(infoHash);
+
+    // Only now, and never at import. A web seed URL for an archive that is
+    // still arriving answers 409, and a peer handed a URL that refuses spends
+    // its retries on it — worse than no web seed at all, and unfixable
+    // afterwards, because the URL is in the .torrent every peer holds. So a
+    // subscription records the intention when it joins and it is acted on
+    // here, at the first moment this node actually holds the whole file.
+    //
+    // Safe to reach on an archive that was already complete: setPublishing
+    // works from what is on record rather than from a transition, so this does
+    // nothing the second time — and does the right thing the first time for an
+    // archive that finished before the setting existed.
+    if (settled && publishingFor(settled, this.#config).selfWebSeed) {
+      try {
+        await this.setPublishing(infoHash, {});
+        return this.#catalog.get(infoHash) ?? settled;
+      } catch (error) {
+        console.warn(
+          `[web seed] ${settled.name} is not published as a web seed by this ` +
+            `node: ${error.message}`,
+        );
+      }
+    }
+    return settled;
+  }
+
+  /**
+   * The rename and the bookkeeping, without the publishing that follows it.
+   * @param {string} infoHash - The archive that finished.
+   * @returns {Promise<object>} - The updated catalog entry.
+   */
+  async #finalizeOnce(infoHash) {
     const entry = this.#catalog.get(infoHash);
     if (!entry) throw new Error('unknown archive');
     if (entry.complete) return entry;
@@ -1145,6 +1178,11 @@ export class Library {
       complete,
       // Held until the download finishes, which may be hours away.
       originMtime: options.originMtime,
+      // Recorded now, applied when the download finishes. Unset leaves the
+      // archive following the node, which is the rule everywhere else.
+      serveArchive: options.serveArchive,
+      selfWebSeed: options.selfWebSeed,
+      publicDownload: options.publicDownload,
       // What the peer that offered this says it holds, where it said anything.
       // The head warmer replaces it with what the archive's own header says as
       // soon as it can read one; until then this is what makes the archive

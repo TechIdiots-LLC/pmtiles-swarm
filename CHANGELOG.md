@@ -7,6 +7,25 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.53.0
+### ✨ Features and improvements
+- **The three switches are now settable on every import, from the console.** **Serve file**, **Web
+  seed** and **Listed** columns on monitored folders, watched web locations, RSS feeds and remote
+  nodes, each offering `node` as well as yes and no — because unset is a real answer here, meaning
+  the archive follows the node rather than being switched off.
+
+### 🐞 Bug fixes
+- **An RSS feed could not ask for any of them.** 0.50.0 wired these through watched folders and
+  scheduled sources and stopped there, and an archive adopted from a feed takes a different path
+  through the library — which is the path a mirror node actually uses. A subscription now carries all
+  three, and there was no way to set them from the console on any import at all.
+
+- **`selfWebSeed` on an import waits for the download to finish.** Publishing a web seed URL for an
+  archive that is still arriving would advertise an address answering `409`, and a peer handed a URL
+  that refuses spends its retries on it — worse than no web seed, and unfixable afterwards because by
+  then the URL is in every copy of the `.torrent`. The intention is recorded when the archive joins
+  and acted on at the first moment this node holds the whole file.
+
 ## 0.52.0
 ### ✨ Features and improvements
 - **`publishingUrl`, for the URLs that have to be permanent.** Almost every URL this node emits is

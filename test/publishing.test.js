@@ -523,3 +523,54 @@ describe('the address a permanent URL is built from', () => {
     }
   });
 });
+
+describe('an archive that arrives from a feed', () => {
+  it('carries the settings the subscription asked for', async () => {
+    // These never reached a subscription at all: the plumbing went in for
+    // watched folders and scheduled sources, and an archive adopted from a
+    // feed takes a different path through the library — which is the path a
+    // mirror node actually uses.
+    const dir = await fs.mkdtemp(path.join(workspace, 'feed-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    const library = new Library({
+      catalog,
+      engine: {
+        name: 'webtorrent',
+        list: async () => [],
+        get: async () => null,
+        add: async () => {},
+        remove: async () => {},
+      },
+      config: {
+        dataDir: dir,
+        webtorrent: { savePath: dir },
+        trackers: [],
+        publishingUrl: 'https://swarm.example.org',
+      },
+    });
+
+    const entry = await library.addExistingTorrent(
+      { torrentFile: await realTorrent() },
+      { mode: 'mirror', serveArchive: true, selfWebSeed: true },
+    );
+    assert.equal(entry.selfWebSeed, true);
+
+    // Nothing published yet. A web seed URL for an archive still arriving
+    // answers 409, and a peer handed a URL that refuses spends its retries on
+    // it — worse than no web seed, and unfixable afterwards because the URL is
+    // in every copy of the .torrent.
+    assert.deepEqual(catalog.get(entry.infoHash).webSeeds, []);
+
+    await library.finalize(entry.infoHash);
+    assert.deepEqual(catalog.get(entry.infoHash).webSeeds, [
+      `https://swarm.example.org/archives/${entry.infoHash}/archive.pmtiles`,
+    ]);
+  });
+
+  it('publishes nothing for a subscription that asked for nothing', async () => {
+    const node = await holding({ publishingUrl: 'https://swarm.example.org' });
+    await node.library.finalize(node.entry.infoHash);
+    assert.deepEqual(node.catalog.get(node.entry.infoHash).webSeeds, []);
+  });
+});

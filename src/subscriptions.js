@@ -423,6 +423,14 @@ export class SubscriptionManager {
       // 698 GiB download before starting one, which means it is populated
       // before a single byte exists here.
       summarySource: 'feed',
+      // What this node will offer of the archive once it holds it. Unset here
+      // means the node's own answer applies, the same rule as everywhere else.
+      // Nothing takes effect until the download finishes: a web seed URL for
+      // an archive that is still arriving answers 409, which is worse than no
+      // web seed because peers spend their retries on it.
+      serveArchive: subscription.serveArchive,
+      selfWebSeed: subscription.selfWebSeed,
+      publicDownload: subscription.publicDownload,
     };
 
     // The .torrent is preferred where there is one: it carries the trackers
