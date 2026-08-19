@@ -7,6 +7,23 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.45.0
+### ✨ Features and improvements
+- **Requires pmtiles-torrent 0.9.1**, which stops the sidecar rewriting resume data that has not
+  changed. A hybrid torrent carries a merkle tree of 32 bytes per 16 KiB block in its resume data —
+  a few hundred megabytes for a 128 GiB archive — and it was being restaged, fsynced and renamed
+  every five minutes for every archive at once, to record that nothing had moved. It also gives each
+  torrent its own share of the save budget instead of five seconds for the whole library, which is
+  why a node with four archives persisted two of them and a different two next time.
+- **Running as a service documents a newer libtorrent than the distribution ships.** `apt` gives you
+  whatever your release froze on, `pip install` into the system Python is refused under PEP 668, and
+  `--break-system-packages` is not the way round it. A virtualenv plus the existing
+  `libtorrent.python` key is, reversibly and without touching apt. The upgrade section now also says
+  that libtorrent is a third thing an update never moves, and how to check which one the service
+  actually imports.
+
+### 🐞 Bug fixes
+
 ## 0.44.0
 ### ✨ Features and improvements
 - **Web seeds are added where they are listed.** The **HTTP sources** tab now has a field and an Add

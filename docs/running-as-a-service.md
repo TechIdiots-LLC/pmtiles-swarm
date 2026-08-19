@@ -553,6 +553,36 @@ rather than exiting. Name the interpreter explicitly when the service user's
 { "libtorrent": { "python": "/usr/bin/python3" } }
 ```
 
+### A newer libtorrent than the distribution ships
+
+`apt` gives you whatever your release froze on, which on Ubuntu 24.04 is
+libtorrent 2.0.x. `pip install libtorrent` into the system Python is refused —
+`externally-managed-environment`, because apt owns that Python — and
+`--break-system-packages` is not the way round it.
+
+Give the service account a virtualenv instead and point the sidecar at it. The
+same `python` key does the work, so nothing else changes:
+
+```sh
+sudo -u pmtiles-swarm python3 -m venv /var/lib/pmtiles-swarm/venv
+sudo -u pmtiles-swarm /var/lib/pmtiles-swarm/venv/bin/pip install libtorrent
+sudo -u pmtiles-swarm /var/lib/pmtiles-swarm/venv/bin/python   -c "import libtorrent; print(libtorrent.__version__)"
+```
+
+```json
+{ "libtorrent": { "python": "/var/lib/pmtiles-swarm/venv/bin/python" } }
+```
+
+Reversible in one line: delete the key and the node is back on the distribution
+package, with no uninstall and nothing done to apt. `ReadWritePaths` already
+covers `/var/lib/pmtiles-swarm`, so the venv needs no unit change — put it
+anywhere else and it does.
+
+Worth doing for a node seeding very large hybrid archives, where v2 support has
+had the most work since 2.0. Change one thing at a time, though: take a version
+of the node first, confirm what it did, then move libtorrent, so a difference in
+behaviour has one candidate rather than two.
+
 ## Ports
 
 Five listeners, and only the peer ports want a firewall rule. See
@@ -614,6 +644,22 @@ Confirm both halves moved, since the sidecar has its own version:
 sudo -u pmtiles-swarm -H npm ls --prefix /var/lib/pmtiles-swarm --depth 1 \
   pmtiles-swarm pmtiles-torrent
 ```
+
+**libtorrent itself is a third thing, and an update never touches it.** The
+sidecar is Python that ships with the package; libtorrent is the binding it
+imports, which came from `apt` or from a virtualenv you made. Neither moves when
+the node does:
+
+```sh
+sudo -u pmtiles-swarm python3 -c "import libtorrent; print(libtorrent.__version__)"
+```
+
+Run that against whatever `libtorrent.python` names, not your login shell's
+Python — they are frequently different interpreters, and the one that matters is
+the one the service uses. See
+[a newer libtorrent than the distribution ships](#a-newer-libtorrent-than-the-distribution-ships)
+for moving it, and move it on its own: a node upgrade and a libtorrent upgrade in
+one restart leaves two candidates for whatever happens next.
 
 An install runs the dependency install scripts again, so check WebRTC survived
 it — see [the allowScripts warning](#the-allowscripts-warning):
