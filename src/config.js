@@ -205,6 +205,45 @@ const DEFAULTS = {
    */
   publicDownload: false,
   /**
+   * Answer a byte range for an archive this node does not hold, by pulling the
+   * covering pieces out of the swarm on demand.
+   *
+   * **Experimental, and not recommended for anything public.** It closes the
+   * loop cache mode was built for — the node holds no bytes, a reader asks for
+   * some, and the pieces arrive from peers — over the same path the tile
+   * endpoint has always used internally, sharing its piece cache and its open
+   * handle. As a way to point an ordinary PMTiles reader at an archive nothing
+   * here has a copy of, it works.
+   *
+   * The reservations are properties of the arrangement rather than of the
+   * implementation:
+   *
+   * - Every byte is somebody else's upload. A cache-mode node is not an origin,
+   *   and putting one behind a URL that looks like one turns each request into
+   *   swarm traffic it neither paid for nor holds.
+   * - A piece read takes as long as the swarm takes. Acceptable for a tile,
+   *   which a reader asked for and will wait on; poor for an HTTP client with
+   *   its own patience and its own timeout.
+   * - There is no honest answer to a request for the whole file, so a Range
+   *   header is required and a large one is refused.
+   */
+  serveArchiveFromSwarm: false,
+  /**
+   * The largest range `serveArchiveFromSwarm` will fetch at once, in bytes.
+   *
+   * Sized for what a PMTiles reader actually asks for — a 16 KiB header, a
+   * directory, a tile — rather than for bulk transfer, which is the thing this
+   * must not quietly become.
+   */
+  swarmRangeLimitBytes: 8 * 1024 * 1024,
+  /**
+   * How long to wait for the swarm before giving up on a range, in
+   * milliseconds. Shorter than the piece timeout underneath on purpose: an
+   * HTTP client gives up long before libtorrent does, and a request left
+   * hanging on a piece nobody is seeding holds a connection open for nothing.
+   */
+  swarmRangeTimeoutMs: 30000,
+  /**
    * How long an unfinished download is kept before startup treats it as
    * abandoned. Until then, re-adding the same URL resumes it.
    */

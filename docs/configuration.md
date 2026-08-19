@@ -315,12 +315,13 @@ rotation stays out across the restart you were probably about to do.
 
 ## Offering the archive file itself
 
-| setting          | default |                                                         |
-| ---------------- | ------- | ------------------------------------------------------- |
-| `serveArchive`   | `false` | answer `/archives/<infohash>/archive.pmtiles`           |
-| `publishingUrl`  | unset   | the address to use where a URL must outlive the request |
-| `selfWebSeed`    | `false` | publish this node as a web seed for archives it holds   |
-| `publicDownload` | `false` | offer them as downloads on the public catalogue page    |
+| setting                 | default |                                                                          |
+| ----------------------- | ------- | ------------------------------------------------------------------------ |
+| `serveArchive`          | `false` | answer `/archives/<infohash>/archive.pmtiles`                            |
+| `publishingUrl`         | unset   | the address to use where a URL must outlive the request                  |
+| `serveArchiveFromSwarm` | `false` | answer a range for an archive this node does not hold — **experimental** |
+| `selfWebSeed`           | `false` | publish this node as a web seed for archives it holds                    |
+| `publicDownload`        | `false` | offer them as downloads on the public catalogue page                     |
 
 Three switches rather than one, because they are three different exposures and a
 node can reasonably want any of them without the others.
@@ -345,6 +346,38 @@ GET /latest/<category>/archive.pmtiles     whichever is current, with an ETag
 ```
 
 With it off, both answer `403`.
+
+### `serveArchiveFromSwarm`
+
+**Experimental, and not recommended for anything public.** Off by default.
+
+With it on, a byte range for an archive this node does _not_ hold is answered by
+pulling the covering pieces out of the swarm on demand — the same path the tile
+endpoint has always taken internally, one HTTP layer further out, sharing its
+piece cache and its open handle. It is the loop cache mode was built for: point
+an ordinary PMTiles reader at a node holding none of the file, and it works.
+
+The reservations are properties of the arrangement rather than of the code:
+
+- **Every byte is somebody else's upload.** A cache-mode node is not an origin,
+  and putting one behind a URL that looks like one turns each request into swarm
+  traffic it neither paid for nor holds.
+- **A piece read takes as long as the swarm takes.** Acceptable for a tile, which
+  a reader asked for and will wait on; poor for an HTTP client with its own
+  timeout. `swarmRangeTimeoutMs` (30s) bounds it and answers `504`.
+- **There is no honest answer to a request for the whole file.** A `Range` header
+  is required — without one the request is refused with `411` — and a range
+  larger than `swarmRangeLimitBytes` (8 MiB) with `416`.
+
+The response carries the same `ETag` and the same year-long `immutable` caching a
+complete copy would give, because it is the same content: the infohash names
+those bytes wherever they were read from.
+
+**A node cannot be a web seed for an archive it does not hold**, whatever this is
+set to. [`selfWebSeed`](#selfwebseed) is refused on an incomplete archive and
+offered again when the download finishes — answering from the swarm and then
+advertising that to the swarm is a loop with an amplifier in it, where every peer
+that takes the seed makes this node fetch the piece again to serve it.
 
 ### `publishingUrl`
 

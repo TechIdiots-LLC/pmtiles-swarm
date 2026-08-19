@@ -2909,6 +2909,19 @@ export class Library {
     let webSeed = published;
     let warning = null;
 
+    // A node cannot be a web seed for bytes it does not have. It might be able
+    // to *answer* for them, where serveArchiveFromSwarm is on -- but answering
+    // by fetching from the swarm and then advertising that to the swarm is a
+    // loop with an amplifier in it: every peer that takes the seed makes this
+    // node download the piece again to serve it.
+    if (after.selfWebSeed && !published && entry.complete === false) {
+      throw new Error(
+        'this node does not hold a complete copy of this archive, so it ' +
+          'cannot be a web seed for it. It will be offered again once the ' +
+          'download finishes.',
+      );
+    }
+
     if (after.selfWebSeed && !published) {
       const base = publishingBase({
         // Given outright beats the node's own answer, which beats the request

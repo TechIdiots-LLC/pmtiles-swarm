@@ -53,10 +53,17 @@ async function holding(config = {}) {
     },
   });
 
-  const entry = await library.addExistingTorrent(
+  const joined = await library.addExistingTorrent(
     { torrentFile: await realTorrent() },
     { mode: 'mirror' },
   );
+  // Joined torrents start incomplete, and a node cannot be a web seed for
+  // bytes it does not have. These tests are about what happens once it does,
+  // so they start where a finished download leaves off.
+  const entry = await catalog.put({
+    infoHash: joined.infoHash,
+    complete: true,
+  });
   return { catalog, library, entry };
 }
 

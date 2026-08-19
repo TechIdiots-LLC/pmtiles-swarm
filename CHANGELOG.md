@@ -7,6 +7,32 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.54.0
+### ✨ Features and improvements
+- **`serveArchiveFromSwarm` — a byte range for an archive this node does not hold.** Experimental,
+  off by default, and the loop cache mode was built for: the node holds no bytes, a reader asks for
+  some, and the pieces covering them arrive from peers. It reuses the machinery the tile endpoint has
+  always used internally — `TorrentSource.getBytes` already fetches every covering piece
+  concurrently, and this shares its piece cache, its directory prefetch and its open handle. Point an
+  ordinary PMTiles reader at a node with no copy of the archive and it works.
+
+  Bounded on purpose. A `Range` header is required, since the only other answer is "pull 700 GiB
+  through BitTorrent and stream it out" — no header is `411`, a range over `swarmRangeLimitBytes`
+  (8 MiB) is `416`, and a swarm that does not answer within `swarmRangeTimeoutMs` (30s) is `504`
+  rather than a socket held open for two minutes. The response carries the same `ETag` and the same
+  year-long `immutable` caching a complete copy would, because it is the same content: the infohash
+  names those bytes wherever they were read from.
+
+  Not recommended for anything public, for reasons that are properties of the arrangement rather than
+  of the code — every byte is somebody else's upload, and a cache-mode node behind a URL that looks
+  like an origin is not one.
+
+### 🐞 Bug fixes
+- **A node could be made a web seed for an archive it did not hold.** `selfWebSeed` is now refused on
+  an incomplete archive and offered again once the download finishes. Answering from the swarm and
+  then advertising that to the swarm is a loop with an amplifier in it: every peer that takes the
+  seed makes this node fetch the piece again in order to serve it.
+
 ## 0.53.0
 ### ✨ Features and improvements
 - **The three switches are now settable on every import, from the console.** **Serve file**, **Web

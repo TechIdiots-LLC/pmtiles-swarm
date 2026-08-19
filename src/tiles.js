@@ -120,6 +120,43 @@ export class TileStore {
   }
 
   /**
+   * Reads a byte range out of an archive, through whatever source applies.
+   *
+   * The same acquisition every tile read goes through, so a cache-mode archive
+   * answers from the swarm and a complete one answers from its file — and both
+   * share the piece cache, the directory prefetch and the open handle that the
+   * tile path has already warmed. That sharing is the point: a reader fetching
+   * the header, then the root directory, then a tile is doing exactly what the
+   * tile endpoint does internally, one HTTP layer further out.
+   *
+   * The range is not split here. `TorrentSource.getBytes` already fetches every
+   * covering piece concurrently, which is what stops a three-piece range paying
+   * three sequential swarm round-trips.
+   * @param {string} infoHash - Which archive.
+   * @param {number} offset - Byte offset into the archive file.
+   * @param {number} length - How many bytes.
+   * @param {object} [options] - Abort signal.
+   * @returns {Promise<Buffer>} - The bytes, clamped to the end of the file.
+   */
+  async readRange(infoHash, offset, length, options = {}) {
+    const entry = this.#catalog.get(infoHash);
+    if (!entry) throw new TileReadError('unknown archive', 404);
+
+    const handle = await this.#acquire(entry);
+    if (!handle.source) {
+      // MBTiles opens as a database rather than a byte source, and a byte
+      // range into one would be a range into a SQLite file — technically
+      // answerable and useless to everybody.
+      throw new TileReadError(
+        'this archive is not readable as a stream of bytes',
+        415,
+      );
+    }
+
+    const answer = await handle.source.getBytes(offset, length, options.signal);
+    return Buffer.from(answer.data);
+  }
+  /**
    * Reads an archive's header and metadata, through whatever source applies.
    *
    * A joined torrent has no summary when it arrives: at that moment there is

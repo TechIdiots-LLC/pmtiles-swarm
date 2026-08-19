@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import parseRange from 'range-parser';
 import {
   ROLES,
   createAuth,
@@ -2333,6 +2334,121 @@ export function createApp({
   };
 
   /**
+   * Serves a byte range for an archive this node does not hold whole.
+   *
+   * **Experimental.** It closes the loop the cache mode was built for: the
+   * node holds no bytes, a reader asks for some, and the pieces covering them
+   * are pulled out of the swarm on demand — the same path the tile endpoint
+   * has always taken internally, one HTTP layer further out and sharing the
+   * same piece cache and open handle.
+   *
+   * It is off by default and should stay off for anything public, for reasons
+   * that are properties of the arrangement rather than of this code:
+   *
+   * - Every byte is somebody else's upload. A node in cache mode is not an
+   *   origin; putting one behind a URL that looks like an origin turns each
+   *   request into swarm traffic that this node neither paid for nor holds.
+   * - A piece read takes as long as the swarm takes. That is fine for a tile,
+   *   which the reader asked for and will wait on, and poor for an HTTP client
+   *   with its own patience.
+   * - There is no way to answer a request for the whole file that is not
+   *   "download 700 GiB through BitTorrent and stream it out". So a range is
+   *   required, and a large one is refused.
+   * @param {import('express').Request} req - The request, for its Range.
+   * @param {import('express').Response} res - The response.
+   * @param {object} entry - The archive.
+   * @returns {Promise<void>} - Once answered.
+   */
+  const serveFromSwarm = async (req, res, entry) => {
+    if (!config.serveArchiveFromSwarm || !tiles?.readRange) {
+      return res.status(409).json({
+        error:
+          'this archive is not complete here, so a byte range would answer ' +
+          'with unwritten space rather than data',
+      });
+    }
+
+    const size = Number(entry.size);
+    if (!Number.isFinite(size) || size <= 0) {
+      return res.status(409).json({
+        error: 'this archive has no known length here yet',
+      });
+    }
+
+    // A range, and only a range. Without one the answer is the whole archive,
+    // and the whole archive is not on this disk — serving it would mean
+    // pulling every piece through the swarm to stream it back out, which is
+    // both enormous and somebody else's bandwidth.
+    const asked = req.headers.range;
+    if (!asked) {
+      res.setHeader('accept-ranges', 'bytes');
+      return res.status(411).json({
+        error:
+          'this node does not hold this archive, so it can only answer a ' +
+          'byte range. Send a Range header.',
+      });
+    }
+
+    const ranges = parseRange(size, asked, { combine: true });
+    // -1 is unsatisfiable, -2 is malformed, and more than one range would mean
+    // a multipart response that nothing reading PMTiles has ever asked for.
+    if (ranges === -1) {
+      res.setHeader('content-range', `bytes */${size}`);
+      return res.status(416).json({ error: 'range not satisfiable' });
+    }
+    if (ranges === -2 || ranges.length !== 1 || ranges.type !== 'bytes') {
+      return res.status(400).json({ error: 'unreadable Range header' });
+    }
+
+    const { start, end } = ranges[0];
+    const length = end - start + 1;
+    const limit = config.swarmRangeLimitBytes ?? 8 * 1024 * 1024;
+    if (length > limit) {
+      return res.status(416).json({
+        error:
+          `this node does not hold this archive, so a range is fetched from ` +
+          `the swarm a piece at a time; ${length} bytes is more than the ` +
+          `${limit} it will do that for at once`,
+      });
+    }
+
+    // A deadline of its own, shorter than the piece timeout underneath. An
+    // HTTP client gives up long before libtorrent does, and a request left
+    // hanging on a piece nobody is seeding holds a connection open for nothing.
+    const controller = new AbortController();
+    const deadline = setTimeout(
+      () => controller.abort(),
+      config.swarmRangeTimeoutMs ?? 30000,
+    );
+    try {
+      const body = await tiles.readRange(entry.infoHash, start, length, {
+        signal: controller.signal,
+      });
+      res.status(206);
+      res.setHeader('accept-ranges', 'bytes');
+      res.setHeader('content-range', `bytes ${start}-${end}/${size}`);
+      res.setHeader('content-type', 'application/octet-stream');
+      for (const [name, value] of Object.entries(RANGE_CORS_HEADERS)) {
+        res.setHeader(name, value);
+      }
+      // The same tag a complete copy would answer with, because it is the same
+      // content: the infohash names these bytes wherever they were read from.
+      res.setHeader('etag', `"${entry.infoHash}"`);
+      res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+      res.send(body);
+    } catch (error) {
+      if (controller.signal.aborted) {
+        return res.status(504).json({
+          error: 'the swarm did not answer for those pieces in time',
+        });
+      }
+      res.status(error.status ?? 502).json({ error: error.message });
+    } finally {
+      clearTimeout(deadline);
+    }
+  };
+
+  /**
    * The current build of a category, as a file, by byte range.
    *
    * The same thing `/archives/<infohash>/archive.pmtiles` is, addressed the
@@ -2367,13 +2483,11 @@ export function createApp({
       });
     }
 
-    if (entry.complete === false) {
-      return res.status(409).json({
-        error:
-          'the newest archive in this category is not complete here, so a ' +
-          'byte range would answer with unwritten space rather than data',
-      });
-    }
+    // Not on this disk. Either the node can read it out of the swarm, which is
+    // what cache mode is for, or it says so — but it never answers a range
+    // from a sparse file, where the unwritten space reads as zeroes and looks
+    // exactly like data.
+    if (entry.complete === false) return serveFromSwarm(req, res, entry);
     const file = entry.savePath ? path.join(entry.savePath, entry.name) : null;
     if (!file) return res.status(404).json({ error: 'no file for it here' });
 
@@ -2712,13 +2826,9 @@ export function createApp({
       });
     }
 
-    if (entry.complete === false) {
-      return res.status(409).json({
-        error:
-          'this archive is not complete here, so a byte range would answer ' +
-          'with unwritten space rather than data',
-      });
-    }
+    // See the /latest/ route above: read from the swarm where the node is
+    // configured to, and refuse rather than answer with unwritten space.
+    if (entry.complete === false) return serveFromSwarm(req, res, entry);
     const file = entry.savePath ? path.join(entry.savePath, entry.name) : null;
     if (!file) return res.status(404).json({ error: 'no file for it here' });
 
