@@ -7,6 +7,42 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.49.0
+### ✨ Features and improvements
+- **The current build of a category can be read as a file.** `GET /latest/<category>/archive.pmtiles`
+  is what `/archives/<infohash>/archive.pmtiles` is, addressed the way a style or a long-lived config
+  wants to address it: by what it is rather than by which build it happens to be. Point any PMTiles
+  reader at it and it keeps working across rebuilds, with no infohash to chase.
+
+- **Every `/latest/` endpoint now carries an ETag, and the tag is the infohash.** Everything under
+  `/archives/` is content-addressed and cached for a year, because the URL changes when the content
+  does. A `/latest/` URL is the opposite — stable on purpose, so the content underneath it moves and
+  the URL alone gives a cache no way to notice. These endpoints had a five-minute TTL and nothing
+  else, which is a guess: for those five minutes every client and every proxy in front of one serves
+  the previous build and not one of them can tell. They are now `max-age=60, must-revalidate` with a
+  validator that changes exactly when the archive does — and, because it is the infohash, one that
+  two nodes behind a load balancer agree on instead of each deriving its own from a body hash or an
+  mtime. The TileJSON, the `.torrent` redirect, the magnet, the single-item feed and the `/latest/`
+  index are all covered.
+
+### 🐞 Bug fixes
+- **A range request could splice two builds together.** `/latest/<category>/archive.pmtiles` honours
+  `If-Range`, and refuses as a range — answering in full instead — anything conditioned on a build
+  that is no longer current. This is the failure the ETag exists to prevent: a PMTiles reader does
+  not fetch a file, it fetches a header, then a root directory, then leaf directories, then tiles,
+  over minutes or hours. A rebuild landing partway through leaves it reading old offsets against new
+  bytes, which decodes as the wrong tile or as nothing, with no error anywhere naming the cause.
+
+- **`/archives/<infohash>/archive.pmtiles` was unreachable from a browser on another origin**, and
+  sent a validator no PMTiles reader would use. It had no CORS header at all — unlike the tile and
+  TileJSON routes beside it — so a page elsewhere could not fetch it. Its ETag was also whatever
+  Express derives from the file's size and mtime, which is weak (the official reader discards any tag
+  beginning with `W/`) and different on every node, so two nodes behind one load balancer would hand
+  a reader two tags for byte-identical archives and it would conclude the file had moved under it.
+  Both range routes now send the infohash as a strong tag, and both expose `ETag` and `Content-Range`
+  to cross-origin JavaScript — without which the reader compares against `null`, the comparison never
+  fires, and it splices builds in silence.
+
 ## 0.48.0
 ### ✨ Features and improvements
 - **An archive can now be read as a file, by byte range.** `GET /archives/<infohash>/archive.pmtiles`

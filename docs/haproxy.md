@@ -220,7 +220,18 @@ says so, which is worse than having no check at all.
 **Cache tiles by infohash aggressively.** `/archives/<infohash>/…` is immutable
 by construction — an infohash names those bytes and no others — and is served
 with `max-age=31536000, immutable`. `/latest/<category>/…` is the opposite: it
-moves on every build and is served with `max-age=300`.
+moves on every build, and is served with `max-age=60, must-revalidate` and an
+ETag naming the build it resolved to.
+
+**Do not strip or rewrite the ETag on either.** It is the infohash, which is
+how a PMTiles reader notices that the archive moved underneath a read already
+in progress — a read that spans minutes, because the reader fetches a header,
+then directories, then tiles. A proxy that drops the tag leaves the reader
+comparing against nothing, and it will assemble one file out of two builds
+without an error anywhere. Compression is the usual culprit: a proxy that
+gzips a response is required to weaken the tag, and a weak tag is one the
+reader discards. Archives are served as `application/octet-stream` and should
+not be compressed at all.
 
 WebRTC does not pass through Cloudflare, and neither does BitTorrent. Browser
 peers reach the node over ICE, and a `wss://` tracker is the only part of that

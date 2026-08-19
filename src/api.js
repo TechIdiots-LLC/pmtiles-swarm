@@ -1993,6 +1993,38 @@ export function createApp({
     );
   };
 
+  /**
+   * Tags a response as "whichever build of this category is current".
+   *
+   * Everything under `/archives/` is addressed by infohash and may be cached
+   * for a year, because the URL changes when the content does. A `/latest/`
+   * URL is the exact opposite: it is stable on purpose, so the content
+   * underneath it moves and the URL alone gives a cache no way to notice. A
+   * short TTL was the only thing these endpoints had, and a TTL is a guess —
+   * at five minutes, every client and every proxy in front of one serves the
+   * previous build for up to five minutes after a rollover, and not one of
+   * them can tell whether it is doing so.
+   *
+   * The infohash is the honest validator. It changes exactly when the archive
+   * a category resolves to changes, never otherwise, and it is the same value
+   * on every node in the swarm — so two nodes behind a load balancer agree
+   * about what is current, rather than each inventing a tag of its own from a
+   * body hash or an mtime and defeating the cache whenever a client is sent
+   * to the other one.
+   * @param {import('express').Response} res - The response to tag.
+   * @param {object} entry - The archive this URL resolved to.
+   */
+  const tagAsLatest = (res, entry) => {
+    // Quoted, because that is what an entity-tag is. Unquoted, a validator
+    // never matches an If-None-Match and every revalidation misses silently.
+    res.setHeader('etag', `"${entry.infoHash}"`);
+    // must-revalidate because serving this one stale is not merely "slightly
+    // old": a reader holding part of one build and asking for the rest after
+    // a rollover assembles a file that never existed. A minute of cache with
+    // a mandatory check at the end of it is the trade.
+    res.setHeader('cache-control', 'public, max-age=60, must-revalidate');
+  };
+
   // Everything a category offers, in one place. A category is the only stable
   // handle this system has — every archive is addressed by infohash, which is
   // what makes a tile immutable, but leaves nothing for a style to point at
@@ -2096,14 +2128,24 @@ export function createApp({
     '/latest/',
     route(async (req, res) => {
       res.setHeader('access-control-allow-origin', '*');
-      // Short, because the answer changes when a build lands.
-      res.setHeader('cache-control', 'public, max-age=60');
+      const categories = describeCategories(req);
+      // Tagged over the categories alone, deliberately. Express would happily
+      // hash the whole body for us, but `generatedAt` is a fresh timestamp on
+      // every request — so that tag would differ every time and no client
+      // could ever revalidate. What a consumer polls this for is whether the
+      // set of categories or the build each resolves to has moved, and that
+      // is exactly what this covers.
+      res.setHeader(
+        'etag',
+        `"${crypto.createHash('sha1').update(JSON.stringify(categories)).digest('hex')}"`,
+      );
+      res.setHeader('cache-control', 'public, max-age=60, must-revalidate');
       res.json({
         // Named so a consumer can refuse a document it does not understand,
         // the same as the catalogue does.
         format: 'pmtiles-swarm-categories/1',
         generatedAt: new Date().toISOString(),
-        categories: describeCategories(req),
+        categories,
       });
     }),
   );
@@ -2124,10 +2166,13 @@ export function createApp({
       }
 
       res.setHeader('access-control-allow-origin', '*');
-      // Deliberately short-lived, and the only mutable document in the system.
-      // Everything it points at is content-addressed and cached for a year;
-      // this is the one thing that has to be re-read to notice a new build.
-      res.setHeader('cache-control', 'public, max-age=300');
+      // Short-lived, and the only mutable document in the system: everything
+      // it points at is content-addressed and cached for a year, and this is
+      // the one thing that has to be re-read to notice a new build. The tag
+      // makes that re-read cheap — a client already holding the current build
+      // gets a 304 and no body, which Express does on its own once an ETag is
+      // set before the response goes out.
+      tagAsLatest(res, entry);
       res.json({
         ...buildTileJson(entry, baseUrl(req)),
         // Names what it resolved to, so a consumer can tell one build from the
@@ -2154,11 +2199,12 @@ export function createApp({
   app.get('/latest/:category/:name.torrent', (req, res) => {
     const entry = newestIn(req.params.category, req);
     if (!entry) return res.status(404).json({ error: 'no such category' });
-    // Short, and said explicitly. A 302 is not cacheable unless a response
-    // says so, but "unless it says so" is a thing intermediaries have been
-    // known to disagree about — and this one moves on every build, which is
-    // the whole point of it.
-    res.setHeader('cache-control', 'public, max-age=300');
+    // A 302 is not cacheable unless a response says so, and "unless it says
+    // so" is a thing intermediaries have been known to disagree about — so
+    // this one says so, and names what it resolved to while it is at it. The
+    // tag is the infohash being redirected to, which is precisely the thing
+    // that changes when this redirect starts pointing somewhere else.
+    tagAsLatest(res, entry);
     res.redirect(
       302,
       `${baseUrl(req)}/archives/${entry.infoHash}/archive.torrent`,
@@ -2168,8 +2214,100 @@ export function createApp({
   app.get('/latest/:category/magnet', (req, res) => {
     const entry = newestIn(req.params.category, req);
     if (!entry) return res.status(404).json({ error: 'no such category' });
-    res.setHeader('cache-control', 'public, max-age=300');
+    tagAsLatest(res, entry);
     res.type('text/plain').send(entry.magnet ?? '');
+  });
+
+  /**
+   * The headers a browser must be told it may read from a range response.
+   *
+   * Only a handful of response headers reach JavaScript on a cross-origin
+   * fetch, and not one of the headers a PMTiles reader depends on is among
+   * them. The official reader records the ETag of the first response and
+   * compares every response after it against that value — which is how it
+   * notices that the archive moved underneath a read in progress. Cross-origin
+   * and unexposed, it reads `null` instead, a comparison against null never
+   * fires, and it would splice two builds together in silence: the exact
+   * failure the tag exists to prevent. Content-Range earns its place through a
+   * narrower case — an archive smaller than the reader's first 16 KiB request
+   * is answered 416, and it parses the real length out of that header before
+   * retrying.
+   */
+  const RANGE_CORS_HEADERS = {
+    'access-control-allow-origin': '*',
+    'access-control-expose-headers':
+      'ETag, Content-Range, Content-Length, Accept-Ranges',
+  };
+
+  /**
+   * The current build of a category, as a file, by byte range.
+   *
+   * The same thing `/archives/<infohash>/archive.pmtiles` is, addressed the
+   * way a style or a long-lived configuration wants to address it: by what it
+   * is rather than by which build it happens to be. Point any PMTiles reader
+   * at this and it keeps working across rebuilds, with no infohash to chase.
+   *
+   * The hazard is the one the immutable route never has to think about. A
+   * PMTiles reader does not fetch a file; it fetches a header, then a root
+   * directory, then leaf directories, then tiles, over minutes or hours. If a
+   * rebuild lands partway through, the offsets it read from the old build
+   * address bytes in the new one. That does not fail loudly — it decodes as
+   * the wrong tile, or as nothing, with no error anywhere that names the
+   * cause. So the validator is the infohash and `If-Range` is honoured: a
+   * range conditioned on a build that is no longer current is refused as a
+   * range and answered in full, which a reader survives, instead of being
+   * spliced, which it does not.
+   */
+  app.get('/latest/:category/archive.pmtiles', (req, res) => {
+    const entry = newestIn(req.params.category, req);
+    if (!entry) return res.status(404).json({ error: 'no such category' });
+
+    if (entry.complete === false) {
+      return res.status(409).json({
+        error:
+          'the newest archive in this category is not complete here, so a ' +
+          'byte range would answer with unwritten space rather than data',
+      });
+    }
+    const file = entry.savePath ? path.join(entry.savePath, entry.name) : null;
+    if (!file) return res.status(404).json({ error: 'no file for it here' });
+
+    res.sendFile(
+      file,
+      {
+        acceptRanges: true,
+        // Set here rather than left to send: this URL means "whichever is
+        // current", so the one claim it must never make is that the answer
+        // cannot have changed.
+        cacheControl: false,
+        // Suppressed on purpose. With both validators present a client is
+        // free to condition If-Range on the date, and a build restored from a
+        // backup or copied with its timestamps intact is newer while looking
+        // older — which passes a date comparison and splices two archives
+        // together. The infohash cannot be fooled that way, so it is the only
+        // validator offered here.
+        lastModified: false,
+        // Applied on send's `headers` event, which fires before it decides
+        // anything — so these are the values its own freshness and If-Range
+        // checks read, and the ETag it compares against is ours.
+        headers: {
+          'content-type': 'application/octet-stream',
+          ...RANGE_CORS_HEADERS,
+          etag: `"${entry.infoHash}"`,
+          'cache-control': 'public, max-age=60, must-revalidate',
+        },
+      },
+      (error) => {
+        if (!error || res.headersSent) return;
+        const missing = error.code === 'ENOENT';
+        const status = missing ? 404 : (error.status ?? 500);
+        res.status(status).json({
+          error: missing
+            ? 'the catalog has this archive but its file is not there'
+            : error.message,
+        });
+      },
+    );
   });
 
   // The newest item on its own, for a subscriber that only ever wants the
@@ -2180,6 +2318,11 @@ export function createApp({
       return res.status(404).json({ error: 'no such feed' });
     }
     const entry = newestIn(category, req);
+    // A category with nothing in it has no build to name, so it gets no
+    // validator: a tag meaning "still empty" is indistinguishable from one
+    // meaning "still this build", and a reader would cache the emptiness past
+    // the arrival of the thing it was waiting for.
+    if (entry) tagAsLatest(res, entry);
     res.type('application/rss+xml').send(
       renderFeed(entry ? [entry] : [], {
         title: `${config.feedTitle ?? 'PMTiles archives'} — ${category}, latest`,
@@ -2473,7 +2616,19 @@ export function createApp({
         // own contents, so a byte at an offset is the same byte for ever.
         maxAge: '1y',
         immutable: true,
-        headers: { 'content-type': 'application/octet-stream' },
+        headers: {
+          'content-type': 'application/octet-stream',
+          ...RANGE_CORS_HEADERS,
+          // Named by the infohash rather than left to send, which derives a
+          // tag from the file's size and mtime. That one is weak — the
+          // official reader discards any tag beginning with `W/` — and it is
+          // different on every node, so two nodes behind one load balancer
+          // would hand a reader two tags for byte-identical archives and it
+          // would conclude the file had changed under it. The infohash is
+          // strong, and it is the same everywhere in the swarm because it is
+          // the content.
+          etag: `"${entry.infoHash}"`,
+        },
       },
       (error) => {
         if (!error || res.headersSent) return;

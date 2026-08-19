@@ -2363,7 +2363,7 @@ describe('a stable handle for the current build', () => {
     try {
       const response = await s.get('/latest/basemaps/tiles.json');
       const cacheControl = response.headers.get('cache-control');
-      assert.match(cacheControl, /max-age=300/);
+      assert.match(cacheControl, /max-age=60, must-revalidate/);
       assert.ok(!/immutable/.test(cacheControl), 'this one does change');
     } finally {
       await s.close();
@@ -2380,7 +2380,10 @@ describe('a stable handle for the current build', () => {
       assert.ok(response.headers.get('location').includes('b'.repeat(40)));
       // It moves on every build, which is the point of it — so it must not be
       // cached the way the URL it points at is.
-      assert.match(response.headers.get('cache-control'), /max-age=300/);
+      assert.match(
+        response.headers.get('cache-control'),
+        /max-age=60, must-revalidate/,
+      );
     } finally {
       await s.close();
     }

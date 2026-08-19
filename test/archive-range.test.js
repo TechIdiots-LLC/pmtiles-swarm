@@ -125,4 +125,28 @@ describe('reading an archive as a file', () => {
       await node.close();
     }
   });
+
+  it('tags it with the infohash rather than its size and mtime', async () => {
+    // What Express derives from a file's stat is weak — the official PMTiles
+    // reader discards any validator beginning with `W/` — and it differs on
+    // every node, so two nodes behind one load balancer would hand a reader
+    // two tags for byte-identical archives and it would conclude the file had
+    // moved under it mid-read. The infohash is neither of those things: it is
+    // strong, and it is the same everywhere because it *is* the content.
+    //
+    // Exposed too, because cross-origin JavaScript is shown almost no headers
+    // by default and ETag is not one of the exceptions.
+    const node = await serve();
+    try {
+      const response = await node.get('archive.pmtiles');
+      assert.equal(response.headers.get('etag'), `"${INFOHASH}"`);
+      assert.match(
+        response.headers.get('access-control-expose-headers') ?? '',
+        /ETag/,
+      );
+      await response.arrayBuffer();
+    } finally {
+      await node.close();
+    }
+  });
 });

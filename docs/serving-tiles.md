@@ -112,6 +112,7 @@ category is already the grouping, so it is what "latest" is asked of:
 
 ```
 GET /latest/{category}/tiles.json        TileJSON for the newest in that category
+GET /latest/{category}/archive.pmtiles   the newest build itself, by byte range
 GET /latest/{category}/archive.torrent   302 to that build's .torrent
 GET /latest/{category}/magnet            its magnet URI
 GET /latest/{category}.xml               a feed holding only the current build
@@ -127,8 +128,7 @@ template at `/latest/` instead would make every tile a moving target and throw
 that away — a client would have no way to know whether two tiles came from the
 same build.
 
-So it is cached for five minutes rather than a year, and carries a `latest`
-block naming what it resolved to:
+So it carries a `latest` block naming what it resolved to:
 
 ```json
 {
@@ -148,6 +148,45 @@ following along to the next one.
 
 Categories that are not published are not resolvable here either — `/latest/`
 answers 404 for them exactly as the feeds do.
+
+### How a client knows the build moved
+
+Every one of these carries an `ETag`, and the tag is the infohash of the archive
+it resolved to:
+
+```
+ETag: "913d671f3a28c5b8d605e28cf6bf01e293d36e86"
+Cache-Control: public, max-age=60, must-revalidate
+```
+
+A short TTL on its own is a guess. At five minutes, every client and every proxy
+in front of one serves the previous build for up to five minutes after a rollover
+and not one of them can tell it is doing so. The infohash is the honest answer:
+it changes exactly when the archive changes, never otherwise, and it is the same
+value on every node in the swarm — so two nodes behind a load balancer agree
+about what is current rather than each inventing a tag from a body hash or an
+mtime.
+
+For `/latest/{category}/archive.pmtiles` this is not a nicety. A PMTiles reader
+does not fetch a file; it fetches a header, then a root directory, then leaf
+directories, then tiles, over minutes or hours. If a rebuild lands partway
+through, offsets read from the old build address bytes in the new one — which
+does not fail loudly, it decodes as the wrong tile or as nothing. So `If-Range`
+is honoured: a range conditioned on a build that is no longer current is refused
+_as a range_ and answered in full. The official PMTiles JavaScript reader closes
+the loop from the other side, comparing the ETag of every response against the
+one it saw first and re-reading the header when they differ.
+
+Two consequences worth knowing about:
+
+- **The tag must survive the proxy.** A proxy that strips it leaves the reader
+  comparing against nothing. One that gzips the response is required to weaken
+  it, and the reader discards any tag beginning with `W/`. Archives go out as
+  `application/octet-stream` and should not be compressed.
+- **A browser must be allowed to read it.** `ETag` is not among the handful of
+  response headers exposed to cross-origin JavaScript by default, so these
+  routes send `Access-Control-Expose-Headers`. Without it the reader sees
+  `null`, the comparison never fires, and it splices two builds in silence.
 
 ## Where the bytes come from
 
