@@ -18,6 +18,15 @@ const TILE_TYPES = {
   3: { format: 'jpeg', contentType: 'image/jpeg' },
   4: { format: 'webp', contentType: 'image/webp' },
   5: { format: 'avif', contentType: 'image/avif' },
+  // MapLibre Tiles. The extension map has known about `mlt` for a while and
+  // this did not, so an MLT archive probed as `unknown` and was refused a tile
+  // endpoint it could have served.
+  //
+  // No MIME type is registered for it, and octet-stream is the honest answer
+  // rather than a vendor type invented here that would collide with the real
+  // one later. Nothing selects an MLT tile by content type in any case: a
+  // client is told what to expect by the source, before it makes the request.
+  6: { format: 'mlt', contentType: 'application/octet-stream' },
 };
 
 /**
@@ -78,7 +87,14 @@ export function metadataFlag(value) {
 export function metadataEncoding(value) {
   if (typeof value !== 'string') return undefined;
   const text = value.trim().toLowerCase();
-  return ['terrarium', 'mapbox', 'custom'].includes(text) ? text : undefined;
+  // `mlt` belongs here because MapLibre spells it the same way. `encoding` on
+  // a raster-dem source says how elevation is packed into pixels; on a vector
+  // source it says the tiles are MapLibre Tiles rather than MVT. One key, two
+  // meanings, disambiguated by the source type -- so there was no new key to
+  // invent, only a value to allow through.
+  return ['terrarium', 'mapbox', 'custom', 'mlt'].includes(text)
+    ? text
+    : undefined;
 }
 
 /**
@@ -126,7 +142,7 @@ export function customEncodingFactors(metadata) {
  * So: stamp what the prober knew at the time, and re-read once when that is
  * behind. Raise this whenever a field is added to the summary below.
  */
-export const SUMMARY_VERSION = 2;
+export const SUMMARY_VERSION = 3;
 
 export function summarize(header, metadata = {}) {
   const type = TILE_TYPES[header.tileType] ?? TILE_TYPES[0];
@@ -169,7 +185,13 @@ export function summarize(header, metadata = {}) {
     // or custom. Read from the archive rather than configured here, for the
     // same reason `sparse` is — the archive knows, and a mirror of it should
     // not have to be told again.
-    encoding: metadataEncoding(metadata.encoding),
+    // The header wins for MLT and only for MLT: an archive whose tile type
+    // says MapLibre Tiles *is* MLT-encoded, and no metadata is needed to know
+    // it. Elevation packing is the opposite -- the header knows the tile is
+    // WebP and nothing about what its channels mean -- so that comes from the
+    // metadata, which is the only place it can.
+    encoding:
+      type.format === 'mlt' ? 'mlt' : metadataEncoding(metadata.encoding),
     // Only where the encoding is custom, since they mean nothing otherwise.
     encodingFactors:
       metadataEncoding(metadata.encoding) === 'custom'

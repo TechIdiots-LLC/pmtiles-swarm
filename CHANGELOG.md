@@ -7,6 +7,33 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.56.0
+### ✨ Features and improvements
+- **MapLibre Tiles are recognised.** PMTiles tile type `6` is MLT, and the tile-type table stopped at
+  `5` — so an MLT archive probed as `unknown` and was refused a tile endpoint it could have served,
+  even though the extension map had known about `.mlt` for a while.
+
+  No new TileJSON key was needed for it. MapLibre spells the tile encoding of a vector source
+  `encoding`, exactly as it does the elevation packing of a raster-dem one, and applies TileJSON
+  members to both after the source is constructed — so `encoding: "mlt"` reaches a vector source the
+  same way `encoding: "terrarium"` reaches a raster one. One key, two meanings, told apart by the
+  source type. The MLT value is read from the header rather than the metadata, because an archive
+  whose tile type says MapLibre Tiles is MLT-encoded and nothing needs to say so twice.
+
+- **A resume-data shortfall is now reported.** The sidecar has been answering with how many torrents
+  were asked to write and how many managed it before the deadline, and both numbers were discarded —
+  by the engine wrapper, and again by the timer that called it. A torrent that does not write is one
+  that gets re-hashed on the next start, which for a 700 GiB archive is the difference between
+  seeding in seconds and seeding in half an hour. That is what "why is everything at 0%" looks like
+  from outside, and the silence here is part of why it was hard to see.
+
+### 🐞 Bug fixes
+- **The two pages disagreed about how large an archive was.** The console rounded to whole units
+  above ten and the public page always kept a decimal, so the same archive read as `81 GiB` on one
+  and `80.6 GiB` on the other. Both now keep a decimal from KiB up — these are mostly archive sizes,
+  and half a gigabyte is worth seeing — and a test holds the two helpers character-for-character
+  identical, since nothing about a duplicated function announces when it stops being a copy.
+
 ## 0.55.3
 ### 🐞 Bug fixes
 - **A `/latest/` document could never be updated once a client had cached it.** The `ETag` was the

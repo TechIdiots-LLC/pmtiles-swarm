@@ -1170,3 +1170,42 @@ describe('copying a magnet', () => {
     assert.match(page, /copyable\(ends\.magnet, 'magnet', true\)/);
   });
 });
+
+describe('the two pages that show a size', () => {
+  /**
+   * The body of the `bytes` helper, as written on one page.
+   * @param {string} source - The page.
+   * @returns {string} - From `const bytes` to its closing brace.
+   */
+  const bytesHelper = (source) => {
+    const at = source.indexOf('const bytes = (n) => {');
+    assert.ok(at > 0, 'no bytes helper on this page');
+    const end = source.indexOf('\n      };', at);
+    assert.ok(end > at, 'could not find the end of it');
+    return source.slice(at, end);
+  };
+
+  it('agree character for character on how to format one', async () => {
+    // They drifted, and the drift was invisible until somebody read the same
+    // archive off both pages: the console rounded to whole units above ten and
+    // the public page always kept a decimal, so one said 81 GiB and the other
+    // 80.6 GiB. Two numbers for one fact is worse than either number, and
+    // nothing about a duplicated helper announces when it stops being a copy.
+    const publicPage = await fs.readFile(
+      path.join(here, '..', 'src', 'web', 'public.html'),
+      'utf8',
+    );
+    assert.equal(bytesHelper(page), bytesHelper(publicPage));
+  });
+
+  it('keeps a decimal above bytes, which is where the difference showed', () => {
+    // Asserted on the text rather than by running it, since the page is a
+    // module inside an HTML file with nothing to import. The rule is the one
+    // thing this test is really about.
+    assert.match(
+      bytesHelper(page),
+      /toFixed\(unit === 0 \? 0 : 1\)/,
+      'the rounding rule changed',
+    );
+  });
+});

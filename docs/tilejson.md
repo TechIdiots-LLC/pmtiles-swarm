@@ -172,7 +172,22 @@ MapLibre applies every TileJSON member to the source after the source is
 constructed, so an `encoding` here **overrides** one written in the style. That
 is the intended direction: the archive is the thing that knows.
 
-Anything other than the three values the style specification defines is dropped
+### `mlt`
+
+The same key carries one more value, for a different kind of source. MapLibre
+spells the tile encoding of a vector source `encoding` too, and `mlt` there means
+the tiles are [MapLibre Tiles](https://maplibre.org/maplibre-tile-spec/) rather
+than MVT — so there was no new key to invent for it, only a value to allow
+through.
+
+This one comes from the header rather than the metadata. PMTiles has a tile type
+for MLT (`6`), and an archive whose tile type says MapLibre Tiles _is_
+MLT-encoded; nothing needs to be written in the metadata to make it so.
+Elevation packing is the opposite case — the header knows the tile is WebP and
+nothing about what its three channels mean — which is why the two are read from
+different places despite sharing a key.
+
+Anything other than the values the style specification defines is dropped
 rather than passed on. A client handed an encoding it does not recognise is
 worse off than one handed nothing, because nothing at least leaves it free to
 use its own default.

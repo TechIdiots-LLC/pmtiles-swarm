@@ -262,8 +262,22 @@
         return node;
       };
 
+      /** What this page shows in place of a size it has not got. */
+      const EMPTY = null;
+      /**
+       * Formats a byte count for people rather than machines.
+       *
+       * Kept character-for-character identical to the same helper on the other
+       * page, and held there by a test. They drifted once: this one rounded to
+       * whole units above ten and the other always kept a decimal, so the same
+       * archive read as 81 GiB on one page and 80.6 GiB on the other. Two
+       * numbers for one fact is worse than either number.
+       *
+       * One decimal from KiB up, because these are mostly archive sizes and
+       * half a gigabyte of difference is worth seeing.
+       */
       const bytes = (n) => {
-        if (!Number.isFinite(n) || n <= 0) return null;
+        if (!Number.isFinite(n) || n <= 0) return EMPTY;
         const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
         let value = n;
         let unit = 0;

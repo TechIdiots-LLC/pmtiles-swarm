@@ -759,10 +759,17 @@ export class LibtorrentEngine {
   /**
    * Persists resume data, so the next start skips re-hashing the store.
    * @param {string} [infoHash] - One torrent, or all when omitted.
-   * @returns {Promise<void>} - Resolves once saved.
+   * @returns {Promise<{written: number, asked: number}>} - How many torrents
+   *   were told to write resume data, and how many actually did before the
+   *   deadline.
    */
   async saveResume(infoHash) {
-    await this.#call('save_resume', { infoHash });
+    // Returned rather than discarded. The sidecar reports both numbers, and
+    // the gap between them is the thing worth knowing: a torrent that did not
+    // write is one that gets re-hashed on the next start, which for a 700 GiB
+    // archive is the difference between seeding in seconds and seeding in half
+    // an hour. That answer was being thrown away here.
+    return this.#call('save_resume', { infoHash });
   }
 
   /**

@@ -529,6 +529,21 @@ PMTILES_SWARM_PUBLIC_URL
     resumeTimer = setInterval(() => {
       engine
         .saveResume()
+        .then((result) => {
+          // Said out loud, because the shortfall is the thing that costs.
+          // A torrent that did not write inside the deadline is one that gets
+          // re-hashed on the next start, and for a 700 GiB archive that is the
+          // difference between seeding in seconds and seeding in half an hour
+          // -- which is exactly what "why is everything at 0%" looks like from
+          // the outside. Silence here is what made that hard to see.
+          const { written = 0, asked = 0 } = result ?? {};
+          if (asked > 0 && written < asked) {
+            console.warn(
+              `[resume] ${written} of ${asked} torrents wrote resume data ` +
+                'in time; the rest will be re-hashed on the next start',
+            );
+          }
+        })
         .catch((error) =>
           console.warn(`[resume] could not save: ${error.message}`),
         );

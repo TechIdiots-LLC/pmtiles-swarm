@@ -430,20 +430,30 @@ export class CompositeEngine {
    * therefore re-hashed its whole store on every start, which for 800 GB is
    * half an hour of disk before it serves anything.
    * @param {string} [infoHash] - One archive, or all of them when omitted.
-   * @returns {Promise<void>} - Resolves once every engine has been asked.
+   * @returns {Promise<{written: number, asked: number}>} - Totals across every
+   *   engine that keeps resume data.
    */
   async saveResume(infoHash) {
+    // Summed rather than dropped, so a caller can tell the difference between
+    // "every torrent wrote" and "half of them will be re-hashed on the next
+    // start". An engine that fails outright contributes nothing to either
+    // total, which is right: it was never asked in a way that counted.
+    let written = 0;
+    let asked = 0;
     for (const engine of [this.#primary, ...this.#secondaries]) {
       // WebTorrent keeps none, and says so by not offering the method.
       if (!engine.saveResume) continue;
       try {
-        await engine.saveResume(infoHash);
+        const result = (await engine.saveResume(infoHash)) ?? {};
+        written += Number(result.written) || 0;
+        asked += Number(result.asked) || 0;
       } catch (error) {
         console.warn(
           `[composite] ${engine.name} could not save resume data: ${error.message}`,
         );
       }
     }
+    return { written, asked };
   }
 
   /**

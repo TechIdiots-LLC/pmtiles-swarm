@@ -288,3 +288,38 @@ describe('a summary written by an older prober', () => {
     }
   });
 });
+
+describe('an archive of MapLibre Tiles', () => {
+  it('is recognised, rather than probing as unknown', async () => {
+    // The extension map had known about `mlt` for a while and the tile-type
+    // table had not, so an MLT archive read as `unknown` and was refused a
+    // tile endpoint it could have served.
+    const summary = summarize({ ...HEADER, tileType: 6 }, {});
+    assert.equal(summary.format, 'mlt');
+  });
+
+  it('says so with the same key a raster-dem archive uses', async () => {
+    // No new key to invent: MapLibre spells this `encoding` on a vector source
+    // exactly as it does on a raster-dem one, and applies TileJSON members to
+    // both after construction. One key, two meanings, told apart by the source
+    // type.
+    const doc = buildTileJson(
+      { ...ENTRY, pmtiles: summarize({ ...HEADER, tileType: 6 }, {}) },
+      'https://x.test',
+    );
+    assert.equal(doc.encoding, 'mlt');
+    assert.match(doc.tiles[0], /\.mlt$/);
+  });
+
+  it('takes the header s word for it, not the metadata s', async () => {
+    // An archive whose tile type says MapLibre Tiles is MLT-encoded, and no
+    // metadata is needed to know it. Elevation packing is the opposite case --
+    // the header knows the tile is WebP and nothing about what its channels
+    // mean -- which is why the two are read from different places.
+    const summary = summarize(
+      { ...HEADER, tileType: 6 },
+      { encoding: 'terrarium' },
+    );
+    assert.equal(summary.encoding, 'mlt');
+  });
+});

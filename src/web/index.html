@@ -889,17 +889,30 @@
     <script type="module">
       const $ = (id) => document.getElementById(id);
 
-      /** Formats a byte count for people rather than machines. */
+      /** What this page shows in place of a size it has not got. */
+      const EMPTY = '—';
+      /**
+       * Formats a byte count for people rather than machines.
+       *
+       * Kept character-for-character identical to the same helper on the other
+       * page, and held there by a test. They drifted once: this one rounded to
+       * whole units above ten and the other always kept a decimal, so the same
+       * archive read as 81 GiB on one page and 80.6 GiB on the other. Two
+       * numbers for one fact is worse than either number.
+       *
+       * One decimal from KiB up, because these are mostly archive sizes and
+       * half a gigabyte of difference is worth seeing.
+       */
       const bytes = (n) => {
-        if (!Number.isFinite(n) || n <= 0) return '—';
+        if (!Number.isFinite(n) || n <= 0) return EMPTY;
         const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
         let value = n;
         let unit = 0;
         while (value >= 1024 && unit < units.length - 1) {
           value /= 1024;
-          unit++;
+          unit += 1;
         }
-        return `${value.toFixed(value < 10 && unit > 0 ? 1 : 0)} ${units[unit]}`;
+        return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
       };
 
       const rate = (n) => (n > 0 ? `${bytes(n)}/s` : '—');
