@@ -7,6 +7,20 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.45.2
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **A peer's pieces bar now gets a row of its own on the Peers tab.** As a column it took most of the
+  table and left every other cell wrapping a word at a time — `WebT orrent 0.3. 0` down four lines —
+  while the bar itself was still too narrow to read. The figures go on one line and the bar spans the
+  table beneath them, labelled **pieces** rather than **Has**.
+- **A peer that describes itself with an object is no longer shown as `[object Object]`.** Engines
+  disagree about the shape: libtorrent sends a version string and a WebTorrent peer arrives as an
+  object, which went into the column unchanged — and that reads as a fault in this node rather than a
+  peer describing itself differently. Whatever the object carries that names it is used, and a dash
+  where nothing does.
+
 ## 0.45.1
 ### ✨ Features and improvements
 

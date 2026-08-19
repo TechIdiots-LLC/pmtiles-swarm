@@ -252,6 +252,12 @@
         word-break: break-all;
       }
       .rows th { color: var(--muted); font-size: 0.75rem; white-space: nowrap; }
+      /* A peer's figures fit on one line once the bar is not competing with
+         them for width; the bar gets the whole table on the row below. */
+      .rows.peers td { white-space: nowrap; word-break: normal; }
+      .rows.peers tr.peerbar > td { border-bottom: 1px solid var(--line); }
+      .rows.peers tr.peerbar .piecerow { margin: 0; }
+      .rows.peers tr:not(.peerbar) > td { border-bottom: none; padding-bottom: 0.1rem; }
       [hidden] { display: none !important; }
 
       /* A radio or checkbox beside its own label.
@@ -1588,6 +1594,30 @@
        * @param {object} entry - What the detail endpoint already returned.
        * @returns {Promise<void>} - Resolves once rendered.
        */
+      /**
+       * What a peer says it is, as a string.
+       *
+       * Engines disagree about the shape: libtorrent sends a version string,
+       * and a WebTorrent peer arrives as an object. The object went through
+       * escapeHtml unchanged and the column read "[object Object]" — which
+       * looks like a fault in this node rather than a peer that described
+       * itself differently.
+       * @param {object} peer - One peer from the engine.
+       * @returns {string} - Something worth printing.
+       */
+      function clientOf(peer) {
+        const said = peer?.client;
+        if (typeof said === 'string' && said.trim()) return said;
+        if (said && typeof said === 'object') {
+          // Whatever it does carry, in the order most likely to name it.
+          for (const key of ['name', 'client', 'version', 'id', 'peerId']) {
+            const value = said[key];
+            if (typeof value === 'string' && value.trim()) return value;
+          }
+        }
+        return '—';
+      }
+
       async function fillPane(name, infoHash, entry) {
         const pane = document.querySelector(`[data-pane="${name}"]`);
         if (!pane) return;
@@ -1677,39 +1707,58 @@
               (peer) => !listed.has(peer.address),
             );
 
-            const rows = [...peers, ...extra].map((peer, index) => {
-              const address = peer.address ?? peer.ip ?? '—';
-              const have = bitfields.get(address);
-              return [
-                escapeHtml(address),
-                escapeHtml(peer.client ?? '—'),
-                escapeHtml(peer.kind ?? 'peer'),
-                escapeHtml(peer.connection ?? '—'),
-                have
-                  ? `<canvas class="piecebar thin" data-bar="peer-${index}"></canvas>`
-                  : '<span class="sub">not reported</span>',
-                peer.progress != null ? pct(peer.progress) : '—',
-                rate(peer.downloadSpeed ?? peer.dlSpeed),
-                rate(peer.uploadSpeed ?? peer.upSpeed),
-              ];
-            });
+            // Two rows a peer: the figures, then its pieces across the full
+            // width. As a column the bar took most of the table and left every
+            // other cell wrapping a word at a time -- "WebT orrent 0.3. 0" in
+            // four lines -- while the bar itself was still too narrow to read.
+            const columns = ['Address', 'Client', 'Kind', 'Conn', 'Progress', 'Down', 'Up'];
+            const body = [...peers, ...extra]
+              .map((peer, index) => {
+                const address = peer.address ?? peer.ip ?? '—';
+                const have = bitfields.get(address);
+                const cells = [
+                  escapeHtml(address),
+                  escapeHtml(clientOf(peer)),
+                  escapeHtml(peer.kind ?? 'peer'),
+                  escapeHtml(peer.connection ?? '—'),
+                  peer.progress != null ? pct(peer.progress) : '—',
+                  rate(peer.downloadSpeed ?? peer.dlSpeed),
+                  rate(peer.uploadSpeed ?? peer.upSpeed),
+                ];
+                return (
+                  `<tr>${cells.map((cell) => `<td>${cell}</td>`).join('')}</tr>` +
+                  `<tr class="peerbar"><td colspan="${columns.length}">
+                     <div class="piecerow">
+                       <span class="label">pieces</span>
+                       ${
+                         have
+                           ? `<canvas class="piecebar thin" data-bar="peer-${index}"></canvas>`
+                           : '<span class="sub">not reported</span>'
+                       }
+                       <span class="value">${peer.progress != null ? pct(peer.progress) : ''}</span>
+                     </div>
+                   </td></tr>`
+                );
+              })
+              .join('');
 
             pane.innerHTML =
-              table(
-                ['Address', 'Client', 'Kind', 'Conn', 'Has', 'Progress', 'Down', 'Up'],
-                rows,
-              ) +
+              (body === ''
+                ? '<div class="sub">Nothing to show.</div>'
+                : `<table class="rows peers"><thead><tr>${columns
+                    .map((header) => `<th>${escapeHtml(header)}</th>`)
+                    .join('')}</tr></thead><tbody>${body}</tbody></table>`) +
               (failed
                 ? `<div class="sub" style="margin-top:0.5rem">
                      The engine could not list peers: ${escapeHtml(failed)}
                    </div>`
                 : '') +
-              (rows.length > 0
+              (body !== ''
                 ? `<div class="sub" style="margin-top:0.5rem">
-                     <b>Has</b> is drawn the same way as the bars on General —
-                     a column covers many pieces and is only filled when all of
-                     them are held. <b>Progress</b> is the engine's own figure
-                     for the same peer, which is exact.
+                     Each peer's <b>pieces</b> bar is drawn the way the bars on
+                     General are — a column covers many pieces and is only
+                     filled when all of them are held. <b>Progress</b> is the
+                     engine's own figure for the same peer, which is exact.
                    </div>`
                 : '');
 

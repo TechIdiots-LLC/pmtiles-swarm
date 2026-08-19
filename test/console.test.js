@@ -986,7 +986,11 @@ describe('what the details tabs are for', () => {
     );
     assert.match(peers, /\/peers`\)/);
     assert.match(peers, /pieces\?buckets=\$\{width\}&peers=true/);
-    assert.match(peers, /'Has',/);
+    assert.match(peers, /'Progress',/);
+    // On a row of its own: as a column the bar took most of the table and left
+    // every other cell wrapping a word at a time.
+    assert.match(peers, /class="peerbar"/);
+    assert.match(peers, /colspan="\$\{columns\.length\}"/);
   });
 });
 
@@ -1025,5 +1029,22 @@ describe('adding a web seed', () => {
     // The question anybody hesitates over before adding one to a published
     // archive, and the reason this is safe to offer at all.
     assert.match(sources, /infohash is unchanged/);
+  });
+});
+
+describe('what a peer calls itself', () => {
+  it('is not printed as [object Object]', () => {
+    // Engines disagree about the shape: libtorrent sends a version string, a
+    // WebTorrent peer arrives as an object. The object went through escapeHtml
+    // unchanged, and a column reading "[object Object]" looks like a fault in
+    // this node rather than a peer describing itself differently.
+    const helper = page.slice(
+      page.indexOf('function clientOf(peer)'),
+      page.indexOf('async function fillPane('),
+    );
+    assert.match(helper, /typeof said === 'string'/);
+    assert.match(helper, /typeof said === 'object'/);
+    assert.match(helper, /return '—';/);
+    assert.match(page, /escapeHtml\(clientOf\(peer\)\)/);
   });
 });
