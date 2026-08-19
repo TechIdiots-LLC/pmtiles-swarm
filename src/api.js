@@ -2429,6 +2429,68 @@ export function createApp({
     }),
   );
 
+  /**
+   * The archive itself, by byte range.
+   *
+   * Every PMTiles consumer there is — pmtiles.js, tileserver-gl, go-pmtiles,
+   * QGIS — reads one file over HTTP with Range requests. Until now this node
+   * offered tiles, which is a different protocol, so using it as an origin
+   * meant either its own tile endpoint or a copy of the file somewhere else.
+   * This is the file, at an address that does not depend on knowing where the
+   * node keeps it.
+   *
+   * It is also, by construction, a valid BEP 19 web seed: that specification
+   * is "an HTTP URL that serves the file and honours Range", which is exactly
+   * this. Publishing it is a separate decision and a later one — a node is not
+   * obliged to offer 700 GiB to strangers because it can.
+   *
+   * Complete archives only. A partial file would answer a range with whatever
+   * happened to be at that offset, which for a torrent's sparse allocation is
+   * zeroes: worse than a refusal, because it looks like data.
+   */
+  app.get('/archives/:infoHash/archive.pmtiles', (req, res) => {
+    const entry = catalog.get(req.params.infoHash);
+    if (!entry) return res.status(404).json({ error: 'not found' });
+
+    if (entry.complete === false) {
+      return res.status(409).json({
+        error:
+          'this archive is not complete here, so a byte range would answer ' +
+          'with unwritten space rather than data',
+      });
+    }
+    const file = entry.savePath ? path.join(entry.savePath, entry.name) : null;
+    if (!file) return res.status(404).json({ error: 'no file for it here' });
+
+    // sendFile does the range work: 206 with Content-Range, 416 for one that
+    // cannot be satisfied, HEAD, and the conditional headers a cache needs.
+    // Reimplementing that is how a subtly wrong Content-Range gets shipped.
+    res.sendFile(
+      file,
+      {
+        acceptRanges: true,
+        // A tile archive is immutable — it is addressed by the hash of its
+        // own contents, so a byte at an offset is the same byte for ever.
+        maxAge: '1y',
+        immutable: true,
+        headers: { 'content-type': 'application/octet-stream' },
+      },
+      (error) => {
+        if (!error || res.headersSent) return;
+        const missing = error.code === 'ENOENT';
+        // sendFile reports a range it cannot satisfy as a 416 on the error,
+        // which is an answer rather than a fault — passing it through as 500
+        // would tell a client its request was our problem.
+        const status = missing ? 404 : (error.status ?? 500);
+        res.status(status).json({
+          error: missing
+            ? 'the catalog has this archive but its file is not there'
+            : error.message,
+        });
+      },
+    );
+  });
+
   app.get(
     '/archives/:infoHash/archive.torrent',
     route(async (req, res) => {

@@ -7,6 +7,25 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.48.0
+### ✨ Features and improvements
+- **An archive can now be read as a file, by byte range.** `GET /archives/<infohash>/archive.pmtiles`
+  answers `Accept-Ranges: bytes`, a `206` with `Content-Range` for a range and `416` for one it cannot
+  satisfy. Every PMTiles consumer there is — pmtiles.js, tileserver-gl, go-pmtiles, QGIS — reads one
+  file over HTTP that way, and until now this node offered tiles, which is a different protocol: using
+  it as an origin meant a copy of the file somewhere else. This is the file, at an address that does
+  not depend on knowing where the node keeps it.
+
+  Complete archives only. A partial file answers a range with whatever is at that offset, which for a
+  torrent's sparse allocation is zeroes — worse than a refusal, because it looks like data. An
+  incomplete archive answers `409` and says so.
+
+  It is also, by construction, a valid BEP 19 web seed: that specification is "an HTTP URL that serves
+  the file and honours Range". Publishing it as one is a separate decision and a later change — a node
+  is not obliged to offer 700 GiB to strangers because it can.
+
+### 🐞 Bug fixes
+
 ## 0.47.1
 ### ✨ Features and improvements
 
