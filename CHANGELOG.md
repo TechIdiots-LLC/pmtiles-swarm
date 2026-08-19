@@ -7,6 +7,17 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.50.1
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **The HTTP sources tab threw instead of opening.** The three switches were built with the base URL
+  that `renderDetail` keeps, and they are rendered by `fillPane`, which is a different function with
+  no sight of it — a `ReferenceError` the moment the tab was clicked. The console is one module
+  inside an HTML file, so there is nothing to import and nothing to lint: `node --check` accepts a
+  binding reached across a function boundary and says nothing. A test now compares what `fillPane`
+  uses against what only `renderDetail` declares.
+
 ## 0.50.0
 ### ✨ Features and improvements
 - **Three switches for what a node offers of an archive's own bytes**, on the node, on a watched

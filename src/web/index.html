@@ -1821,7 +1821,12 @@
             // says nothing defers to the node's own answer, and what belongs
             // in a checkbox is what is actually happening.
             const on = entry.publishing ?? {};
-            const archiveUrl = `${base}/archives/${entry.infoHash}/archive.pmtiles`;
+            // location.origin, not the `base` renderDetail keeps: this runs in
+            // fillPane, which is a different function, and reaching for a
+            // binding that is not there is a ReferenceError nothing here would
+            // catch until somebody opened the tab.
+            const archiveUrl =
+              `${location.origin}/archives/${entry.infoHash}/archive.pmtiles`;
 
             // Three switches rather than one, because they are three separate
             // exposures. Serving the file to a reader that was handed the URL,

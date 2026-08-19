@@ -171,6 +171,59 @@ describe('console script structure', () => {
       assert.ok(depths.has(name), `${name} should exist in the console script`);
     }
   });
+
+  it('does not reach into renderDetail from fillPane', () => {
+    // They read as one thing on screen — the panel and its tabs — and they are
+    // two functions with nothing between them. fillPane is called with (name,
+    // infoHash, entry) and nothing else, so every local renderDetail computes
+    // for its own markup is a ReferenceError from in there: not a syntax
+    // error, not caught by `node --check`, and not visible until somebody
+    // opens the tab that uses it. That is exactly how `base` got in.
+    const start = page.indexOf('async function fillPane(');
+    const end = page.indexOf('async function renderDetail(');
+    assert.ok(start > 0 && end > start, 'the two functions moved');
+
+    // Comments go first, or every name mentioned in one reads as a use — and
+    // these functions are heavily commented, including about the bug this
+    // checks for.
+    const body = page
+      .slice(start, end)
+      .replace(/\/\*[\s\S]*?\*\//g, ' ')
+      .replace(/\/\/[^\n]*/g, ' ');
+
+    // Split into identifiers rather than searched with a pattern per name. The
+    // first attempt built the pattern in a template literal, where JavaScript
+    // resolves the escapes before RegExp ever sees them — so it looked for a
+    // literal `w` and a backspace, matched nothing, and passed against the
+    // very file it was written to catch.
+    const used = new Set(body.split(/[^A-Za-z0-9_$]+/));
+
+    // What fillPane declares for itself is its own, whatever it is called.
+    // Two functions in one file reaching for the same obvious name is not the
+    // mistake being looked for here.
+    for (const match of body.matchAll(/\b(?:const|let|var|function) (\w+)/g)) {
+      used.delete(match[1]);
+    }
+
+    // Every `const x =` at renderDetail's own indentation, up to its closing
+    // brace at the indentation it was declared at.
+    const detail = page.slice(end);
+    const locals = [
+      ...detail
+        .slice(0, detail.indexOf('\n      }'))
+        .matchAll(/^ {8}const (\w+) =/gm),
+    ].map((match) => match[1]);
+    assert.ok(
+      locals.length > 3,
+      'renderDetail declares fewer locals than it did',
+    );
+
+    assert.deepEqual(
+      locals.filter((name) => used.has(name)),
+      [],
+      'fillPane uses names only renderDetail has',
+    );
+  });
 });
 
 describe('the archives table', () => {
