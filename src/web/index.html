@@ -963,7 +963,7 @@
        * four requests a tick for nothing, which is why they are loaded lazily
        * in the first place.
        */
-      const LIVE_PANES = new Set(['pieces', 'peers']);
+      const LIVE_PANES = new Set(['peers']);
       let refreshingPane = false;
 
       // What the header switch shows, so a click knows what it is toggling to.
@@ -1566,6 +1566,7 @@
        * @returns {void}
        */
       function refreshOpenPane() {
+        if (activeTab === 'general' && selected) renderPieceBars(selected);
         if (refreshingPane || !selected || !LIVE_PANES.has(activeTab)) return;
         const pane = document.querySelector(`[data-pane="${activeTab}"]`);
         // Only while it is on screen: a hidden pane is one the reader moved
@@ -1647,92 +1648,80 @@
           }
 
           if (name === 'peers') {
-            const answer = await api(`/api/torrents/${infoHash}/peers`);
+            const width = Math.max(256, Math.min(2048, pane.clientWidth || 1000));
+            // Both, because they answer halves of the same question and were
+            // two tabs for no better reason than that they come from two
+            // endpoints. `/peers` knows how a peer is connected and how fast;
+            // `/pieces` knows what it holds. Neither is much use alone.
+            const [answer, info] = await Promise.all([
+              api(`/api/torrents/${infoHash}/peers`),
+              api(`/api/torrents/${infoHash}/pieces?buckets=${width}&peers=true`).catch(
+                () => ({}),
+              ),
+            ]);
+
             // Either a bare array, or `{ peers, error }` when an engine could
             // not answer. "Nothing to show" is the right thing to say about an
             // empty swarm and the wrong thing to say about a broken engine.
             const peers = Array.isArray(answer) ? answer : (answer?.peers ?? []);
             const failed = Array.isArray(answer) ? null : answer?.error;
+
+            // Joined on address, which is the only thing both sides agree on.
+            // A peer in one and not the other still gets its row: half an
+            // answer about a peer beats leaving it out of the list.
+            const bitfields = new Map(
+              (info.peers ?? []).map((peer) => [peer.address, peer.have]),
+            );
+            const listed = new Set(peers.map((peer) => peer.address ?? peer.ip));
+            const extra = (info.peers ?? []).filter(
+              (peer) => !listed.has(peer.address),
+            );
+
+            const rows = [...peers, ...extra].map((peer, index) => {
+              const address = peer.address ?? peer.ip ?? '—';
+              const have = bitfields.get(address);
+              return [
+                escapeHtml(address),
+                escapeHtml(peer.client ?? '—'),
+                escapeHtml(peer.kind ?? 'peer'),
+                escapeHtml(peer.connection ?? '—'),
+                have
+                  ? `<canvas class="piecebar thin" data-bar="peer-${index}"></canvas>`
+                  : '<span class="sub">not reported</span>',
+                peer.progress != null ? pct(peer.progress) : '—',
+                rate(peer.downloadSpeed ?? peer.dlSpeed),
+                rate(peer.uploadSpeed ?? peer.upSpeed),
+              ];
+            });
+
             pane.innerHTML =
               table(
-                ['Address', 'Client', 'Kind', 'Conn', 'Progress', 'Down', 'Up'],
-                peers.map((peer) => [
-                  escapeHtml(peer.address ?? peer.ip ?? '—'),
-                  escapeHtml(peer.client ?? '—'),
-                  escapeHtml(peer.kind ?? 'peer'),
-                  escapeHtml(peer.connection ?? '—'),
-                  peer.progress != null ? pct(peer.progress) : '—',
-                  rate(peer.downloadSpeed ?? peer.dlSpeed),
-                  rate(peer.uploadSpeed ?? peer.upSpeed),
-                ]),
+                ['Address', 'Client', 'Kind', 'Conn', 'Has', 'Progress', 'Down', 'Up'],
+                rows,
               ) +
               (failed
                 ? `<div class="sub" style="margin-top:0.5rem">
                      The engine could not list peers: ${escapeHtml(failed)}
                    </div>`
+                : '') +
+              (rows.length > 0
+                ? `<div class="sub" style="margin-top:0.5rem">
+                     <b>Has</b> is drawn the same way as the bars on General —
+                     a column covers many pieces and is only filled when all of
+                     them are held. <b>Progress</b> is the engine's own figure
+                     for the same peer, which is exact.
+                   </div>`
                 : '');
-            return;
-          }
 
-          if (name === 'pieces') {
-            const width = Math.max(256, Math.min(2048, pane.clientWidth || 1000));
-            const info = await api(
-              `/api/torrents/${infoHash}/pieces?buckets=${width}&peers=true`,
-            );
-            if (info.error) {
-              pane.innerHTML = `<div class="sub">${escapeHtml(info.error)}</div>`;
-              return;
-            }
-
-            const held = info.haveCount ?? 0;
-            const pctHeld = info.numPieces ? (held / info.numPieces) * 100 : 0;
-            pane.innerHTML = `
-              <div class="piecerow">
-                <span class="label">Downloaded</span>
-                <canvas class="piecebar" data-bar="have"></canvas>
-                <span class="value">${pctHeld.toFixed(1)}%</span>
-              </div>
-              <div class="piecerow">
-                <span class="label">Availability</span>
-                <canvas class="piecebar" data-bar="availability"></canvas>
-                <span class="value">${(info.distributedCopies ?? 0).toFixed(3)}</span>
-              </div>
-              <div class="sub" style="margin:0.6rem 0 1rem">
-                ${info.numPieces} pieces of ${bytes(info.pieceLength)}, drawn in
-                ${info.buckets} columns — so one column is
-                ${Math.ceil(info.numPieces / info.buckets)} piece(s), and is only
-                shown as held when <i>all</i> of them are. Availability is the
-                <i>rarest</i> piece in each column: one piece nobody has is the
-                answer to "can this still be completed", however well supplied
-                its neighbours are. It counts <i>connected peers</i> and not
-                this node, so an archive only this node holds shows an empty
-                bar — which is the truth about the swarm, not about the file.
-              </div>
-              ${
-                (info.peers ?? []).length > 0
-                  ? `<h3 style="margin:0 0 0.5rem">What each peer has</h3>` +
-                    (info.peers ?? [])
-                      .map(
-                        (peer, index) => `
-                          <div class="piecerow">
-                            <span class="label" title="${escapeHtml(peer.client ?? '')}">${escapeHtml(peer.address ?? '?')}</span>
-                            <canvas class="piecebar thin" data-bar="peer-${index}"></canvas>
-                            <span class="value">${peer.progress != null ? pct(peer.progress) : ''}</span>
-                          </div>`,
-                      )
-                      .join('')
-                  : '<div class="sub">No connected peer is reporting what it holds.</div>'
-              }`;
-
-            drawPieceBar(pane.querySelector('[data-bar="have"]'), info.have, 'have');
-            drawPieceBar(
-              pane.querySelector('[data-bar="availability"]'),
-              info.availability,
-              'availability',
-            );
-            (info.peers ?? []).forEach((peer, index) =>
-              drawPieceBar(pane.querySelector(`[data-bar="peer-${index}"]`), peer.have, 'peer'),
-            );
+            [...peers, ...extra].forEach((peer, index) => {
+              const have = bitfields.get(peer.address ?? peer.ip);
+              if (!have) return;
+              drawPieceBar(
+                pane.querySelector(`[data-bar="peer-${index}"]`),
+                have,
+                'peer',
+              );
+            });
             return;
           }
 
@@ -1775,6 +1764,56 @@
         }
       }
 
+      /**
+       * Draws the two whole-archive bars at the top of General.
+       *
+       * Into the canvases that are already there rather than by re-rendering
+       * the pane: General carries the category box and the export buttons, and
+       * replacing its markup under a three-second refresh would take the focus
+       * out of whatever was being typed. A canvas can be redrawn in place.
+       * @param {string} infoHash - The open archive.
+       * @returns {Promise<void>} - Resolves once drawn, or quietly if it cannot be.
+       */
+      async function renderPieceBars(infoHash) {
+        const holder = $('entry-pieces');
+        if (!holder) return;
+
+        const width = Math.max(256, Math.min(2048, holder.clientWidth || 1000));
+        let info;
+        try {
+          info = await api(
+            `/api/torrents/${infoHash}/pieces?buckets=${width}`,
+          );
+        } catch {
+          // An engine that cannot describe pieces is not a fault worth a
+          // message here — the rest of General is still the answer somebody
+          // opened this for.
+          return;
+        }
+        if (!info || info.error || !info.have) return;
+
+        const held = info.haveCount ?? 0;
+        const pctHeld = info.numPieces ? (held / info.numPieces) * 100 : 0;
+        holder.querySelector('[data-value="have"]').textContent =
+          `${pctHeld.toFixed(1)}%`;
+        holder.querySelector('[data-value="availability"]').textContent = (
+          info.distributedCopies ?? 0
+        ).toFixed(3);
+        holder.querySelector('[data-role="piecenote"]').textContent =
+          `${info.numPieces} pieces of ${bytes(info.pieceLength)}, drawn in ` +
+          `${info.buckets} columns — so one column is ` +
+          `${Math.ceil(info.numPieces / info.buckets)} piece(s), and is only ` +
+          'shown as held when all of them are.';
+
+        drawPieceBar(holder.querySelector('[data-bar="have"]'), info.have, 'have');
+        drawPieceBar(
+          holder.querySelector('[data-bar="availability"]'),
+          info.availability,
+          'availability',
+        );
+        holder.hidden = false;
+      }
+
       async function renderDetail(infoHash, keepTab = true) {
         if (!keepTab) activeTab = 'general';
         const panel = $('detail');
@@ -1809,12 +1848,25 @@
             <button data-tab="general" class="on">General</button>
             <button data-tab="trackers">Trackers</button>
             <button data-tab="peers">Peers</button>
-            <button data-tab="pieces">Pieces</button>
             <button data-tab="sources">HTTP sources</button>
             <button data-tab="content">Content</button>
           </div>
 
           <div data-pane="general">
+          <div id="entry-pieces" hidden>
+            <div class="piecerow">
+              <span class="label">Downloaded</span>
+              <canvas class="piecebar" data-bar="have"></canvas>
+              <span class="value" data-value="have"></span>
+            </div>
+            <div class="piecerow">
+              <span class="label" title="The rarest piece in each column: one piece nobody has answers &quot;can this still be completed&quot;, however well supplied its neighbours are. Connected peers only, not this node — so an archive only this node holds shows an empty bar, which is the truth about the swarm rather than about the file.">Availability</span>
+              <canvas class="piecebar" data-bar="availability"></canvas>
+              <span class="value" data-value="availability"></span>
+            </div>
+            <div class="sub" data-role="piecenote" style="margin:0.6rem 0 1rem"></div>
+          </div>
+
           <div class="grid">
             <div><span>infohash</span><b>${escapeHtml(entry.infoHash)}</b></div>
             <div><span>size</span><b>${bytes(entry.size)}</b></div>
@@ -1938,7 +1990,6 @@
 
           <div data-pane="trackers" hidden><div class="sub">loading…</div></div>
           <div data-pane="peers" hidden><div class="sub">loading…</div></div>
-          <div data-pane="pieces" hidden><div class="sub">loading…</div></div>
           <div data-pane="sources" hidden><div class="sub">loading…</div></div>
           <div data-pane="content" hidden><div class="sub">loading…</div></div>`;
 
@@ -2289,6 +2340,7 @@ Every piece is hashed against the ` +
           }
         };
 
+        renderPieceBars(infoHash);
         if (servable) renderPreview(entry);
       }
 

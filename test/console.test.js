@@ -561,12 +561,15 @@ describe('saving a row editor', () => {
 });
 
 describe('the detail panes that change by themselves', () => {
-  it('redraws pieces and peers on the refresh tick', async () => {
+  it('redraws the live panes on the refresh tick', async () => {
     // A pane is filled once, the first time it is shown — right for the ones
-    // describing an archive, wrong for the two describing what is happening
+    // describing an archive, wrong for the ones describing what is happening
     // now. Those sat frozen until the reader closed the panel and opened it
-    // again, or reloaded the page.
-    assert.match(page, /const LIVE_PANES = new Set\(\['pieces', 'peers'\]\)/);
+    // again, or reloaded the page. Peers is the pane that moves; General's
+    // two bars are redrawn separately, into canvases, so the category box
+    // beneath them keeps whatever was being typed into it.
+    assert.match(page, /const LIVE_PANES = new Set\(\['peers'\]\)/);
+    assert.match(page, /activeTab === 'general' && selected\) renderPieceBars/);
     assert.match(
       page,
       /renderRows\(\);\s+refreshOpenPane\(\);/,
@@ -935,5 +938,54 @@ describe('where the whole-node switch lives', () => {
     assert.match(header, /id="offline-toggle"[^>]*\shidden/);
     const render = page.slice(page.indexOf('function renderOffline('));
     assert.match(render.slice(0, 300), /button\.hidden = false;/);
+  });
+});
+
+describe('what the details tabs are for', () => {
+  it('has no separate Pieces tab', () => {
+    // What was left on it once the whole-archive bars moved to General was
+    // per-peer data, which is what the Peers tab is.
+    assert.ok(!page.includes('data-tab="pieces"'), 'the tab is still there');
+    assert.ok(!page.includes('data-pane="pieces"'), 'the pane is still there');
+    assert.ok(!/LIVE_PANES = new Set\(\[[^\]]*'pieces'/.test(page));
+  });
+
+  it('leads General with how much is here and whether it can complete', () => {
+    // Above the infohash, because it is the first thing anybody opening an
+    // archive wants and it used to be a tab away.
+    const general = page.slice(
+      page.indexOf('<div data-pane="general">'),
+      page.indexOf('<h2>Categories</h2>'),
+    );
+    assert.ok(general.includes('data-bar="have"'));
+    assert.ok(general.includes('data-bar="availability"'));
+    assert.ok(
+      general.indexOf('data-bar="have"') < general.indexOf('>infohash<'),
+      'the bars are below the infohash row',
+    );
+  });
+
+  it('redraws those bars without rebuilding the pane', () => {
+    // General carries the category box. Replacing its markup every three
+    // seconds would take the focus out of whatever was being typed, so the
+    // canvases are drawn into rather than re-rendered.
+    const render = page.slice(
+      page.indexOf('async function renderPieceBars('),
+      page.indexOf('async function renderDetail('),
+    );
+    assert.ok(!render.includes('innerHTML'), 'it rebuilds the pane');
+    assert.match(render, /drawPieceBar\(/);
+  });
+
+  it('shows each peer what it holds beside how it is connected', () => {
+    // Two endpoints, one question. `/peers` knows how a peer is connected and
+    // how fast; `/pieces` knows what it holds.
+    const peers = page.slice(
+      page.indexOf("if (name === 'peers') {"),
+      page.indexOf("if (name === 'sources') {"),
+    );
+    assert.match(peers, /\/peers`\)/);
+    assert.match(peers, /pieces\?buckets=\$\{width\}&peers=true/);
+    assert.match(peers, /'Has',/);
   });
 });

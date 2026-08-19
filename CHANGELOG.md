@@ -7,6 +7,23 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.43.0
+### ✨ Features and improvements
+- **Six detail tabs are now five, and the two bars that matter lead the General tab.** How much of an
+  archive is here, and whether it can still be completed, are the first things anybody opening one
+  wants — and they were a tab away, above an explanation of how the drawing works. They now sit above
+  the infohash row, where the question is asked.
+
+  What that left on the Pieces tab was per-peer data, which is what the Peers tab already was. The two
+  are one: each peer's row shows what it holds beside how it is connected and how fast, joined from
+  the two endpoints that each knew half of it. A peer either side knows about still gets a row, since
+  half an answer about a peer beats leaving it out.
+
+  The General bars are redrawn into their canvases rather than by re-rendering the pane, so the
+  category box below them keeps whatever was being typed across the three-second refresh.
+
+### 🐞 Bug fixes
+
 ## 0.42.0
 ### ✨ Features and improvements
 - **Recheck all, Pause all and Resume all**, in the archives toolbar. Each does to every archive what
