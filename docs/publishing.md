@@ -151,6 +151,22 @@ Adding from a **local path** never publishes a seed unless you ask: a web seed
 appears only when `webSeedBase` is set, and `publishDir` moves the file without
 implying one.
 
+### Adding one later
+
+An archive already in circulation can be given a web seed at any time, from the
+**HTTP sources** tab of its details or with
+`POST /api/torrents/<infohash>/webseeds`. This is safe on a published torrent:
+`url-list` sits outside the info dictionary, so the infohash does not change and
+every magnet, tracker and peer already relying on it keeps working.
+
+The URL has to serve the whole archive, byte for byte, under the name the torrent
+gives it. A seed that answers with anything else is not a faster path to the
+data — peers will fetch from it, fail the piece hash, and fall back to the swarm
+having wasted the transfer.
+
+Worth doing whenever an archive gets a public home after the fact: a swarm with
+one web seed starts cold in seconds rather than waiting for a peer to appear.
+
 ## Building from a feed of source data
 
 Subscribing is not only for finished archives. The OpenStreetMap project

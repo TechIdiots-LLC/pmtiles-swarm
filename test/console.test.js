@@ -989,3 +989,41 @@ describe('what the details tabs are for', () => {
     assert.match(peers, /'Has',/);
   });
 });
+
+describe('adding a web seed', () => {
+  const sources = page.slice(
+    page.indexOf("if (name === 'sources') {"),
+    page.indexOf("if (name === 'content') {"),
+  );
+
+  it('is done where the web seeds are listed', () => {
+    // It used to be a button in Actions that opened a prompt(), a long way
+    // from the list it changes and offering no sight of what is already there.
+    assert.match(sources, /id="seed-url"/);
+    assert.match(sources, /id="seed-add"/);
+    assert.match(sources, /\/webseeds`/);
+  });
+
+  it('is the only way to add one', () => {
+    // Two ways to do one thing is how they drift apart.
+    assert.ok(!page.includes('id="add-seed"'), 'the Actions button is back');
+  });
+
+  it('takes Enter as well as the button', () => {
+    // One field with a button beside it is a form in everything but name.
+    assert.match(sources, /event\.key === 'Enter'/);
+  });
+
+  it('says whether the engine actually took it', () => {
+    // "Added" and "the engine is using it" are different claims, and the
+    // second is the one somebody adding a seed wants.
+    assert.match(sources, /result\.live/);
+    assert.match(sources, /has not taken it yet/);
+  });
+
+  it('says the infohash does not change', () => {
+    // The question anybody hesitates over before adding one to a published
+    // archive, and the reason this is safe to offer at all.
+    assert.match(sources, /infohash is unchanged/);
+  });
+});

@@ -1728,12 +1728,63 @@
           if (name === 'sources') {
             const seeds = entry.webSeeds ?? [];
             pane.innerHTML =
-              table(['URL'], seeds.map((url) => [escapeHtml(url)])) +
-              `<div class="sub" style="margin-top:0.5rem">
+              table(
+                ['URL'],
+                seeds.map((url) => [escapeHtml(url)]),
+              ) +
+              `<div style="display:flex; gap:0.4rem; margin-top:0.75rem">
+                 <input
+                   id="seed-url"
+                   class="grow"
+                   placeholder="https://example.org/${escapeHtml(entry.name)}"
+                   spellcheck="false"
+                 />
+                 <button id="seed-add">Add</button>
+               </div>
+               <div class="sub" style="margin-top:0.5rem">
                  A web seed serves the archive over plain HTTP, which is what
                  makes it usable before it has peers — and the difference
-                 between a cold tile taking tens of seconds and under one.
+                 between a cold tile taking tens of seconds and under one. One
+                 can be added at any time: <code>url-list</code> sits outside
+                 the info dictionary, so the infohash is unchanged and every
+                 magnet and peer already relying on it keeps working. The URL
+                 must serve the whole archive, byte for byte, under the name
+                 the torrent gives it.
                </div>`;
+
+            // Attached here rather than in the panel, because this pane is
+            // rebuilt whenever it is shown and the handler has to survive that.
+            // Safe: sources is not one of the panes the refresh redraws.
+            const add = async () => {
+              const url = pane.querySelector('#seed-url').value.trim();
+              if (!url) return;
+              const button = pane.querySelector('#seed-add');
+              button.disabled = true;
+              try {
+                const result = await api(
+                  `/api/torrents/${infoHash}/webseeds`,
+                  { method: 'POST', body: { webSeeds: [url] } },
+                );
+                // "Added" and "the engine is using it" are different claims,
+                // and the second is the one somebody adding a seed wants.
+                toast(
+                  result.live
+                    ? 'web seed added and live'
+                    : 'web seed added; the engine has not taken it yet',
+                );
+                renderDetail(infoHash);
+              } catch (error) {
+                toast(error.message);
+                button.disabled = false;
+              }
+            };
+
+            pane.querySelector('#seed-add').onclick = add;
+            pane.querySelector('#seed-url').onkeydown = (event) => {
+              // Enter, because a single field with a button beside it is a
+              // form in everything but name.
+              if (event.key === 'Enter') add();
+            };
             return;
           }
 
@@ -1976,7 +2027,6 @@
           <div class="actions">
             ${servable ? '<button id="warm">Warm region</button>' : ''}
             <button id="set-location">Set location…</button>
-            <button id="add-seed">Add web seed</button>
             <button id="clear-cache" ${mode === 'cache' ? '' : 'disabled title="only cache-mode archives have a cache to clear"'}>Clear cache</button>
             <button id="recheck" title="Hash the files on disk again and believe the result. For an archive that reads 0% next to a file that is plainly there, or one that claims to be complete and is not — every other figure comes from something written down earlier, and this is the only thing that goes and looks.">Recheck files</button>
             <button id="pause">${entry.paused ? 'Resume' : 'Pause'}</button>
@@ -2246,24 +2296,6 @@
               $('move-error').textContent = error.message;
             }
           };
-        };
-
-        $('add-seed').onclick = async () => {
-          const url = window.prompt(
-            'Web seed URL (adding one does not change the infohash):',
-            `https://example.org/${entry.name}`,
-          );
-          if (!url) return;
-          try {
-            const result = await api(`/api/torrents/${infoHash}/webseeds`, {
-              method: 'POST',
-              body: { webSeeds: [url] },
-            });
-            toast(result.live ? 'web seed added and live' : 'web seed added');
-            renderDetail(infoHash);
-          } catch (error) {
-            toast(error.message);
-          }
         };
 
         $('clear-cache').onclick = async () => {

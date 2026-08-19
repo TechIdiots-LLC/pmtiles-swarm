@@ -7,6 +7,20 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.44.0
+### ✨ Features and improvements
+- **Web seeds are added where they are listed.** The **HTTP sources** tab now has a field and an Add
+  button under the list, so adding one shows what is already there and what the addition did. It
+  replaces the **Add web seed** button in Actions, which opened a `prompt()` a long way from the list
+  it changed — one way to do this rather than two.
+
+  The tab now also says why this is safe on a published archive: `url-list` sits outside the info
+  dictionary, so the infohash is unchanged and every magnet and peer already relying on it keeps
+  working. The result distinguishes "added" from "the engine has taken it", which are different
+  claims and the second is the one that matters.
+
+### 🐞 Bug fixes
+
 ## 0.43.0
 ### ✨ Features and improvements
 - **Six detail tabs are now five, and the two bars that matter lead the General tab.** How much of an
