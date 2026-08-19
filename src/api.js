@@ -366,13 +366,8 @@ export function createApp({
   const metadataRetries = new Map();
   const needsReread = (summary, infoHash) => {
     if (!summary) return false;
-    // Two reasons to go back to the archive. The first is the one this began
-    // as: a vector archive whose layers have not been read yet. The second is
-    // the general case it turned out to be — a summary written by an older
-    // prober, missing whatever that prober did not know to look for. Without
-    // it, adding a field to the summary reaches new archives only, and every
-    // archive already in the catalog keeps its hole until somebody removes and
-    // re-adds it by hand.
+    // Either the layers were never read, or an older prober wrote this and did
+    // not know to look for what the summary now carries.
     const stale = summary.summaryVersion !== SUMMARY_VERSION;
     const missingLayers = summary.format === 'pbf' && !summary.vectorLayers;
     if (!stale && !missingLayers) return false;
@@ -404,21 +399,13 @@ export function createApp({
     tiles
       .summarize(entry.infoHash, { timeoutMs })
       .then(async (summary) => {
-        // Written back whenever the read produced something newer than what
-        // was stored. Returning early unless vector layers turned up was right
-        // when layers were the only thing this looked for; it would now throw
-        // away the encoding it went to fetch.
         const fresh = summary.summaryVersion !== entry.pmtiles?.summaryVersion;
         if (!summary.vectorLayers && !fresh) return;
         await catalog.put({
           infoHash: entry.infoHash,
           pmtiles: { ...entry.pmtiles, ...summary },
         });
-        // Guarded, because this now runs for raster archives too, where there
-        // are no layers to count -- and the TypeError went to the catch below,
-        // which reported a backfill that had already succeeded as a failure.
-        // A misleading log is worse than none when it is the thing somebody is
-        // reading to find out whether the backfill works.
+        // Raster archives have no layers to count.
         console.log(
           summary.vectorLayers
             ? `[tiles] read ${summary.vectorLayers.length} vector layers for ` +
@@ -1048,17 +1035,16 @@ export function createApp({
           // `location.origin` there names the one port that is not for the
           // public — and a web seed built from it is handed to every peer in
           // the swarm.
-          // Whatever was actually published for this archive, where one was:
-          // the record is the truth about what peers hold, and it need not be
-          // what this node would build today.
+          // What was actually published, which need not be what this node
+          // would build today.
           url:
             entry.selfWebSeedUrl ??
             `${publishingBase({
               config,
               requestBase: baseUrl(req),
             })}/archives/${entry.infoHash}/archive.pmtiles`,
-          // The base the switch would use, so the console can offer it for
-          // editing before anything permanent is written.
+          // Worked out here: the console runs on the admin listener, whose port
+          // no peer can reach.
           base: publishingBase({ config, requestBase: baseUrl(req) }),
         },
       });
@@ -1184,14 +1170,8 @@ export function createApp({
       const body = req.body ?? {};
       try {
         const result = await library.setPublishing(req.params.infoHash, body, {
-          // Typed into the field beside the switch, where it beats
-          // everything else: this is the one URL a person gets to decide
-          // deliberately, because it is the one that cannot be taken back.
+          // The typed field wins; otherwise the request, on the public port.
           publishingUrl: body.publishingUrl,
-          // Otherwise the request it is being asked on is the best evidence
-          // available, the same reasoning the TileJSON already uses — and
-          // with the public port rather than the admin one, since a seed URL
-          // on a listener bound to localhost reaches no peer at all.
           baseUrl: baseUrl(req),
         });
         res.json(result);
@@ -2059,9 +2039,7 @@ export function createApp({
           magnet: entry.magnet,
           torrent: `${baseUrl(req)}/archives/${entry.infoHash}/archive.torrent`,
           webSeeds: entry.webSeeds ?? [],
-          // Present only when this archive is offered as a download. Absent
-          // otherwise rather than null: a public document should say what is
-          // on offer, not enumerate what is being withheld.
+          // Absent rather than null where it is not on offer.
           ...(publishingFor(entry, config).publicDownload
             ? {
                 archive: `${baseUrl(req)}/archives/${entry.infoHash}/archive.pmtiles`,
@@ -2110,52 +2088,22 @@ export function createApp({
   };
 
   /**
-   * Tags a response as "whichever build of this category is current".
+   * Tags a `/latest/` response so a cache can tell when the build moves.
    *
-   * Everything under `/archives/` is addressed by infohash and may be cached
-   * for a year, because the URL changes when the content does. A `/latest/`
-   * URL is the exact opposite: it is stable on purpose, so the content
-   * underneath it moves and the URL alone gives a cache no way to notice. A
-   * short TTL was the only thing these endpoints had, and a TTL is a guess —
-   * at five minutes, every client and every proxy in front of one serves the
-   * previous build for up to five minutes after a rollover, and not one of
-   * them can tell whether it is doing so.
-   *
-   * The infohash is the honest validator. It changes exactly when the archive
-   * a category resolves to changes, never otherwise, and it is the same value
-   * on every node in the swarm — so two nodes behind a load balancer agree
-   * about what is current, rather than each inventing a tag of its own from a
-   * body hash or an mtime and defeating the cache whenever a client is sent
-   * to the other one.
+   * See docs/serving-tiles.md — "How a client knows the build moved".
    * @param {import('express').Response} res - The response to tag.
-   * @param {object} entry - The archive this URL resolved to.
+   * @param {object|string} content - What is being sent.
    */
   const tagAsLatest = (res, content) => {
-    // Hashed from what is actually being sent, not from the infohash it
-    // resolved to. The infohash was the obvious choice and it was wrong: it
-    // says which build this is, and these documents carry more than that. A
-    // TileJSON also carries the archive's summary, a magnet also carries the
-    // web seeds and trackers, a feed carries both. Enrich a summary or add a
-    // web seed and the body changes while the infohash does not -- so every
-    // cache in the path revalidates, is told 304, and serves the old body for
-    // ever. That is not a cache being stale for a minute; it is a document
-    // that can never be updated again.
-    //
-    // A hash of the body has the property the infohash was picked for anyway:
-    // two nodes answering identically produce identical tags, and two nodes
-    // answering differently should not claim otherwise.
+    // Over the body, not the infohash: these documents carry more than which
+    // build they resolved to, so the infohash can stay put while they change.
     const text =
       typeof content === 'string' ? content : JSON.stringify(content);
-    // Quoted, because that is what an entity-tag is. Unquoted, a validator
-    // never matches an If-None-Match and every revalidation misses silently.
+    // Quoted, or `fresh` never matches it and every revalidation misses.
     res.setHeader(
       'etag',
       `"${crypto.createHash('sha1').update(text).digest('hex')}"`,
     );
-    // must-revalidate because serving this one stale is not merely "slightly
-    // old": a reader holding part of one build and asking for the rest after
-    // a rollover assembles a file that never existed. A minute of cache with
-    // a mandatory check at the end of it is the trade.
     res.setHeader('cache-control', 'public, max-age=60, must-revalidate');
   };
 
@@ -2263,12 +2211,8 @@ export function createApp({
     route(async (req, res) => {
       res.setHeader('access-control-allow-origin', '*');
       const categories = describeCategories(req);
-      // Tagged over the categories alone, deliberately. Express would happily
-      // hash the whole body for us, but `generatedAt` is a fresh timestamp on
-      // every request — so that tag would differ every time and no client
-      // could ever revalidate. What a consumer polls this for is whether the
-      // set of categories or the build each resolves to has moved, and that
-      // is exactly what this covers.
+      // Over the categories alone: `generatedAt` changes every request, so a
+      // tag covering it could never match.
       res.setHeader(
         'etag',
         `"${crypto.createHash('sha1').update(JSON.stringify(categories)).digest('hex')}"`,
@@ -2299,10 +2243,7 @@ export function createApp({
         });
       }
 
-      // The same background re-read the per-archive route does. Left out
-      // here, it missed exactly the archives that matter most: /latest/ is the
-      // URL a style points at, so a category anyone actually consumes through
-      // the documented path was the one place a stale summary never healed.
+      // /latest/ is the URL a style points at, so it has to heal too.
       startMetadataBackfill(entry);
 
       res.setHeader('access-control-allow-origin', '*');
@@ -2359,19 +2300,9 @@ export function createApp({
   });
 
   /**
-   * The headers a browser must be told it may read from a range response.
+   * Headers a cross-origin PMTiles reader needs and would not otherwise see.
    *
-   * Only a handful of response headers reach JavaScript on a cross-origin
-   * fetch, and not one of the headers a PMTiles reader depends on is among
-   * them. The official reader records the ETag of the first response and
-   * compares every response after it against that value — which is how it
-   * notices that the archive moved underneath a read in progress. Cross-origin
-   * and unexposed, it reads `null` instead, a comparison against null never
-   * fires, and it would splice two builds together in silence: the exact
-   * failure the tag exists to prevent. Content-Range earns its place through a
-   * narrower case — an archive smaller than the reader's first 16 KiB request
-   * is answered 416, and it parses the real length out of that header before
-   * retrying.
+   * See docs/serving-tiles.md — "How a client knows the build moved".
    */
   const RANGE_CORS_HEADERS = {
     'access-control-allow-origin': '*',
@@ -2382,24 +2313,8 @@ export function createApp({
   /**
    * Serves a byte range for an archive this node does not hold whole.
    *
-   * **Experimental.** It closes the loop the cache mode was built for: the
-   * node holds no bytes, a reader asks for some, and the pieces covering them
-   * are pulled out of the swarm on demand — the same path the tile endpoint
-   * has always taken internally, one HTTP layer further out and sharing the
-   * same piece cache and open handle.
-   *
-   * It is off by default and should stay off for anything public, for reasons
-   * that are properties of the arrangement rather than of this code:
-   *
-   * - Every byte is somebody else's upload. A node in cache mode is not an
-   *   origin; putting one behind a URL that looks like an origin turns each
-   *   request into swarm traffic that this node neither paid for nor holds.
-   * - A piece read takes as long as the swarm takes. That is fine for a tile,
-   *   which the reader asked for and will wait on, and poor for an HTTP client
-   *   with its own patience.
-   * - There is no way to answer a request for the whole file that is not
-   *   "download 700 GiB through BitTorrent and stream it out". So a range is
-   *   required, and a large one is refused.
+   * Experimental, off by default, and bounded: a Range is required and a large
+   * one refused. See docs/configuration.md — `serveArchiveFromSwarm`.
    * @param {import('express').Request} req - The request, for its Range.
    * @param {import('express').Response} res - The response.
    * @param {object} entry - The archive.
@@ -2421,17 +2336,12 @@ export function createApp({
       });
     }
 
-    // A range, and only a range. Without one the answer is the whole archive,
-    // and the whole archive is not on this disk — serving it would mean
-    // pulling every piece through the swarm to stream it back out, which is
-    // both enormous and somebody else's bandwidth.
+    // Without a Range the answer is the whole archive, pulled piece by piece
+    // through the swarm to stream back out.
     const asked = req.headers.range;
     if (!asked) {
       res.setHeader('accept-ranges', 'bytes');
-      // 409 rather than 411. The request is well formed -- 411 is about a
-      // missing Content-Length on the way in -- and what is wrong is the state
-      // of the thing being asked for: the whole file is not here, and fetching
-      // it through the swarm to stream back out is not an answer.
+      // 409, not 411: the request is well formed, the resource is not here.
       return res.status(409).json({
         error:
           'this node does not hold this archive, so it can only answer a ' +
@@ -2440,8 +2350,7 @@ export function createApp({
     }
 
     const ranges = parseRange(size, asked, { combine: true });
-    // -1 is unsatisfiable, -2 is malformed, and more than one range would mean
-    // a multipart response that nothing reading PMTiles has ever asked for.
+    // -1 unsatisfiable, -2 malformed; multipart is not worth supporting here.
     if (ranges === -1) {
       res.setHeader('content-range', `bytes */${size}`);
       return res.status(416).json({ error: 'range not satisfiable' });
@@ -2462,9 +2371,8 @@ export function createApp({
       });
     }
 
-    // A deadline of its own, shorter than the piece timeout underneath. An
-    // HTTP client gives up long before libtorrent does, and a request left
-    // hanging on a piece nobody is seeding holds a connection open for nothing.
+    // Shorter than the piece timeout underneath: an HTTP client gives up long
+    // before libtorrent does.
     const controller = new AbortController();
     const deadline = setTimeout(
       () => controller.abort(),
@@ -2481,8 +2389,7 @@ export function createApp({
       for (const [name, value] of Object.entries(RANGE_CORS_HEADERS)) {
         res.setHeader(name, value);
       }
-      // The same tag a complete copy would answer with, because it is the same
-      // content: the infohash names these bytes wherever they were read from.
+      // The same tag a complete copy answers with: same bytes, same name.
       res.setHeader('etag', `"${entry.infoHash}"`);
       res.setHeader('cache-control', 'public, max-age=31536000, immutable');
       res.send(body);
@@ -2501,30 +2408,13 @@ export function createApp({
   /**
    * The current build of a category, as a file, by byte range.
    *
-   * The same thing `/archives/<infohash>/archive.pmtiles` is, addressed the
-   * way a style or a long-lived configuration wants to address it: by what it
-   * is rather than by which build it happens to be. Point any PMTiles reader
-   * at this and it keeps working across rebuilds, with no infohash to chase.
-   *
-   * The hazard is the one the immutable route never has to think about. A
-   * PMTiles reader does not fetch a file; it fetches a header, then a root
-   * directory, then leaf directories, then tiles, over minutes or hours. If a
-   * rebuild lands partway through, the offsets it read from the old build
-   * address bytes in the new one. That does not fail loudly — it decodes as
-   * the wrong tile, or as nothing, with no error anywhere that names the
-   * cause. So the validator is the infohash and `If-Range` is honoured: a
-   * range conditioned on a build that is no longer current is refused as a
-   * range and answered in full, which a reader survives, instead of being
-   * spliced, which it does not.
+   * `If-Range` is honoured so a rebuild landing mid-read cannot splice two
+   * builds. See docs/serving-tiles.md — "How a client knows the build moved".
    */
   app.get('/latest/:category/archive.pmtiles', (req, res) => {
     const entry = newestIn(req.params.category, req);
     if (!entry) return res.status(404).json({ error: 'no such category' });
 
-    // Whether this node hands out whole archives at all is the operator's
-    // call, not a consequence of having the file. Everything else published
-    // here is either small or metered by the request; this is up to 700 GiB to
-    // anyone who knows an infohash, so it is asked for rather than assumed.
     if (!publishingFor(entry, config).serveArchive) {
       return res.status(403).json({
         error:
@@ -2533,10 +2423,8 @@ export function createApp({
       });
     }
 
-    // Not on this disk. Either the node can read it out of the swarm, which is
-    // what cache mode is for, or it says so — but it never answers a range
-    // from a sparse file, where the unwritten space reads as zeroes and looks
-    // exactly like data.
+    // Never answered from the sparse file, where unwritten space reads as
+    // zeroes and looks exactly like data.
     if (entry.complete === false) return serveFromSwarm(req, res, entry);
     const file = entry.savePath ? path.join(entry.savePath, entry.name) : null;
     if (!file) return res.status(404).json({ error: 'no file for it here' });
@@ -2863,10 +2751,6 @@ export function createApp({
     const entry = catalog.get(req.params.infoHash);
     if (!entry) return res.status(404).json({ error: 'not found' });
 
-    // Whether this node hands out whole archives at all is the operator's
-    // call, not a consequence of having the file. Everything else published
-    // here is either small or metered by the request; this is up to 700 GiB to
-    // anyone who knows an infohash, so it is asked for rather than assumed.
     if (!publishingFor(entry, config).serveArchive) {
       return res.status(403).json({
         error:

@@ -166,82 +166,29 @@ const DEFAULTS = {
    */
   md5: false,
   /**
-   * Answer `/archives/<infohash>/archive.pmtiles` — the archive itself, by
-   * byte range, which is what every PMTiles reader actually wants.
-   *
-   * Off by default, and deliberately so: this is the whole file, and an
-   * archive here can be 700 GiB. Everything else this node publishes is either
-   * small (TileJSON, a .torrent, a feed) or metered by the request (one tile),
-   * so turning a node on has never meant offering its disk to anyone who knows
-   * an infohash. This would, so it is asked for rather than assumed.
-   *
-   * The node's answer, not the only one: a watched folder, a scheduled source
-   * or an individual archive may carry its own, and is obeyed either way.
+   * Answer `/archives/<infohash>/archive.pmtiles`. Off by default: it is the
+   * whole file. See docs/configuration.md — `serveArchive`.
    */
   serveArchive: false,
   /**
-   * Write this node's own archive URL into the torrent's `url-list`, so every
-   * peer in the swarm can fetch from it over HTTP.
-   *
-   * A web seed is the difference between a cold tile taking tens of seconds
-   * and taking under one, and it is what makes an archive usable before it has
-   * any peers at all. It is also an open invitation: a seed URL is followed by
-   * everyone who holds the torrent, not only by people who visit this node.
-   *
-   * Means nothing without `serveArchive`, and is read as off without it — a
-   * web seed URL that refuses the request is worse than none, because a client
-   * spends its retries on it.
+   * Publish this node as a web seed for the archives it holds. Read as off
+   * without `serveArchive`. See docs/configuration.md — `selfWebSeed`.
    */
   selfWebSeed: false,
   /**
-   * Offer the archive as a download on the public catalogue page.
-   *
-   * Separate from `serveArchive` on purpose. Serving a file to a reader that
-   * was given the URL and advertising it on a page are different acts, and a
-   * node can reasonably want the first without the second: the endpoint exists
-   * for a style or a peer, and putting a 700 GiB link in front of every casual
-   * visitor is a different decision. Read as off without `serveArchive`, since
-   * a link that answers 403 is worse than no link.
+   * Offer the archive as a download on the public catalogue page. Needs
+   * `serveArchive` and a complete copy. See docs/configuration.md.
    */
   publicDownload: false,
   /**
-   * Answer a byte range for an archive this node does not hold, by pulling the
-   * covering pieces out of the swarm on demand.
-   *
-   * **Experimental, and not recommended for anything public.** It closes the
-   * loop cache mode was built for — the node holds no bytes, a reader asks for
-   * some, and the pieces arrive from peers — over the same path the tile
-   * endpoint has always used internally, sharing its piece cache and its open
-   * handle. As a way to point an ordinary PMTiles reader at an archive nothing
-   * here has a copy of, it works.
-   *
-   * The reservations are properties of the arrangement rather than of the
-   * implementation:
-   *
-   * - Every byte is somebody else's upload. A cache-mode node is not an origin,
-   *   and putting one behind a URL that looks like one turns each request into
-   *   swarm traffic it neither paid for nor holds.
-   * - A piece read takes as long as the swarm takes. Acceptable for a tile,
-   *   which a reader asked for and will wait on; poor for an HTTP client with
-   *   its own patience and its own timeout.
-   * - There is no honest answer to a request for the whole file, so a Range
-   *   header is required and a large one is refused.
+   * Answer a byte range for an archive this node does not hold, from the
+   * swarm. Experimental, and not for anything public — see
+   * docs/configuration.md — `serveArchiveFromSwarm`.
    */
   serveArchiveFromSwarm: false,
-  /**
-   * The largest range `serveArchiveFromSwarm` will fetch at once, in bytes.
-   *
-   * Sized for what a PMTiles reader actually asks for — a 16 KiB header, a
-   * directory, a tile — rather than for bulk transfer, which is the thing this
-   * must not quietly become.
-   */
+  /** The largest range `serveArchiveFromSwarm` will fetch at once, in bytes. */
   swarmRangeLimitBytes: 8 * 1024 * 1024,
-  /**
-   * How long to wait for the swarm before giving up on a range, in
-   * milliseconds. Shorter than the piece timeout underneath on purpose: an
-   * HTTP client gives up long before libtorrent does, and a request left
-   * hanging on a piece nobody is seeding holds a connection open for nothing.
-   */
+  /** How long to wait for the swarm before giving up on a range, in ms. */
   swarmRangeTimeoutMs: 30000,
   /**
    * How long an unfinished download is kept before startup treats it as
@@ -274,23 +221,9 @@ const DEFAULTS = {
   /** Public base URL, used to build absolute links in the RSS feed and TileJSON. */
   publicUrl: undefined,
   /**
-   * The one address to use for URLs that outlive the request that made them.
-   *
-   * Almost every URL this node emits is worked out per request, deliberately: a
-   * node answering on several domains should name itself as whichever one was
-   * asked for, and leaving `publicUrl` unset is what allows that. Read once, by
-   * whoever asked, a per-request answer is the correct answer.
-   *
-   * A web seed is not read once. It is written into the `.torrent` and the
-   * magnet, served byte for byte to everyone who fetches either, and never
-   * rewritten — so it has to be one address rather than whichever the last
-   * request happened to arrive on. Set this to that address.
-   *
-   * Narrower than `publicUrl` on purpose. `publicUrl` overrides every URL the
-   * node emits and so gives up the multi-domain behaviour; this overrides only
-   * the ones that have to be permanent. Unset falls back to `publicUrl`, then
-   * to the request — and the console lets the address be typed at the moment
-   * the switch is turned on, which beats both.
+   * The address for URLs that outlive the request that made them — today, web
+   * seeds. Narrower than `publicUrl`, which overrides every URL and so gives
+   * up answering on several domains. See docs/configuration.md.
    */
   publishingUrl: undefined,
   /**

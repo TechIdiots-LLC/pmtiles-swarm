@@ -18,6 +18,8 @@ Operator-facing documentation is elsewhere — see [publishing](publishing.md),
 - [Serving an MBTiles archive](#serving-an-mbtiles-archive)
 - [Answering for a tile that is not there](#answering-for-a-tile-that-is-not-there)
 - [Reading an archive that is still arriving](#reading-an-archive-that-is-still-arriving)
+- [Re-reading a summary an older prober wrote](#re-reading-a-summary-an-older-prober-wrote)
+- [A validator for a URL that stays put](#a-validator-for-a-url-that-stays-put)
 - [The health endpoint](#the-health-endpoint)
 - [The externally visible base URL](#the-externally-visible-base-url)
 - [Scheduled sources](#scheduled-sources)
@@ -309,6 +311,86 @@ nothing to read yet and the same archive at 100% will, so a permanent
 "unavailable" flag would be wrong within the hour — but retrying on every request
 would put a swarm read behind each one. The limiter is in memory on purpose: a
 restart is a reasonable moment to try again.
+
+## Re-reading a summary an older prober wrote
+
+An archive's summary — format, zoom range, bounds, vector layers, encoding — is
+read once, written into the catalog, and never questioned again. That is right
+as far as it goes: re-reading a header out of the swarm is not free, and for a
+given infohash the answer cannot change.
+
+It goes wrong the moment the prober learns to read something new. Every archive
+probed before that keeps a summary with a hole in it, permanently, and the only
+way out is to remove and re-add the archive by hand.
+
+`encoding` was the case that made this plain. The key had been sitting in the
+metadata of archives a node had been serving for months; teaching the prober to
+read it changed nothing at all, because nothing ever asked again.
+
+So `summarize()` stamps a `summaryVersion`, and a summary older than the current
+prober is re-read once in the background — on a request for the archive's
+TileJSON, rate-limited to once a minute per archive. Raise `SUMMARY_VERSION`
+whenever a field is added and every archive in the catalog picks it up on its
+own, with nothing to do on upgrade.
+
+Two things this needs to get right, both learned the hard way:
+
+- **Every route that serves a TileJSON has to trigger it**, not only
+  `/archives/<infohash>/tiles.json`. `/latest/<category>/tiles.json` is the URL
+  a style points at, so leaving it out missed exactly the archives that were
+  being consumed the documented way.
+- **The write-back must not be conditioned on one field.** It began as a
+  vector-layer backfill and returned early unless layers turned up, which would
+  have discarded the encoding it had just gone to fetch.
+
+## A validator for a URL that stays put
+
+Everything under `/archives/` is addressed by infohash: the URL changes when the
+content does, so it can be cached for a year and marked `immutable`. A `/latest/`
+URL is the opposite — stable on purpose, with the content moving underneath it —
+so it needs a validator, and a short TTL alone is a guess.
+
+The obvious validator is the infohash of the archive the category resolved to.
+It is wrong, and it fails in a way that has no bottom: these documents carry more
+than which build they name. A TileJSON also carries the archive's summary; a
+magnet also carries its web seeds and trackers; the feed carries both. Enrich a
+summary or add a web seed and the body changes while the infohash does not — so
+every cache in the path revalidates, is told `304`, and goes on serving the old
+document. Not stale for a minute: unable to be updated again for as long as the
+archive exists.
+
+So these are tagged over the body they are sending. Two nodes answering
+identically still produce identical tags, which is the property the infohash was
+chosen for; two nodes answering differently no longer claim otherwise.
+
+`/latest/<category>/archive.pmtiles` and the `.torrent` redirect keep the
+infohash, because for those the infohash really is the whole content.
+
+### Where the ranges have to be careful
+
+A PMTiles reader does not fetch a file. It fetches a header, then a root
+directory, then leaf directories, then tiles, over minutes or hours. If a
+rebuild lands partway through, the offsets it read from the old build address
+bytes in the new one — which does not fail loudly. It decodes as the wrong tile,
+or as nothing, with no error anywhere naming the cause.
+
+`If-Range` is therefore honoured on the category range endpoint: a range
+conditioned on a build that is no longer current is refused _as a range_ and
+answered in full, which a reader survives. `Last-Modified` is suppressed there so
+a client cannot condition on a date instead — a build restored from a backup can
+be newer while looking older.
+
+The official reader closes the loop from its side, comparing the `ETag` of every
+response against the one it saw first and re-reading the header when they differ.
+That only works if it can see the tag: `ETag` is not exposed to cross-origin
+JavaScript by default, so these routes send `Access-Control-Expose-Headers`.
+Unexposed, the reader compares against `null`, the comparison never fires, and it
+splices two builds in silence.
+
+A weak validator is no better. The reader discards any tag beginning with `W/`,
+which is exactly what Express derives from a file's size and mtime — and that
+tag also differs per node, so two nodes behind a load balancer would hand a
+reader two tags for byte-identical archives.
 
 ## The health endpoint
 

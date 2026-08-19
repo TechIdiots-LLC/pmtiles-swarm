@@ -7,6 +7,20 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.56.1
+### ✨ Features and improvements
+- **Comments trimmed back to house style, and the reasoning moved into the docs where it belongs.**
+  Recent work had been leaving 15–25 line explanatory blocks in the source; measured across
+  `catalog.js` that was 85 new comment lines against 76 new code lines. The argument for a decision
+  drifts out of date faster in a comment than in prose, and buries the code while it does it.
+
+  Two new sections in [docs/internals.md](docs/internals.md) give the displaced reasoning a home:
+  **Re-reading a summary an older prober wrote**, and **A validator for a URL that stays put** —
+  which is where the ETag story now lives, including why the infohash was the wrong choice and what
+  a PMTiles reader needs to see for `If-Range` and cross-origin `ETag` to work.
+
+  No behaviour change.
+
 ## 0.56.0
 ### ✨ Features and improvements
 - **MapLibre Tiles are recognised.** PMTiles tile type `6` is MLT, and the tile-type table stopped at

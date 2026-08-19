@@ -58,42 +58,18 @@ export function normalizeCategories(source) {
 }
 
 /**
- * What this node offers of an archive's own bytes, over plain HTTP.
+ * What this node offers of an archive's own bytes over HTTP.
  *
- * Three separate decisions, because they are three separate exposures and
- * conflating them takes the choice away from whoever runs the node:
- *
- * - `serveArchive` — whether `/archives/<hash>/archive.pmtiles` answers at
- *   all. This is the one that decides whether a stranger who knows an infohash
- *   can pull 700 GiB off the box.
- * - `selfWebSeed` — whether this node's own URL is written into the torrent's
- *   `url-list`, so every peer in the swarm fetches from it.
- * - `publicDownload` — whether the public catalogue page offers it as a
- *   download. Serving a file to a reader that already knows the URL and
- *   advertising it on a page are not the same act.
- *
- * The last two are ANDed with the first rather than merely defaulting from it.
- * A node cannot be a web seed for a file it will not serve, and a download link
- * that 403s is worse than no link — so a catalog edited by hand into that state
- * is read as the safe thing rather than obeyed into an incoherent one.
+ * Three separate exposures, resolved per archive then per node. See
+ * docs/configuration.md — "Offering the archive file itself".
  * @param {object} [entry] - A catalog entry, whose fields win where set.
  * @param {object} [config] - The node's defaults.
  * @returns {{serveArchive: boolean, selfWebSeed: boolean, publicDownload: boolean}} - Resolved.
  */
 export function publishingFor(entry, config) {
   const serveArchive = entry?.serveArchive ?? config?.serveArchive ?? false;
-  // Whether the whole file is here. `serveArchive` does not depend on it —
-  // `serveArchiveFromSwarm` exists precisely so a node holding nothing can
-  // still answer a bounded range — but a download link does. A link labelled
-  // "download" on a public page has to hand over the file, and a cache-mode
-  // node cannot: it answers 409, or refuses a request with no Range, which
-  // reads as a broken node rather than as a deliberate limit.
-  //
-  // `selfWebSeed` is guarded separately, in setPublishing, because it has a
-  // lifecycle rather than a state: the URL is written into a .torrent and has
-  // to be added and withdrawn at the right moments, not merely reported as
-  // off. Resolving it to false here would withdraw a published seed the first
-  // time an archive was rechecked.
+  // A download link has to hand over the file; a bounded range need not.
+  // selfWebSeed is guarded in setPublishing instead — it has a lifecycle.
   const held = entry?.complete !== false;
   return {
     serveArchive,
@@ -275,20 +251,10 @@ export class Catalog {
   }
 }
 /**
- * Whether a URL is one other people could plausibly fetch.
+ * Whether a URL is one other peers could plausibly fetch.
  *
- * A web seed is not a setting; it is written into the `.torrent` and the
- * magnet, and served to everyone who asks for either. Nothing rewrites it
- * afterwards — the file is handed out byte for byte — so a URL that names
- * this machine's own loopback interface is not a mistake that gets corrected
- * later. It is distributed, followed, and retried by every peer in the swarm
- * for as long as the torrent exists.
- *
- * Loopback is the only case refused outright, because it cannot be right for
- * anybody: `127.0.0.1` means the peer's own machine, not this one. A private
- * address is a different matter — a node syncing to its own peers across a LAN
- * is a real arrangement, and this is not the place to overrule it — so that is
- * reported rather than blocked.
+ * Loopback is refused; a private address is reported and allowed. See
+ * docs/configuration.md — `selfWebSeed`.
  * @param {string} url - The candidate web seed.
  * @returns {{ok: boolean, why?: string, warning?: string}} - Whether to
  *   publish it, and what to say about it either way.
@@ -343,24 +309,10 @@ export function reachability(url) {
 }
 
 /**
- * The base a URL gets when it is going to outlive the request that made it.
+ * The base for a URL that will outlive the request that made it.
  *
- * Almost every URL this node emits is worked out per request, on purpose: a
- * node answering on several domains should name itself as whichever one was
- * asked, and `publicUrl` is deliberately left unset to allow that. That is the
- * right answer for a TileJSON, a `.torrent` link or a style URL — read once,
- * by whoever asked, and correct for them.
- *
- * A web seed is not that. It is written into the `.torrent` and the magnet and
- * served byte for byte to everyone who asks for either, so it has to be one
- * address rather than whichever the last request happened to arrive on. This
- * is where that address comes from, in order of how deliberate it is:
- *
- * 1. Given outright — the field beside the switch in the console.
- * 2. `publishingUrl`, the node's answer for exactly this question.
- * 3. `publicUrl`, if a node has overridden everything anyway.
- * 4. The request, which is a guess, but the same guess every other URL makes.
- *
+ * Given outright, then `publishingUrl`, then `publicUrl`, then the request.
+ * See docs/configuration.md — `publishingUrl`.
  * @param {object} [options] - `explicit`, `config` and `requestBase`.
  * @returns {string} - A base with no trailing slash, or an empty string.
  */
@@ -372,9 +324,7 @@ export function publishingBase({ explicit, config, requestBase } = {}) {
     requestBase,
   ];
   for (const candidate of candidates) {
-    // An empty or whitespace value means "not set", not "use an empty base" —
-    // the same reading `publicUrl` gets, and for the same reason: clearing a
-    // key by emptying it is what an operator naturally does to a JSON file.
+    // Empty means "not set", not "use an empty base".
     const value = String(candidate ?? '').trim();
     if (value) return value.replace(/\/+$/, '');
   }

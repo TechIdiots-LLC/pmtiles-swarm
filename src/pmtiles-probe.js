@@ -18,14 +18,7 @@ const TILE_TYPES = {
   3: { format: 'jpeg', contentType: 'image/jpeg' },
   4: { format: 'webp', contentType: 'image/webp' },
   5: { format: 'avif', contentType: 'image/avif' },
-  // MapLibre Tiles. The extension map has known about `mlt` for a while and
-  // this did not, so an MLT archive probed as `unknown` and was refused a tile
-  // endpoint it could have served.
-  //
-  // No MIME type is registered for it, and octet-stream is the honest answer
-  // rather than a vendor type invented here that would collide with the real
-  // one later. Nothing selects an MLT tile by content type in any case: a
-  // client is told what to expect by the source, before it makes the request.
+  // No MIME is registered for MLT, and nothing selects a tile by content type.
   6: { format: 'mlt', contentType: 'application/octet-stream' },
 };
 
@@ -68,41 +61,23 @@ export function metadataFlag(value) {
 }
 
 /**
- * What a `raster-dem` archive says about how its elevations are packed.
+ * The tile encoding an archive declares, if it is one MapLibre understands.
  *
- * Nothing in a PMTiles header says this — the header knows the tile is WebP,
- * not what the three channels mean — so the only place it can come from is the
- * archive's own metadata. Without it a consumer falls back to a default, and
- * the default is wrong for exactly the archives that most need to say
- * something: a terrarium-packed DEM read as `mapbox` decodes every mountain
- * into noise, silently, with a plausible-looking map on screen.
- *
- * The values are the ones the style specification defines, and anything else
- * is dropped rather than passed on. A tile client handed an encoding it does
- * not recognise is worse off than one handed nothing, because nothing at least
- * leaves it free to use its own default.
+ * See docs/tilejson.md — `encoding`.
  * @param {unknown} value - Whatever the metadata held.
  * @returns {string | undefined} - A known encoding, or undefined.
  */
 export function metadataEncoding(value) {
   if (typeof value !== 'string') return undefined;
   const text = value.trim().toLowerCase();
-  // `mlt` belongs here because MapLibre spells it the same way. `encoding` on
-  // a raster-dem source says how elevation is packed into pixels; on a vector
-  // source it says the tiles are MapLibre Tiles rather than MVT. One key, two
-  // meanings, disambiguated by the source type -- so there was no new key to
-  // invent, only a value to allow through.
+  // An unrecognised value is dropped: it would cost a client its own default.
   return ['terrarium', 'mapbox', 'custom', 'mlt'].includes(text)
     ? text
     : undefined;
 }
 
 /**
- * The numbers a `custom` encoding is meaningless without.
- *
- * `encoding: "custom"` says "the channels mean what these four factors say",
- * so carrying the word and not the factors publishes an archive nobody can
- * read. They travel together or not at all.
+ * The four factors a `custom` encoding is unreadable without. All or nothing.
  * @param {object} metadata - The archive's metadata.
  * @returns {object | undefined} - The four factors, or undefined.
  */
@@ -127,20 +102,9 @@ export function customEncodingFactors(metadata) {
  * @returns {Promise<PMTilesSummary>} - The summary.
  */
 /**
- * What this prober reads, as a number that goes up when that changes.
- *
- * A summary is stored in the catalog and never read again, which is right --
- * re-reading a header out of the swarm is not free, and the answer does not
- * change for a given infohash. It goes wrong the moment the prober learns to
- * read something new: every archive probed before that keeps a summary with a
- * hole in it, for ever, and the only way out was to remove and re-add it.
- *
- * `encoding` was the case that made this obvious. It sat in the metadata of
- * archives this node had been serving for months, and adding the code to read
- * it changed nothing at all, because nothing ever asked again.
- *
- * So: stamp what the prober knew at the time, and re-read once when that is
- * behind. Raise this whenever a field is added to the summary below.
+ * What this prober reads. Raise it whenever a field is added to the summary,
+ * and archives probed by an older build are re-read once. See
+ * docs/internals.md — "Re-reading a summary an older prober wrote".
  */
 export const SUMMARY_VERSION = 3;
 
@@ -181,18 +145,9 @@ export function summarize(header, metadata = {}) {
     // the same key, so an archive built to be served there carries the answer
     // with it and does not have to be configured again here.
     sparse: metadataFlag(metadata.sparse),
-    // How a raster-dem archive packs elevation into pixels: terrarium, mapbox
-    // or custom. Read from the archive rather than configured here, for the
-    // same reason `sparse` is — the archive knows, and a mirror of it should
-    // not have to be told again.
-    // The header wins for MLT and only for MLT: an archive whose tile type
-    // says MapLibre Tiles *is* MLT-encoded, and no metadata is needed to know
-    // it. Elevation packing is the opposite -- the header knows the tile is
-    // WebP and nothing about what its channels mean -- so that comes from the
-    // metadata, which is the only place it can.
+    // The header settles MLT; only the metadata can settle elevation packing.
     encoding:
       type.format === 'mlt' ? 'mlt' : metadataEncoding(metadata.encoding),
-    // Only where the encoding is custom, since they mean nothing otherwise.
     encodingFactors:
       metadataEncoding(metadata.encoding) === 'custom'
         ? customEncodingFactors(metadata)

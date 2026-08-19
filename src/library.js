@@ -528,17 +528,8 @@ export class Library {
   async finalize(infoHash) {
     const settled = await this.#finalizeOnce(infoHash);
 
-    // Only now, and never at import. A web seed URL for an archive that is
-    // still arriving answers 409, and a peer handed a URL that refuses spends
-    // its retries on it — worse than no web seed at all, and unfixable
-    // afterwards, because the URL is in the .torrent every peer holds. So a
-    // subscription records the intention when it joins and it is acted on
-    // here, at the first moment this node actually holds the whole file.
-    //
-    // Safe to reach on an archive that was already complete: setPublishing
-    // works from what is on record rather than from a transition, so this does
-    // nothing the second time — and does the right thing the first time for an
-    // archive that finished before the setting existed.
+    // Only now: a web seed for an archive still arriving answers 409, and the
+    // URL cannot be taken back out of the torrents peers already hold.
     if (settled && publishingFor(settled, this.#config).selfWebSeed) {
       try {
         await this.setPublishing(infoHash, {});
@@ -2713,13 +2704,9 @@ export class Library {
   /**
    * Rewrites an archive's web seed list, in the .torrent and everywhere else.
    *
-   * This is safe on a torrent already in circulation. BEP 19's `url-list` is a
-   * top-level key in the metainfo and the infohash covers only the `info`
-   * dictionary, so changing one leaves the infohash untouched — every magnet,
-   * peer and published reference stays valid. The check below asserts that
-   * rather than trusting it: if a rewrite ever did change the infohash, the
-   * result would be a different torrent wearing the old one's name, which is
-   * worth refusing loudly.
+   * Safe on a torrent in circulation: `url-list` sits outside the info
+   * dictionary, so the infohash is untouched. Asserted below rather than
+   * trusted.
    * @param {object} entry - The catalog entry to rewrite.
    * @param {string[]} wanted - The complete new list.
    * @returns {Promise<{webSeeds: string[], parsed: object}>} - The new list and
@@ -2821,13 +2808,10 @@ export class Library {
   }
 
   /**
-   * Drops web seeds from an archive, leaving everything else about it alone.
+   * Drops web seeds from an archive, leaving everything else alone.
    *
-   * The running engine is not told. libtorrent has no "forget this url seed"
-   * that every version answers to, and the consequence of it keeping one is
-   * bounded — it retries a URL that refuses and gives up on it. What matters
-   * is that the .torrent and the magnet stop handing the URL to anybody new,
-   * which is what this does.
+   * The running engine is not told: there is no portable way to retract a url
+   * seed, and what matters is that nobody new is handed it.
    * @param {string} infoHash - The archive.
    * @param {string[]} urls - Web seed URLs to drop. Unknown ones are ignored.
    * @returns {Promise<{webSeeds: string[], dropped: string[]}>} - What is left,
@@ -2857,17 +2841,9 @@ export class Library {
   /**
    * Sets what this node offers of one archive's own bytes over HTTP.
    *
-   * Three separate switches — see `publishingFor` in catalog.js for why they
-   * are separate — and one side effect: turning `selfWebSeed` on writes this
-   * node's own archive URL into the torrent's `url-list`, and turning it off
-   * takes that URL back out. The URL used is remembered, because the base can
-   * change underneath a node and removing "whatever we would build today"
-   * would leave yesterday's URL in the torrent for ever.
-   *
-   * Turning `serveArchive` off takes the other two with it, and that is not a
-   * quiet tidy-up: it means a URL already handed to every peer holding the
-   * torrent stops answering. The caller is told what was withdrawn so it can
-   * say so.
+   * `selfWebSeed` has a side effect: it writes this node's URL into the
+   * torrent, and takes it out again. See docs/configuration.md — "Offering the
+   * archive file itself".
    * @param {string} infoHash - The archive.
    * @param {object} changes - Any of the three, as booleans. Anything else is
    *   ignored, so a caller may send only what it is changing.
@@ -2878,20 +2854,14 @@ export class Library {
     const entry = this.#catalog.get(infoHash);
     if (!entry) throw new Error('unknown archive');
 
-    // Only what was actually asked for is recorded. An archive that says
-    // nothing about a setting goes on deferring to the node, which is what
-    // makes changing the node's answer reach the archives that never had one
-    // of their own.
+    // Only what was asked for: an archive that says nothing defers to the node.
     const wanted = { ...entry };
     for (const key of ['serveArchive', 'selfWebSeed', 'publicDownload']) {
       if (typeof changes[key] === 'boolean') wanted[key] = changes[key];
     }
 
-    // With serving off the other two cannot be true, and writing that down
-    // matters more than it looks: left as a latent `true`, either would spring
-    // back the moment serving was turned on again — re-publishing this node as
-    // a web seed, or re-listing a 700 GiB download, as a side effect of a
-    // decision about something else.
+    // Written down rather than left latent, or either would spring back the
+    // next time serving was turned on.
     if (!publishingFor(wanted, this.#config).serveArchive) {
       wanted.selfWebSeed = false;
       wanted.publicDownload = false;
@@ -2899,21 +2869,14 @@ export class Library {
     const after = publishingFor(wanted, this.#config);
     await this.#catalog.put(wanted);
 
-    // Driven by what is on record rather than by the transition, so calling
-    // this twice does nothing the second time and calling it on an archive
-    // that was created with the setting already on still writes the seed. A
-    // transition test looked equivalent and was not: an import that inherits
-    // `selfWebSeed: true` from the node has no "before" in which it was off,
-    // so nothing would ever have published it.
+    // Driven by what is on record, not by a transition: an import that
+    // inherits the setting has no "before" in which it was off.
     const published = entry.selfWebSeedUrl ?? null;
     let webSeed = published;
     let warning = null;
 
-    // A node cannot be a web seed for bytes it does not have. It might be able
-    // to *answer* for them, where serveArchiveFromSwarm is on -- but answering
-    // by fetching from the swarm and then advertising that to the swarm is a
-    // loop with an amplifier in it: every peer that takes the seed makes this
-    // node download the piece again to serve it.
+    // Answering from the swarm and advertising that to the swarm is a loop
+    // with an amplifier in it.
     if (after.selfWebSeed && !published && entry.complete === false) {
       throw new Error(
         'this node does not hold a complete copy of this archive, so it ' +
@@ -2937,10 +2900,7 @@ export class Library {
         );
       }
       webSeed = `${base}/archives/${infoHash}/archive.pmtiles`;
-      // Checked before it goes anywhere. Nothing rewrites a web seed once it
-      // is in a .torrent -- the file is served byte for byte to everyone who
-      // asks -- so a URL that cannot work is not a mistake that gets corrected
-      // on the next request. It is distributed and then retried for ever.
+      // Nothing rewrites a web seed once it is in a .torrent.
       const reach = reachability(webSeed);
       if (!reach.ok) throw new Error(reach.why);
       if (reach.warning) console.warn(`[web seed] ${reach.warning}`);
@@ -2952,10 +2912,7 @@ export class Library {
       // and then vanish in the same call.
       await this.#catalog.put({ infoHash, selfWebSeedUrl: webSeed });
     } else if (!after.selfWebSeed && published) {
-      // Whatever was actually published, which is not necessarily the URL this
-      // node would build for itself today: the base can change underneath a
-      // node, and removing "whatever we would say now" would leave yesterday's
-      // URL in the torrent for ever.
+      // What was published, not what this node would build today.
       await this.removeWebSeeds(infoHash, [published]);
       await this.#catalog.put({ infoHash, selfWebSeedUrl: null });
       webSeed = null;
@@ -2964,12 +2921,8 @@ export class Library {
     return {
       ...after,
       webSeed,
-      // Published anyway, and said out loud. A node syncing to its own peers
-      // across a LAN is a real arrangement and not this code's to overrule.
       warning,
-      // Named so a caller can warn about the one change that is not merely a
-      // setting moving: this URL is already in the hands of every peer that
-      // holds the torrent, and they will go on trying it for a while.
+      // Peers holding the torrent keep trying the URL until they refresh.
       withdrewWebSeed: Boolean(published) && !after.selfWebSeed,
     };
   }
@@ -3165,12 +3118,8 @@ export class Library {
       stale: false,
     });
 
-    // Publishing this node as a web seed is the one of the three with an
-    // effect beyond a stored boolean: it writes a URL into the .torrent and
-    // the magnet. Done here so a watched folder and an RSS subscription get it
-    // without each having to know, and warned rather than thrown because an
-    // import that produced a good archive should not be failed by a seed URL
-    // that could not be built.
+    // Here rather than in each caller, and warned rather than thrown: a good
+    // archive should not be failed by a seed URL that could not be built.
     if (publishingFor(entry, this.#config).selfWebSeed) {
       try {
         await this.setPublishing(entry.infoHash, {});
