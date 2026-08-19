@@ -7,6 +7,20 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.45.4
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **URLs shown in the console name the public port, not the admin one.** The console is served by the
+  admin listener, so every address it handed out named that listener — a TileJSON URL on `:8091`, a
+  `.torrent` on `:8091`, a style URL carrying both. Those are exactly the addresses that get pasted
+  into a style, a torrent client or another node, and none of them can reach the admin port: it binds
+  to localhost by default and serves nothing public even when it does not.
+
+  Only the port is corrected, and only when it is the admin one. The host stays whatever the request
+  arrived as, so a node behind a proxy still names itself correctly without anyone setting
+  `publicUrl` — and `publicUrl` still wins outright where it is set.
+
 ## 0.45.3
 ### ✨ Features and improvements
 

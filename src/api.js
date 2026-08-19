@@ -317,8 +317,27 @@ export function createApp({
     // a torrent client handed the `torrent` link, another node syncing from
     // the feed -- silently gets something it cannot use.
     const configured = String(config.publicUrl ?? '').trim();
-    const base = configured || `${req.protocol}://${req.host}`;
-    return base.replace(/\/$/, '');
+    if (configured) return configured.replace(/\/$/, '');
+
+    // Never the admin port, whichever one the request came in on.
+    //
+    // The console lives on the admin listener, so every URL it showed named
+    // that listener — a TileJSON URL on :8091, a `.torrent` on :8091, a style
+    // URL carrying both. Those are the addresses people copy into a style, a
+    // torrent client or another node, and none of them can reach the admin
+    // port: it is bound to localhost by default and serves nothing public
+    // even when it is not. Half the addresses on a node pointing somewhere
+    // the other half do not is a confusion nobody should have to diagnose.
+    //
+    // The host is still whatever the request arrived as, so a node behind a
+    // proxy keeps naming itself correctly without anybody configuring
+    // `publicUrl`. Only the port is corrected, and only when it is the one
+    // port that is not for the public.
+    const host = onAdminPort(req)
+      ? String(req.host).replace(/:\d+$/, '') +
+        (config.port ? `:${config.port}` : '')
+      : req.host;
+    return `${req.protocol}://${host}`.replace(/\/$/, '');
   };
 
   /**

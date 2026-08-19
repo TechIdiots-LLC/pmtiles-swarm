@@ -150,3 +150,72 @@ describe('the base URL a node advertises', () => {
     );
   });
 });
+
+describe('a URL handed out by the console', () => {
+  it('names the public port, not the admin one it was asked on', async () => {
+    // The console lives on the admin listener, so every URL it showed named
+    // that listener — a TileJSON URL on the admin port, a .torrent on it, a
+    // style URL carrying both. Those are the addresses people paste into a
+    // style, a torrent client or another node, and none of them can reach the
+    // admin port: it is bound to localhost by default and serves nothing
+    // public even when it is not.
+    const dir = await fs.mkdtemp(path.join(workspace, 'admin-'));
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    await catalog.put({
+      infoHash: INFOHASH,
+      name: 'planet.pmtiles',
+      size: 1024,
+      kind: 'pmtiles',
+      categories: ['basemap'],
+      magnet: `magnet:?xt=urn:btih:${INFOHASH}`,
+      pmtiles: {
+        format: 'pbf',
+        minZoom: 0,
+        maxZoom: 14,
+        bounds: [-1, -1, 1, 1],
+      },
+    });
+
+    // Read per request rather than captured, so the listening port can be
+    // written back once it is known.
+    const config = { watch: [], subscriptions: [], port: 8090 };
+    const app = createApp({
+      library: {
+        listWithStatus: async () =>
+          catalog.list().map((held) => ({ ...held, status: null })),
+      },
+      catalog,
+      engine: { name: 'webtorrent', list: async () => [] },
+      subscriptions: {},
+      tiles: {},
+      config,
+    });
+
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const asked = server.address().port;
+    config.adminPort = asked;
+
+    try {
+      const body = await (
+        await fetch(`http://127.0.0.1:${asked}/api/categories`)
+      ).json();
+      const seen = [];
+      for (const entry of body) {
+        for (const [name, url] of Object.entries(entry.endpoints ?? {})) {
+          if (typeof url !== 'string' || !url.startsWith('http')) continue;
+          seen.push(name);
+          assert.equal(
+            new URL(url).port,
+            '8090',
+            `${entry.category}.${name} points at ${url}`,
+          );
+        }
+      }
+      assert.ok(seen.length > 0, 'no absolute endpoint was checked');
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});
