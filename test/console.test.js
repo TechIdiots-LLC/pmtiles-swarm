@@ -1048,3 +1048,14 @@ describe('what a peer calls itself', () => {
     assert.match(page, /escapeHtml\(clientOf\(peer\)\)/);
   });
 });
+
+describe('the category endpoints table', () => {
+  it('keeps its buttons on the page', () => {
+    // `th, td` is nowrap for the archive table, where a wrapped number is
+    // worse than a wide one. Here the cell holds a style URL and a paragraph
+    // explaining it, so nowrap pushed the table past the window and carried
+    // Copy and Open off the far edge.
+    assert.match(styles, /#category-list table \{ table-layout: fixed; \}/);
+    assert.match(styles, /#category-list td \{ white-space: normal; \}/);
+  });
+});

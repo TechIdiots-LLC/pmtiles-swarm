@@ -224,6 +224,15 @@
       }
       .tag.on { background: var(--accent); color: #fff; border-color: var(--accent); }
       #add-error { color: var(--bad); min-height: 1.2rem; }
+      /* Category endpoints. `th, td` is nowrap for the archive table, where a
+         wrapped number is worse than a wide one — but here the cell holds a
+         style URL and a paragraph explaining it, so nowrap pushed the table
+         wider than the window and took the Copy and Open buttons off the far
+         edge with it. Fixed layout keeps the two end columns where they are
+         and gives the middle whatever is left. */
+      #category-list table { table-layout: fixed; }
+      #category-list td { white-space: normal; }
+      #category-list code { word-break: break-all; }
       /* Separates what acts on one archive from what acts on all of them. */
       .bar-gap { flex: 1 1 1.5rem; min-width: 0.75rem; }
       .tabs {

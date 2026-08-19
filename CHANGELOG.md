@@ -7,6 +7,17 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.45.3
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **The Copy and Open buttons on the Categories tab no longer sit off the edge of the page.** Table
+  cells are `nowrap`, which is right for the archive list where a wrapped number is worse than a wide
+  column — but a category cell holds a style URL and a paragraph explaining it, so nothing could
+  wrap and the table grew past the window, carrying the buttons at its end out of reach. The
+  endpoints table lays out fixed now: the label and button columns keep their width and the URL takes
+  what is left.
+
 ## 0.45.2
 ### ✨ Features and improvements
 
