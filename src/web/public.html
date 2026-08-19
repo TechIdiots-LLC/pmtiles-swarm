@@ -408,7 +408,11 @@
           // preview is a page to visit. The rest are addresses that belong
           // somewhere else — a style, a torrent client, a feed reader — and
           // following one here achieves nothing, so those copy.
-          const copy = (href, text) => {
+          // `fetched` for an endpoint whose *answer* is the thing worth
+          // having rather than its address. /magnet serves a magnet URI as
+          // text/plain, and copying the URL of that handed somebody a link to
+          // a magnet instead of a magnet — which a torrent client cannot open.
+          const copy = (href, text, fetched) => {
             const button = el('button', 'copy', text);
             button.type = 'button';
             const absolute = new URL(href, location.href).href;
@@ -418,7 +422,10 @@
             button.title = absolute;
             button.onclick = async () => {
               try {
-                await navigator.clipboard.writeText(absolute);
+                const value = fetched
+                  ? (await (await fetch(absolute)).text()).trim()
+                  : absolute;
+                await navigator.clipboard.writeText(value);
                 button.classList.add('done');
                 button.textContent = 'copied';
                 setTimeout(() => {
@@ -444,7 +451,7 @@
             a.download = '';
             links.append(a);
           }
-          if (ends.magnet) copy(ends.magnet, 'magnet');
+          if (ends.magnet) copy(ends.magnet, 'magnet', true);
           if (ends.feed) copy(ends.feed, 'RSS');
           // The one worth copying and the one nobody wants to read: a TileJSON
           // URL carrying the .torrent URL and a percent-encoded magnet in its

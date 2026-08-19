@@ -3511,9 +3511,16 @@ Every piece is hashed against the ` +
               url
                 ? `<a href="${escapeHtml(url)}"${download ? ' download' : ' target="_blank" rel="noreferrer"'}>${text}</a>`
                 : '';
-            const copyable = (url, text) =>
+            // `fetched` for an endpoint whose *answer* is the thing worth
+            // having rather than its address. /magnet serves a magnet URI as
+            // text/plain, and copying the URL of that handed somebody a link
+            // to a magnet instead of a magnet — which a torrent client cannot
+            // open.
+            const copyable = (url, text, fetched) =>
               url
-                ? `<button class="copy" data-copy-url="${escapeHtml(url)}" title="${escapeHtml(url)}">${text}</button>`
+                ? `<button class="copy" data-copy-url="${escapeHtml(url)}"${
+                    fetched ? ' data-copy-fetch="1"' : ''
+                  } title="${escapeHtml(url)}">${text}</button>`
                 : '';
 
             return `
@@ -3535,7 +3542,7 @@ Every piece is hashed against the ` +
                          ${copyable(ends.tileJson, 'TileJSON')}
                          ${link(ends.preview, 'preview')}
                          ${link(ends.torrent, '.torrent', true)}
-                         ${copyable(ends.magnet, 'magnet')}
+                         ${copyable(ends.magnet, 'magnet', true)}
                          ${copyable(ends.feed, 'RSS')}
                          ${copyable(ends.latestFeed, 'RSS, newest only')}
                          ${copyable(ends.styleUrl, 'style URL')}
@@ -3554,7 +3561,19 @@ Every piece is hashed against the ` +
           .join('');
 
         for (const button of list.querySelectorAll('[data-copy-url]')) {
-          button.onclick = () => copy(button.dataset.copyUrl, 'URL');
+          button.onclick = async () => {
+            const url = button.dataset.copyUrl;
+            if (!button.dataset.copyFetch) return copy(url, 'URL');
+            try {
+              // A plain fetch, not `api`: that one parses JSON, and this
+              // endpoint answers text/plain.
+              const response = await fetch(url);
+              if (!response.ok) throw new Error(response.statusText);
+              copy((await response.text()).trim(), 'magnet');
+            } catch (error) {
+              toast(error.message);
+            }
+          };
         }
       }
 

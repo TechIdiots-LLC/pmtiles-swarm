@@ -7,6 +7,16 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.47.1
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **The magnet button copies a magnet, not a link to one.** `/latest/<category>/magnet` answers a
+  magnet URI as `text/plain`, and both pages were copying that endpoint's own address — so what
+  landed on the clipboard was an `http://` URL, which a torrent client cannot open. The button now
+  fetches the endpoint and copies what it answers. Every other endpoint is still copied by address,
+  because for those the address is the thing.
+
 ## 0.47.0
 ### ✨ Features and improvements
 - **The console's Categories tab now matches the public page.** They were two views of one thing that

@@ -1075,7 +1075,7 @@ describe('the console categories and the public page', () => {
     assert.match(console_, /copyable\(ends\.tileJson, 'TileJSON'\)/);
     assert.match(console_, /link\(ends\.preview, 'preview'\)/);
     assert.match(console_, /link\(ends\.torrent, '\.torrent', true\)/);
-    assert.match(console_, /copyable\(ends\.magnet, 'magnet'\)/);
+    assert.match(console_, /copyable\(ends\.magnet, 'magnet', true\)/);
     assert.match(console_, /copyable\(ends\.styleUrl, 'style URL'\)/);
   });
 
@@ -1088,5 +1088,21 @@ describe('the console categories and the public page', () => {
   it('gives the console the preview link it was missing', () => {
     // The public page had it and this did not, which is the drift in one line.
     assert.ok(console_.includes('ends.preview'));
+  });
+});
+
+describe('copying a magnet', () => {
+  it('copies the magnet, not the URL that serves one', () => {
+    // /magnet answers a magnet URI as text/plain. Copying that endpoint's own
+    // address handed somebody a link to a magnet instead of a magnet, which a
+    // torrent client cannot open.
+    const publicPage = fsSync.readFileSync(
+      path.join(here, '..', 'src', 'web', 'public.html'),
+      'utf8',
+    );
+    assert.match(publicPage, /copy\(ends\.magnet, 'magnet', true\)/);
+    assert.match(publicPage, /fetched\s*$/m);
+    assert.match(page, /data-copy-fetch/);
+    assert.match(page, /copyable\(ends\.magnet, 'magnet', true\)/);
   });
 });
