@@ -7,6 +7,17 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.45.1
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
+- **The virtualenv route for libtorrent now says it can hand you an older version.** pip installs the
+  newest wheel the *Python* can take, not the newest libtorrent, and the wheels for Python 3.8 stop
+  at 2.0.9 — so on Ubuntu 20.04 the recipe as written produced a downgrade from the distribution's
+  own package, silently. The section now says how to read the `cp` tag in the filename, to compare
+  both interpreters before committing, and that a newer libtorrent on an older release needs a newer
+  Python first.
+
 ## 0.45.0
 ### ✨ Features and improvements
 - **Requires pmtiles-torrent 0.9.1**, which stops the sidecar rewriting resume data that has not

@@ -573,6 +573,22 @@ sudo -u pmtiles-swarm /var/lib/pmtiles-swarm/venv/bin/python   -c "import libtor
 { "libtorrent": { "python": "/var/lib/pmtiles-swarm/venv/bin/python" } }
 ```
 
+**Check what you got before pointing anything at it.** pip installs the newest
+wheel _your Python_ can take, which is not the newest libtorrent. The filename
+says which: `libtorrent-2.1.1-cp312-…` is Python 3.12, `libtorrent-2.0.9-cp38-…`
+is Python 3.8 — and 2.0.9 is where the wheels for 3.8 stop. On Ubuntu 20.04,
+whose `python3` is 3.8, this route hands you something **older** than the
+distribution's own package. Compare the two before you commit to it:
+
+```sh
+sudo -u pmtiles-swarm python3 -c "import libtorrent; print(libtorrent.__version__)"
+sudo -u pmtiles-swarm /var/lib/pmtiles-swarm/venv/bin/python   -c "import libtorrent; print(libtorrent.__version__)"
+```
+
+If the venv is not newer, delete it and keep the distribution package. Getting a
+newer libtorrent on an older release means a newer Python first — deadsnakes, or
+the release upgrade — and building the venv from that interpreter.
+
 Reversible in one line: delete the key and the node is back on the distribution
 package, with no uninstall and nothing done to apt. `ReadWritePaths` already
 covers `/var/lib/pmtiles-swarm`, so the venv needs no unit change — put it
