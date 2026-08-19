@@ -189,14 +189,25 @@ describe('console script structure', () => {
     const body = page
       .slice(start, end)
       .replace(/\/\*[\s\S]*?\*\//g, ' ')
-      .replace(/\/\/[^\n]*/g, ' ');
+      .replace(/\/\/[^\n]*/g, ' ')
+      // Quoted strings too, which in here are mostly HTML attributes. An id
+      // like "publish-base" splits on the hyphen into `publish` and `base`,
+      // and reads as a use of renderDetail's `base`, which it plainly is not.
+      // Template literals are left alone: `${base}` is the thing being looked
+      // for, and it only exists inside one.
+      .replace(/"[^"\n]*"|'[^'\n]*'/g, ' ');
 
     // Split into identifiers rather than searched with a pattern per name. The
     // first attempt built the pattern in a template literal, where JavaScript
     // resolves the escapes before RegExp ever sees them — so it looked for a
     // literal `w` and a backspace, matched nothing, and passed against the
     // very file it was written to catch.
-    const used = new Set(body.split(/[^A-Za-z0-9_$]+/));
+    // Property accesses go too. `on.base` is a key on something fillPane was
+    // handed, not a reach for renderDetail's `base`, and counting it as one
+    // would make this test cry wolf until somebody stopped reading it.
+    const used = new Set(
+      body.replace(/\.\s*[A-Za-z0-9_$]+/g, ' ').split(/[^A-Za-z0-9_$]+/),
+    );
 
     // What fillPane declares for itself is its own, whatever it is called.
     // Two functions in one file reaching for the same obvious name is not the

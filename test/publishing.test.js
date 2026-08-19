@@ -404,3 +404,122 @@ describe('what the console is told to show', () => {
     }
   });
 });
+
+describe('the address a permanent URL is built from', () => {
+  it('prefers publishingUrl to the request', async () => {
+    const node = await holding({ publishingUrl: 'https://swarm.example.org' });
+    const result = await node.library.setPublishing(
+      node.entry.infoHash,
+      { serveArchive: true, selfWebSeed: true },
+      { baseUrl: 'http://10.0.0.7:8090' },
+    );
+    assert.equal(
+      result.webSeed,
+      `https://swarm.example.org/archives/${node.entry.infoHash}/archive.pmtiles`,
+    );
+  });
+
+  it('is taken exactly as written, port and all', async () => {
+    // The case this setting exists for: a node listening on 8090 behind a load
+    // balancer that answers on 443. Nothing here may "correct" the port —
+    // the port substitution elsewhere is for a request that reached the node
+    // directly on its admin listener, and applying it to an address somebody
+    // configured would turn a working URL into one no peer can reach, in a
+    // file that is never rewritten.
+    const node = await holding({ publishingUrl: 'https://swarm.example.org' });
+    const result = await node.library.setPublishing(
+      node.entry.infoHash,
+      { serveArchive: true, selfWebSeed: true },
+      { baseUrl: 'http://10.0.0.7:8091' },
+    );
+    assert.equal(new URL(result.webSeed).port, '', result.webSeed);
+    assert.equal(new URL(result.webSeed).protocol, 'https:');
+  });
+
+  it('keeps a path prefix, for a node proxied under one', async () => {
+    const node = await holding({
+      publishingUrl: 'https://maps.example.org/swarm/',
+    });
+    const result = await node.library.setPublishing(node.entry.infoHash, {
+      serveArchive: true,
+      selfWebSeed: true,
+    });
+    assert.match(
+      result.webSeed,
+      /^https:\/\/maps\.example\.org\/swarm\/archives\//,
+    );
+  });
+
+  it('prefers what was typed to either', async () => {
+    // The one URL somebody gets to decide deliberately, because it is the one
+    // that cannot be taken back.
+    const node = await holding({
+      publishingUrl: 'https://swarm.example.org',
+      publicUrl: 'https://other.example.org',
+    });
+    const result = await node.library.setPublishing(
+      node.entry.infoHash,
+      { serveArchive: true, selfWebSeed: true },
+      { publishingUrl: 'https://chosen.example.org', baseUrl: 'http://x/' },
+    );
+    assert.match(result.webSeed, /^https:\/\/chosen\.example\.org\//);
+  });
+
+  it('falls back to publicUrl for a node that has overridden everything', async () => {
+    const node = await holding({ publicUrl: 'https://only.example.org' });
+    const result = await node.library.setPublishing(node.entry.infoHash, {
+      serveArchive: true,
+      selfWebSeed: true,
+    });
+    assert.match(result.webSeed, /^https:\/\/only\.example\.org\//);
+  });
+
+  it('leaves every other URL answering as whichever name was asked for', async () => {
+    // The whole reason this is a separate setting. publicUrl overrides every
+    // URL the node emits, which is exactly what a node meant to answer on
+    // several domains must not do — so publishingUrl pins the one kind of URL
+    // that has to be permanent and touches nothing else.
+    const node = await holding({ publishingUrl: 'https://swarm.example.org' });
+    await node.catalog.put({
+      infoHash: node.entry.infoHash,
+      categories: ['basemap'],
+      pmtiles: {
+        format: 'pbf',
+        minZoom: 0,
+        maxZoom: 14,
+        bounds: [-1, -1, 1, 1],
+      },
+    });
+
+    const app = createApp({
+      library: node.library,
+      catalog: node.catalog,
+      engine: { name: 'webtorrent', list: async () => [] },
+      subscriptions: {},
+      tiles: {},
+      config: {
+        watch: [],
+        subscriptions: [],
+        publishingUrl: 'https://swarm.example.org',
+      },
+    });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    try {
+      const port = server.address().port;
+      const doc = await (
+        await fetch(`http://127.0.0.1:${port}/latest/basemap/tiles.json`)
+      ).json();
+      assert.ok(
+        doc.tiles[0].startsWith(`http://127.0.0.1:${port}/archives/`),
+        doc.tiles[0],
+      );
+      assert.ok(
+        !doc.tiles[0].includes('swarm.example.org'),
+        'publishingUrl reached a URL that is read once and thrown away',
+      );
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});

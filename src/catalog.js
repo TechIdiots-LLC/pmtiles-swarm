@@ -327,3 +327,42 @@ export function reachability(url) {
 
   return { ok: true };
 }
+
+/**
+ * The base a URL gets when it is going to outlive the request that made it.
+ *
+ * Almost every URL this node emits is worked out per request, on purpose: a
+ * node answering on several domains should name itself as whichever one was
+ * asked, and `publicUrl` is deliberately left unset to allow that. That is the
+ * right answer for a TileJSON, a `.torrent` link or a style URL — read once,
+ * by whoever asked, and correct for them.
+ *
+ * A web seed is not that. It is written into the `.torrent` and the magnet and
+ * served byte for byte to everyone who asks for either, so it has to be one
+ * address rather than whichever the last request happened to arrive on. This
+ * is where that address comes from, in order of how deliberate it is:
+ *
+ * 1. Given outright — the field beside the switch in the console.
+ * 2. `publishingUrl`, the node's answer for exactly this question.
+ * 3. `publicUrl`, if a node has overridden everything anyway.
+ * 4. The request, which is a guess, but the same guess every other URL makes.
+ *
+ * @param {object} [options] - `explicit`, `config` and `requestBase`.
+ * @returns {string} - A base with no trailing slash, or an empty string.
+ */
+export function publishingBase({ explicit, config, requestBase } = {}) {
+  const candidates = [
+    explicit,
+    config?.publishingUrl,
+    config?.publicUrl,
+    requestBase,
+  ];
+  for (const candidate of candidates) {
+    // An empty or whitespace value means "not set", not "use an empty base" —
+    // the same reading `publicUrl` gets, and for the same reason: clearing a
+    // key by emptying it is what an operator naturally does to a JSON file.
+    const value = String(candidate ?? '').trim();
+    if (value) return value.replace(/\/+$/, '');
+  }
+  return '';
+}

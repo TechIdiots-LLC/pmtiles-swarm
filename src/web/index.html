@@ -392,6 +392,13 @@
          would rearrange the panel under a click, and would leave no sign of
          why the option had gone. */
       .publish input:disabled + span { opacity: 0.55; }
+      /* The address a web seed would be published at. Beside the switch it
+         belongs to rather than in settings, because it is decided once, at the
+         moment it stops being editable. */
+      .pubbase { margin: -0.2rem 0 0 1.6rem; }
+      .pubbase.hidden { display: none; }
+      .pubbase label { display: block; font-size: 0.8rem; color: var(--muted); }
+      .pubbase input { width: 100%; max-width: 32rem; margin: 0.2rem 0; }
     </style>
   </head>
   <body>
@@ -1870,6 +1877,25 @@
                     while.`,
                    !on.serveArchive,
                  )}
+                 <div class="pubbase${on.serveArchive ? '' : ' hidden'}">
+                   <label for="publish-base">Published as</label>
+                   <input
+                     id="publish-base"
+                     value="${escapeHtml(on.base ?? '')}"
+                     placeholder="https://swarm.example.org"
+                     spellcheck="false"
+                     ${on.selfWebSeed ? 'disabled' : ''}
+                   />
+                   <div class="sub">
+                     The address peers will be given, and the one thing here
+                     that cannot be taken back: a <code>.torrent</code> is
+                     served exactly as it was written, so this URL reaches
+                     everyone who ever fetches it. Filled in from
+                     <code>publishingUrl</code>, or from this request when
+                     there is none — worth correcting if the node answers on
+                     more than one name.
+                   </div>
+                 </div>
                  ${toggle(
                    'publicDownload',
                    'Offer it as a download on the public page',
@@ -1930,9 +1956,19 @@
                 }
                 box.disabled = true;
                 try {
+                  // Sent only with the switch it belongs to, so editing the
+                  // field and then toggling something else cannot rewrite a
+                  // seed nobody was looking at.
+                  const typed =
+                    key === 'selfWebSeed' && want
+                      ? pane.querySelector('#publish-base')?.value.trim()
+                      : undefined;
                   const result = await api(
                     `/api/torrents/${infoHash}/publish`,
-                    { method: 'POST', body: { [key]: want } },
+                    {
+                      method: 'POST',
+                      body: { [key]: want, publishingUrl: typed || undefined },
+                    },
                   );
                   // A seed URL nothing will rewrite later, published to a
                   // network smaller than the swarm. Worth interrupting for:

@@ -13,7 +13,11 @@ import {
   hashToken,
   isPublicSurface,
 } from './auth.js';
-import { normalizeCategories, publishingFor } from './catalog.js';
+import {
+  normalizeCategories,
+  publishingBase,
+  publishingFor,
+} from './catalog.js';
 import { mutableMagnet, trackersFromMagnet } from './mutable.js';
 import { guessKind } from './library.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
@@ -1021,7 +1025,18 @@ export function createApp({
           // `location.origin` there names the one port that is not for the
           // public — and a web seed built from it is handed to every peer in
           // the swarm.
-          url: `${baseUrl(req)}/archives/${entry.infoHash}/archive.pmtiles`,
+          // Whatever was actually published for this archive, where one was:
+          // the record is the truth about what peers hold, and it need not be
+          // what this node would build today.
+          url:
+            entry.selfWebSeedUrl ??
+            `${publishingBase({
+              config,
+              requestBase: baseUrl(req),
+            })}/archives/${entry.infoHash}/archive.pmtiles`,
+          // The base the switch would use, so the console can offer it for
+          // editing before anything permanent is written.
+          base: publishingBase({ config, requestBase: baseUrl(req) }),
         },
       });
     }),
@@ -1145,16 +1160,17 @@ export function createApp({
     route(async (req, res) => {
       const body = req.body ?? {};
       try {
-        const result = await library.setPublishing(
-          req.params.infoHash,
-          body,
-          // A node with no publicUrl still has to name itself to be a web
-          // seed, and the request it is being asked on is the best evidence
-          // available — the same reasoning the TileJSON already uses. Given
-          // the public port, never the admin one: a seed URL on a listener
-          // bound to localhost is a URL no peer can reach.
-          { baseUrl: baseUrl(req) },
-        );
+        const result = await library.setPublishing(req.params.infoHash, body, {
+          // Typed into the field beside the switch, where it beats
+          // everything else: this is the one URL a person gets to decide
+          // deliberately, because it is the one that cannot be taken back.
+          publishingUrl: body.publishingUrl,
+          // Otherwise the request it is being asked on is the best evidence
+          // available, the same reasoning the TileJSON already uses — and
+          // with the public port rather than the admin one, since a seed URL
+          // on a listener bound to localhost reaches no peer at all.
+          baseUrl: baseUrl(req),
+        });
         res.json(result);
       } catch (error) {
         const status = /unknown archive/.test(error.message) ? 404 : 400;

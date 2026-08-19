@@ -315,11 +315,12 @@ rotation stays out across the restart you were probably about to do.
 
 ## Offering the archive file itself
 
-| setting          | default |                                                       |
-| ---------------- | ------- | ----------------------------------------------------- |
-| `serveArchive`   | `false` | answer `/archives/<infohash>/archive.pmtiles`         |
-| `selfWebSeed`    | `false` | publish this node as a web seed for archives it holds |
-| `publicDownload` | `false` | offer them as downloads on the public catalogue page  |
+| setting          | default |                                                         |
+| ---------------- | ------- | ------------------------------------------------------- |
+| `serveArchive`   | `false` | answer `/archives/<infohash>/archive.pmtiles`           |
+| `publishingUrl`  | unset   | the address to use where a URL must outlive the request |
+| `selfWebSeed`    | `false` | publish this node as a web seed for archives it holds   |
+| `publicDownload` | `false` | offer them as downloads on the public catalogue page    |
 
 Three switches rather than one, because they are three different exposures and a
 node can reasonably want any of them without the others.
@@ -345,6 +346,36 @@ GET /latest/<category>/archive.pmtiles     whichever is current, with an ETag
 
 With it off, both answer `403`.
 
+### `publishingUrl`
+
+The address to use for URLs that outlive the request that made them.
+
+Almost every URL this node emits is worked out per request, deliberately: a node
+answering on several domains should name itself as whichever one was asked for,
+and leaving [`publicUrl`](#publicurl) unset is what allows that. Read once, by
+whoever asked, a per-request answer is the correct answer.
+
+A web seed is not read once. It is written into the `.torrent` and the magnet,
+served byte for byte to everyone who fetches either, and never rewritten — so it
+has to be one address rather than whichever the last request happened to arrive
+on. This is that address.
+
+Narrower than `publicUrl` on purpose: `publicUrl` overrides every URL the node
+emits and so gives up the multi-domain behaviour, while this overrides only the
+ones that have to be permanent. Everything else — TileJSON, tile templates,
+`.torrent` links, style URLs, the feeds — goes on naming whichever host the
+request arrived as.
+
+```json
+{
+  "publishingUrl": "https://swarm.example.org"
+}
+```
+
+Unset falls back to `publicUrl` and then to the request. Whatever it resolves to
+is what the console shows in the **Published as** field, where it can be
+corrected before it becomes permanent.
+
 ### `selfWebSeed`
 
 Writes this node's own `archive.pmtiles` URL into the torrent's `url-list`, so
@@ -358,10 +389,20 @@ node. Turning it off takes the URL back out of the `.torrent` and the magnet —
 but peers already holding either keep trying it until they refresh, so this
 withdraws an advertisement rather than closing a door.
 
-The node has to know what it is called. Set [`publicUrl`](#publicurl), or turn
-the switch on from the console, where the request itself names the node. Without
-either, the setting is refused rather than guessed at: a guessed web seed URL is
-published and then followed.
+The node has to know what it is called, and this is the one URL where "whichever
+name was asked for" is not good enough. In order of how deliberate it is:
+
+1. **The field beside the switch in the console.** Prefilled with whatever the
+   node would use, editable until the moment the switch is turned on, and after
+   that it is what peers hold.
+2. **[`publishingUrl`](#publishingurl)** — the node's answer for exactly this
+   question, and the one to set on a node that answers on several domains.
+3. **[`publicUrl`](#publicurl)**, for a node that has overridden everything
+   anyway.
+4. **The request**, which is a guess, but the same guess every other URL makes.
+
+With none of them the setting is refused rather than invented: a guessed web
+seed URL is published and then followed.
 
 **Nothing rewrites a web seed after it is published.** A `.torrent` is served
 byte for byte as it was written, so the URL that went in is the URL every peer

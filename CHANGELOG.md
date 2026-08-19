@@ -7,6 +7,28 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.52.0
+### ✨ Features and improvements
+- **`publishingUrl`, for the URLs that have to be permanent.** Almost every URL this node emits is
+  worked out per request, deliberately: a node answering on several domains should name itself as
+  whichever one was asked for, and leaving `publicUrl` unset is what allows that. A web seed is not
+  read once, though — it is written into the `.torrent` and the magnet, served byte for byte to
+  everyone who fetches either, and never rewritten — so it has to be one address rather than
+  whichever the last request happened to arrive on.
+
+  `publishingUrl` is that address, and nothing else. TileJSON, tile templates, `.torrent` links,
+  style URLs and the feeds go on naming whichever host the request arrived as, so the multi-domain
+  behaviour is intact. It is taken exactly as written, port and path included: a node listening on
+  8090 behind a load balancer answering on 443 sets `https://swarm.example.org` and gets it, with
+  none of the port substitution that applies to a request reaching the node directly.
+
+- **A "Published as" field beside the web seed switch**, prefilled with whatever the node would use
+  and editable until the moment the switch is turned on. Which is the point: it is the one URL here
+  that cannot be taken back, so it should be readable — and correctable — before it is.
+
+  Resolution order is deliberate: the field, then `publishingUrl`, then `publicUrl`, then the
+  request. With none of them the setting is refused rather than invented.
+
 ## 0.51.0
 ### ✨ Features and improvements
 - **A web seed URL that no peer could fetch is caught before it is published.** Nothing rewrites a

@@ -11,7 +11,7 @@ import {
   promote,
   suffixFor,
 } from './incomplete.js';
-import { publishingFor, reachability } from './catalog.js';
+import { publishingBase, publishingFor, reachability } from './catalog.js';
 import { checkOrigin, fingerprintOrigin } from './origin.js';
 import { probePMTiles } from './pmtiles-probe.js';
 import {
@@ -2872,13 +2872,17 @@ export class Library {
     let warning = null;
 
     if (after.selfWebSeed && !published) {
-      const base = String(options.baseUrl ?? this.#config.publicUrl ?? '')
-        .trim()
-        .replace(/\/+$/, '');
+      const base = publishingBase({
+        // Given outright beats the node's own answer, which beats the request
+        // this happens to have arrived on. See publishingBase().
+        explicit: options.publishingUrl,
+        config: this.#config,
+        requestBase: options.baseUrl,
+      });
       if (!base) {
         throw new Error(
           'cannot publish this node as a web seed without knowing its own ' +
-            'URL: set publicUrl, or pass a base URL',
+            'URL: set publishingUrl, or give one with the request',
         );
       }
       webSeed = `${base}/archives/${infoHash}/archive.pmtiles`;

@@ -235,6 +235,26 @@ const DEFAULTS = {
   /** Public base URL, used to build absolute links in the RSS feed and TileJSON. */
   publicUrl: undefined,
   /**
+   * The one address to use for URLs that outlive the request that made them.
+   *
+   * Almost every URL this node emits is worked out per request, deliberately: a
+   * node answering on several domains should name itself as whichever one was
+   * asked for, and leaving `publicUrl` unset is what allows that. Read once, by
+   * whoever asked, a per-request answer is the correct answer.
+   *
+   * A web seed is not read once. It is written into the `.torrent` and the
+   * magnet, served byte for byte to everyone who fetches either, and never
+   * rewritten — so it has to be one address rather than whichever the last
+   * request happened to arrive on. Set this to that address.
+   *
+   * Narrower than `publicUrl` on purpose. `publicUrl` overrides every URL the
+   * node emits and so gives up the multi-domain behaviour; this overrides only
+   * the ones that have to be permanent. Unset falls back to `publicUrl`, then
+   * to the request — and the console lets the address be typed at the moment
+   * the switch is turned on, which beats both.
+   */
+  publishingUrl: undefined,
+  /**
    * Trust X-Forwarded-* headers, for running behind a reverse proxy or CDN.
    * Takes anything Express accepts: `true`, a hop count, or a subnet list.
    */
