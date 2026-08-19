@@ -64,6 +64,7 @@ async function serve({
   const base = `http://127.0.0.1:${server.address().port}`;
 
   return {
+    catalog,
     get: (suffix, init) => fetch(`${base}${suffix}`, init),
     file: (init) => fetch(`${base}/latest/basemap/archive.pmtiles`, init),
     close: () => new Promise((resolve) => server.close(resolve)),
@@ -196,11 +197,12 @@ describe('the other endpoints that resolve to a build', () => {
     // one serves the previous one and none of them can tell.
     await withNode({}, async (node) => {
       const first = await node.get('/latest/basemap/tiles.json');
-      assert.equal(first.headers.get('etag'), `"${INFOHASH}"`);
+      const tag = first.headers.get('etag');
+      assert.match(tag ?? '', /^"[0-9a-f]{8}/, 'no strong validator');
       assert.equal((await first.json()).latest.infohash, INFOHASH);
 
       const again = await node.get('/latest/basemap/tiles.json', {
-        headers: { ...WILLING_TO_CACHE, 'if-none-match': `"${INFOHASH}"` },
+        headers: { ...WILLING_TO_CACHE, 'if-none-match': tag },
       });
       assert.equal(again.status, 304);
     });
@@ -209,10 +211,11 @@ describe('the other endpoints that resolve to a build', () => {
   it('tags the magnet the same way', async () => {
     await withNode({}, async (node) => {
       const first = await node.get('/latest/basemap/magnet');
-      assert.equal(first.headers.get('etag'), `"${INFOHASH}"`);
+      const tag = first.headers.get('etag');
+      assert.ok(tag, 'the magnet sent no validator');
 
       const again = await node.get('/latest/basemap/magnet', {
-        headers: { ...WILLING_TO_CACHE, 'if-none-match': `"${INFOHASH}"` },
+        headers: { ...WILLING_TO_CACHE, 'if-none-match': tag },
       });
       assert.equal(again.status, 304);
     });
@@ -226,7 +229,7 @@ describe('the other endpoints that resolve to a build', () => {
         redirect: 'manual',
       });
       assert.equal(response.status, 302);
-      assert.equal(response.headers.get('etag'), `"${INFOHASH}"`);
+      assert.ok(response.headers.get('etag'), 'the redirect sent no validator');
     });
   });
 
@@ -250,8 +253,67 @@ describe('the other endpoints that resolve to a build', () => {
   it('tags the single-item feed with the build it describes', async () => {
     await withNode({}, async (node) => {
       const response = await node.get('/latest/basemap.xml');
-      assert.equal(response.headers.get('etag'), `"${INFOHASH}"`);
+      assert.ok(response.headers.get('etag'), 'the feed sent no validator');
       await response.text();
+    });
+  });
+});
+
+describe('a document that changed underneath a stable URL', () => {
+  it('gets a new validator, so a cache cannot serve the old one for ever', async () => {
+    // The bug this replaces was subtle and total. The ETag was the infohash,
+    // which says which *build* a category resolved to — and these documents
+    // carry more than that. A TileJSON also carries the archive's summary. So
+    // when the summary was enriched (an encoding read out of the metadata that
+    // an older prober had not looked for), the body changed and the infohash
+    // did not: every cache in the path revalidated, was told 304, and went on
+    // serving the old document. Not stale for a minute — unable to be updated
+    // at all, for as long as the archive existed.
+    await withNode({}, async (node) => {
+      const before = (await node.get('/latest/basemap/tiles.json')).headers.get(
+        'etag',
+      );
+
+      // Exactly what the background metadata re-read does.
+      await node.catalog.put({
+        infoHash: INFOHASH,
+        pmtiles: {
+          format: 'pbf',
+          minZoom: 0,
+          maxZoom: 14,
+          bounds: [-1, -1, 1, 1],
+          encoding: 'mapbox',
+        },
+      });
+
+      const response = await node.get('/latest/basemap/tiles.json');
+      assert.notEqual(response.headers.get('etag'), before);
+      assert.equal((await response.json()).encoding, 'mapbox');
+
+      // And the old validator no longer matches, so a cache holding the old
+      // body is told to take the new one.
+      const conditional = await node.get('/latest/basemap/tiles.json', {
+        headers: { ...WILLING_TO_CACHE, 'if-none-match': before },
+      });
+      assert.equal(conditional.status, 200);
+    });
+  });
+
+  it('does the same for a magnet, which a new web seed rewrites', async () => {
+    // Same shape of bug: adding a web seed rewrites the magnet without
+    // touching the infohash the magnet is named after.
+    await withNode({}, async (node) => {
+      const before = (await node.get('/latest/basemap/magnet')).headers.get(
+        'etag',
+      );
+      await node.catalog.put({
+        infoHash: INFOHASH,
+        magnet: `magnet:?xt=urn:btih:${INFOHASH}&ws=https%3A%2F%2Fx.test%2Fa`,
+      });
+      const after = (await node.get('/latest/basemap/magnet')).headers.get(
+        'etag',
+      );
+      assert.notEqual(after, before);
     });
   });
 });

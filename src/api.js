@@ -414,9 +414,16 @@ export function createApp({
           infoHash: entry.infoHash,
           pmtiles: { ...entry.pmtiles, ...summary },
         });
+        // Guarded, because this now runs for raster archives too, where there
+        // are no layers to count -- and the TypeError went to the catch below,
+        // which reported a backfill that had already succeeded as a failure.
+        // A misleading log is worse than none when it is the thing somebody is
+        // reading to find out whether the backfill works.
         console.log(
-          `[tiles] read ${summary.vectorLayers.length} vector layers for ` +
-            `${entry.name} out of the swarm`,
+          summary.vectorLayers
+            ? `[tiles] read ${summary.vectorLayers.length} vector layers for ` +
+                `${entry.name} out of the swarm`
+            : `[tiles] re-read the metadata for ${entry.name}`,
         );
       })
       .catch((error) => {
@@ -2123,10 +2130,28 @@ export function createApp({
    * @param {import('express').Response} res - The response to tag.
    * @param {object} entry - The archive this URL resolved to.
    */
-  const tagAsLatest = (res, entry) => {
+  const tagAsLatest = (res, content) => {
+    // Hashed from what is actually being sent, not from the infohash it
+    // resolved to. The infohash was the obvious choice and it was wrong: it
+    // says which build this is, and these documents carry more than that. A
+    // TileJSON also carries the archive's summary, a magnet also carries the
+    // web seeds and trackers, a feed carries both. Enrich a summary or add a
+    // web seed and the body changes while the infohash does not -- so every
+    // cache in the path revalidates, is told 304, and serves the old body for
+    // ever. That is not a cache being stale for a minute; it is a document
+    // that can never be updated again.
+    //
+    // A hash of the body has the property the infohash was picked for anyway:
+    // two nodes answering identically produce identical tags, and two nodes
+    // answering differently should not claim otherwise.
+    const text =
+      typeof content === 'string' ? content : JSON.stringify(content);
     // Quoted, because that is what an entity-tag is. Unquoted, a validator
     // never matches an If-None-Match and every revalidation misses silently.
-    res.setHeader('etag', `"${entry.infoHash}"`);
+    res.setHeader(
+      'etag',
+      `"${crypto.createHash('sha1').update(text).digest('hex')}"`,
+    );
     // must-revalidate because serving this one stale is not merely "slightly
     // old": a reader holding part of one build and asking for the rest after
     // a rollover assembles a file that never existed. A minute of cache with
@@ -2287,8 +2312,7 @@ export function createApp({
       // makes that re-read cheap — a client already holding the current build
       // gets a 304 and no body, which Express does on its own once an ETag is
       // set before the response goes out.
-      tagAsLatest(res, entry);
-      res.json({
+      const doc = {
         ...buildTileJson(entry, baseUrl(req)),
         // Names what it resolved to, so a consumer can tell one build from the
         // next without diffing the tile URLs.
@@ -2298,7 +2322,9 @@ export function createApp({
           name: entry.name,
           createdAt: entry.createdAt,
         },
-      });
+      };
+      tagAsLatest(res, doc);
+      res.json(doc);
     }),
   );
 
@@ -2319,18 +2345,17 @@ export function createApp({
     // this one says so, and names what it resolved to while it is at it. The
     // tag is the infohash being redirected to, which is precisely the thing
     // that changes when this redirect starts pointing somewhere else.
-    tagAsLatest(res, entry);
-    res.redirect(
-      302,
-      `${baseUrl(req)}/archives/${entry.infoHash}/archive.torrent`,
-    );
+    const target = `${baseUrl(req)}/archives/${entry.infoHash}/archive.torrent`;
+    tagAsLatest(res, target);
+    res.redirect(302, target);
   });
 
   app.get('/latest/:category/magnet', (req, res) => {
     const entry = newestIn(req.params.category, req);
     if (!entry) return res.status(404).json({ error: 'no such category' });
-    tagAsLatest(res, entry);
-    res.type('text/plain').send(entry.magnet ?? '');
+    const magnet = entry.magnet ?? '';
+    tagAsLatest(res, magnet);
+    res.type('text/plain').send(magnet);
   });
 
   /**
@@ -2566,16 +2591,15 @@ export function createApp({
     // validator: a tag meaning "still empty" is indistinguishable from one
     // meaning "still this build", and a reader would cache the emptiness past
     // the arrival of the thing it was waiting for.
-    if (entry) tagAsLatest(res, entry);
-    res.type('application/rss+xml').send(
-      renderFeed(entry ? [entry] : [], {
-        title: `${config.feedTitle ?? 'PMTiles archives'} — ${category}, latest`,
-        baseUrl: baseUrl(req),
-        copyright: config.feedCopyright,
-        category,
-        maxItems: 1,
-      }),
-    );
+    const body = renderFeed(entry ? [entry] : [], {
+      title: `${config.feedTitle ?? 'PMTiles archives'} — ${category}, latest`,
+      baseUrl: baseUrl(req),
+      copyright: config.feedCopyright,
+      category,
+      maxItems: 1,
+    });
+    if (entry) tagAsLatest(res, body);
+    res.type('application/rss+xml').send(body);
   });
 
   app.get('/feed.xml', (req, res) => {

@@ -157,13 +157,22 @@ answers 404 for them exactly as the feeds do.
 
 ### How a client knows the build moved
 
-Every one of these carries an `ETag`, and the tag is the infohash of the archive
-it resolved to:
+Every one of these carries an `ETag` over the document it is sending:
 
 ```
-ETag: "913d671f3a28c5b8d605e28cf6bf01e293d36e86"
+ETag: "6b8f1c2d…"
 Cache-Control: public, max-age=60, must-revalidate
 ```
+
+**Over the document, not over the infohash.** The infohash is the obvious
+choice and it is wrong here: it says which _build_ a category resolved to, and
+these documents carry more than that. A TileJSON also carries the archive's
+summary; a magnet also carries its web seeds and trackers. Enrich a summary or
+add a web seed and the body changes while the infohash does not — so every cache
+in the path revalidates, is told `304`, and goes on serving the old document.
+Not stale for a minute: unable to be updated at all. Only
+`/latest/{category}/archive.pmtiles` and the `.torrent` redirect are tagged by
+infohash, because for those the infohash really is the whole content.
 
 A short TTL on its own is a guess. At five minutes, every client and every proxy
 in front of one serves the previous build for up to five minutes after a rollover

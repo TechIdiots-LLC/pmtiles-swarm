@@ -7,6 +7,24 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.55.3
+### 🐞 Bug fixes
+- **A `/latest/` document could never be updated once a client had cached it.** The `ETag` was the
+  infohash, which says which _build_ a category resolved to — and these documents carry more than
+  that. A TileJSON also carries the archive's summary; a magnet also carries its web seeds and
+  trackers; the feed carries both. So enriching a summary (0.55.1 reading an `encoding` an older
+  prober had missed) or adding a web seed changed the body while the infohash stayed put: every cache
+  in the path revalidated, was told `304`, and went on serving the old document indefinitely. That is
+  not a cache being stale for a minute; it is a document that can never change again.
+
+  These are now tagged over what is actually sent. `/latest/<category>/archive.pmtiles` and the
+  `.torrent` redirect keep the infohash, because for those the infohash really is the whole content.
+
+- **A successful metadata re-read was logged as a failure.** The line counting vector layers ran for
+  raster archives too, where there are none, and the `TypeError` went to the catch beside it — which
+  reported a backfill that had already written its result as "no vector layers yet". A misleading log
+  is worse than none when it is what somebody is reading to find out whether the thing works.
+
 ## 0.55.2
 ### 🐞 Bug fixes
 - **The stale-summary re-read never ran for a category URL.** 0.55.1 added it to
