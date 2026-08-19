@@ -1821,11 +1821,14 @@
             // says nothing defers to the node's own answer, and what belongs
             // in a checkbox is what is actually happening.
             const on = entry.publishing ?? {};
-            // location.origin, not the `base` renderDetail keeps: this runs in
-            // fillPane, which is a different function, and reaching for a
-            // binding that is not there is a ReferenceError nothing here would
-            // catch until somebody opened the tab.
+            // The node's own answer, not this page's. The console is served
+            // from the admin listener, so `location.origin` here is the one
+            // port that is not for the public — showing it beside a switch
+            // that publishes a URL to the whole swarm is how a useless web
+            // seed gets advertised. The fallback is for an older node that
+            // does not send one.
             const archiveUrl =
+              on.url ??
               `${location.origin}/archives/${entry.infoHash}/archive.pmtiles`;
 
             // Three switches rather than one, because they are three separate
@@ -1931,6 +1934,11 @@
                     `/api/torrents/${infoHash}/publish`,
                     { method: 'POST', body: { [key]: want } },
                   );
+                  // A seed URL nothing will rewrite later, published to a
+                  // network smaller than the swarm. Worth interrupting for:
+                  // by the time a peer fails to fetch it, the URL is in every
+                  // copy of the torrent.
+                  if (result.warning) toast(result.warning);
                   // The withdrawal is worth saying out loud. The others are
                   // visible in the checkbox that was just clicked.
                   if (result.withdrewWebSeed) {

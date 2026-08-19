@@ -1014,7 +1014,15 @@ export function createApp({
         reading,
         diskBytes,
         served,
-        publishing: publishingFor(entry, config),
+        publishing: {
+          ...publishingFor(entry, config),
+          // What this node would actually publish, worked out here rather than
+          // in the browser. The console is served from the admin listener, so
+          // `location.origin` there names the one port that is not for the
+          // public — and a web seed built from it is handed to every peer in
+          // the swarm.
+          url: `${baseUrl(req)}/archives/${entry.infoHash}/archive.pmtiles`,
+        },
       });
     }),
   );

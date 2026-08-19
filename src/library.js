@@ -11,7 +11,7 @@ import {
   promote,
   suffixFor,
 } from './incomplete.js';
-import { publishingFor } from './catalog.js';
+import { publishingFor, reachability } from './catalog.js';
 import { checkOrigin, fingerprintOrigin } from './origin.js';
 import { probePMTiles } from './pmtiles-probe.js';
 import {
@@ -2869,6 +2869,7 @@ export class Library {
     // so nothing would ever have published it.
     const published = entry.selfWebSeedUrl ?? null;
     let webSeed = published;
+    let warning = null;
 
     if (after.selfWebSeed && !published) {
       const base = String(options.baseUrl ?? this.#config.publicUrl ?? '')
@@ -2881,6 +2882,14 @@ export class Library {
         );
       }
       webSeed = `${base}/archives/${infoHash}/archive.pmtiles`;
+      // Checked before it goes anywhere. Nothing rewrites a web seed once it
+      // is in a .torrent -- the file is served byte for byte to everyone who
+      // asks -- so a URL that cannot work is not a mistake that gets corrected
+      // on the next request. It is distributed and then retried for ever.
+      const reach = reachability(webSeed);
+      if (!reach.ok) throw new Error(reach.why);
+      if (reach.warning) console.warn(`[web seed] ${reach.warning}`);
+      warning = reach.warning ?? null;
       await this.addWebSeeds(infoHash, [webSeed]);
       // Only the field. put() merges, so spreading the entry captured before
       // addWebSeeds would write the old webSeeds and the old magnet back over
@@ -2900,6 +2909,9 @@ export class Library {
     return {
       ...after,
       webSeed,
+      // Published anyway, and said out loud. A node syncing to its own peers
+      // across a LAN is a real arrangement and not this code's to overrule.
+      warning,
       // Named so a caller can warn about the one change that is not merely a
       // setting moving: this URL is already in the hands of every peer that
       // holds the torrent, and they will go on trying it for a while.

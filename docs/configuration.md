@@ -363,6 +363,21 @@ the switch on from the console, where the request itself names the node. Without
 either, the setting is refused rather than guessed at: a guessed web seed URL is
 published and then followed.
 
+**Nothing rewrites a web seed after it is published.** A `.torrent` is served
+byte for byte as it was written, so the URL that went in is the URL every peer
+receives, for as long as the torrent exists. Two consequences:
+
+- A loopback address is refused. `127.0.0.1` names the machine asking, so every
+  peer given it would try to fetch the archive from itself and retry for ever.
+- A private address, or a hostname with no domain in it, is published with a
+  warning rather than blocked. A node syncing to its own peers across a LAN is a
+  real arrangement and the internal address is the right answer there — but it is
+  worth knowing that peers outside that network cannot use it.
+
+The console asks the node for the URL rather than building one from the address
+in the browser's bar, since the console is served from the admin listener and
+that is the one port that is not for the public.
+
 ### `publicDownload`
 
 Adds a **download** link to the public catalogue page. Separate from

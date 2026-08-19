@@ -7,6 +7,24 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.51.0
+### ✨ Features and improvements
+- **A web seed URL that no peer could fetch is caught before it is published.** Nothing rewrites a
+  web seed afterwards — a `.torrent` is served byte for byte as it was written, so the URL that goes
+  in is the URL every peer receives for as long as the torrent exists. A loopback address is now
+  refused outright, since `127.0.0.1` names the machine asking and every peer given it would try to
+  fetch the archive from itself and retry for ever. A private address, or a hostname with no domain
+  in it, is published with a warning rather than blocked: a node syncing to its own peers across a
+  LAN is a real arrangement, and the internal address is the right answer there.
+
+### 🐞 Bug fixes
+- **The HTTP sources tab showed the admin port beside the serve switch.** The console built the URL
+  from the address in the browser's bar, and the console is served from the admin listener — so the
+  one port that is not for the public was the one displayed next to a switch that publishes a URL to
+  the whole swarm. It now asks the node, which already answers this correctly everywhere else. What
+  was actually written into the `.torrent` and the magnet was right throughout; only the label was
+  wrong.
+
 ## 0.50.1
 ### ✨ Features and improvements
 

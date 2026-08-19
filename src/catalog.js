@@ -260,3 +260,70 @@ export class Catalog {
     return this.#writing;
   }
 }
+/**
+ * Whether a URL is one other people could plausibly fetch.
+ *
+ * A web seed is not a setting; it is written into the `.torrent` and the
+ * magnet, and served to everyone who asks for either. Nothing rewrites it
+ * afterwards — the file is handed out byte for byte — so a URL that names
+ * this machine's own loopback interface is not a mistake that gets corrected
+ * later. It is distributed, followed, and retried by every peer in the swarm
+ * for as long as the torrent exists.
+ *
+ * Loopback is the only case refused outright, because it cannot be right for
+ * anybody: `127.0.0.1` means the peer's own machine, not this one. A private
+ * address is a different matter — a node syncing to its own peers across a LAN
+ * is a real arrangement, and this is not the place to overrule it — so that is
+ * reported rather than blocked.
+ * @param {string} url - The candidate web seed.
+ * @returns {{ok: boolean, why?: string, warning?: string}} - Whether to
+ *   publish it, and what to say about it either way.
+ */
+export function reachability(url) {
+  let host;
+  try {
+    host = new URL(url).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  } catch {
+    return { ok: false, why: `not a URL: ${url}` };
+  }
+
+  if (host === 'localhost' || host === '::1' || /^127\./.test(host)) {
+    return {
+      ok: false,
+      why:
+        `${host} names the machine asking, not this one, so a web seed at ` +
+        'this address is unusable by every peer that receives it. Set ' +
+        'publicUrl to the address this node is reachable at.',
+    };
+  }
+
+  const private4 =
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host) ||
+    /^169\.254\./.test(host);
+  // fc00::/7, the IPv6 unique-local range.
+  const private6 = /^f[cd][0-9a-f]{2}:/.test(host);
+  if (private4 || private6 || host.endsWith('.local')) {
+    return {
+      ok: true,
+      warning:
+        `${host} is a private address. It will be published in the .torrent ` +
+        'and the magnet as it stands, and nothing rewrites it later — peers ' +
+        'outside this network cannot use it.',
+    };
+  }
+
+  // A bare name with no dot in it resolves only where the same search domain
+  // does, which is a narrower place than the swarm.
+  if (!host.includes('.')) {
+    return {
+      ok: true,
+      warning:
+        `${host} has no domain, so it resolves only on networks that already ` +
+        'know the name. Peers elsewhere cannot use it.',
+    };
+  }
+
+  return { ok: true };
+}

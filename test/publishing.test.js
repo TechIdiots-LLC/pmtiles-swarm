@@ -309,3 +309,98 @@ describe('the public catalogue', () => {
     );
   });
 });
+
+describe('a web seed URL nobody else can fetch', () => {
+  it('refuses loopback outright', async () => {
+    // Nothing rewrites a web seed once it is in a .torrent — the file is
+    // served byte for byte to everyone who asks for it — so this is not a
+    // mistake that gets corrected on the next request. 127.0.0.1 names the
+    // machine asking, so every peer that received it would try to fetch the
+    // archive from itself, fail, and retry for as long as it held the torrent.
+    const node = await holding({ publicUrl: 'http://127.0.0.1:8090' });
+    await assert.rejects(
+      () =>
+        node.library.setPublishing(node.entry.infoHash, {
+          serveArchive: true,
+          selfWebSeed: true,
+        }),
+      /names the machine asking/,
+    );
+    assert.deepEqual(node.catalog.get(node.entry.infoHash).webSeeds, []);
+  });
+
+  it('publishes a private address, and says so', async () => {
+    // Not this code's to overrule: a node syncing to its own peers across a
+    // LAN is a real arrangement, and the internal address is the right answer
+    // there. What it must not do is happen quietly.
+    const node = await holding({ publicUrl: 'http://192.168.1.50:8090' });
+    const result = await node.library.setPublishing(node.entry.infoHash, {
+      serveArchive: true,
+      selfWebSeed: true,
+    });
+
+    assert.match(result.warning ?? '', /private address/);
+    assert.equal(node.catalog.get(node.entry.infoHash).webSeeds.length, 1);
+  });
+
+  it('says nothing about an address that is fine', async () => {
+    const node = await holding({ publicUrl: 'https://swarm.example.org' });
+    const result = await node.library.setPublishing(node.entry.infoHash, {
+      serveArchive: true,
+      selfWebSeed: true,
+    });
+    assert.equal(result.warning, null);
+  });
+
+  it('flags a bare hostname, which resolves only where it is already known', async () => {
+    const node = await holding({ publicUrl: 'http://tileserver-1:8090' });
+    const result = await node.library.setPublishing(node.entry.infoHash, {
+      serveArchive: true,
+      selfWebSeed: true,
+    });
+    assert.match(result.warning ?? '', /no domain/);
+  });
+});
+
+describe('what the console is told to show', () => {
+  it('names the archive URL the node would publish, not the one the browser is on', async () => {
+    // The console is served from the admin listener, so `location.origin`
+    // there is the one port that is not for the public. A switch that
+    // publishes a URL to the whole swarm must not be labelled with an address
+    // no peer can reach.
+    const node = await holding();
+    const config = {
+      watch: [],
+      subscriptions: [],
+      port: 8090,
+    };
+    const app = createApp({
+      library: node.library,
+      catalog: node.catalog,
+      engine: {
+        name: 'webtorrent',
+        list: async () => [],
+        get: async () => null,
+      },
+      subscriptions: {},
+      tiles: { status: () => null },
+      config,
+    });
+    const server = app.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    const admin = server.address().port;
+    config.adminPort = admin;
+
+    try {
+      const detail = await (
+        await fetch(
+          `http://127.0.0.1:${admin}/api/torrents/${node.entry.infoHash}`,
+        )
+      ).json();
+      assert.equal(new URL(detail.publishing.url).port, '8090');
+      assert.match(detail.publishing.url, /\/archive\.pmtiles$/);
+    } finally {
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
+});
