@@ -573,6 +573,22 @@ export function createApp({
   app.get(
     '/health',
     route(async (_req, res) => {
+      // Answered before the engine is asked, and answered the same way every
+      // time. An operator who has taken a node out of rotation wants it out
+      // whatever the engine happens to say, and wants that to survive the
+      // restart they are probably about to do — which is why it lives in the
+      // configuration rather than in memory.
+      if (config.offline) {
+        res.setHeader('cache-control', 'no-store');
+        res.setHeader('access-control-allow-origin', '*');
+        return res.status(503).json({
+          status: 'offline',
+          engine: engine.name,
+          version: VERSION,
+          error: 'this node has been taken out of rotation by an operator',
+        });
+      }
+
       const now = Date.now();
       if (now - healthChecked >= HEALTH_TTL_MS) {
         healthChecked = now;
@@ -612,6 +628,7 @@ export function createApp({
       }
       res.json({
         version: VERSION,
+        offline: Boolean(config.offline),
         // What an unfinished archive is actually called on disk, or null when
         // nothing renames it. Both halves matter: the setting can be empty,
         // and an engine can ignore it entirely. The console showed the marker
@@ -1097,6 +1114,46 @@ export function createApp({
       try {
         const result = await library.recheck(req.params.infoHash);
         res.status(202).json(result);
+      } catch (error) {
+        res.status(error.status ?? 500).json({ error: error.message });
+      }
+    }),
+  );
+
+  // The whole library at once. Each of these is a shell loop over the
+  // per-archive route otherwise, and the moment somebody wants one -- a disk
+  // that has just been repaired, a node about to be taken down -- is exactly
+  // when they are least inclined to write one.
+  //
+  // Under /api/library rather than /api/torrents, so no path here can ever be
+  // mistaken for an infohash.
+  app.post(
+    '/api/library/recheck',
+    route(async (_req, res) => {
+      try {
+        res.status(202).json(await library.recheckAll());
+      } catch (error) {
+        res.status(error.status ?? 500).json({ error: error.message });
+      }
+    }),
+  );
+
+  app.post(
+    '/api/library/pause',
+    route(async (_req, res) => {
+      try {
+        res.json(await library.pauseAll());
+      } catch (error) {
+        res.status(error.status ?? 500).json({ error: error.message });
+      }
+    }),
+  );
+
+  app.post(
+    '/api/library/resume',
+    route(async (_req, res) => {
+      try {
+        res.json(await library.resumeAll());
       } catch (error) {
         res.status(error.status ?? 500).json({ error: error.message });
       }

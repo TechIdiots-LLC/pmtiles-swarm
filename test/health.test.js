@@ -36,7 +36,7 @@ async function serve(options = {}) {
     engine,
     subscriptions: {},
     tiles: { status: () => null },
-    config: { watch: [], subscriptions: [] },
+    config: { watch: [], subscriptions: [], offline: options.offline },
   });
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
@@ -280,6 +280,49 @@ describe('whether one archive can be served yet', () => {
     try {
       const response = await node.ready(hash('a'));
       assert.match(response.headers.get('cache-control'), /no-store/);
+    } finally {
+      await node.close();
+    }
+  });
+});
+
+describe('a node taken out of rotation on purpose', () => {
+  it('answers 503 even though the engine is fine', async () => {
+    // The point of the switch. An operator draining a node wants it drained
+    // whatever the engine happens to think, so this is answered before the
+    // engine is asked at all.
+    const node = await serve({ offline: true });
+    try {
+      const response = await node.get('/health');
+      assert.equal(response.status, 503);
+      const body = await response.json();
+      assert.equal(body.status, 'offline');
+      assert.match(body.error, /out of rotation/);
+      assert.equal(node.state.asked, 0, 'the engine was asked anyway');
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('says so on the status the console reads', async () => {
+    // Or the console would show a healthy-looking node with no sign that it
+    // has been switched off, and the switch would be invisible to the person
+    // who threw it.
+    const node = await serve({ offline: true });
+    try {
+      const body = await (await node.get('/api/status')).json();
+      assert.equal(body.offline, true);
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('is off unless it has been set', async () => {
+    const node = await serve();
+    try {
+      assert.equal((await node.get('/health')).status, 200);
+      const body = await (await node.get('/api/status')).json();
+      assert.equal(body.offline, false);
     } finally {
       await node.close();
     }

@@ -7,6 +7,31 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.42.0
+### ✨ Features and improvements
+- **Recheck all, Pause all and Resume all**, in the archives toolbar. Each does to every archive what
+  the per-archive action does to one — sequentially, because rechecking is disk-bound and firing
+  twenty at once at a library of planet builds is a way to make a node unresponsive while it works.
+
+  Each skips what does not need doing and reports how many were done, skipped and failed; a failure
+  is counted and named rather than thrown, since these run over archives nobody has looked at
+  individually and stopping at the first would leave the rest in an unknown state. **Recheck all** is
+  the one worth knowing about after a disk repair: every other answer about how much of an archive is
+  here comes from something written down earlier, and this is the only thing that goes and looks.
+  `POST /api/library/recheck`, `/api/library/pause` and `/api/library/resume` are the same three from
+  a script.
+- **A node can be taken out of rotation without being stopped.** `offline` — or **Take offline** in
+  the console — makes `/health` answer `503` with `status: "offline"`, which is what a load balancer
+  reads to stop sending traffic here. It is answered before the engine is asked, so a node stays
+  drained whatever the engine happens to think.
+
+  Nothing else changes: seeding, the console and the library carry on, because draining traffic and
+  stopping work are separate decisions and one switch doing both would mean a node could not be
+  drained without also being idled. It is stored in the configuration rather than in memory, so it
+  survives the restart you were probably about to do.
+
+### 🐞 Bug fixes
+
 ## 0.41.3
 ### ✨ Features and improvements
 - **The details panel no longer repeats the archive's name.** It opens directly under the row that

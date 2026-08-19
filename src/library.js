@@ -1820,6 +1820,83 @@ export class Library {
   }
 
   /**
+   * Does something to the whole library, one archive at a time.
+   *
+   * One at a time on purpose. Every one of these is a request to the engine
+   * and rechecking is disk-bound, so firing twenty at once on a library of
+   * planet builds is a way to make a node unresponsive while it works. Nothing
+   * here is urgent enough to be worth that.
+   *
+   * A failure is counted rather than thrown: these run over archives the
+   * caller has not looked at individually, and stopping at the first would
+   * leave the rest in an unknown state with no way to tell which.
+   * @param {Function} pick - Given an entry, whether it needs doing.
+   * @param {Function} act - Given an infohash, does it.
+   * @returns {Promise<{done: string[], skipped: number, failed: object[]}>} - What happened.
+   */
+  async #eachArchive(pick, act) {
+    const done = [];
+    const failed = [];
+    let skipped = 0;
+
+    for (const entry of this.#catalog.list()) {
+      if (!pick(entry)) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        await act(entry.infoHash);
+        done.push(entry.infoHash);
+      } catch (error) {
+        failed.push({ name: entry.name, error: error.message });
+      }
+    }
+
+    return { done, skipped, failed };
+  }
+
+  /**
+   * Hashes every archive against its torrent.
+   *
+   * The operation somebody wants after a disk repair, and the only one that
+   * goes and looks: every other answer about how much of an archive is here
+   * comes from something written down earlier. Doing it one archive at a time
+   * from a shell loop is the alternative, which is exactly when nobody is
+   * inclined to write one.
+   * @returns {Promise<{done: string[], skipped: number, failed: object[]}>} - What happened.
+   */
+  async recheckAll() {
+    // A paused archive cannot be rechecked by an engine that rechecks by
+    // re-adding, and skipping it beats failing the whole sweep on it.
+    return this.#eachArchive(
+      (entry) => !entry.paused,
+      (infoHash) => this.recheck(infoHash),
+    );
+  }
+
+  /**
+   * Stops offering every archive, without forgetting any.
+   * @returns {Promise<{done: string[], skipped: number, failed: object[]}>} - What happened.
+   */
+  async pauseAll() {
+    return this.#eachArchive(
+      (entry) => !entry.paused,
+      (infoHash) => this.pause(infoHash),
+    );
+  }
+
+  /**
+   * Starts every archive that was paused.
+   * @returns {Promise<{done: string[], skipped: number, failed: object[]}>} - What happened.
+   */
+  async resumeAll() {
+    return this.#eachArchive(
+      (entry) => entry.paused,
+      (infoHash) => this.resume(infoHash),
+    );
+  }
+
+  /**
    * Reconciles what the catalog says about an archive with what is on disk.
    *
    * An archive downloaded here is written under a marker — `planet.pmtiles`

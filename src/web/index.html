@@ -224,6 +224,14 @@
       }
       .tag.on { background: var(--accent); color: #fff; border-color: var(--accent); }
       #add-error { color: var(--bad); min-height: 1.2rem; }
+      /* Separates what acts on one archive from what acts on all of them. */
+      .bar-gap { flex: 1 1 1.5rem; min-width: 0.75rem; }
+      /* A node deliberately out of rotation should not read as a healthy one.
+         Loud rather than subtle: this is a state somebody meant to leave. */
+      button#offline-toggle.on {
+        color: var(--warn);
+        border-color: var(--warn);
+      }
       .tabs {
         display: flex;
         gap: 0.25rem;
@@ -366,6 +374,11 @@
           <a id="feed-link" href="/feed.xml" target="_blank" rel="noreferrer">
             <button type="button">Feed</button>
           </a>
+          <span class="bar-gap"></span>
+          <button id="recheck-all" title="Hash every archive against its torrent and believe the result. What you want after a disk repair — nothing else goes and looks. Progress reads as the fraction hashed while it runs.">Recheck all</button>
+          <button id="pause-all" title="Stop offering every archive. The data and the catalog stay; this is &quot;not right now&quot;, not &quot;not any more&quot;.">Pause all</button>
+          <button id="resume-all" title="Start every archive that is paused.">Resume all</button>
+          <button id="offline-toggle" title="Take this node out of rotation. /health answers 503 while it is off, which is what a load balancer reads to stop sending traffic here — seeding and the console carry on.">Take offline</button>
         </div>
         <div class="bar">
           <input
@@ -1188,6 +1201,7 @@
           // What an unfinished archive is really called on disk, or null when
           // nothing renames it. The engine decides, not the setting alone.
           incompleteMarker = status.incompleteMarker ?? null;
+          renderOffline(Boolean(status.offline));
           const engine = status.engine;
           renderReach(status.reachability);
           $('status').innerHTML =
@@ -1262,6 +1276,125 @@
         if (hours > 0) return `${hours}h ${minutes % 60}m`;
         return `${minutes}m`;
       }
+
+      /**
+       * Runs one of the whole-library actions and reports what it did.
+       *
+       * Disabled while it runs, because each of these walks the library one
+       * archive at a time and a second click would start a second walk over
+       * the same archives.
+       * @param {string} id - The button's id.
+       * @param {string} path - The endpoint to post to.
+       * @param {Function} confirm - Given the archive count, the question to ask, or null to just do it.
+       * @param {Function} describe - Given the result, what to say afterwards.
+       * @returns {void}
+       */
+      function bulkAction(id, path, confirm, describe) {
+        $(id).onclick = async () => {
+          const question = confirm?.(archives.length);
+          if (question && !window.confirm(question)) return;
+
+          const button = $(id);
+          const label = button.textContent;
+          button.disabled = true;
+          button.textContent = 'working…';
+          try {
+            const result = await api(path, { method: 'POST' });
+            toast(describe(result));
+            refresh();
+          } catch (error) {
+            toast(error.message);
+          } finally {
+            button.disabled = false;
+            button.textContent = label;
+          }
+        };
+      }
+
+      /**
+       * How a whole-library action turned out, in one line.
+       * @param {object} result - `{done, skipped, failed}` from the server.
+       * @param {string} verb - What was done to the ones that were.
+       * @returns {string} - The summary.
+       */
+      function bulkSummary(result, verb) {
+        const parts = [`${result.done.length} ${verb}`];
+        if (result.skipped) parts.push(`${result.skipped} already were`);
+        if (result.failed.length) {
+          parts.push(`${result.failed.length} failed`);
+          // Named in the log as well: a toast is gone in a few seconds and the
+          // one thing somebody needs afterwards is which archive it was.
+          for (const failure of result.failed) {
+            console.error(`${failure.name}: ${failure.error}`);
+          }
+        }
+        return parts.join(', ');
+      }
+
+      bulkAction(
+        'recheck-all',
+        '/api/library/recheck',
+        (count) =>
+          `Hash all ${count} archives against their torrents.\n\n` +
+            'This reads every byte on disk, so it takes a while on a large ' +
+            'library, and each archive reads as low progress until its own ' +
+            'check finishes. Nothing is deleted.',
+        (result) => bulkSummary(result, 'rechecking'),
+      );
+
+      bulkAction(
+        'pause-all',
+        '/api/library/pause',
+        (count) =>
+          `Stop offering all ${count} archives.\n\n` +
+            'The data and the catalog stay. Nothing is served to the swarm ' +
+            'until they are resumed.',
+        (result) => bulkSummary(result, 'paused'),
+      );
+
+      bulkAction('resume-all', '/api/library/resume', null, (result) =>
+        bulkSummary(result, 'resumed'),
+      );
+
+      /**
+       * Puts the offline switch in the state the node is actually in.
+       *
+       * Read from the node rather than remembered here, so a second console —
+       * or the same one after a reload — shows the truth rather than whatever
+       * this tab last did.
+       * @param {boolean} offline - Whether the node is out of rotation.
+       * @returns {void}
+       */
+      function renderOffline(offline) {
+        const button = $('offline-toggle');
+        button.classList.toggle('on', offline);
+        button.textContent = offline ? 'Bring online' : 'Take offline';
+      }
+
+      $('offline-toggle').onclick = async () => {
+        const going = !$('offline-toggle').classList.contains('on');
+        if (
+          going &&
+          !window.confirm(
+            'Take this node out of rotation.\n\n' +
+              '/health will answer 503, so a load balancer stops sending it ' +
+              'traffic. Seeding, the console and the library are unaffected, ' +
+              'and this survives a restart.',
+          )
+        ) {
+          return;
+        }
+        try {
+          await api('/api/config', {
+            method: 'PATCH',
+            body: { offline: going },
+          });
+          renderOffline(going);
+          toast(going ? 'taken out of rotation' : 'back in rotation');
+        } catch (error) {
+          toast(error.message);
+        }
+      };
 
       /**
        * Closes the details, panel and row together.

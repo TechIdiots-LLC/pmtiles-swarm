@@ -411,6 +411,16 @@ const DEFAULTS = {
    * power to a token has to be made somewhere a token cannot reach.
    */
   allowHooksFromApi: false,
+  /**
+   * Take this node out of rotation without stopping it.
+   *
+   * `/health` answers 503 while this is set, which is what a load balancer
+   * reads to stop sending traffic here. Nothing else changes: the node keeps
+   * seeding, keeps answering the console, and keeps its library — draining
+   * traffic and stopping work are separate decisions, and doing both from one
+   * switch would mean a node could not be drained without also being idled.
+   */
+  offline: false,
   /** How often to look for finished downloads, in seconds. */
   onCompleteCheckIntervalSeconds: 60,
   /**

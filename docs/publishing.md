@@ -79,7 +79,26 @@ A magnet, a `.torrent` URL and an uploaded `.torrent` are metadata rather than
 data, so there is nothing slow to wait for: those still answer `201` with the
 entry.
 
-### Stopping one that is running
+### Acting on the whole library
+
+Three buttons in the archives toolbar do to every archive what the per-archive
+actions do to one, in sequence rather than all at once:
+
+| button          | what it does                                                                                              |
+| --------------- | --------------------------------------------------------------------------------------------------------- |
+| **Recheck all** | hashes every archive against its torrent. What you want after a disk repair — nothing else goes and looks |
+| **Pause all**   | stops offering everything. The data and the catalog stay                                                  |
+| **Resume all**  | starts everything that is paused                                                                          |
+
+Each skips archives that do not need it and reports how many were done, skipped
+and failed. One failure does not stop the rest: these run over archives nobody
+has looked at individually, and stopping at the first would leave the others in
+an unknown state.
+
+`POST /api/library/recheck`, `/api/library/pause` and `/api/library/resume` are
+the same three from a script.
+
+## Stopping one that is running
 
 `DELETE /api/adds?url=…` stops an add before it has produced a torrent, and the
 console offers it as a Cancel button beside each one. The identifier is whatever

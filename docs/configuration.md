@@ -298,6 +298,20 @@ Nothing computes an MD5 for a [subscription](#subscriptions): those adopt a
 torrent somebody else built, so there is no hashing pass here to extend. What
 their feed publishes as `<pmtiles:md5>` is recorded as it arrives.
 
+### `offline`
+
+Off by default. Set it — or press **Take offline** in the console — and `/health`
+answers `503` with `status: "offline"`, which is what a load balancer reads to
+stop sending traffic here.
+
+Nothing else changes. The node keeps seeding, keeps answering the console, and
+keeps its library: draining traffic and stopping work are separate decisions, and
+one switch doing both would mean a node could not be drained without also being
+idled. Use **Pause all** for the other half.
+
+It lives in the configuration rather than in memory, so a node taken out of
+rotation stays out across the restart you were probably about to do.
+
 ## Trackers
 
 `trackers` is baked into every torrent this node creates. It defaults to the
