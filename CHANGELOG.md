@@ -7,6 +7,21 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.46.0
+### ✨ Features and improvements
+- **Each category endpoint on the public page is now offered the way it is used.** A `.torrent` is a
+  file, so it downloads. A preview is a page, so it opens. The rest are addresses that belong
+  somewhere else — a style, a torrent client, a feed reader — and following one here achieves
+  nothing, so TileJSON, magnet, RSS and the style URL copy instead.
+
+  The style URL is no longer printed. It is a TileJSON URL carrying a `.torrent` URL and a
+  percent-encoded magnet in its fragment, several hundred characters of it, and it was most of the
+  card — while being the one thing on the page nobody reads and everybody pastes. Every copy button
+  also carries its URL as a tooltip, since a browser on plain HTTP has no clipboard and a string
+  somebody can select beats a button that does nothing.
+
+### 🐞 Bug fixes
+
 ## 0.45.4
 ### ✨ Features and improvements
 

@@ -118,6 +118,19 @@
         gap: 0.35rem 0.9rem;
         font-size: 0.9rem;
       }
+      /* A copy button reads as a link's sibling, not as a form control. */
+      .copy {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: none;
+        color: var(--muted);
+        font: inherit;
+        font-size: 0.74rem;
+        padding: 0 0.45rem;
+        cursor: pointer;
+      }
+      .copy:hover { color: var(--fg); border-color: var(--fg); }
+      .copy.done { border-color: currentColor; color: #3fb950; }
       .urls {
         margin-top: 0.7rem;
         display: grid;
@@ -390,30 +403,55 @@
             a.href = href;
             links.append(a);
           };
+          // What each endpoint is for decides how it is offered. A .torrent
+          // is a file to fetch, so it stays a link the browser downloads; a
+          // preview is a page to visit. The rest are addresses that belong
+          // somewhere else — a style, a torrent client, a feed reader — and
+          // following one here achieves nothing, so those copy.
+          const copy = (href, text) => {
+            const button = el('button', 'copy', text);
+            button.type = 'button';
+            const absolute = new URL(href, location.href).href;
+            // The URL either way: a browser on plain HTTP has no clipboard,
+            // and a tooltip somebody can select beats a button that does
+            // nothing.
+            button.title = absolute;
+            button.onclick = async () => {
+              try {
+                await navigator.clipboard.writeText(absolute);
+                button.classList.add('done');
+                button.textContent = 'copied';
+                setTimeout(() => {
+                  button.classList.remove('done');
+                  button.textContent = text;
+                }, 1200);
+              } catch {
+                button.textContent = 'copy failed — it is in the tooltip';
+              }
+            };
+            links.append(button);
+          };
+
           const ends = entry.endpoints;
-          if (ends.tileJson) add(ends.tileJson, 'TileJSON');
+          if (ends.tileJson) copy(ends.tileJson, 'TileJSON');
           // The newest build's preview, which is what "show me this
           // category" means.
           if (ends.preview) add(ends.preview, 'preview');
-          if (ends.torrent) add(ends.torrent, '.torrent');
-          if (ends.magnet) add(ends.magnet, 'magnet');
-          if (ends.feed) add(ends.feed, 'RSS');
-          card.append(links);
-
-          const urls = el('div', 'urls');
-          // The one worth copying: the TileJSON URL with the .torrent URL and
-          // the magnet in its fragment, which a plain client fetches over HTTP
-          // and a swarm-aware one joins directly.
-          if (ends.styleUrl) {
-            urls.append(
-              urlRow('style URL', new URL(ends.styleUrl, location.href).href),
-            );
-          } else if (ends.tileJson) {
-            urls.append(
-              urlRow('TileJSON', new URL(ends.tileJson, location.href).href),
-            );
+          // A file, so a link the browser saves rather than renders.
+          if (ends.torrent) {
+            const a = el('a', null, '.torrent');
+            a.href = ends.torrent;
+            a.download = '';
+            links.append(a);
           }
-          if (urls.childElementCount > 0) card.append(urls);
+          if (ends.magnet) copy(ends.magnet, 'magnet');
+          if (ends.feed) copy(ends.feed, 'RSS');
+          // The one worth copying and the one nobody wants to read: a TileJSON
+          // URL carrying the .torrent URL and a percent-encoded magnet in its
+          // fragment. Printed in full it was most of the card — several
+          // hundred characters of it — and it is never read, only pasted.
+          if (ends.styleUrl) copy(ends.styleUrl, 'style URL');
+          card.append(links);
 
           host.append(card);
         }
