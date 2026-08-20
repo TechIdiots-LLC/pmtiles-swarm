@@ -2,21 +2,16 @@
   "port": 8090,
   "adminPort": 8091,
   "adminHost": "127.0.0.1",
-  "publicUrl": "https://maps.example.org",
 
-  "dataDir": "./data",
-  "savePath": "./data/torrents-data",
+  "dataDir": "/var/lib/pmtiles-swarm/data",
+  "savePath": "/EDIT-ME/store/torrent-data",
   "savePathLayout": "infohash",
-  "locations": [
-    { "name": "default", "path": "./data/torrents-data" },
-    { "name": "bulk storage", "path": "/EDIT-ME/bulk/archives" }
-  ],
 
   "engine": "libtorrent",
   "secondaryEngines": ["webtorrent"],
   "libtorrent": {
     "python": "python3",
-    "resumeDir": "./data/resume",
+    "resumeDir": "/var/lib/pmtiles-swarm/data/resume",
     "listen": "0.0.0.0:6881",
     "upnp": true,
     "natpmp": true
@@ -31,66 +26,27 @@
   "trackers": [
     "udp://tracker.opentrackr.org:1337/announce",
     "udp://tracker.torrent.eu.org:451/announce",
-    "wss://tracker.openwebtorrent.com"
+    "udp://tracker-udp.gbitt.info:80/announce",
+    "wss://tracker.openwebtorrent.com",
+    "wss://tracker.webtorrent.dev"
   ],
-
-  "speed": {
-    "uploadLimit": 0,
-    "downloadLimit": 0,
-    "alternative": { "uploadLimit": 2097152, "downloadLimit": 20971520 },
-    "schedule": { "enabled": false, "from": "08:00", "to": "23:00", "days": "everyday" }
-  },
-  "seeding": { "ratio": null, "minutes": null, "then": "stop" },
 
   "feedTitle": "Example map archives",
   "feedCopyright": "© OpenStreetMap contributors",
-  "feedMaxItems": 50,
 
   "watch": [
     {
-      "path": "/EDIT-ME/maps/generated",
+      "path": "/EDIT-ME/store/generated/pmtiles",
       "categories": ["basemaps"],
-      "webSeedBase": "https://maps.example.org/files",
-      "stabilitySeconds": 30,
-      "pollSeconds": 0
+      "pollSeconds": 0,
+      "keepDays": 35
     }
   ],
-
-  "sources": [
-    {
-      "name": "daily-planet",
-      "url": "https://build.example.org/{YYYYMMDD}.pmtiles",
-      "filename": "planet-{YYYYMMDD}.pmtiles",
-      "categories": ["planet"],
-      "offsetDays": -1,
-      "lookbackDays": 0,
-      "at": "10:00",
-      "keep": 2,
-      "webSeed": true,
-      "latestLink": "planet-latest.pmtiles"
-    }
-  ],
-
-  "subscriptionsEnabled": true,
-  "subscriptionIntervalSeconds": 900,
-  "subscriptions": [
-    { "url": "https://peer.example.org/api/catalog", "protocol": "api", "mode": "cache" },
-    {
-      "url": "https://feed.example.org/pbf/planet-pbf-rss.xml",
-      "protocol": "rss",
-      "mode": "mirror",
-      "newest": 1,
-      "categories": ["osm-planet"],
-      "enabled": false
-    }
-  ],
-
-  "tiles": { "sparse": null },
 
   "auth": {
-    "apiKey": "REPLACE-WITH-A-LONG-RANDOM-STRING",
     "username": "admin",
     "password": "REPLACE-ME",
+    "apiKey": "REPLACE-WITH-A-LONG-RANDOM-STRING",
     "tokens": []
   }
 }

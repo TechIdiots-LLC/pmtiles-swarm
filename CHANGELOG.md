@@ -7,6 +7,24 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.58.1
+### 🐞 Bug fixes
+- **The sample configuration put every piece of state under the config file.** `"dataDir": "./data"`,
+  `"savePath": "./data/torrents-data"` and `"resumeDir": "./data/resume"` all resolve against the
+  config file — and the service guide puts that file in `/etc`. Anyone following both documents ended
+  up with a catalog, a resume directory and their archives on the partition meant for configuration,
+  having done nothing wrong. The sample now uses absolute paths, a test enforces it, and the node
+  warns at startup if state resolves under `/etc` anyway.
+
+  It is also shorter. A first config should get a node running, not demonstrate the whole surface —
+  `docs/configuration.md` is where the rest lives.
+
+- **Moving state out of `/etc` had a trap in the instructions.** `mv OLD/data NEW/data` nests when the
+  destination exists, which it does after the documented setup — so the real directory ends up one
+  level too deep, the node writes a fresh empty catalog beside it, and an intact library reads as
+  lost. `docs/running-as-a-service.md` now gives a form that cannot nest, says to repoint
+  `libtorrent.resumeDir` as well as `dataDir`, and has you count catalog entries before and after.
+
 ## 0.58.0
 ### ✨ Features and improvements
 - **A stable name for every kind of import, not just watched folders.** `latestLink` and

@@ -258,8 +258,8 @@ directory:
 
 That is rarely what you want for a service, and the node says so on startup —
 `/etc` is for configuration, and a catalog, a resume directory and possibly an
-archive do not belong on that partition. Use absolute paths for anything
-holding data:
+archive do not belong on that partition. The shipped sample uses absolute paths
+for exactly this reason. Use them for anything holding data:
 
 ```json
 {
@@ -268,6 +268,33 @@ holding data:
   "libtorrent": { "resumeDir": "/var/lib/pmtiles-swarm/resume" }
 }
 ```
+
+#### Moving state that already landed in the wrong place
+
+Repoint **every** path that lived under the directory being moved, not just
+`dataDir`: `libtorrent.resumeDir` is the one that is easy to miss, because it is
+absolute and sits inside it.
+
+And move with a destination that cannot nest. `mv /etc/pmtiles-swarm/data
+/var/lib/pmtiles-swarm/data` puts the source _inside_ the destination when the
+destination already exists — which it does, since the setup above creates it —
+leaving `/var/lib/pmtiles-swarm/data/data`. The node then finds no catalog where
+it was told to look, writes a fresh empty one, and every archive appears to have
+been lost.
+
+```bash
+sudo systemctl stop pmtiles-swarm
+sudo python3 -c "import json;print(len(json.load(open('OLD/catalog.json'))['entries']))"
+
+sudo mv /etc/pmtiles-swarm/data /var/lib/pmtiles-swarm/   # note: no second 'data'
+# repoint dataDir *and* libtorrent.resumeDir, then
+
+sudo systemctl start pmtiles-swarm
+sudo python3 -c "import json;print(len(json.load(open('NEW/catalog.json'))['entries']))"
+```
+
+The entry count before and after is the check that matters: an empty new catalog
+is indistinguishable from a lost library until you count.
 
 ### 2. Every one of them in `ReadWritePaths`
 

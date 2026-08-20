@@ -188,3 +188,30 @@ describe('the sample ships with the package', () => {
     assert.match(doc, /node_modules\/\.bin\/pmtiles-swarm/);
   });
 });
+
+describe('the paths in the sample', () => {
+  it('never leaves state to resolve against the config file', async () => {
+    // Every path resolves relative to the config file. The documented layout
+    // puts that file in /etc, so a sample reading "./data" puts the catalog,
+    // the resume directory and the archives on the partition meant for
+    // configuration — and the person who follows both documents has done
+    // nothing wrong. Absolute here, always.
+    const sample = JSON.parse(await fs.readFile(samplePath, 'utf8'));
+    const named = [
+      ['dataDir', sample.dataDir],
+      ['savePath', sample.savePath],
+      ['libtorrent.resumeDir', sample.libtorrent?.resumeDir],
+    ];
+    for (const [name, value] of named) {
+      assert.ok(value, `${name} should be in the sample`);
+      assert.ok(
+        value.startsWith('/'),
+        `${name} is ${value}; it has to be absolute`,
+      );
+      assert.ok(
+        !value.startsWith('/etc/'),
+        `${name} is ${value}; /etc is for configuration, not state`,
+      );
+    }
+  });
+});
