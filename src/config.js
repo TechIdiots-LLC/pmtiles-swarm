@@ -508,11 +508,51 @@ function clone(value) {
 }
 
 /**
+ * Every directory this configuration means to write to.
+ *
+ * Which is exactly what `ReadWritePaths` has to name. Under
+ * `ProtectSystem=strict` a directory missing from that line is refused inside
+ * the unit's namespace, before any permission bit is consulted — so it fails
+ * with ownership and mode both perfect, which is a hard thing to go looking
+ * for. Deriving the list from the config rather than writing it out by hand is
+ * the only way the two cannot drift.
+ *
+ * See docs/running-as-a-service.md — "Where it writes".
+ * @param {object} config - A config whose paths have been resolved.
+ * @param {string} [configPath] - The config file, whose directory is written to.
+ * @returns {string[]} - Absolute directories, deduplicated and shortest-first.
+ */
+export function writablePaths(config, configPath) {
+  const found = [
+    config?.dataDir,
+    config?.savePath,
+    config?.cacheSavePath,
+    config?.libtorrent?.resumeDir,
+    config?.torrentDropDir,
+    // The console rewrites the configuration when a token is minted, so the
+    // directory holding it is written to as surely as any of the above.
+    configPath ? path.dirname(path.resolve(configPath)) : undefined,
+    ...(config?.watch ?? []).map((entry) => entry?.path),
+    ...(config?.locations ?? []).map((entry) => entry?.path),
+    ...(config?.subscriptions ?? []).map((entry) => entry?.savePath),
+  ].filter((value) => typeof value === 'string' && value);
+
+  // Deduplicated but deliberately not collapsed into common ancestors. A
+  // shorter list would grant the same access — `ReadWritePaths` covers a
+  // directory and everything under it — but the two callers want different
+  // things from it, and only one of them would be served. Creating the
+  // directories needs each of them named; and collapsing quietly widens the
+  // grant to whatever ancestor happens to be shared, which for a config beside
+  // its data is the whole tree above both.
+  return [...new Set(found.map((value) => path.resolve(value)))].sort();
+}
+
+/**
  * Complains about state that has landed in /etc.
  *
  * Nobody chooses this. The documented service layout puts the config file in
- * /etc, every path resolves relative to that file, and the sample reads
- * "./data" — so the catalog and the resume directory end up on the partition
+ * /etc, every path resolves relative to that file, and the sample read
+ * "./data" — so the catalog and the resume directory ended up on the partition
  * meant for configuration. Warned rather than corrected: it is a real path
  * that works, and moving a running node's data would be worse than saying so.
  *

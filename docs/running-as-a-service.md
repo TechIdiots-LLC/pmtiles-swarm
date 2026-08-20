@@ -151,7 +151,49 @@ sudo apt-get install -y python3-libtorrent
 sudo -u pmtiles-swarm python3 -c "import libtorrent; print(libtorrent.__version__)"
 ```
 
+## The configuration, and a unit for it
+
+`init` writes both, and the unit's `ReadWritePaths` is derived from the
+configuration it just wrote. That derivation is the reason to use it: a unit and
+a configuration that disagree is the failure this whole document is arranged
+around, and two files generated from one source cannot.
+
+```sh
+sudo -u pmtiles-swarm -H /var/lib/pmtiles-swarm/node_modules/.bin/pmtiles-swarm   init --config /etc/pmtiles-swarm/swarm.config.json   --data-dir /var/lib/pmtiles-swarm/data   --save-path /mnt/store/torrent-data   --systemd --password 'the console password'
+```
+
+That writes the configuration, generates `pmtiles-swarm.service` beside it, and
+prints a command for every directory involved — each with the right owner and
+mode. Nothing privileged happens and nothing is installed: the unit is written
+next to the configuration, and copying it into `/etc/systemd/system` is one of
+the lines it hands you.
+
+Two refusals worth knowing before you type it. State under `/etc` is rejected
+rather than warned about, because at the moment a configuration is written there
+is nothing to migrate — the same mistake found six months later costs a stopped
+service and a careful move. And a configuration that already exists is left
+alone unless `--force` says otherwise, since the credentials in it are not
+recoverable.
+
+`--password` is hashed before it is written. Leave it off and there is no
+console password at all: the generated API key is the way in until you set one.
+There is deliberately no placeholder, because `auth.password` accepts plaintext
+and a placeholder in that field is a working password until somebody notices.
+
+**Re-run it after adding a watched folder**, or a subscription with a save path
+of its own. Both are directories the node writes to, and neither reaches
+`ReadWritePaths` by itself. `tools/resume-doctor.py` checks a running node's
+unit against its live configuration and says which directories are missing.
+
+The unit below is what it generates, with your paths in it. Worth reading
+either way — a generated file you do not understand is a hand-written one you
+have not written yet.
+
 ## The unit
+
+Annotated, because every directive here has cost somebody a diagnosis.
+`init --systemd` writes this file with your paths already in it; what
+follows is what those lines are for.
 
 ```ini
 [Unit]

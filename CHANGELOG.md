@@ -2,9 +2,40 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.59.0
+### ✨ Features and improvements
 - **Requires pmtiles-torrent 0.10.2**, which is what actually ends the re-checking: a
   `seedOnly` add now discards resume data that would cancel the claim, and the periodic save
   leaves a hashing torrent alone. Everything below only stops the node making more of it.
+- **`pmtiles-swarm init` writes a first configuration, and optionally the unit to run it.**
+  Every path it writes is absolute, which is the one mistake it exists to make impossible: a
+  relative path resolves against the config file, the documented layout puts that file in
+  `/etc`, and so `./data` there means a catalog, a resume directory and potentially a 700 GiB
+  archive on the configuration partition. State under `/etc` is refused rather than warned
+  about — at the moment a config is written there is nothing to migrate, and the same mistake
+  found later costs a stopped service and a careful move.
+
+  `--systemd` also writes `pmtiles-swarm.service` beside it, with `ReadWritePaths` **derived
+  from the configuration it just wrote**. That derivation is the point. A unit and a config
+  that disagree is every systemd failure this project has diagnosed, and none of them look
+  like what they are: a `savePath` missing from that line is refused inside the unit's
+  namespace before any permission bit is read, so the directory's owner and mode are both
+  perfect and the write still fails. Two files generated from one source cannot drift.
+
+  It installs nothing. The unit is written next to the configuration and the `cp` into
+  `/etc/systemd/system` is one of the commands it prints, alongside an `install -d` for every
+  directory involved with the right owner and mode.
+
+  `--password` is hashed before it is written, and left out entirely when none is given.
+  There is deliberately no placeholder: `auth.password` accepts plaintext, so `REPLACE-ME` in
+  that field is a working password until somebody notices — a credential that looks set and
+  is not.
+
 - **Two scripts for diagnosing a library that re-checks on every start**, in `tools/`.
   `resume-doctor.py` reads a node's real configuration, catalog, stored `.torrent` files and
   resume directory and says, for each archive, what libtorrent will do on the next start and

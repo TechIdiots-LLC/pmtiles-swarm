@@ -16,7 +16,12 @@ import { assertPortsFree, claimDataDir } from './lock.js';
 import { ProgramHooks } from './hooks.js';
 import { SpeedLimits } from './rate-limits.js';
 import { SeedingLimits } from './seeding.js';
-import { closeServer, installSignalHandlers, runStoppers } from './shutdown.js';
+import {
+  closeServer,
+  engineStopMs,
+  installSignalHandlers,
+  runStoppers,
+} from './shutdown.js';
 import { ScheduledSourceManager } from './sources.js';
 import { SubscriptionManager } from './subscriptions.js';
 import { TileStats } from './tile-stats.js';
@@ -100,6 +105,12 @@ async function main() {
       port: { type: 'string', short: 'p' },
       help: { type: 'boolean', short: 'h' },
       json: { type: 'boolean' },
+      'data-dir': { type: 'string' },
+      'save-path': { type: 'string' },
+      force: { type: 'boolean' },
+      systemd: { type: 'boolean' },
+      user: { type: 'string' },
+      password: { type: 'string' },
     },
     allowPositionals: true,
   });
@@ -109,10 +120,17 @@ async function main() {
 
 Usage:
   pmtiles-swarm [--config FILE]          start the node
+  pmtiles-swarm init [--config FILE]     write a first configuration
   pmtiles-swarm status [--config FILE]   ask a running node what it is doing
   pmtiles-swarm publisher-key            print a new BEP 46 signing key
 
   --config, -c   path to a JSON config file
+  --data-dir     where state goes, for init. Absolute, and never under /etc
+  --save-path    where archive data goes, for init
+  --systemd      also write a unit file, for init
+  --user         service account the unit runs as. Default pmtiles-swarm
+  --password     console password, stored hashed. For init
+  --force        let init replace a config that already exists
   --port,   -p   override the listen port
   --json         machine-readable output, for the status command
   --help,   -h   this message
@@ -121,6 +139,21 @@ Environment: PMTILES_SWARM_PORT, PMTILES_SWARM_DATA_DIR, PMTILES_SWARM_ENGINE,
 PMTILES_SWARM_QBT_URL, PMTILES_SWARM_QBT_USERNAME, PMTILES_SWARM_QBT_PASSWORD,
 PMTILES_SWARM_PUBLIC_URL
 `);
+    return;
+  }
+
+  // Ahead of loadConfig, which is the point: there is no config to load yet.
+  if (positionals[0] === 'init') {
+    const { runInit } = await import('./init-command.js');
+    process.exitCode = await runInit({
+      config: values.config,
+      dataDir: values['data-dir'],
+      savePath: values['save-path'],
+      systemd: values.systemd,
+      user: values.user,
+      password: values.password,
+      force: values.force,
+    });
     return;
   }
 
@@ -211,7 +244,19 @@ PMTILES_SWARM_PUBLIC_URL
   const engine = createEngine(config);
   // The slowest, because it announces "stopped" to every tracker, and an
   // unreachable one costs a timeout each. Registered first so it stops last.
-  stoppers.unshift({ label: 'engine', stop: () => engine.destroy(), ms: 8000 });
+  //
+  // Scaled to the library, because what dominates this step is writing resume
+  // data and the sidecar gives each torrent two seconds of that budget. A flat
+  // eight seconds was under it for any node past four archives, so the node
+  // abandoned the sidecar mid-write on every stop and re-hashed on the way
+  // back up whatever had not been persisted — which is how a library ends up
+  // permanently checking rather than seeding.
+  const resumeStopMs = engineStopMs(catalog.list().length);
+  stoppers.unshift({
+    label: 'engine',
+    stop: () => engine.destroy({ timeoutMs: resumeStopMs }),
+    ms: resumeStopMs + 2000,
+  });
   try {
     await engine.connect();
     console.log(`[engine] ${engine.name} ready`);
@@ -528,7 +573,12 @@ PMTILES_SWARM_PUBLIC_URL
   if (resumeSeconds > 0 && engine.saveResume) {
     resumeTimer = setInterval(() => {
       engine
-        .saveResume()
+        // Recomputed each tick rather than captured, because the library grows:
+        // a node that started with four archives and watched forty in would
+        // otherwise still be allowing the budget for four.
+        .saveResume(undefined, {
+          timeoutMs: engineStopMs(catalog.list().length),
+        })
         .then((result) => {
           // Said out loud, because the shortfall is the thing that costs.
           // A torrent that did not write inside the deadline is one that gets
