@@ -191,6 +191,15 @@ export class CompletionWatcher {
         await this.#library.captureMetadata?.(entry.infoHash).catch(() => null);
       }
 
+      // Before the `complete` gate below, deliberately. An archive already
+      // recorded complete is the case this covers: it was re-checking when a
+      // tile reader opened it, so the reader went to the swarm — and when the
+      // check finished nothing noticed, because finalize only runs for a
+      // download. See Library.refreshReader.
+      if (entry.status?.progress >= 1) {
+        await this.#library.refreshReader?.(entry.infoHash).catch(() => null);
+      }
+
       if (entry.complete) continue;
 
       // The engine's account wins whenever it has one: a client allocates the

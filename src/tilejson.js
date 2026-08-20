@@ -24,20 +24,44 @@ const URL_EXTENSION = {
 };
 
 /**
+ * The extension a tile URL uses for one archive format.
+ *
+ * Exported because the console publishes the XYZ template beside the TileJSON,
+ * and a second copy of this map is a second thing to forget when a format is
+ * added — which would show up as a working document advertising a URL that
+ * answers 400.
+ * @param {string} [format] - The archive's tile format.
+ * @returns {string} - The extension, without a dot.
+ */
+export function tileExtension(format) {
+  return URL_EXTENSION[format] ?? 'bin';
+}
+
+/**
  * Builds the TileJSON document for one catalog entry.
+ *
+ * `tilesRoot` is how a category document points its tiles at itself rather
+ * than at the build it happens to have resolved to. The infohash URL is the
+ * right default — it pins content, which is what lets a tile be cached for a
+ * year — but it is the wrong thing to write into an application, because it
+ * changes with every rebuild. A category has to be able to hand out a URL that
+ * does not.
  * @param {object} entry - Catalog entry.
  * @param {string} baseUrl - Public base URL, without a trailing slash.
+ * @param {object} [options] - Overrides.
+ * @param {string} [options.tilesRoot] - Root for the tile template.
  * @returns {object} - A TileJSON 3.0.0 document.
  */
-export function buildTileJson(entry, baseUrl) {
+export function buildTileJson(entry, baseUrl, options = {}) {
   const summary = entry.pmtiles ?? {};
-  const extension = URL_EXTENSION[summary.format] ?? 'bin';
+  const extension = tileExtension(summary.format);
   const root = `${baseUrl}/archives/${entry.infoHash}`;
+  const tilesRoot = options.tilesRoot ?? root;
 
   const doc = {
     tilejson: '3.0.0',
     scheme: 'xyz',
-    tiles: [`${root}/{z}/{x}/{y}.${extension}`],
+    tiles: [`${tilesRoot}/{z}/{x}/{y}.${extension}`],
     name: summary.name ?? entry.name,
     minzoom: summary.minZoom ?? 0,
     maxzoom: summary.maxZoom ?? 14,

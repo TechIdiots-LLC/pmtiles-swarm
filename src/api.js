@@ -32,7 +32,7 @@ import {
   expandTemplate,
 } from './sources.js';
 import { limitFor, remaining } from './seeding.js';
-import { buildTileJson, extensionMatches } from './tilejson.js';
+import { buildTileJson, extensionMatches, tileExtension } from './tilejson.js';
 import { SUMMARY_VERSION } from './pmtiles-probe.js';
 import { TileReadError } from './tiles.js';
 
@@ -2158,6 +2158,14 @@ export function createApp({
           servable,
           endpoints: {
             tileJson: servable ? `${base}/latest/${category}/tiles.json` : null,
+            // The XYZ template itself, which is what most things outside this
+            // system actually want: a leaflet layer, an OpenLayers source, a
+            // GIS client, anything that takes a URL with braces in it rather
+            // than a TileJSON document. It follows the category, so it can be
+            // written into an application and survive a rebuild.
+            xyz: servable
+              ? `${base}/latest/${category}/{z}/{x}/{y}.${tileExtension(newest.pmtiles?.format)}`
+              : null,
             // The same URL with the ways into the swarm in the fragment,
             // which is what a style should carry. A fragment is never sent in
             // a request, so an ordinary client fetches the TileJSON and
@@ -2253,8 +2261,23 @@ export function createApp({
       // makes that re-read cheap — a client already holding the current build
       // gets a 304 and no body, which Express does on its own once an ETag is
       // set before the response goes out.
+      // Both templates are built, because both are wanted and they are wanted
+      // for opposite reasons.
+      //
+      // `tiles` points at the category, so a style written once keeps working
+      // across a rebuild. That is what the endpoint is for, and an infohash
+      // template cannot do it: it changes every build, so anything holding it
+      // is pinned to a build that eventually stops existing.
+      //
+      // The immutable template is still published, under `latest.tiles`, and
+      // is still the better URL for anything that can re-read this document —
+      // it is content-addressed, so it caches for a year and never
+      // revalidates. Offering only one of the two would be choosing for the
+      // consumer, and the right answer differs by consumer.
+      const pinned = buildTileJson(entry, baseUrl(req));
+      const stableRoot = `${baseUrl(req)}/latest/${encodeURIComponent(req.params.category)}`;
       const doc = {
-        ...buildTileJson(entry, baseUrl(req)),
+        ...buildTileJson(entry, baseUrl(req), { tilesRoot: stableRoot }),
         // Names what it resolved to, so a consumer can tell one build from the
         // next without diffing the tile URLs.
         latest: {
@@ -2262,6 +2285,7 @@ export function createApp({
           infohash: entry.infoHash,
           name: entry.name,
           createdAt: entry.createdAt,
+          tiles: pinned.tiles,
         },
       };
       tagAsLatest(res, doc);
@@ -2833,119 +2857,191 @@ export function createApp({
     }),
   );
 
+  /**
+   * Serves one tile, from an archive the caller has already resolved.
+   *
+   * Shared by the two ways of naming an archive, which differ in one respect
+   * and want the same behaviour in every other. `/archives/<infohash>/…` pins
+   * content, so the answer can be cached for a year and never revalidated.
+   * `/latest/<category>/…` resolves to whichever build is current, so it
+   * cannot: the same URL returns different bytes after a rebuild, and a client
+   * holding it for a year would hold a build that no longer exists.
+   *
+   * The difference is expressed entirely in the caching headers rather than in
+   * two implementations, because everything else — the coordinate checks, the
+   * summary backfill, the abort on a cancelled request, the 204-against-404
+   * decision for a sparse archive — has to be identical or one of the two is
+   * quietly a different endpoint.
+   * @param {object} found - The catalog entry to read from.
+   * @param {import('express').Request} req - The request.
+   * @param {import('express').Response} res - The response.
+   * @param {object} [options] - `immutable` false for a resolved category.
+   * @returns {Promise<void>} - Resolves once answered.
+   */
+  const serveTile = async (found, req, res, options = {}) => {
+    const { ext } = req.params;
+    let entry = found;
+    const infoHash = entry.infoHash;
+    // MBTiles passes through here and is turned away by the store instead,
+    // which is the only layer that knows whether the download has finished.
+    if (entry.kind && entry.kind !== 'pmtiles' && entry.kind !== 'mbtiles') {
+      return res.status(415).json({
+        error: `this is a ${entry.kind} archive, and only PMTiles and MBTiles can be served as tiles`,
+      });
+    }
+
+    const z = Number(req.params.z);
+    const x = Number(req.params.x);
+    const y = Number(req.params.y);
+    if (![z, x, y].every(Number.isInteger)) {
+      return res.status(400).json({ error: 'z, x and y must be integers' });
+    }
+    const limit = 2 ** z;
+    if (z < 0 || z > 26 || x < 0 || y < 0 || x >= limit || y >= limit) {
+      return res.status(400).json({ error: 'tile coordinates out of range' });
+    }
+    // An MBTiles archive never went through the PMTiles prober, so it
+    // reaches here with no summary and nothing to check the extension
+    // against. Read one now: it is a handful of rows out of a local SQLite
+    // file, kept in the catalog, so this is paid once per archive rather
+    // than per tile. A failure is left to the read below to report, which
+    // already knows how to say "not complete yet".
+    if (!entry.pmtiles?.format) {
+      const summary = await tiles.summarize(entry.infoHash).catch(() => null);
+      if (summary) {
+        entry = await catalog.put({
+          infoHash: entry.infoHash,
+          pmtiles: summary,
+          summarySource: 'header',
+        });
+      }
+    }
+
+    if (!extensionMatches(entry, ext)) {
+      return res.status(400).json({
+        error: `this archive holds ${entry.pmtiles?.format ?? 'unknown'} tiles`,
+      });
+    }
+
+    const controller = new AbortController();
+    // A panning map abandons requests constantly. Without this the swarm
+    // keeps fetching pieces for tiles nobody is waiting for any more.
+    res.on('close', () => {
+      if (!res.writableEnded) controller.abort();
+    });
+
+    // Counted on the way out rather than at each return: this handler ends
+    // in six different places (200, 204, 404, 415, 400, a read error), and
+    // one hook catches all of them without any of them having to remember.
+    // Abandoned requests are not counted -- a panning map cancels constantly
+    // and those were never served.
+    if (stats) {
+      const startedAt = process.hrtime.bigint();
+      res.on('finish', () => {
+        stats.record({
+          infoHash,
+          name: entry.name,
+          z,
+          x,
+          y,
+          status: res.statusCode,
+          bytes: Number(res.getHeader('content-length')) || 0,
+          ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
+          // Whatever this process can see. Behind a proxy that sends no
+          // X-Forwarded-For this is the proxy's address, which is itself
+          // the answer to "did this arrive directly or through HAProxy".
+          ip: req.ip,
+        });
+      });
+    }
+
+    let tile;
+    try {
+      tile = await tiles.getTile(infoHash, z, x, y, {
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error.name === 'AbortError') return;
+      if (error instanceof TileReadError) {
+        return res.status(error.status).json({ error: error.message });
+      }
+      throw error;
+    }
+
+    res.setHeader('access-control-allow-origin', '*');
+    // The tag is the resolved infohash either way, which is what makes the
+    // category URL cheap to hold: when the build has not moved a
+    // revalidation is a 304 with no body, and when it has, the tag changes
+    // on its own without anything having to remember to invalidate.
+    res.setHeader('etag', `"${infoHash}-${z}-${x}-${y}"`);
+    res.setHeader(
+      'cache-control',
+      options.immutable === false
+        ? // A category resolves to whatever build is current, so the same
+          // URL returns different bytes after a rebuild. Five minutes bounds
+          // how long a client can be looking at the previous build, and
+          // must-revalidate is what stops a cache serving it beyond that.
+          'public, max-age=300, must-revalidate'
+        : // An infohash pins content, so a tile under one can never change.
+          // When a mutable archive is updated the infohash changes and so
+          // does this URL, which makes cache invalidation automatic.
+          'public, max-age=31536000, immutable',
+    );
+
+    // A missing tile is normal, and which status says so matters.
+    //
+    //   404 tells MapLibre the tile is absent, so it overzooms the parent —
+    //       which is the only way a sparse raster-dem renders terrain at all.
+    //   204 tells it the tile is empty but present, so it draws nothing and
+    //       does not fall back.
+    //
+    // Vector wants 204 (an empty tile means no features here); raster wants
+    // 404. Same rule and same name as tileserver-gl's `sparse`.
+    if (!tile) return res.status(isSparse(entry) ? 404 : 204).end();
+
+    res.type(entry.pmtiles?.contentType ?? 'application/octet-stream');
+    if (tile.encoding) res.setHeader('content-encoding', tile.encoding);
+    res.send(tile.data);
+  };
+
   app.get(
     '/archives/:infoHash/:z/:x/:y.:ext',
     route(async (req, res) => {
-      const { infoHash, ext } = req.params;
-      let entry = catalog.get(infoHash);
+      const entry = catalog.get(req.params.infoHash);
       if (!entry) return res.status(404).json({ error: 'unknown archive' });
-      // MBTiles passes through here and is turned away by the store instead,
-      // which is the only layer that knows whether the download has finished.
       if (entry.kind && entry.kind !== 'pmtiles' && entry.kind !== 'mbtiles') {
         return res.status(415).json({
           error: `this is a ${entry.kind} archive, and only PMTiles and MBTiles can be served as tiles`,
         });
       }
+      return serveTile(entry, req, res);
+    }),
+  );
 
-      const z = Number(req.params.z);
-      const x = Number(req.params.x);
-      const y = Number(req.params.y);
-      if (![z, x, y].every(Number.isInteger)) {
-        return res.status(400).json({ error: 'z, x and y must be integers' });
-      }
-      const limit = 2 ** z;
-      if (z < 0 || z > 26 || x < 0 || y < 0 || x >= limit || y >= limit) {
-        return res.status(400).json({ error: 'tile coordinates out of range' });
-      }
-      // An MBTiles archive never went through the PMTiles prober, so it
-      // reaches here with no summary and nothing to check the extension
-      // against. Read one now: it is a handful of rows out of a local SQLite
-      // file, kept in the catalog, so this is paid once per archive rather
-      // than per tile. A failure is left to the read below to report, which
-      // already knows how to say "not complete yet".
-      if (!entry.pmtiles?.format) {
-        const summary = await tiles.summarize(entry.infoHash).catch(() => null);
-        if (summary) {
-          entry = await catalog.put({
-            infoHash: entry.infoHash,
-            pmtiles: summary,
-            summarySource: 'header',
-          });
-        }
-      }
-
-      if (!extensionMatches(entry, ext)) {
-        return res.status(400).json({
-          error: `this archive holds ${entry.pmtiles?.format ?? 'unknown'} tiles`,
+  // The one tile URL that survives a rebuild.
+  //
+  // Every archive is addressed by infohash, which is what makes a tile
+  // cacheable for a year and what makes it useless in an application: the URL
+  // changes with every build. A category is the stable handle, so it needs a
+  // tile endpoint of its own — and this is the URL the category TileJSON
+  // advertises, so a style pointed at `/latest/<category>/tiles.json` keeps
+  // working across rebuilds without being re-fetched for the URLs alone.
+  //
+  // Not a redirect to the immutable URL, though every other `/latest/` route
+  // is one. A redirect costs a round trip, and a map asks for hundreds of
+  // tiles: what is a negligible indirection for a `.torrent` is the difference
+  // between a map that feels immediate and one that does not.
+  app.get(
+    '/latest/:category/:z/:x/:y.:ext',
+    route(async (req, res) => {
+      const entry = newestIn(req.params.category, req);
+      if (!entry) return res.status(404).json({ error: 'no such category' });
+      if (entry.kind && entry.kind !== 'pmtiles' && entry.kind !== 'mbtiles') {
+        return res.status(415).json({
+          error: `the newest archive in this category is a ${entry.kind} archive, and only PMTiles and MBTiles can be served as tiles`,
         });
       }
-
-      const controller = new AbortController();
-      // A panning map abandons requests constantly. Without this the swarm
-      // keeps fetching pieces for tiles nobody is waiting for any more.
-      res.on('close', () => {
-        if (!res.writableEnded) controller.abort();
-      });
-
-      // Counted on the way out rather than at each return: this handler ends
-      // in six different places (200, 204, 404, 415, 400, a read error), and
-      // one hook catches all of them without any of them having to remember.
-      // Abandoned requests are not counted -- a panning map cancels constantly
-      // and those were never served.
-      if (stats) {
-        const startedAt = process.hrtime.bigint();
-        res.on('finish', () => {
-          stats.record({
-            infoHash,
-            name: entry.name,
-            z,
-            x,
-            y,
-            status: res.statusCode,
-            bytes: Number(res.getHeader('content-length')) || 0,
-            ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
-            // Whatever this process can see. Behind a proxy that sends no
-            // X-Forwarded-For this is the proxy's address, which is itself
-            // the answer to "did this arrive directly or through HAProxy".
-            ip: req.ip,
-          });
-        });
-      }
-
-      let tile;
-      try {
-        tile = await tiles.getTile(infoHash, z, x, y, {
-          signal: controller.signal,
-        });
-      } catch (error) {
-        if (error.name === 'AbortError') return;
-        if (error instanceof TileReadError) {
-          return res.status(error.status).json({ error: error.message });
-        }
-        throw error;
-      }
-
-      res.setHeader('access-control-allow-origin', '*');
-      // An infohash pins content, so a tile under one can never change. When a
-      // mutable archive is updated the infohash changes and so does this URL,
-      // which makes cache invalidation automatic.
-      res.setHeader('cache-control', 'public, max-age=31536000, immutable');
-      res.setHeader('etag', `"${infoHash}-${z}-${x}-${y}"`);
-
-      // A missing tile is normal, and which status says so matters.
-      //
-      //   404 tells MapLibre the tile is absent, so it overzooms the parent —
-      //       which is the only way a sparse raster-dem renders terrain at all.
-      //   204 tells it the tile is empty but present, so it draws nothing and
-      //       does not fall back.
-      //
-      // Vector wants 204 (an empty tile means no features here); raster wants
-      // 404. Same rule and same name as tileserver-gl's `sparse`.
-      if (!tile) return res.status(isSparse(entry) ? 404 : 204).end();
-
-      res.type(entry.pmtiles?.contentType ?? 'application/octet-stream');
-      if (tile.encoding) res.setHeader('content-encoding', tile.encoding);
-      res.send(tile.data);
+      return serveTile(entry, req, res, { immutable: false });
     }),
   );
 

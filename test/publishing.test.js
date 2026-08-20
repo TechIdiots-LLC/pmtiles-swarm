@@ -517,8 +517,11 @@ describe('the address a permanent URL is built from', () => {
       const doc = await (
         await fetch(`http://127.0.0.1:${port}/latest/basemap/tiles.json`)
       ).json();
+      // The base, not the path: this test is about publishingUrl not reaching
+      // an ordinary URL, and asserting which route the template uses tied it
+      // to a decision it is not about.
       assert.ok(
-        doc.tiles[0].startsWith(`http://127.0.0.1:${port}/archives/`),
+        doc.tiles[0].startsWith(`http://127.0.0.1:${port}/`),
         doc.tiles[0],
       );
       assert.ok(

@@ -77,7 +77,7 @@ describe('the base URL a node advertises', () => {
   it('uses publicUrl when one is configured', async () => {
     await withNode({ publicUrl: 'https://swarm.example.org' }, async (node) => {
       const doc = await node.tileJson();
-      assert.ok(doc.tiles[0].startsWith('https://swarm.example.org/archives/'));
+      assert.ok(doc.tiles[0].startsWith('https://swarm.example.org/'));
     });
   });
 
@@ -87,7 +87,7 @@ describe('the base URL a node advertises', () => {
     await withNode({}, async (node) => {
       const doc = await node.tileJson();
       assert.ok(
-        doc.tiles[0].startsWith(`http://127.0.0.1:${node.port}/archives/`),
+        doc.tiles[0].startsWith(`http://127.0.0.1:${node.port}/`),
         doc.tiles[0],
       );
     });
@@ -104,7 +104,7 @@ describe('the base URL a node advertises', () => {
     await withNode({ publicUrl: '' }, async (node) => {
       const doc = await node.tileJson();
       assert.ok(
-        doc.tiles[0].startsWith(`http://127.0.0.1:${node.port}/archives/`),
+        doc.tiles[0].startsWith(`http://127.0.0.1:${node.port}/`),
         doc.tiles[0],
       );
       assert.ok(!doc.tiles[0].startsWith('/'), 'must not be a relative URL');
@@ -119,7 +119,7 @@ describe('the base URL a node advertises', () => {
       // began with a space instead of a slash — different rubbish, equally
       // unusable, and it would have slipped past a looser check.
       assert.ok(
-        doc.tiles[0].startsWith(`http://127.0.0.1:${node.port}/archives/`),
+        doc.tiles[0].startsWith(`http://127.0.0.1:${node.port}/`),
         doc.tiles[0],
       );
     });
@@ -142,9 +142,7 @@ describe('the base URL a node advertises', () => {
       { publicUrl: 'https://swarm.example.org/' },
       async (node) => {
         const doc = await node.tileJson();
-        assert.ok(
-          doc.tiles[0].startsWith('https://swarm.example.org/archives/'),
-        );
+        assert.ok(doc.tiles[0].startsWith('https://swarm.example.org/'));
         assert.ok(!doc.tiles[0].includes('.org//'));
       },
     );

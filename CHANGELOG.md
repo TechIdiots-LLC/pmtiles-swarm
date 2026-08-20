@@ -7,6 +7,74 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.60.0
+### ✨ Features and improvements
+- **A tile URL that survives a rebuild.** Every archive is addressed by infohash, which is
+  what makes a tile cacheable for a year and what makes it useless in an application: the URL
+  changes with every build, so anything that wrote one down is pinned to a build that
+  eventually stops existing. A category is the only stable handle this system has, and now it
+  has a tile endpoint of its own — `/latest/<category>/{z}/{x}/{y}.<ext>` — which resolves to
+  whichever build is current on every request.
+
+  The category TileJSON advertises it as `tiles`, so a style written once keeps working across
+  a rebuild without being re-fetched for the URLs alone. The immutable template is still
+  published beside it as `latest.tiles`, because it is still the better URL for anything that
+  can re-read the document: it is content-addressed, so it caches for a year and never
+  revalidates. Offering only one of the two would be choosing for the consumer, and the right
+  answer differs by consumer.
+
+  The console offers the template as a copyable **XYZ** button next to the TileJSON one, which
+  is the form a Leaflet layer, an OpenLayers source or a GIS client actually wants.
+
+  Deliberately not a redirect to the immutable URL, though every other `/latest/` route is one.
+  A redirect costs a round trip and a map asks for hundreds of tiles: what is a negligible
+  indirection for a `.torrent` is the difference between a map that feels immediate and one
+  that does not. It is cached as the moving target it is — `max-age=300, must-revalidate`,
+  tagged with the build it resolved to, so a revalidation is a 304 while that build stands and
+  a miss the moment it moves.
+
+- **A benchmark for "why does this feel slower than the other one", in `tools/tile-bench.mjs`.**
+  It reads two TileJSON documents, picks tiles inside the zoom range and bounds both can serve,
+  and requests the same set from each — one server at a time, because run together they compete
+  for the same link and each measures the other's load as its own latency.
+
+  It reports percentiles rather than an average, since what makes a map feel slow is the tail
+  and a mean built from nineteen fast requests does not move for the twentieth. Time to first
+  byte is separated from the total, which is the difference between a slow lookup and a slow
+  link — they want opposite fixes.
+
+  It also detects a pool of unequal nodes, which is a common cause and an invisible one: half
+  the tiles arrive quickly and half do not, and balanced evenly the mean looks tolerable
+  throughout. Two distinct groups are reported as two, with a histogram, and `--header` tallies
+  a response header naming which backend answered. `--a-origin`/`--b-origin` send the tile
+  requests somewhere other than the document was read from, which is the only way to measure
+  one node directly: a node with `publicUrl` set answers with that name however it was asked.
+
+- **`docs/haproxy.md` covers a pool whose nodes are not the same speed.** Round robin assumes
+  the pool is interchangeable, and a tile server on an NVMe disk and one on a spinning disk are
+  not — an archive read is a seek into a large file, which is what a spinning disk is worst at.
+  `backup`, `weight` and least-connections are compared, along with what each does and does not
+  fix.
+
+### 🐞 Bug fixes
+- **An archive at 100% and seeding could serve no tiles until the node was restarted.** Which
+  source an archive is read through is decided once, when a reader opens it, and every other
+  thing that can change that answer already invalidates the reader: a pause, a resume, a mode
+  change, a move, a finished download. A finished *check* did not — and it is the easiest of
+  them to reach, because during `checking_files` libtorrent reports `progress` as the fraction
+  hashed so far, which is indistinguishable from a download sitting at the same figure.
+
+  So a tile read arriving mid-check opened against the swarm, correctly, and kept that handle
+  afterwards. The archive then read from a swarm whose only member is this node, while the
+  whole file sat on the disk beside it, and nothing evicted the handle short of a restart. The
+  completion sweep looked straight past it: an entry already recorded complete never reaches
+  the code that would have noticed.
+
+  The sweep now drops a reader that is going to the swarm for an archive the disk says is
+  whole. The disk is checked before the handle is dropped rather than after, or a reader that
+  would only re-open against the swarm anyway would be invalidated on every sweep, for ever.
+  Cache mode is left alone: it reads from the swarm because that is what it is for.
+
 ## 0.59.0
 ### ✨ Features and improvements
 - **Requires pmtiles-torrent 0.10.2**, which is what actually ends the re-checking: a

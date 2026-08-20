@@ -2317,7 +2317,12 @@ describe('a stable handle for the current build', () => {
       catalog,
       engine: { name: 'x', list: async () => [] },
       subscriptions: {},
-      tiles: { status: () => null },
+      // getTile so the advertised category template can be followed to an
+      // actual answer; the rest of this block only ever reads documents.
+      tiles: {
+        status: () => null,
+        getTile: async () => ({ data: Buffer.from([1, 2, 3]) }),
+      },
       config: { watch: [], subscriptions: [], feedCategories },
     });
     const server = app.listen(0);
@@ -2342,17 +2347,80 @@ describe('a stable handle for the current build', () => {
     }
   });
 
-  it('points its tiles at the immutable URLs, not back at itself', async () => {
-    // The layering that matters. This document is the only mutable thing; what
-    // it names is content-addressed and cacheable for a year. Pointing the
-    // tiles at /latest/ would make every tile a moving target and throw that
-    // away.
+  it('points its tiles back at the category, and publishes the pinned ones too', async () => {
+    // This used to point `tiles` at the immutable URLs, on the reasoning that
+    // the document is the only mutable thing and everything it names is
+    // content-addressed and cacheable for a year. The reasoning holds and the
+    // conclusion did not: an infohash template changes with every build, so
+    // anything that wrote one into an application was pinned to a build that
+    // eventually stops existing. A category is the only stable handle there
+    // is, and `tiles` is the field a style actually reads.
+    //
+    // Nothing is lost by it. The pinned template is still published beside it,
+    // for a consumer that can re-read this document and would rather have the
+    // URL that never revalidates.
     const s = await serve();
     try {
       const doc = await (await s.get('/latest/basemaps/tiles.json')).json();
-      assert.ok(doc.tiles[0].includes(`/archives/${'b'.repeat(40)}/`));
-      assert.ok(!doc.tiles[0].includes('/latest/'));
+      assert.ok(doc.tiles[0].includes('/latest/basemaps/'));
+      assert.ok(!doc.tiles[0].includes('/archives/'));
+      assert.ok(doc.latest.tiles[0].includes(`/archives/${'b'.repeat(40)}/`));
+      // Same tile, named two ways: the extension has to agree or one of them
+      // is pointing at something that will not answer.
+      assert.equal(
+        doc.tiles[0].split('.').pop(),
+        doc.latest.tiles[0].split('.').pop(),
+      );
       assert.equal(doc.torrent.infohash, 'b'.repeat(40));
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('publishes the XYZ template the console offers to copy', async () => {
+    // The template most things outside this system want: a leaflet layer, an
+    // OpenLayers source, a GIS client — anything that takes a URL with braces
+    // rather than a TileJSON document. It has to agree with the TileJSON, or
+    // the console hands out a URL that answers 400.
+    const s = await serve();
+    try {
+      const list = await (await s.get('/api/categories')).json();
+      const basemaps = (list.categories ?? list).find(
+        (item) => item.category === 'basemaps',
+      );
+      const doc = await (await s.get('/latest/basemaps/tiles.json')).json();
+
+      assert.equal(basemaps.endpoints.xyz, doc.tiles[0]);
+      assert.ok(basemaps.endpoints.xyz.includes('{z}/{x}/{y}'));
+      assert.ok(basemaps.endpoints.xyz.includes('/latest/basemaps/'));
+    } finally {
+      await s.close();
+    }
+  });
+
+  it('serves a tile from the category URL it advertises', async () => {
+    // The endpoint the template names has to exist, and has to be cached as a
+    // moving target rather than as a pinned one.
+    const s = await serve();
+    try {
+      const doc = await (await s.get('/latest/basemaps/tiles.json')).json();
+      // Substituted before parsing: new URL().pathname percent-encodes the
+      // braces, and `%7Bz%7D` is not a coordinate.
+      const filled = doc.tiles[0]
+        .replace('{z}', '0')
+        .replace('{x}', '0')
+        .replace('{y}', '0');
+      const target = new URL(filled).pathname;
+
+      const response = await s.get(target);
+      const body = await response.clone().text();
+      assert.equal(response.status, 200, `status ${response.status}: ${body}`);
+      const cacheControl = response.headers.get('cache-control') ?? '';
+      assert.ok(!cacheControl.includes('immutable'), cacheControl);
+      assert.match(cacheControl, /must-revalidate/);
+      // Tagged by the build it resolved to, so a revalidation is a 304 while
+      // the build stands and a miss the moment it moves.
+      assert.match(response.headers.get('etag') ?? '', /^"b{40}-0-0-0"$/);
     } finally {
       await s.close();
     }

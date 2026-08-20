@@ -2779,6 +2779,60 @@ export class Library {
   }
 
   /**
+   * Drops a reader still going to the swarm for an archive that is now whole.
+   *
+   * Which source an archive is read through is decided once, when it is
+   * opened, and every other thing that can change the answer — a pause, a
+   * resume, a mode change, a move, a finished download — invalidates the
+   * reader itself. A finished *check* is the one that does not, and it is the
+   * easiest of them to hit: during `checking_files` libtorrent reports
+   * `progress` as the fraction hashed so far, which is indistinguishable from
+   * a download at the same figure. So a tile read arriving mid-check opens
+   * against the swarm, correctly, and then keeps that handle after the check
+   * finishes and the whole file is sitting on disk.
+   *
+   * What that looks like is an archive at 100% and seeding whose tiles will
+   * not load, because the swarm it is being read from has one member: this
+   * node. It survives until something evicts the handle, which in practice
+   * means a restart.
+   *
+   * The disk is checked before the handle is dropped, and that is not
+   * belt-and-braces: without it an archive that re-opens against the swarm
+   * anyway would be invalidated again on every sweep, for ever.
+   * @param {string} infoHash - Which archive.
+   * @returns {Promise<boolean>} - Whether a stale reader was dropped.
+   */
+  async refreshReader(infoHash) {
+    // Cheap and synchronous, and false for all but a handful of archives —
+    // this runs for every entry on the completion timer.
+    if (this.#tiles?.status(infoHash)?.mode !== 'swarm') return false;
+
+    const entry = this.#catalog.get(infoHash);
+    if (!entry?.savePath || !entry?.name) return false;
+
+    // Cache mode reads from the swarm because that is what it is for, not
+    // because anything went stale.
+    if (entry.mode === 'cache') return false;
+
+    const whole = await alreadyComplete({
+      savePath: entry.savePath,
+      name: entry.name,
+      size: entry.size,
+    });
+    if (!whole) return false;
+
+    const dropped = await this.#tiles.invalidate(infoHash).catch(() => false);
+    if (dropped) {
+      console.log(
+        `[tiles] ${entry.name}: was being read from the swarm while a whole ` +
+          'copy sat on disk, which is what a finished re-check leaves behind. ' +
+          'Reopening it locally.',
+      );
+    }
+    return dropped;
+  }
+
+  /**
    * Rewrites an archive's web seed list, in the .torrent and everywhere else.
    *
    * Safe on a torrent in circulation: `url-list` sits outside the info

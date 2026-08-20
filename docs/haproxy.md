@@ -114,6 +114,70 @@ gives archive affinity, at the price of concentrating one archive on one node.
 For nodes holding complete copies there is no cold read to avoid, so this is a
 cost with no benefit.
 
+### When the nodes are not the same speed
+
+Round robin assumes the pool is interchangeable, and a tile server on an NVMe
+disk and one on a spinning disk are not. Every archive read is a seek into a
+large file — the PMTiles directory, then the leaf, then the tile — and that is
+precisely the access pattern a spinning disk is worst at. The two can easily
+differ by an order of magnitude.
+
+What that does to a pool is worse than the average suggests. Balanced evenly,
+half the tiles arrive quickly and half do not, and a map is judged by the slow
+half: panning stutters wherever the slow node answered. The mean looks
+tolerable throughout, which is why this is easy to miss and easy to blame on
+the software.
+
+Three ways out, and they answer different questions.
+
+**`backup`** keeps the slow node out of service entirely until the fast one
+fails:
+
+```
+backend pmtiles-swarm
+    option httpchk GET /health HTTP/1.1
+    http-check expect status 200
+    server node1 172.16.1.49:8090 check inter 5s
+    server node2 172.16.1.41:8090 check inter 5s backup
+```
+
+Every request goes to `node1` while it is healthy, and the pool falls to
+`node2` when it is not. Latency is then the fast node's latency, and the slow
+one is redundancy rather than capacity. This is the right answer when the fast
+node can carry the load alone, which for tile serving it usually can.
+
+**`weight`** keeps both in service and sends proportionally less to the slow
+one:
+
+```
+    server node1 172.16.1.49:8090 check inter 5s weight 200
+    server node2 172.16.1.41:8090 check inter 5s weight 20
+```
+
+Worth it only when you actually need the second node's throughput. It does not
+remove the slow answers, it makes them rarer — a tenth of requests at ten times
+the latency is still a tenth of requests a person notices.
+
+**Least Connections** is the better of the two ways to keep both in service,
+and it needs no numbers chosen by hand. A slow node holds each connection
+longer, so it accumulates open ones and stops being picked until it catches up:
+the pool tunes itself to what the disks are doing today rather than to a weight
+somebody guessed last year. It shares `weight`'s limitation — the slow answers
+become proportionally rarer, not absent — and it pairs with `backup` without
+conflict, since a backup server is held out of the pool whatever the algorithm.
+
+`tools/tile-bench.mjs` shows which situation you are in. A pool of unequal
+nodes answers in two distinct groups rather than one spread, and the tool says
+so explicitly; `--header` tallies a response header naming the backend, if
+HAProxy is set to add one:
+
+```
+http-response set-header X-Served-By %s
+```
+
+Run it before and after the change. What should move is the tail: `total p90`
+and `total p99` collapse towards `p50` once one node is answering everything.
+
 ### HTTP/2
 
 Enable it on the frontend and leave _HTTP/2 without TLS_ unchecked: the client
@@ -219,9 +283,16 @@ says so, which is worse than having no check at all.
 
 **Cache tiles by infohash aggressively.** `/archives/<infohash>/…` is immutable
 by construction — an infohash names those bytes and no others — and is served
-with `max-age=31536000, immutable`. `/latest/<category>/…` is the opposite: it
-moves on every build, and is served with `max-age=60, must-revalidate` and an
-ETag naming the build it resolved to.
+with `max-age=31536000, immutable`.
+
+Everything under `/latest/<category>/` is the opposite, because it moves on
+every build. The documents — `tiles.json`, the feeds — are served with
+`max-age=60, must-revalidate`; the tiles with `max-age=300`. Both carry an ETag
+naming the build they resolved to, so a revalidation is a 304 while the build
+stands and a miss the moment it moves. Let Cloudflare revalidate rather than
+overriding either with a page rule: the whole point of the category tile URL is
+that it is safe to write into an application, and it is only safe while the
+edge notices a rebuild.
 
 **Do not strip or rewrite the ETag on either.** It is the infohash, which is
 how a PMTiles reader notices that the archive moved underneath a read already
