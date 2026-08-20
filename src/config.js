@@ -508,6 +508,36 @@ function clone(value) {
 }
 
 /**
+ * Complains about state that has landed in /etc.
+ *
+ * Nobody chooses this. The documented service layout puts the config file in
+ * /etc, every path resolves relative to that file, and the sample reads
+ * "./data" — so the catalog and the resume directory end up on the partition
+ * meant for configuration. Warned rather than corrected: it is a real path
+ * that works, and moving a running node's data would be worse than saying so.
+ *
+ * See docs/running-as-a-service.md — "The paths in the configuration".
+ * @param {object} config - A config whose paths have been resolved.
+ * @returns {string[]} - What to say, empty when there is nothing to say.
+ */
+export function stateUnderEtc(config) {
+  const named = [
+    ['dataDir', config?.dataDir],
+    ['savePath', config?.savePath],
+  ];
+  return named
+    .filter(
+      ([, value]) => typeof value === 'string' && value.startsWith('/etc/'),
+    )
+    .map(
+      ([name, value]) =>
+        `[config] ${name} is ${value}. /etc is for configuration; state ` +
+        'belongs under /var/lib. Give it an absolute path, or let systemd ' +
+        'StateDirectory= make one.',
+    );
+}
+
+/**
  * Loads configuration from a JSON file, applying defaults and environment
  * overrides. A missing file is fine — the defaults run.
  * @param {string} [configPath] - Path to a JSON config file.
@@ -573,6 +603,9 @@ export async function loadConfig(configPath) {
   const { savePath, conflict } = resolveSavePath(config);
   config.savePath = path.resolve(base, savePath);
   config.savePathConflict = conflict;
+
+  for (const message of stateUnderEtc(config)) console.warn(message);
+
   // Kept in step, because older code and older configs both reach for it.
   config.webtorrent = { ...config.webtorrent, savePath: config.savePath };
   if (config.libtorrent) config.libtorrent.savePath = config.savePath;

@@ -639,6 +639,9 @@ export class ScheduledSourceManager {
       target: entry.retainedAt ?? path.join(entry.savePath, entry.name),
       name: source.latestLink,
       label: '[source]',
+      // Honoured here as it is for a watched folder. It was accepted and
+      // ignored, so a source asking for a hard link quietly got a symlink.
+      type: source.latestLinkType ?? 'symbolic',
     });
   }
 

@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
-import { loadConfig, resolveSavePath } from '../src/config.js';
+import { loadConfig, resolveSavePath, stateUnderEtc } from '../src/config.js';
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-savepath-'));
 after(() => fs.rm(workspace, { recursive: true, force: true }));
@@ -215,5 +215,45 @@ describe('paths resolve against the config file, not the working directory', () 
       locations: [{ name: 'bulk', path: absolute }],
     });
     assert.equal(config.locations[0].path, absolute);
+  });
+});
+
+describe('state that landed under /etc', () => {
+  it('says so, because the documented layout leads there', () => {
+    // Every path resolves relative to the config file, and the service setup
+    // puts that file in /etc — so a sample reading "./data" quietly puts the
+    // catalog and the resume directory on the partition meant for
+    // configuration. Nobody chooses this; they follow the guide.
+    const said = stateUnderEtc({
+      dataDir: '/etc/pmtiles-swarm/data',
+      savePath: '/mnt/store/torrent-data',
+    });
+    assert.equal(said.length, 1, said.join(' | '));
+    assert.match(said[0], /dataDir/);
+    assert.match(said[0], /var\/lib/);
+  });
+
+  it('names each path that is wrong, not just the first', () => {
+    assert.equal(
+      stateUnderEtc({
+        dataDir: '/etc/pmtiles-swarm/data',
+        savePath: '/etc/pmtiles-swarm/archives',
+      }).length,
+      2,
+    );
+  });
+
+  it('says nothing about paths that are where they should be', () => {
+    assert.deepEqual(
+      stateUnderEtc({
+        dataDir: '/var/lib/pmtiles-swarm',
+        savePath: '/mnt/store/torrent-data',
+      }),
+      [],
+    );
+  });
+
+  it('is not fooled by a directory that merely starts with the letters', () => {
+    assert.deepEqual(stateUnderEtc({ dataDir: '/etcetera/data' }), []);
   });
 });

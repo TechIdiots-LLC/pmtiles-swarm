@@ -4708,6 +4708,21 @@ Every piece is hashed against the ` +
           ],
         ];
 
+        // The same stable name a watched folder can keep, for the tables that
+        // did not offer it. A source implemented it and never showed it; a
+        // subscription could not ask for it at all.
+        const latestLinkColumns = [
+          { field: 'latestLink', label: 'Stable name', placeholder: 'off' },
+          {
+            field: 'latestLinkType',
+            label: 'Stable name is a',
+            options: [
+              ['', 'symlink'],
+              ['hard', 'hard link'],
+            ],
+          },
+        ];
+
         const publishingColumns = [
           {
             field: 'localFile',
@@ -4945,7 +4960,8 @@ Every piece is hashed against the ` +
               placeholder: 'for ever',
               number: true,
             },
-                      ...publishingColumns,
+                      ...latestLinkColumns,
+            ...publishingColumns,
           ],
           rows: config.sources ?? [],
           checkNow: '/api/sources/check',
@@ -5070,7 +5086,8 @@ Every piece is hashed against the ` +
                 ['false', 'no'],
               ],
             },
-                      ...publishingColumns,
+                      ...latestLinkColumns,
+            ...publishingColumns,
           ],
           rows: following.filter((row) => !isPeer(row)),
           checkNow: '/api/subscriptions/refresh',
@@ -5145,7 +5162,8 @@ Every piece is hashed against the ` +
                 ['false', 'no'],
               ],
             },
-                      ...publishingColumns,
+                      ...latestLinkColumns,
+            ...publishingColumns,
           ],
           rows: following.filter(isPeer),
           checkNow: '/api/subscriptions/refresh',

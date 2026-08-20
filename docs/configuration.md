@@ -596,6 +596,17 @@ it, and what turns a cold tile read from tens of seconds into well under one.
 `webSeedBase` on its own assumes the watched folder is already the web root, since
 nothing is moved.
 
+**Every table that imports an archive offers this**, not just watched folders:
+a [scheduled source](#scheduled-sources), an [RSS feed](#subscriptions) and a
+remote node each take `latestLink` and `latestLinkType` too. The point is the
+same in all four — a consumer holds one path and never learns the name of any
+particular build.
+
+For a subscription the name is pointed at the archive **when the download
+finishes**, not when it is joined: until then there is a marker file or a sparse
+one still filling in, and a name resolving to either is worse than no name at
+all, because whatever opens it reads zeroes rather than failing.
+
 `latestLinkType: 'hard'` is for a name something reads the archive _through_. A
 hard link still resolves after the build it names is retired, where a symlink is
 left pointing at nothing. The other kind stays the fallback in both directions,
@@ -635,6 +646,7 @@ entry gives either a `url` template or an `index` directory:
 | `everyHours`                                    | an interval instead                                                                                           |
 | `md5`                                           | overrides the node's [`md5`](#md5) for this source alone                                                      |
 | `serveArchive`, `selfWebSeed`, `publicDownload` | override what this node offers of the archives this source fetches                                            |
+| `latestLink`, `latestLinkType`                  | a stable second name for the newest build, as on a watched folder                                             |
 
 Prefer a template where the naming is predictable: it asks a direct question,
 gets a direct answer, and needs the upstream to publish no listing at all.

@@ -431,6 +431,10 @@ export class SubscriptionManager {
       serveArchive: subscription.serveArchive,
       selfWebSeed: subscription.selfWebSeed,
       publicDownload: subscription.publicDownload,
+      // Pointed at the archive once the download finishes, so a consumer can
+      // hold one path across every build a peer publishes.
+      latestLink: subscription.latestLink,
+      latestLinkType: subscription.latestLinkType,
     };
 
     // The .torrent is preferred where there is one: it carries the trackers

@@ -7,6 +7,28 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.58.0
+### ✨ Features and improvements
+- **A stable name for every kind of import, not just watched folders.** `latestLink` and
+  `latestLinkType` are now offered on watched web locations, RSS feeds and remote nodes as well — one
+  path a consumer can hold while the build behind it changes.
+
+  A scheduled source had the feature all along and no way to ask for it: the console never showed the
+  column. It was also ignoring `latestLinkType`, so a source asking for a hard link quietly got a
+  symlink. A subscription could not ask at all.
+
+  For a subscription the name is pointed at the archive **when the download finishes**. Until then
+  there is a marker file, or a sparse one still filling in, and a name resolving to either is worse
+  than no name: whatever opens it reads zeroes rather than failing.
+
+- **The node says something when its state has landed in `/etc`.** Nobody chooses that — the
+  documented service layout puts the config file there, every path resolves relative to that file,
+  and the sample reads `"dataDir": "./data"`. So the catalog and the resume directory end up on the
+  partition meant for configuration. Warned rather than corrected: it is a real path that works, and
+  moving a running node's data would be worse than saying so.
+
+### 🐞 Bug fixes
+
 ## 0.57.0
 ### ✨ Features and improvements
 - **The three publishing switches are one **Local file** column on the import tables.** Three

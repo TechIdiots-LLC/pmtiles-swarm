@@ -256,7 +256,9 @@ directory:
   -> /etc/pmtiles-swarm/data
 ```
 
-That is rarely what you want for a service. Use absolute paths for anything
+That is rarely what you want for a service, and the node says so on startup —
+`/etc` is for configuration, and a catalog, a resume directory and possibly an
+archive do not belong on that partition. Use absolute paths for anything
 holding data:
 
 ```json

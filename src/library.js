@@ -12,6 +12,7 @@ import {
   suffixFor,
 } from './incomplete.js';
 import { publishingBase, publishingFor, reachability } from './catalog.js';
+import { linkLatest } from './latest-link.js';
 import { checkOrigin, fingerprintOrigin } from './origin.js';
 import { probePMTiles } from './pmtiles-probe.js';
 import {
@@ -527,6 +528,17 @@ export class Library {
    */
   async finalize(infoHash) {
     const settled = await this.#finalizeOnce(infoHash);
+
+    // A name pointing at a marker file, or at a sparse one still filling in,
+    // is worse than no name: whatever opens it reads zeroes.
+    if (settled?.latestLink && settled.savePath) {
+      await linkLatest({
+        target: path.join(settled.savePath, settled.name),
+        name: settled.latestLink,
+        label: '[sync]',
+        type: settled.latestLinkType ?? 'symbolic',
+      });
+    }
 
     // Only now: a web seed for an archive still arriving answers 409, and the
     // URL cannot be taken back out of the torrents peers already hold.
@@ -1174,6 +1186,10 @@ export class Library {
       serveArchive: options.serveArchive,
       selfWebSeed: options.selfWebSeed,
       publicDownload: options.publicDownload,
+      // Likewise: there is nothing to point a name at until the file is whole
+      // and under its own name.
+      latestLink: options.latestLink,
+      latestLinkType: options.latestLinkType,
       // What the peer that offered this says it holds, where it said anything.
       // The head warmer replaces it with what the archive's own header says as
       // soon as it can read one; until then this is what makes the archive
