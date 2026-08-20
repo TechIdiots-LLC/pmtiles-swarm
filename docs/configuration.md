@@ -488,9 +488,19 @@ moment a download finishes.
 
 The node's setting is the default. A [watched folder](#watched-folders), a
 [scheduled source](#scheduled-sources), an [RSS feed](#subscriptions) and a
-remote node may each carry their own — the **Serve file**, **Web seed** and
-**Listed** columns on those tables, where `node` means "no opinion" rather than
-"off". And any individual archive can be switched in the console, under **HTTP
+remote node may each carry their own — the **Local file** column on those
+tables, which offers the three as one choice:
+
+| option                      | `serveArchive` | `selfWebSeed` | `publicDownload` |
+| --------------------------- | -------------- | ------------- | ---------------- |
+| `node`                      | unset          | unset         | unset            |
+| `off`                       | `false`        | —             | —                |
+| `http`                      | `true`         | —             | —                |
+| `http + catalog`            | `true`         | —             | `true`           |
+| `http + web seed`           | `true`         | `true`        | —                |
+| `http + web seed + catalog` | `true`         | `true`        | `true`           |
+
+`node` means "no opinion" rather than "off". And any individual archive can be switched in the console, under **HTTP
 sources** in its details.
 
 An archive that says nothing goes on following the node, so changing the node's

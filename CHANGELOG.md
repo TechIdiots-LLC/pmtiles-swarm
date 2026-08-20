@@ -7,6 +7,29 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.57.0
+### ✨ Features and improvements
+- **The three publishing switches are one **Local file** column on the import tables.** Three
+  dropdowns per row cost more width than the choice is worth, on tables that already scroll
+  sideways — and as an import default these are almost always decided together:
+
+  | option | serves the file | web seed | on the public page |
+  | --- | --- | --- | --- |
+  | `node` | — | — | — |
+  | `off` | no | — | — |
+  | `http` | yes | no | no |
+  | `http + catalog` | yes | no | yes |
+  | `http + web seed` | yes | yes | no |
+  | `http + web seed + catalog` | yes | yes | yes |
+
+  `http + catalog` is there rather than left out to keep a tidier ladder: a dropdown that could not
+  say it would round that state up to the nearest option it had, turning a web seed on — and
+  publishing the node to the swarm — because somebody re-saved an unrelated row. Every combination
+  survives being written and read back, which is what the round-trip test checks.
+
+  The archive details panel still offers the three separately. A row here sets a policy for what
+  arrives; the panel is where one archive gets picked over.
+
 ## 0.56.2
 ### 🐞 Bug fixes
 - **Adding a save location in the console did nothing.** The row was read correctly and then thrown

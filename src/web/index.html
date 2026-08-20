@@ -3798,7 +3798,9 @@ Every piece is hashed against the ` +
         panel.style.marginBottom = '1rem';
         panel.dataset.rowEditor = key;
 
-        const cell = (column, value) => `
+        const cell = (column, row) => {
+          const value = column.pack ? column.pack(row) : row[column.field];
+          return `
           <td>
             ${
               column.options
@@ -3836,10 +3838,11 @@ Every piece is hashed against the ` +
                 : ''
             }
           </td>`;
+        };
 
         const rowHtml = (row = {}, index) => `
           <tr${index === undefined ? '' : ` data-origin="${index}"`}>
-            ${columns.map((column) => cell(column, row[column.field])).join('')}
+            ${columns.map((column) => cell(column, row)).join('')}
             <td>
               ${preview ? '<button type="button" data-act="preview">Preview</button>' : ''}
               ${peerPreview ? '<button type="button" data-act="test">Test</button>' : ''}
@@ -4033,12 +4036,17 @@ Every piece is hashed against the ` +
         for (const column of columns) {
           const raw = row.querySelector(`[data-field="${column.field}"]`)?.value.trim() ?? '';
           // Emptied on purpose is still an instruction, so the field goes
-          // rather than the original value surviving underneath it.
+          // rather than the original value surviving underneath it. A packed
+          // column takes all the fields it stands for with it.
           if (!raw) {
-            delete record[column.field];
+            for (const field of column.fields ?? [column.field]) {
+              delete record[field];
+            }
             continue;
           }
-          if (column.list) {
+          if (column.unpack) {
+            Object.assign(record, column.unpack(raw));
+          } else if (column.list) {
             record[column.field] = raw
               .split(',')
               .map((part) => part.trim())
@@ -4667,31 +4675,71 @@ Every piece is hashed against the ` +
         await renderTokenEditor(body);
         renderHookEditor(body, config, restartKeys);
 
-        // The three switches the details panel offers, as import defaults.
-        // Each has a blank option as well as yes and no, because unset is a
-        // real answer here: it means the archive follows the node, and a row
-        // that has never said anything must keep not saying it. See
-        // publishingFor() -- the node's setting reaches everything that never
-        // had one of its own, and that only works if "no opinion" is storable.
-        const publishing = ['', 'node'];
+        // One control for three settings, because as an import default they
+        // are almost always decided together and three dropdowns per row cost
+        // more width than the choice is worth. The details panel still offers
+        // them separately, which is where a single archive gets picked over.
+        //
+        // Every combination is reachable, including http + catalog without a
+        // web seed. A ladder that skipped it would misread a config that had
+        // it, and quietly turn a web seed on when the row was next saved.
+        //
+        // The blank option means "no opinion", not "off": an archive that says
+        // nothing follows the node, which is what lets the node's own setting
+        // reach everything that never had one. See publishingFor().
+        const LOCAL_FILE = [
+          ['', 'node', {}],
+          ['off', 'off', { serveArchive: false }],
+          ['http', 'http', { serveArchive: true }],
+          [
+            'http+catalog',
+            'http + catalog',
+            { serveArchive: true, publicDownload: true },
+          ],
+          [
+            'http+webseed',
+            'http + web seed',
+            { serveArchive: true, selfWebSeed: true },
+          ],
+          [
+            'http+webseed+catalog',
+            'http + web seed + catalog',
+            { serveArchive: true, selfWebSeed: true, publicDownload: true },
+          ],
+        ];
+
         const publishingColumns = [
           {
-            field: 'serveArchive',
-            label: 'Serve file',
-            boolean: true,
-            options: [publishing, ['true', 'yes'], ['false', 'no']],
-          },
-          {
-            field: 'selfWebSeed',
-            label: 'Web seed',
-            boolean: true,
-            options: [publishing, ['true', 'yes'], ['false', 'no']],
-          },
-          {
-            field: 'publicDownload',
-            label: 'Listed',
-            boolean: true,
-            options: [publishing, ['true', 'yes'], ['false', 'no']],
+            field: 'localFile',
+            label: 'Local file',
+            wide: true,
+            fields: ['serveArchive', 'selfWebSeed', 'publicDownload'],
+            options: LOCAL_FILE.map(([value, label]) => [value, label]),
+            // Read back from the three so a row written by hand, or by the
+            // details panel, shows what it actually says.
+            pack: (row) => {
+              if (row.serveArchive === undefined) return '';
+              if (!row.serveArchive) return 'off';
+              return [
+                'http',
+                row.selfWebSeed ? 'webseed' : '',
+                row.publicDownload ? 'catalog' : '',
+              ]
+                .filter(Boolean)
+                .join('+');
+            },
+            unpack: (value) => {
+              const chosen = LOCAL_FILE.find(([option]) => option === value);
+              // Named in full rather than merged over what was there: picking
+              // "http" has to turn the other two off, not leave them as they
+              // were.
+              return {
+                serveArchive: undefined,
+                selfWebSeed: undefined,
+                publicDownload: undefined,
+                ...(chosen ? chosen[2] : {}),
+              };
+            },
           },
         ];
 

@@ -606,9 +606,12 @@ describe('saving a row editor', () => {
   it('still lets a field be cleared', async () => {
     // The other half: an emptied box has to mean "remove this", not "leave
     // whatever was there underneath".
+    // Every field the control stands for, since one dropdown can now cover
+    // three settings and leaving two of them behind would be the same bug in
+    // a quieter form.
     assert.match(
       page,
-      /delete record\[column\.field\];/,
+      /for \(const field of column\.fields \?\? \[column\.field\]\) \{\s*delete record\[field\];/,
       'an emptied field is removed rather than falling back to the original',
     );
   });
@@ -1242,5 +1245,82 @@ describe('the settings pane and the row editors above it', () => {
     // editorKeys is only as good as rowEditorColumns, which renderRowEditor
     // fills in. If that stopped happening the skip would silently do nothing.
     assert.match(page, /rowEditorColumns\[key\] = columns;/);
+  });
+});
+
+describe('the local-file dropdown on an import row', () => {
+  /**
+   * The column definition, lifted out of the page and evaluated.
+   *
+   * The console is a module inside an HTML file, so there is nothing to
+   * import. Asserting on the source text would check the shape and miss the
+   * thing worth checking — that a value survives being written and read back.
+   * @returns {object} - The packed column.
+   */
+  const column = (() => {
+    const start = page.indexOf('const LOCAL_FILE = [');
+    const end = page.indexOf('\n        ];', page.indexOf('publishingColumns'));
+    assert.ok(start > 0 && end > start, 'the local-file column moved');
+    const source = page.slice(start, end + '\n        ];'.length);
+    return new Function(`${source}\nreturn publishingColumns[0];`)();
+  })();
+
+  it('reads every setting back as the option that produced it', () => {
+    // The round trip is the whole contract: one control stands for three
+    // booleans, and a row that is opened and saved without being touched must
+    // come out saying exactly what it went in saying.
+    for (const [value] of column.options) {
+      const unpacked = column.unpack(value);
+      assert.equal(
+        column.pack(unpacked),
+        value,
+        `${value || '(node)'} did not survive the round trip`,
+      );
+    }
+  });
+
+  it('can say http and catalog without a web seed', () => {
+    // The combination a plain ladder would lose. Losing it would not merely
+    // hide the option: packing that state would round up to the nearest rung
+    // and turn a web seed on, publishing this node to the swarm because
+    // somebody re-saved an unrelated row.
+    const listed = { serveArchive: true, publicDownload: true };
+    assert.equal(column.pack(listed), 'http+catalog');
+    assert.deepEqual(column.unpack('http+catalog'), {
+      serveArchive: true,
+      selfWebSeed: undefined,
+      publicDownload: true,
+    });
+  });
+
+  it('leaves an archive with no opinion following the node', () => {
+    // Blank is not "off". An archive that says nothing takes the node's
+    // answer, which is what lets one setting reach a whole library.
+    assert.equal(column.pack({}), '');
+    assert.deepEqual(column.unpack(''), {
+      serveArchive: undefined,
+      selfWebSeed: undefined,
+      publicDownload: undefined,
+    });
+  });
+
+  it('turns the others off when a lower option is chosen', () => {
+    // Merged over what was there, "http" would leave a web seed running that
+    // the row no longer claims — and the row is what somebody just read.
+    assert.deepEqual(column.unpack('http'), {
+      serveArchive: true,
+      selfWebSeed: undefined,
+      publicDownload: undefined,
+    });
+    assert.equal(column.unpack('off').serveArchive, false);
+  });
+
+  it('stands for the three fields it has to clear', () => {
+    // readRow deletes `column.fields` when the control is emptied.
+    assert.deepEqual(column.fields, [
+      'serveArchive',
+      'selfWebSeed',
+      'publicDownload',
+    ]);
   });
 });
