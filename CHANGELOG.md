@@ -7,6 +7,18 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.56.2
+### 🐞 Bug fixes
+- **Adding a save location in the console did nothing.** The row was read correctly and then thrown
+  away: the settings pane below renders every config key it does not explicitly skip as a raw-JSON
+  textarea, the skip list named `watch`, `sources` and `subscriptions` but not `locations`, and in
+  `saveSettings` the textarea loop runs after the row editors — so a copy of the list as it was when
+  the pane was drawn overwrote the one with the new row in it.
+
+  The skip is now derived from the registered row editors rather than listed by hand, so this cannot
+  happen again to the next editor somebody adds. The list was the bug; keeping a list and adding one
+  more name to it would have been the same bug waiting.
+
 ## 0.56.1
 ### ✨ Features and improvements
 - **Comments trimmed back to house style, and the reasoning moved into the docs where it belongs.**

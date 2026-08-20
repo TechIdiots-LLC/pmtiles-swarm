@@ -5111,12 +5111,23 @@ Every piece is hashed against the ` +
             'before trusting it with anything more.',
         });
 
+        // Whatever a row editor above already owns. Derived rather than
+        // listed, because a list has to be remembered: `locations` was missing
+        // from one, so the settings pane rendered it as raw JSON as well, and
+        // the textarea's stale copy overwrote the editor's on the way out —
+        // adding a save location appeared to do nothing.
+        const editorKeys = new Set(
+          Object.keys(rowEditorColumns).map(
+            (key) => rowEditorTargets[key]?.configKey ?? key,
+          ),
+        );
+
         for (const [key, value] of Object.entries(config)) {
+          if (editorKeys.has(key)) continue;
           // Shown above, in a form that says what they mean.
           if (key === 'incompleteSuffix' || key === 'cacheSavePath') continue;
           // Shown as real fields above rather than as raw JSON.
           if (key === 'seeding' || key === 'speed') continue;
-          if (key === 'watch' || key === 'sources' || key === 'subscriptions') continue;
           if (key === 'subscriptionsEnabled') continue;
           if (key === 'subscriptionIntervalSeconds') continue;
           if (key === 'onAdded' || key === 'onComplete') continue;

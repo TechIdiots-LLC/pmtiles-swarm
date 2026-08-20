@@ -1209,3 +1209,38 @@ describe('the two pages that show a size', () => {
     );
   });
 });
+
+describe('the settings pane and the row editors above it', () => {
+  it('never renders a setting that a row editor already owns', () => {
+    // Both write to `updates` in saveSettings, and the raw-JSON textarea runs
+    // second — so a key rendered in both places has the editor's version
+    // overwritten by a copy of whatever was on screen when the pane was drawn.
+    // `locations` was exactly that: adding a save location read correctly,
+    // then vanished on the way out.
+    //
+    // Derived rather than listed, because a list is a thing to forget.
+    const at = page.indexOf(
+      'for (const [key, value] of Object.entries(config))',
+    );
+    assert.ok(at > 0, 'the settings loop moved');
+    const loop = page.slice(at, at + 400);
+    assert.match(
+      loop,
+      /if \(editorKeys\.has\(key\)\) continue;/,
+      'the settings loop no longer skips what the row editors own',
+    );
+
+    // And the set it consults is built from the editors themselves.
+    assert.match(
+      page,
+      /const editorKeys = new Set\(\s*Object\.keys\(rowEditorColumns\)/,
+      'editorKeys is no longer derived from the registered editors',
+    );
+  });
+
+  it('registers every row editor under the key it saves to', () => {
+    // editorKeys is only as good as rowEditorColumns, which renderRowEditor
+    // fills in. If that stopped happening the skip would silently do nothing.
+    assert.match(page, /rowEditorColumns\[key\] = columns;/);
+  });
+});
