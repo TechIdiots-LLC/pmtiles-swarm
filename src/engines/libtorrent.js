@@ -763,25 +763,40 @@ export class LibtorrentEngine {
    *   were told to write resume data, and how many actually did before the
    *   deadline.
    */
-  async saveResume(infoHash) {
+  async saveResume(infoHash, options = {}) {
     // Returned rather than discarded. The sidecar reports both numbers, and
     // the gap between them is the thing worth knowing: a torrent that did not
     // write is one that gets re-hashed on the next start, which for a 700 GiB
     // archive is the difference between seeding in seconds and seeding in half
     // an hour. That answer was being thrown away here.
-    return this.#call('save_resume', { infoHash });
+    //
+    // The default #call timeout is 60s and the sidecar's own budget is two
+    // seconds per torrent, so past thirty archives the call gave up first —
+    // and then the counts never came back, which is why the shortfall this
+    // reports could not be seen from outside.
+    return this.#call('save_resume', { infoHash }, options.timeoutMs);
   }
 
   /**
    * Saves resume data and stops the sidecar.
+   *
+   * The timeout is the caller's to set, because only the caller knows how many
+   * torrents are about to be written down and the sidecar spends two seconds
+   * per torrent. Fifteen seconds was the fixed value, which meant every
+   * library past seven archives had its resume save cut off — and each torrent
+   * that missed was re-hashed in full on the way back up.
+   * @param {object} [options] - Overrides.
+   * @param {number} [options.timeoutMs] - How long the sidecar gets to finish.
    * @returns {Promise<void>} - Resolves once stopped.
    */
-  async destroy() {
+  async destroy(options = {}) {
     // Set before anything else, so the exit this is about to cause is
     // recognised as intended by the handler that sees it.
     this.#stopping = true;
     if (!this.#child) return;
-    await this.#call('shutdown', {}, 15000).catch(() => {});
+    await this.#call('shutdown', {}, options.timeoutMs ?? 15000).catch(
+      () => {},
+    );
     this.#child?.kill();
     this.#child = null;
     this.#ready = null;

@@ -18,8 +18,53 @@
  * every step is bounded, and the whole sequence is bounded again behind that.
  */
 
-/** How long the whole shutdown may take before it gives up on itself. */
-const WATCHDOG_MS = 15000;
+/** Slack over the sum of the steps, for the shutdown's own bookkeeping. */
+const WATCHDOG_SLACK_MS = 5000;
+
+/** What a step is allowed when it does not say. */
+const STEP_MS = 5000;
+
+/**
+ * How long the whole shutdown may take before it gives up on itself.
+ *
+ * Derived from the steps rather than fixed, because a fixed bound is a second
+ * deadline that has to be kept in agreement with them by hand — and was not.
+ * Fifteen seconds sat under an engine step that legitimately wants two seconds
+ * per torrent, so on any library past seven archives the watchdog fired first
+ * and exited the process while the sidecar was still writing resume data. What
+ * that costs is a re-hash of everything that had not been written yet, on the
+ * way back up.
+ *
+ * Computed when the signal arrives, so a step registered later is still
+ * covered.
+ * @param {Array<{ms?: number}>} stoppers - The steps to be run.
+ * @returns {number} - The bound, in milliseconds.
+ */
+export function watchdogFor(stoppers) {
+  const total = stoppers.reduce(
+    (sum, stopper) => sum + (stopper.ms ?? STEP_MS),
+    0,
+  );
+  return total + WATCHDOG_SLACK_MS;
+}
+
+/**
+ * How long to let the engine stop, given how much it has to write down.
+ *
+ * The sidecar allows each torrent two seconds of its resume-save budget, so
+ * the only bound that does not eventually cut a library short is one that
+ * counts them. The floor covers a node with nothing in it, where what remains
+ * is announcing "stopped" to trackers that may not answer.
+ *
+ * Whatever this returns has to be under the unit's `TimeoutStopSec`, or
+ * systemd kills the process while it is still working. See
+ * docs/running-as-a-service.md.
+ * @param {number} archives - How many archives the catalog holds.
+ * @returns {number} - Milliseconds.
+ */
+export function engineStopMs(archives) {
+  return Math.max(15000, archives * 2000 + 10000);
+}
 
 /**
  * Runs one shutdown step, giving up on it rather than waiting for ever.
@@ -125,11 +170,14 @@ export function installSignalHandlers(stoppers, options = {}) {
     stopping = true;
     console.log(`\n[shutdown] ${signal}`);
 
-    // A last resort, in case a step ignores its own bound.
+    // A last resort, in case a step ignores its own bound — never a bound in
+    // its own right, which is what it silently became when it was shorter than
+    // the steps it was meant to outlast.
+    const limitMs = watchdogFor(stoppers);
     const watchdog = setTimeout(() => {
-      console.warn('[shutdown] took too long; exiting anyway');
+      console.warn(`[shutdown] took longer than ${limitMs}ms; exiting anyway`);
       exit(1);
-    }, WATCHDOG_MS);
+    }, limitMs);
 
     await runStoppers(stoppers);
 

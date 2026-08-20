@@ -2,10 +2,48 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **Requires pmtiles-torrent 0.10.2**, which is what actually ends the re-checking: a
+  `seedOnly` add now discards resume data that would cancel the claim, and the periodic save
+  leaves a hashing torrent alone. Everything below only stops the node making more of it.
+- **Two scripts for diagnosing a library that re-checks on every start**, in `tools/`.
+  `resume-doctor.py` reads a node's real configuration, catalog, stored `.torrent` files and
+  resume directory and says, for each archive, what libtorrent will do on the next start and
+  why — applying libtorrent's own rules and citing the file and line each came from. It also
+  reads the unit through `systemctl show`, does the arithmetic on every deadline that can cut
+  a resume save short, and hashes pieces rather than trusting the catalog. `resume-experiment.py`
+  proves the five behaviours involved on whatever libtorrent is actually installed, because
+  1.2, 2.0 and 2.1 differ enough that a claim verified on one is not a claim about the other.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A stop no longer abandons the sidecar mid-write, which is where resume data was going.**
+  Three separate bounds decided how long the engine step had, and the smallest won: eight
+  seconds for the step, fifteen for the whole shutdown, fifteen for the shutdown RPC. The
+  sidecar allows each torrent two seconds of its resume-save budget, so past four archives the
+  node gave up first and every torrent it had not persisted re-hashed its whole store on the
+  way back up. That is the state a library gets stuck in: checking, on every start, for hours.
+
+  The engine step is now worked out from the catalog — two seconds a torrent, over a floor —
+  and the shutdown watchdog is derived from the steps it is meant to contain rather than being
+  a second deadline kept in agreement with them by hand. It was not in agreement.
+
+  The same fixed 60s applied to the periodic save, so past thirty archives the call gave up
+  before the sidecar finished, and the written/asked counts never came back — which is why the
+  shortfall this reports could not be seen from outside. **`TimeoutStopSec` in the documented
+  unit rises from 45 to 300 seconds**, and existing installs need it raised by hand.
+
+- **A `.torrent` that moved with `dataDir` is found again instead of silently becoming a
+  magnet.** `torrentPath` is recorded absolute, so moving state out of `/etc` — which
+  `docs/running-as-a-service.md` tells you to do — left every catalog entry naming a directory
+  that no longer existed. Nothing repointed them and nothing complained, because an unreadable
+  `.torrent` was treated as "use the magnet instead".
+
+  That fallback is the damage rather than a graceful degradation. A magnet carries no metadata
+  and neither does resume data, so the archive waits on BEP 9 for a file list that only a peer
+  can supply — and for an archive this node originated there is nobody to ask. Seen in the
+  field: twenty archives at 0% in `downloading_metadata`, indefinitely, after one documented
+  migration. The current `dataDir` is now tried second, the recorded path is corrected in
+  place so the warning is printed once rather than for ever, and falling back to a magnet at
+  all now says so.
 
 ## 0.58.1
 ### 🐞 Bug fixes

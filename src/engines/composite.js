@@ -433,7 +433,7 @@ export class CompositeEngine {
    * @returns {Promise<{written: number, asked: number}>} - Totals across every
    *   engine that keeps resume data.
    */
-  async saveResume(infoHash) {
+  async saveResume(infoHash, options = {}) {
     // Summed rather than dropped, so a caller can tell the difference between
     // "every torrent wrote" and "half of them will be re-hashed on the next
     // start". An engine that fails outright contributes nothing to either
@@ -444,7 +444,7 @@ export class CompositeEngine {
       // WebTorrent keeps none, and says so by not offering the method.
       if (!engine.saveResume) continue;
       try {
-        const result = (await engine.saveResume(infoHash)) ?? {};
+        const result = (await engine.saveResume(infoHash, options)) ?? {};
         written += Number(result.written) || 0;
         asked += Number(result.asked) || 0;
       } catch (error) {
@@ -653,19 +653,21 @@ export class CompositeEngine {
    * Shuts every engine down.
    * @returns {Promise<void>} - Resolves once all are stopped.
    */
-  async destroy() {
+  async destroy(options = {}) {
     this.#stopping = true;
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = undefined;
 
     for (const engine of this.#secondaries) {
       await engine
-        .destroy()
+        .destroy(options)
         .catch((error) =>
           console.error(`[engine] ${engine.name}: ${error.message}`),
         );
     }
-    await this.#primary.destroy();
+    // Forwarded, because the primary is the one holding resume data and the
+    // budget was worked out from how much of it there is to write.
+    await this.#primary.destroy(options);
   }
 }
 

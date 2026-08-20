@@ -177,8 +177,12 @@ Restart=always
 RestartSec=5
 
 # Stopping announces "stopped" to every tracker, releases the data directory
-# lock and cancels downloads in flight. Worst case is about 20 seconds.
-TimeoutStopSec=45
+# lock, cancels downloads in flight and writes resume data for every archive.
+# That last part is what scales: the node allows its engine two seconds per
+# torrent, so a library of fifty wants well over a minute and systemd has to
+# outlast it. Too low here and the process is killed mid-save, which costs a
+# re-hash of everything unwritten on the way back up.
+TimeoutStopSec=300
 
 # The node stops the sidecar itself, and needs it alive to do so. The default
 # signals both at once, which kills the sidecar before it can write its resume
@@ -232,6 +236,17 @@ rechecked to find out they were complete all along.
 itself, in order, and waits for the resume data to be written. Nothing is left
 running: anything still alive when `TimeoutStopSec` expires is killed, sidecar
 included.
+
+**`TimeoutStopSec`, and why it is not a round number you pick once.** Stopping
+writes resume data for every archive, and the node allows its engine two seconds
+per torrent to do it — so the figure that matters grows with the library. Three
+hundred seconds covers a hundred and forty archives; a larger node needs more.
+Set it too low and systemd kills the process mid-save, and every archive that
+had not been written re-hashes its whole store on the way back up, which for a
+700 GiB archive is hours.
+
+`tools/resume-doctor.py` prints the arithmetic for your library and says whether
+the unit's value covers it.
 
 **No `ExecStop=`.** systemd already sends `SIGTERM`, and the node handles it
 from the moment it starts. `ExecStop=/bin/kill -15 $MAINPID` is redundant, and
@@ -779,3 +794,111 @@ once rather than diagnosing later:
   `journalctl -u pmtiles-swarm | grep -i onComplete` — and a hook redirecting its
   own output to a file will have nothing for the journal to show, which is not
   the same as not having run.
+
+## When archives re-check on every start
+
+The symptom is always the same shape — a restart, and then a library sitting at
+0% or grinding through a re-hash of archives that are whole on the disk. The
+causes are not the same shape at all, so guessing between them is expensive:
+re-hashing a 700 GiB archive is half an hour during which it serves nobody.
+
+Two scripts in `tools/` answer it without guessing. Neither starts anything,
+neither writes anything, and both are safe against a running node.
+
+```sh
+sudo -u pmtiles-swarm python3 tools/resume-doctor.py \
+  -c /etc/pmtiles-swarm/swarm.config.json
+```
+
+**`resume-doctor.py`** reads your configuration, catalog, stored `.torrent`
+files and resume directory, and says for each archive what libtorrent will do on
+the next start and why — seed at once, stat its files, or re-hash the store. It
+applies libtorrent's own rules rather than a guess at them, and cites the file
+and line each one came from. It also reads the unit through `systemctl show`,
+does the arithmetic on every deadline that can cut a resume save short, and
+scans the journal for the failures that leave a trace.
+
+```sh
+sudo -u pmtiles-swarm python3 tools/resume-experiment.py
+```
+
+**`resume-experiment.py`** proves the behaviour on the libtorrent you actually
+have, rather than the one the documentation was written against. It builds a
+real torrent over a temporary file, saves real resume data, adds it again, and
+reports what happened. 2.0 and 2.1 differ enough to be worth the thirty seconds.
+
+Three things they exist to tell apart, because the first two look identical from
+outside and want opposite fixes:
+
+- **No resume data is not the problem.** An archive recorded complete is added
+  with `seed_mode`, and that claim stands on its own: libtorrent stats the files
+  and seeds, without hashing a byte. A missing resume file costs nothing.
+- **Stale resume data is the problem, and it is worse than none.** A resume file
+  holding a _partial_ bitfield cancels the `seed_mode` claim — libtorrent drops
+  it if a single piece is unset. The archive then comes back as a downloader
+  with every byte already on disk, and fetches again what it has. Deleting that
+  one file is the repair; with none, it seeds at once.
+- **A short or missing file is a genuine re-check.** `mismatching_file_size` is
+  the only thing here that really does mean re-hashing, and it is about the data
+  on disk rather than about resume data at all. libtorrent 2.x records no
+  mtimes, so nothing in this depends on a timestamp.
+
+Which archives carry stale resume data is not random, and the pattern is worth
+knowing before it looks like a second bug. An archive from a watched folder was
+read end to end before it was ever registered: it is complete from its first
+moment and no partial bitfield is ever written for it. An archive joined from a
+feed, a magnet or a peer is genuinely partial for hours, with partial resume
+data written for it every `resumeSaveIntervalSeconds` throughout. Only the
+second kind has anything to leave behind, so trouble concentrating there is this
+failure's ordinary shape rather than something the import path introduced.
+
+Two more things the doctor looks at, because they are the ones a snapshot alone
+gets wrong.
+
+**Whether the catalog still points at its own `.torrent` files.** Each entry
+records `torrentPath` as an absolute path, and restore reads that rather than
+recomputing it — so moving `dataDir` out of `/etc`, which this guide tells you
+to do, leaves every recorded path behind. Nothing warns, because a missing
+`.torrent` is not treated as an error: restore quietly falls back to the magnet.
+That fallback is the damage. A magnet carries no metadata, resume data does not
+carry it either, and so the archive waits on BEP 9 for a file list that only a
+peer can supply — from a swarm where this node is the origin. It sits at 0% in
+`downloading_metadata` indefinitely, which no amount of re-checking will fix.
+
+**Whether the periodic save gets through the whole library.** Every torrent is
+asked to save in the same cycle, so a healthy `resumeDir` has all its files
+within one interval of each other. Ages spread wider than that mean some cycles
+are finishing early, and the ages alone cannot say whether the same archives
+lose every time. `--watch` measures it rather than inferring it:
+
+```sh
+sudo -u pmtiles-swarm python3 tools/resume-doctor.py \
+  -c /etc/pmtiles-swarm/swarm.config.json --watch 660
+```
+
+It reports each save cycle as it happens, how many of them covered every
+archive, and which archives were never written at all.
+
+**A poisoned archive may heal itself, so run this twice.** The commonest way a
+whole archive acquires a partial bitfield is a save taken while it was
+re-checking: `write_resume_data` truncates `have_pieces` to the pieces checked
+so far, and the five-minute timer lands inside that window every time a large
+archive checks. That shortened bitfield is what cancels `seed_mode` on the next
+start — so the archive comes back partial, checks again, and writes another one.
+The loop needs no restart to keep itself going.
+
+The doctor tells the two apart by length: a bitfield shorter than the torrent
+was written mid-check, and one at full length is what a finished check
+concluded. A check that completes rewrites its own resume file correctly, so an
+archive poisoned in one run can read `seeds at once` in the next with nothing
+done to it. **Only the archives that stay poisoned across two runs, several
+minutes apart, are worth deleting a file for.**
+
+Two things it deliberately does not treat as faults. An archive whose data sits
+outside the `savePathLayout` shape is normal — one adopted from a file this node
+already holds keeps that file, and a node may keep archives beside whatever
+produced them. What matters is whether the data is where the entry says, which
+is checked directly. And every directory an archive actually lives in has to
+appear in `ReadWritePaths`, not just the `savePath` in the configuration; the
+doctor checks each one in use, because a deliberately-placed archive is exactly
+the case that gets left out of the unit.

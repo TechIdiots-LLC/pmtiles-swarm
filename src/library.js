@@ -667,15 +667,76 @@ export class Library {
    * @param {object} entry - Catalog entry.
    * @returns {Promise<void>} - Resolves once added.
    */
-  async #readd(entry) {
-    const torrentFile = entry.torrentPath
-      ? await fs
-          .readFile(entry.torrentPath)
-          .then((buffer) => new Uint8Array(buffer))
-          .catch(() => null)
+  /**
+   * An entry's metainfo, from wherever it actually is.
+   *
+   * `torrentPath` is recorded absolute, so moving `dataDir` — which the service
+   * guide tells you to do, out of `/etc` — leaves every entry in the catalog
+   * naming a directory that no longer exists. Nothing repoints them, and
+   * nothing complained, because an unreadable `.torrent` was simply treated as
+   * "use the magnet instead".
+   *
+   * So the recorded path is tried first and the current `dataDir` second. The
+   * file is stored under the infohash either way, which is what makes the
+   * second lookup possible at all.
+   * @param {object} entry - The catalog entry.
+   * @returns {Promise<Uint8Array | null>} - The metainfo, or null.
+   */
+  async #metainfoFor(entry) {
+    const read = (file) =>
+      file
+        ? fs
+            .readFile(file)
+            .then((buffer) => new Uint8Array(buffer))
+            .catch(() => null)
+        : Promise.resolve(null);
+
+    const recorded = await read(entry.torrentPath);
+    if (recorded) return recorded;
+
+    const beside = entry.infoHash
+      ? path.join(this.torrentDir, `${entry.infoHash}.torrent`)
       : null;
+    if (!beside || beside === entry.torrentPath) return null;
+
+    const found = await read(beside);
+    if (!found) return null;
+
+    console.warn(
+      `[restore] ${entry.name}: the catalog names ${entry.torrentPath}, which ` +
+        `is not there; using ${beside} instead. Its recorded path is being ` +
+        'corrected.',
+    );
+    // Corrected in place, so the warning is printed once rather than on every
+    // start for the rest of the node's life.
+    await this.#catalog
+      .put({ infoHash: entry.infoHash, torrentPath: beside })
+      .catch(() => null);
+    return found;
+  }
+
+  async #readd(entry) {
+    const torrentFile = await this.#metainfoFor(entry);
     const magnet = torrentFile ? undefined : this.#withTrackers(entry);
     if (!torrentFile && !magnet) return;
+
+    // Falling back to the magnet is not a quiet equivalent, and it used to
+    // happen silently. A magnet carries no metadata and neither does resume
+    // data, so the archive waits on BEP 9 for a file list — which no peer can
+    // supply for an archive this node originated. It sits at 0% in
+    // downloading_metadata indefinitely, and no re-check will move it.
+    //
+    // Only where the entry claims a metainfo it cannot produce. An archive
+    // that never had one was joined by magnet and is waiting on
+    // captureMetadata in the ordinary way; saying this about it would be a
+    // warning on the normal path.
+    if (!torrentFile && entry.torrentPath) {
+      console.warn(
+        `[restore] ${entry.name}: no .torrent could be read, so it is being ` +
+          'added as a magnet and must fetch its metadata from a peer. If this ' +
+          'node is the only seeder, it will not finish.',
+      );
+    }
 
     await this.#engine.add({
       torrentFile: torrentFile ?? undefined,

@@ -8,6 +8,8 @@ import {
   installSignalHandlers,
   limit,
   runStoppers,
+  engineStopMs,
+  watchdogFor,
 } from '../src/shutdown.js';
 
 describe('bounding a shutdown step', () => {
@@ -173,5 +175,56 @@ describe('signal handling', () => {
     fake.emit('SIGTERM');
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.deepEqual(codes, [0]);
+  });
+});
+
+describe('how long the whole shutdown gets', () => {
+  it('outlasts the steps it is meant to contain', () => {
+    // The bug this replaces: a fixed 15s watchdog sitting under an engine step
+    // that legitimately wants two seconds per torrent. Past seven archives the
+    // watchdog fired first and exited the process while the sidecar was still
+    // writing resume data — so the last resort became the binding deadline,
+    // and everything unwritten was re-hashed on the way back up.
+    const stoppers = [
+      { label: 'engine', ms: 60000 },
+      { label: 'watchers', ms: 5000 },
+    ];
+    assert.ok(
+      watchdogFor(stoppers) > 65000,
+      'the watchdog must exceed the sum of the steps',
+    );
+  });
+
+  it('counts a step that names no bound at its default', () => {
+    assert.equal(watchdogFor([{ label: 'a' }, { label: 'b' }]), 15000);
+  });
+
+  it('is computed from whatever is registered by the time it is read', () => {
+    // Stoppers are collected by reference and pushed to during startup, so a
+    // bound worked out at install time would not cover the engine at all.
+    const stoppers = [];
+    const before = watchdogFor(stoppers);
+    stoppers.push({ label: 'engine', ms: 120000 });
+    assert.ok(watchdogFor(stoppers) > before + 100000);
+  });
+});
+
+describe('the engine stop budget', () => {
+  it('grows with the library, because the save does', () => {
+    // The sidecar gives each torrent two seconds of its resume-save budget.
+    assert.ok(engineStopMs(52) >= 52 * 2000);
+    assert.ok(engineStopMs(52) > engineStopMs(21));
+  });
+
+  it('still allows a useful minimum for an empty node', () => {
+    // Nothing to write, but trackers still have to be told, and an
+    // unreachable one costs a timeout.
+    assert.ok(engineStopMs(0) >= 15000);
+  });
+
+  it('covers what a node this size actually needs', () => {
+    // planetgen: 21 archives, so the sidecar wants max(5, 2 x 21) = 42s. The
+    // fixed 8s it had before was under that by a factor of five.
+    assert.ok(engineStopMs(21) > 42000);
   });
 });
