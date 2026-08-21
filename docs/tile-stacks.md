@@ -35,6 +35,7 @@ of its parts.
 - [When a source will not answer](#when-a-source-will-not-answer)
 - [Baking a stack into an archive](#baking-a-stack-into-an-archive)
 - [What the offline merge got wrong](#what-the-offline-merge-got-wrong)
+- [The stack editor](#the-stack-editor)
 - [Staging](#staging)
 - [Open questions](#open-questions)
 
@@ -525,6 +526,105 @@ was kept, correctly ordered, because that guard asks the stricter "is any source
 native here?" and the two are not interchangeable. The ordering rule it violated
 is [Deciding a tile is empty](#deciding-a-tile-is-empty).
 
+## The stack editor
+
+A stack is a short document, but it is one where the order carries meaning and
+the fields differ per source. Hand-editing `data/stacks.json` works and should
+keep working; the console's job is to make the order legible and the per-source
+settings discoverable.
+
+### The list is shown top-first, and saved bottom-first
+
+This is the one thing the editor has to get right. `sources` is stored bottom
+first, because that is painting order and it is what the offline merge does. But
+every layers panel anyone has ever used — Photoshop, QGIS, the browser's own
+element tree — puts the topmost layer at the top of the list. An editor that
+renders the array in storage order would invert the mental model of every person
+who opens it, and dragging would do the opposite of what it looks like.
+
+So the editor reverses on load and reverses again on save, and says which end is
+which rather than relying on the reader to remember:
+
+```
+┌─ Layers ──────────────────────────────┐
+│  ⠿  planet-bathymetry      z0–z16  ▲  │  ← top: paints over everything below
+│  ⠿  gebco                  z0–z8   ▼  │  ← bottom: the base
+└───────────────────────────────────────┘
+```
+
+The JSON this writes lists `gebco` first. Nobody editing the file by hand should
+be surprised by that, which is why
+[Painting order](#painting-order) says it too.
+
+### What a row shows without being clicked
+
+Enough to understand the stack at a glance:
+
+- **The source**, and whether it is a category (follows rebuilds) or a pinned
+  archive. Category is the default when adding one, since that is the reason to
+  do this in the swarm at all.
+- **The zoom range it covers**, from its TileJSON. This is what makes a stack
+  self-explanatory: seeing `z0–z8` under `z0–z16` is the whole design in one
+  glance, and it is where the stack's own `maxzoom` visibly comes from.
+- **A warning when the source is swarm-read**, because that is the difference
+  between a stack that answers in milliseconds and one that answers in seconds.
+  See [Cost](#cost-and-the-caches-that-make-it-bearable).
+- **Whether it is masked or height-adjusted**, so a source doing something
+  non-obvious is not silently identical to one that is not.
+
+### Clicking a row opens its settings
+
+Per-source fields, driven by the stack's `space` — there is no point offering
+`blend` on an elevation stack or `maskValues` on an RGBA one:
+
+| `space`     | Fields                                                                          |
+| ----------- | ------------------------------------------------------------------------------- |
+| `elevation` | `encoding`, `baseVal`, `interval`, `maskValues`, `heightAdjustment`, `required` |
+| `rgba`      | `opacity`, `blend`, `required`                                                  |
+
+`maskValues` is a list of decoded heights and deserves better than a
+comma-separated string — the values that matter (`-10000`, `0`, `-1`, `-0.1`)
+are easy to typo into something that silently masks nothing, since masking
+compares exactly. Entered as chips, each one removable.
+
+### Dragging is not the only way to reorder
+
+Every row carries move-up and move-down controls beside the drag handle. Drag
+and drop is not reachable by keyboard, and reordering is the one operation this
+editor exists for — an editor whose primary action only works with a mouse is
+an editor half the people cannot use. The console has no drag-and-drop anywhere
+yet, so this is the first, and the buttons are what make it safe to add.
+
+### What the editor refuses, and what it only warns about
+
+Refuses, because the stack cannot work:
+
+- Two sources with different `tileSize` and no `output.tileSize` to resample to.
+  See [Open questions](#open-questions).
+- A source that resolves to nothing — an empty category, or an archive that
+  retention has removed.
+- No pixel codec installed, for any stack that is not pure passthrough. The
+  banner names what to install rather than failing at the first tile request.
+
+Warns, because they are legitimate and often deliberate:
+
+- Every source swarm-read, which makes the stack a batch endpoint rather than an
+  interactive one.
+- A gap in zoom coverage between layers.
+- A top source with no `maskValues`, which makes every layer beneath it dead
+  weight — correct for a single-source stack, almost certainly a mistake in one
+  with three.
+
+### Preview
+
+The existing preview page, pointed at `/stacks/<id>/`. It re-renders when the
+recipe changes, which is also the cheapest way to notice that a stack costs more
+per tile than a plain archive does — the map feels it immediately.
+
+Debounced, and it should not follow the map past the stack's `maxzoom`: above
+that the client overzooms and there is nothing new to see, but the tiles are
+still requested and still composited.
+
 ## Staging
 
 1. **Recipe and resolution.** `data/stacks.json`, load and validate, resolve
@@ -539,7 +639,8 @@ is [Deciding a tile is empty](#deciding-a-tile-is-empty).
    rio-rgbify-merge parity case, and the one that motivated this.
 5. **The tile cache.** With a size budget and eviction, plus the benchmark.
 6. **RGBA space.** Opacity and the separable blend modes.
-7. **Console.** Stack editor, preview, per-source swarm-read warnings.
+7. **Console.** The stack editor, per‑source settings and the preview. See
+   [The stack editor](#the-stack-editor).
 8. **Bake.** Whole-pyramid run to a new `.pmtiles`, published like any other.
 
 Stages 1 and 2 are worth doing on their own even if the rest waits: a
