@@ -407,7 +407,7 @@ on. This is that address.
 Narrower than `publicUrl` on purpose: `publicUrl` overrides every URL the node
 emits and so gives up the multi-domain behaviour, while this overrides only the
 ones that have to be permanent. Everything else — TileJSON, tile templates,
-`.torrent` links, style URLs, the feeds — goes on naming whichever host the
+`.torrent` links, source URLs, the feeds — goes on naming whichever host the
 request arrived as.
 
 ```json

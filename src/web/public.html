@@ -290,6 +290,48 @@
 
       // A row of "label: copyable URL". The URLs are the point of the page, so
       // they are shown in full rather than hidden behind link text.
+      /**
+       * Puts text on the clipboard, including where there is no secure context.
+       *
+       * `navigator.clipboard` requires one. This page is usually reached over
+       * HTTPS and so usually has it — but a node answering by IP on a LAN does
+       * not, and there the button did nothing but say so. The selection API
+       * predates the clipboard API and carries no such requirement, so it
+       * works exactly where the other one fails.
+       *
+       * Deliberately duplicated in index.html rather than shared. Both pages
+       * are single files with their script inlined, and one browser shim is a
+       * poor reason to give that up.
+       * @param {string} text - What to put on the clipboard.
+       * @returns {Promise<boolean>} - Whether it landed.
+       */
+      const toClipboard = async (text) => {
+        try {
+          await navigator.clipboard.writeText(text);
+          return true;
+        } catch {
+          // Off-screen rather than hidden: an element with `display:none` or
+          // `visibility:hidden` cannot hold a selection, so the copy would
+          // silently do nothing.
+          const field = document.createElement('textarea');
+          field.value = text;
+          field.setAttribute('readonly', '');
+          field.style.position = 'fixed';
+          field.style.top = '-1000px';
+          document.body.append(field);
+          field.select();
+          // select() alone is not enough on iOS.
+          field.setSelectionRange(0, field.value.length);
+          try {
+            return document.execCommand('copy');
+          } catch {
+            return false;
+          } finally {
+            field.remove();
+          }
+        }
+      };
+
       const urlRow = (label, url) => {
         const row = el('div');
         row.append(el('span', null, label));
@@ -454,9 +496,11 @@
                 const value = fetched
                   ? (await (await fetch(absolute)).text()).trim()
                   : absolute;
-                await navigator.clipboard.writeText(value);
-                button.classList.add('done');
-                button.textContent = 'copied';
+                const landed = await toClipboard(value);
+                button.classList.toggle('done', landed);
+                button.textContent = landed
+                  ? 'copied'
+                  : 'copy failed — it is in the tooltip';
                 setTimeout(() => {
                   button.classList.remove('done');
                   button.textContent = text;
@@ -470,6 +514,11 @@
 
           const ends = entry.endpoints;
           if (ends.tileJson) copy(ends.tileJson, 'TileJSON');
+          // The XYZ template beside the document that carries it. Anything
+          // that takes a URL with braces in it rather than a TileJSON — a
+          // Leaflet layer, an OpenLayers source, a GIS client — wants this
+          // one, and it follows the category, so it survives a rebuild.
+          if (ends.xyz) copy(ends.xyz, 'XYZ');
           // The newest build's preview, which is what "show me this
           // category" means.
           if (ends.preview) add(ends.preview, 'preview');
@@ -486,7 +535,7 @@
           // URL carrying the .torrent URL and a percent-encoded magnet in its
           // fragment. Printed in full it was most of the card — several
           // hundred characters of it — and it is never read, only pasted.
-          if (ends.styleUrl) copy(ends.styleUrl, 'style URL');
+          if (ends.sourceUrl) copy(ends.sourceUrl, 'source URL');
           card.append(links);
 
           host.append(card);

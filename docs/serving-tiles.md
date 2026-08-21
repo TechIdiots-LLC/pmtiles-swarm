@@ -45,7 +45,7 @@ See [internals.md](internals.md#serving-an-mbtiles-archive).
 
 `GET /latest/` lists every category this node publishes, with the endpoints
 that resolve to each one's newest build — the TileJSON, the `.torrent`, the
-magnet, the per-category feed, and the style URL with the magnet in its
+magnet, the per-category feed, and the source URL with the magnet in its
 fragment.
 
 Public, and deliberately so. Everything else under `/latest/` is — the
@@ -274,7 +274,7 @@ everywhere:
 | torrent-aware                     | joins **before any network call**, and still can if the fetch fails |
 
 The console's **Copy TileJSON URL + swarm** button produces exactly this, and so
-does the `styleUrl` on every row of `/api/categories` and `/latest/`.
+does the `sourceUrl` on every row of `/api/categories` and `/latest/`.
 
 ### Two handles, and why both
 

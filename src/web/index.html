@@ -241,9 +241,11 @@
         padding: 0 0.45rem;
       }
       button.copy:hover { color: var(--fg); border-color: var(--fg); }
+      /* The same green the public catalogue page confirms a copy with. */
+      button.copy.done { border-color: currentColor; color: #3fb950; }
       /* Category endpoints. `th, td` is nowrap for the archive table, where a
          wrapped number is worse than a wide one — but here the cell holds a
-         style URL and a paragraph explaining it, so nowrap pushed the table
+         source URL and a paragraph explaining it, so nowrap pushed the table
          wider than the window and took the Copy and Open buttons off the far
          edge with it. Fixed layout keeps the two end columns where they are
          and gives the middle whatever is left. */
@@ -999,15 +1001,58 @@
         return data;
       }
 
-      const copy = async (text, what) => {
+      /**
+       * Puts text on the clipboard, in a console that is usually not a secure
+       * context.
+       *
+       * `navigator.clipboard` requires one, and a console reached by IP over
+       * plain HTTP on a LAN is not — which is how most of them are reached. So
+       * the interesting path here is the fallback, not the modern call: the
+       * selection API predates the clipboard API and carries no such
+       * requirement, so it works exactly where the other one does not.
+       *
+       * What this replaces was `window.prompt`, which does put the text
+       * somewhere it can be copied from and makes the reader do the copying.
+       * A button that says "copy" should copy.
+       *
+       * Deliberately duplicated in public.html rather than shared. Both pages
+       * are single files with their script inlined, and one browser shim is a
+       * poor reason to give that up.
+       * @param {string} text - What to put on the clipboard.
+       * @returns {Promise<boolean>} - Whether it landed.
+       */
+      const toClipboard = async (text) => {
         try {
           await navigator.clipboard.writeText(text);
-          toast(`${what} copied`);
+          return true;
         } catch {
-          // Clipboard access needs a secure context, which a plain-http LAN
-          // deployment is not. Fall back to showing it to select by hand.
-          window.prompt(`Copy ${what}:`, text);
+          // Off-screen rather than hidden: an element with `display:none` or
+          // `visibility:hidden` cannot hold a selection, so the copy would
+          // silently do nothing.
+          const field = document.createElement('textarea');
+          field.value = text;
+          field.setAttribute('readonly', '');
+          field.style.position = 'fixed';
+          field.style.top = '-1000px';
+          document.body.append(field);
+          field.select();
+          // select() alone is not enough on iOS.
+          field.setSelectionRange(0, field.value.length);
+          try {
+            return document.execCommand('copy');
+          } catch {
+            return false;
+          } finally {
+            field.remove();
+          }
         }
+      };
+
+      const copy = async (text, what) => {
+        if (await toClipboard(text)) return toast(`${what} copied`);
+        // Both ways of reaching the clipboard refused. Showing the text is the
+        // only thing left that is better than nothing.
+        window.prompt(`Copy ${what}:`, text);
       };
 
       // ── Archives ──────────────────────────────────────────────────────────
@@ -3676,7 +3721,7 @@ Every piece is hashed against the ` +
             // torrent client, a feed reader — and following one from here
             // achieves nothing, so they copy.
             //
-            // The style URL is not printed. It is a TileJSON URL carrying a
+            // The source URL is not printed. It is a TileJSON URL carrying a
             // `.torrent` URL and a percent-encoded magnet in its fragment,
             // several hundred characters of it, and it was truncated to 96
             // here — long enough to fill the row and too short to be the
@@ -3721,14 +3766,16 @@ Every piece is hashed against the ` +
                          ${copyable(ends.magnet, 'magnet', true)}
                          ${copyable(ends.feed, 'RSS')}
                          ${copyable(ends.latestFeed, 'RSS, newest only')}
-                         ${copyable(ends.styleUrl, 'style URL')}
+                         ${copyable(ends.sourceUrl, 'source URL')}
                        </div>
                        <div class="sub" style="margin-top:0.5rem">
-                         The style URL is the TileJSON with the .torrent URL and
-                         the magnet in its fragment, which is never sent to the
-                         server — an ordinary client fetches the TileJSON and
-                         ignores them, a swarm-aware one reads them first, and
-                         both follow the category rather than this build.
+                         The source URL is the TileJSON with the .torrent URL
+                         and the magnet in its fragment, which is never sent to
+                         the server — an ordinary client fetches the TileJSON
+                         and ignores them, a swarm-aware one reads them first,
+                         and both follow the category rather than this build.
+                         It goes in a style's <code>sources</code> block; it is
+                         not itself a style.
                        </div>`
                     : '<div class="sub">not a PMTiles archive, so there is no tile endpoint</div>'
                 }
@@ -3737,15 +3784,32 @@ Every piece is hashed against the ` +
           .join('');
 
         for (const button of list.querySelectorAll('[data-copy-url]')) {
+          // The URL either way, so there is something to select by hand if
+          // both routes to the clipboard are shut.
+          button.title = button.dataset.copyUrl;
+          const label = button.textContent;
+          // Said on the button rather than in a toast: these sit in a row of
+          // seven, and which one was pressed is the thing worth confirming.
+          // The public catalogue page does the same, and the two are the same
+          // control in two places.
+          const said = (text, ok) => {
+            button.textContent = text;
+            if (ok) button.classList.add('done');
+            setTimeout(() => {
+              button.textContent = label;
+              button.classList.remove('done');
+            }, 1200);
+          };
           button.onclick = async () => {
             const url = button.dataset.copyUrl;
-            if (!button.dataset.copyFetch) return copy(url, 'URL');
             try {
               // A plain fetch, not `api`: that one parses JSON, and this
               // endpoint answers text/plain.
-              const response = await fetch(url);
-              if (!response.ok) throw new Error(response.statusText);
-              copy((await response.text()).trim(), 'magnet');
+              const value = button.dataset.copyFetch
+                ? (await (await fetch(url)).text()).trim()
+                : url;
+              const landed = await toClipboard(value);
+              said(landed ? 'copied' : 'it is in the tooltip', landed);
             } catch (error) {
               toast(error.message);
             }

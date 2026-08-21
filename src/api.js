@@ -158,12 +158,17 @@ function withSwarmHandles(url, { torrent, magnet }) {
 
 /**
  * A TileJSON URL carrying the ways into the swarm in its fragment.
+ *
+ * A *source* URL, not a style one — it goes in a style's `sources` block, and
+ * a style is the document that would contain it. It was called the other thing
+ * for a while, which is a name that tells a reader to put it in the wrong
+ * place.
  * @param {string} category - Which category.
  * @param {object} newest - Its newest entry.
  * @param {string} base - Public base URL.
- * @returns {string} - The URL a style should use.
+ * @returns {string} - The URL a source should point at.
  */
-function styleUrlFor(category, newest, base) {
+function sourceUrlFor(category, newest, base) {
   const url = `${base}/latest/${category}/tiles.json`;
   const magnet = newest?.mutable?.publicKey
     ? mutableMagnet(newest.mutable.publicKey, {
@@ -2178,7 +2183,13 @@ export function createApp({
             // and resolves the current build over the DHT. Otherwise the
             // newest build's own magnet, which pins that build but still
             // beats a blank map when the fallback is needed at all.
-            styleUrl: servable ? styleUrlFor(category, newest, base) : null,
+            // What goes in a style's `sources` block. It is a TileJSON URL
+            // with the ways into the swarm in its fragment, so it is a source
+            // by every reading: what it addresses, and where it is written.
+            sourceUrl: servable ? sourceUrlFor(category, newest, base) : null,
+            // The name this had until 0.61.0, kept so a consumer that reads it
+            // is not broken by the correction. Deprecated: read `sourceUrl`.
+            styleUrl: servable ? sourceUrlFor(category, newest, base) : null,
             // Points at the category, not at a build. The page reads the
             // TileJSON beside it, so it renders whatever is current — which
             // makes it the same URL a style holds, demonstrating itself rather

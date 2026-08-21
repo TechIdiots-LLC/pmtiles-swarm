@@ -7,6 +7,31 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.61.0
+### ✨ Features and improvements
+- **"Style URL" is now "source URL", because that is what it is.** It goes in a style's
+  `sources` block and is not itself a style, so the old name told a reader to put it in the
+  wrong place. The field on `/api/categories` and `/latest/` is `sourceUrl`; `styleUrl` is
+  still sent alongside it and is deprecated, so nothing reading the old name breaks on the
+  correction.
+
+- **A copy button copies, rather than opening a box to copy from.** `navigator.clipboard`
+  needs a secure context and a console reached by IP over plain HTTP on a LAN is not one —
+  which is how most of them are reached — so the console fell back to `window.prompt` every
+  time. It now falls back to the selection API, which predates the clipboard API and carries
+  no such requirement, and confirms on the button itself the way the public page does. The
+  public page gained the same fallback: it was failing outright wherever the console was
+  prompting, which is the same nodes.
+
+- **The XYZ template is offered on the public catalogue page too**, beside the TileJSON it
+  already had. 0.60.0 added it to the console only, which is the wrong way round: the console
+  is for the operator, and the person who needs a tile URL to paste into a Leaflet layer or a
+  GIS client is usually looking at the public page. Both draw from the same builder, so the
+  field was already in the public payload and only the button was missing.
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
 ## 0.60.0
 ### ✨ Features and improvements
 - **A tile URL that survives a rebuild.** Every archive is addressed by infohash, which is

@@ -1119,7 +1119,7 @@ describe('what a peer calls itself', () => {
 describe('the category endpoints table', () => {
   it('keeps its buttons on the page', () => {
     // `th, td` is nowrap for the archive table, where a wrapped number is
-    // worse than a wide one. Here the cell holds a style URL and a paragraph
+    // worse than a wide one. Here the cell holds a source URL and a paragraph
     // explaining it, so nowrap pushed the table past the window and carried
     // Copy and Open off the far edge.
     // The table is gone entirely now — the endpoints are a row of links and
@@ -1143,10 +1143,10 @@ describe('the console categories and the public page', () => {
     assert.match(console_, /link\(ends\.preview, 'preview'\)/);
     assert.match(console_, /link\(ends\.torrent, '\.torrent', true\)/);
     assert.match(console_, /copyable\(ends\.magnet, 'magnet', true\)/);
-    assert.match(console_, /copyable\(ends\.styleUrl, 'style URL'\)/);
+    assert.match(console_, /copyable\(ends\.sourceUrl, 'source URL'\)/);
   });
 
-  it('does not print the style URL here either', () => {
+  it('does not print the source URL here either', () => {
     // It was truncated to 96 characters — long enough to fill the row and too
     // short to be the thing anybody wanted.
     assert.ok(!console_.includes('slice(0, 96)'), 'still printing it');

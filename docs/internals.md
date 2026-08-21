@@ -725,7 +725,7 @@ own and asks for nothing guarded.
 
 Three things joined the public list to make it work, and each is a read of
 something already published: `/api/categories`, which groups the same archives
-and carries the style URL for each; the per-archive `/preview`; and `/vendor/`,
+and carries the source URL for each; the per-archive `/preview`; and `/vendor/`,
 which is the MapLibre bundle the preview renders with. The preview used to be
 excluded on the grounds that it is console furniture and would not render
 without `/vendor` anyway — both true, and both answered by publishing the pair

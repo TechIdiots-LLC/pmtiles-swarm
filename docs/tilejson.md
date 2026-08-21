@@ -110,7 +110,7 @@ minor one. **A browser has no DHT** — WebTorrent's `browser` field maps
 UDP or TCP sockets at all. Given only a public key, a browser would have to fetch
 this TileJSON before it could join anything. Since this magnet is routinely
 carried in the _fragment of the TileJSON URL itself_ — see
-[`styleUrl`](#where-this-magnet-shows-up) — that would make the fragment useless
+[`sourceUrl`](#where-this-magnet-shows-up) — that would make the fragment useless
 to the one client most likely to be reading it.
 
 The infohash does go stale on the next rebuild. That is acceptable and expected:
@@ -122,7 +122,7 @@ going to follow the series anyway. It is a starting point, not a subscription.
 Three places, all built from the same function, so they agree:
 
 - `torrent.mutable.magnet` in this document.
-- The fragment on `styleUrl`, from `GET /api/categories` — a
+- The fragment on `sourceUrl`, from `GET /api/categories` — a
   `…/latest/<category>/tiles.json#magnet:?…`. One string that a plain client
   fetches over HTTP and a swarm client joins directly, with no extra round trip
   for either.

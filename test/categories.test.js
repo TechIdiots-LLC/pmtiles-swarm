@@ -247,6 +247,29 @@ describe('the URL a style should point at', () => {
     webSeeds: ['https://maps.example.org/planet.pmtiles'],
   };
 
+  it('still answers to the name it had before, for one release', async () => {
+    // It was `styleUrl` until 0.61.0, which is a name that tells a reader to
+    // put it in the wrong place: this goes in a style's `sources` block and is
+    // not itself a style. The correction is worth making and is not worth
+    // breaking a consumer over, so both are sent and the old one is
+    // deprecated. Delete `styleUrl` and this test together.
+    const api = await serve([
+      entry({
+        infoHash: 'a'.repeat(40),
+        name: 'planet.pmtiles',
+        categories: ['planet'],
+        ...servable,
+      }),
+    ]);
+    try {
+      const [row] = await api.get('/api/categories').then((r) => r.json());
+      assert.ok(row.endpoints.sourceUrl, 'no sourceUrl');
+      assert.equal(row.endpoints.styleUrl, row.endpoints.sourceUrl);
+    } finally {
+      await api.close();
+    }
+  });
+
   it('carries the .torrent URL and the magnet in the fragment', async () => {
     // A fragment is never sent in an HTTP request, so this one string works
     // for every client: ordinary ones fetch the TileJSON and ignore it, and a
@@ -262,7 +285,7 @@ describe('the URL a style should point at', () => {
     ]);
     try {
       const [row] = await api.get('/api/categories').then((r) => r.json());
-      const [url, fragment] = row.endpoints.styleUrl.split('#');
+      const [url, fragment] = row.endpoints.sourceUrl.split('#');
       assert.match(url, /\/latest\/planet\/tiles\.json$/);
 
       const handles = new URLSearchParams(fragment);
@@ -301,7 +324,7 @@ describe('the URL a style should point at', () => {
     ]);
     try {
       const [row] = await api.get('/api/categories').then((r) => r.json());
-      const fragment = row.endpoints.styleUrl.split('#')[1];
+      const fragment = row.endpoints.sourceUrl.split('#')[1];
       const magnet = new URLSearchParams(fragment).get('magnet');
       assert.match(magnet, /^magnet:\?xt=urn:btih:b{40}&xs=urn:btpk:/);
       assert.match(magnet, /&s=openmaptiles/);
@@ -337,7 +360,9 @@ describe('the URL a style should point at', () => {
     ]);
     try {
       const [row] = await api.get('/api/categories').then((r) => r.json());
-      const handles = new URLSearchParams(row.endpoints.styleUrl.split('#')[1]);
+      const handles = new URLSearchParams(
+        row.endpoints.sourceUrl.split('#')[1],
+      );
       // Absolute, and pointing at this node: a handle a client is meant to
       // fetch without having the page it came from is not one it can resolve
       // against anything.
@@ -368,7 +393,7 @@ describe('the URL a style should point at', () => {
     ]);
     try {
       const [row] = await api.get('/api/categories').then((r) => r.json());
-      assert.equal(row.endpoints.styleUrl, null);
+      assert.equal(row.endpoints.sourceUrl, null);
       assert.equal(row.endpoints.tileJson, null);
       // The torrent and feed endpoints still make sense for it.
       assert.ok(row.endpoints.torrent);

@@ -196,3 +196,91 @@ describe('the README configuration example', () => {
     assert.match(intro, /adminPort` is unset by default/);
   });
 });
+
+describe('the documentation the source points at', () => {
+  /**
+   * Every `docs/x.md — "Section"` reference in the source.
+   *
+   * The convention is used sixty-odd times and nothing checked it: renaming a
+   * heading left every comment naming it pointing at nothing, and a comment is
+   * the one thing no test and no linter reads.
+   * @returns {Promise<Array<{file: string, doc: string, section: string}>>} - Found references.
+   */
+  async function references() {
+    const found = [];
+    const walk = async (dir) => {
+      for (const item of await fs.readdir(path.join(root, dir), {
+        withFileTypes: true,
+      })) {
+        const next = `${dir}/${item.name}`;
+        if (item.isDirectory()) await walk(next);
+        else if (/\.(js|mjs|html|py)$/.test(item.name)) {
+          const text = await fs.readFile(path.join(root, next), 'utf8');
+          // A reference routinely wraps across two comment lines, so the
+          // comment furniture is folded away before matching. The \r goes with
+          // it: these files are CRLF, and leaving it behind turns "the same as
+          // incomplete" into "the same as\r incomplete", which matches no
+          // heading and looks exactly like a real break.
+          const flat = text.replace(/\r?\n\s*(\*|\/\/|#)[ \t]?/g, ' ');
+          for (const match of flat.matchAll(
+            /(docs\/[a-z-]+\.md)\s*[—-]+\s*["“']([^"”']+)["”']/g,
+          )) {
+            found.push({ file: next, doc: match[1], section: match[2] });
+          }
+        }
+      }
+    };
+    await walk('src');
+    await walk('tools');
+    return found;
+  }
+
+  /**
+   * Every heading in a document, as a prose reference would write it.
+   * @returns {Promise<Map<string, Set<string>>>} - Doc path to its headings.
+   */
+  async function headingsByDoc() {
+    const map = new Map();
+    for (const name of await fs.readdir(path.join(root, 'docs'))) {
+      if (!name.endsWith('.md')) continue;
+      const text = await fs.readFile(path.join(root, 'docs', name), 'utf8');
+      const titles = new Set();
+      for (const match of text.matchAll(/^#{2,4}\s+(.+?)\s*$/gm)) {
+        const title = match[1].replace(/`/g, '').trim().toLowerCase();
+        titles.add(title);
+        // "### 1. The paths in the configuration" is referred to without its
+        // number, which is the sensible way to name it in prose.
+        titles.add(title.replace(/^\d+\.\s*/, ''));
+      }
+      map.set(`docs/${name}`, titles);
+    }
+    return map;
+  }
+
+  it('names documents that exist', async () => {
+    const docs = await headingsByDoc();
+    const missing = (await references())
+      .filter((ref) => !docs.has(ref.doc))
+      .map((ref) => `${ref.file} -> ${ref.doc}`);
+    assert.deepEqual([...new Set(missing)], []);
+  });
+
+  it('names sections that exist', async () => {
+    const docs = await headingsByDoc();
+    const found = await references();
+    // A guard on the guard: a regex that quietly stops matching would make
+    // this pass by checking nothing at all.
+    assert.ok(found.length > 40, `only found ${found.length} references`);
+
+    const broken = found
+      .filter((ref) => {
+        const titles = docs.get(ref.doc);
+        return (
+          titles &&
+          !titles.has(ref.section.replace(/`/g, '').trim().toLowerCase())
+        );
+      })
+      .map((ref) => `${ref.file} -> ${ref.doc} — "${ref.section}"`);
+    assert.deepEqual(broken, []);
+  });
+});

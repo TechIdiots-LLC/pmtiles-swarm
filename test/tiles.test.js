@@ -2377,6 +2377,26 @@ describe('a stable handle for the current build', () => {
     }
   });
 
+  it('offers the XYZ template without a credential, for the public page', async () => {
+    // The public catalogue page reads /latest/ rather than /api/categories,
+    // and draws its copy buttons from `endpoints`. A field present on one and
+    // missing from the other would show the button to an operator and hide it
+    // from everybody the page exists for.
+    const s = await serve();
+    try {
+      const index = await (await s.get('/latest/')).json();
+      const basemaps = (index.categories ?? index).find(
+        (item) => item.category === 'basemaps',
+      );
+      const doc = await (await s.get('/latest/basemaps/tiles.json')).json();
+
+      assert.ok(basemaps.endpoints.xyz, 'no xyz on the public index');
+      assert.equal(basemaps.endpoints.xyz, doc.tiles[0]);
+    } finally {
+      await s.close();
+    }
+  });
+
   it('publishes the XYZ template the console offers to copy', async () => {
     // The template most things outside this system want: a leaflet layer, an
     // OpenLayers source, a GIS client — anything that takes a URL with braces
