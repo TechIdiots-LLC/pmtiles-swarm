@@ -537,6 +537,18 @@ is [Deciding a tile is empty](#deciding-a-tile-is-empty).
 
 ## The stack editor
 
+**Stacks** is a view of its own, third in the header:
+
+```
+Archives   Categories   Stacks   Traffic   Settings
+└──────── what this node serves ────────┘  └── how it runs ──┘
+```
+
+Third rather than last because the header already splits that way: Archives,
+Categories and Stacks are all the same question — what this node serves —
+while Traffic and Settings are about how it runs. A stack is built out of the
+two views beside it, so it belongs after them and before the break.
+
 A stack is a short document, but it is one where the order carries meaning and
 the fields differ per source. Hand-editing `data/stacks.json` works and should
 keep working; the console's job is to make the order legible and the per-source
