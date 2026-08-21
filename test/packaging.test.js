@@ -72,3 +72,34 @@ describe('the lock file agrees with the manifest', () => {
     }
   });
 });
+
+describe('what an install actually contains', () => {
+  it('ships the tools the documentation tells people to run', async () => {
+    // docs/ is published, so a reader who installed from npm is told to run
+    // `tools/resume-doctor.py` against their node. Leaving tools/ out of the
+    // manifest made that instruction true only inside this repository, which
+    // is the one place it is least needed.
+    const pkg = await read('package.json');
+    assert.ok(pkg.files.includes('tools'), 'tools is not published');
+
+    const docs = await fs.readdir(path.join(root, 'docs'));
+    const named = new Set();
+    for (const name of docs) {
+      if (!name.endsWith('.md')) continue;
+      const text = await fs.readFile(path.join(root, 'docs', name), 'utf8');
+      for (const match of text.matchAll(
+        /tools\/([a-z0-9-]+\.(?:py|mjs|js))/g,
+      )) {
+        named.add(match[1]);
+      }
+    }
+    assert.ok(named.size > 0, 'no tool is referenced from the docs');
+
+    const present = new Set(await fs.readdir(path.join(root, 'tools')));
+    assert.deepEqual(
+      [...named].filter((tool) => !present.has(tool)),
+      [],
+      'the docs name a tool that is not there',
+    );
+  });
+});

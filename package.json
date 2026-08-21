@@ -10,6 +10,8 @@
   "files": [
     "src",
     "docs",
+    "tools",
+    "!tools/__pycache__",
     "swarm.config.json.sample",
     "NOTICE.md",
     "CHANGELOG.md"

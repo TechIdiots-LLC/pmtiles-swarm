@@ -250,7 +250,7 @@ async function runAll(source, tiles, options) {
  * @returns {object | null} - The two modes, or null if it looks like one.
  */
 function twoModes(values) {
-  if (values.length < 12) return null;
+  if (values.length < 20) return null;
   const sorted = [...values].sort((one, two) => one - two);
 
   let at = -1;
@@ -273,9 +273,22 @@ function twoModes(values) {
   const share = Math.min(low.length, high.length) / sorted.length;
   const lowMid = percentile(low, 0.5);
   const highMid = percentile(high, 0.5);
-  // Each side has to be a real share of the sample, and the two have to be far
-  // enough apart that no ordinary variance would produce the gap.
-  if (share < 0.15 || highMid < lowMid * 1.8) return null;
+
+  // Both halves have to be a real share of the sample, not a tail wearing a
+  // gap. A quarter is deliberately strict: a balanced pair of backends splits
+  // near half, and anything under a quarter is more likely to be the handful
+  // of slow reads every server has.
+  if (share < 0.25) return null;
+  if (highMid < lowMid * 1.8) return null;
+
+  // And the gap has to be wide compared with how spread out the fast half
+  // already is. Latency is skewed by nature — a cold read, a deeper zoom, a
+  // busy moment — so the widest gap in *any* sample is nonzero, and comparing
+  // it against nothing was enough to report an ordinary tail as two backends.
+  // Measured against a real pair of nodes the gap is many times the spread;
+  // against one node it is comparable to it.
+  const spread = Math.max(1, percentile(low, 0.9) - percentile(low, 0.1));
+  if (widest < spread * 3) return null;
 
   return {
     fast: { count: low.length, median: lowMid },
@@ -380,6 +393,18 @@ function report(sides) {
   row('total p99', (s) => s.total.p99);
   row('total max', (s) => s.total.max);
   console.log('');
+  // A percentile needs enough samples to mean anything. Under a hundred, the
+  // 99th is arithmetically the slowest single request, and reading one request
+  // as a pattern is how a benchmark invents a problem.
+  const smallest = Math.min(...sides.map(([, s]) => s.served));
+  if (smallest < 100) {
+    console.log(
+      `  note: ${smallest} tiles served, so p99 is the slowest single request. ` +
+        'Raise --tiles or --rounds before reading the tail as a pattern.',
+    );
+    console.log('');
+  }
+
   for (const [label, summary] of sides) {
     const statuses = [...summary.statuses]
       .map(([status, count]) => `${status}x${count}`)
