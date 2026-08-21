@@ -52,6 +52,33 @@
   substituted in — afterwards every pixel holds a real value and there is nothing
   left to test.
 
+- **Merged tiles are cached on disk.** A merged tile costs a read of every
+  source, a decode each and an encode, and against a cache-mode source those
+  reads may go to the swarm — doing that again for a tile somebody already asked
+  for is the difference between a map that pans and one that does not. Bounded
+  by `stacks.cacheBytes` (2 GiB by default, zero to turn it off), evicted
+  least-recently-used, and indexed from disk at startup so a restart does not
+  throw the work away.
+
+  Keyed by the tile's ETag, which already covers the recipe's revision and what
+  its sources resolved to — so editing a stack or rebuilding a source produces a
+  different key rather than needing anything to remember to invalidate the old
+  one. Only the merging path is cached: passthrough already costs one read, and
+  keeping its answer would put a second copy of the archive's own bytes beside
+  the first.
+
+  Several requests for the same tile at once run one merge between them, which
+  matters because each duplicate would otherwise issue its own reads to every
+  source underneath it.
+
+- **A stack's TileJSON declares `sparse`.** True by default, which for a stack
+  is not a guess: `maxzoom` is the deepest any source reaches, so most of the
+  pyramid below it is covered by only some of them. A tile no source covered
+  answers 404, which is what makes maplibre-gl-js and maplibre-native overzoom
+  the parent rather than draw nothing — the same flag, the same name and the
+  same rule tileserver-gl reads. A stack can set `sparse: false` to answer 204
+  instead.
+
 ### 🐞 Bug fixes
 - **Two settings reported success and changed nothing.** `tiles` and `resumeSaveIntervalSeconds`
   are read while the process starts — the tile reader's directory cache when the store is

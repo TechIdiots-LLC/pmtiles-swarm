@@ -6,6 +6,7 @@ import { createApp } from './api.js';
 import { assertSafeToListen, createAuth } from './auth.js';
 import { Catalog } from './catalog.js';
 import { StackStore } from './stacks.js';
+import { StackCache } from './stack-cache.js';
 import { loadConfig } from './config.js';
 import { CompositeEngine } from './engines/composite.js';
 import { LibtorrentEngine } from './engines/libtorrent.js';
@@ -245,6 +246,13 @@ PMTILES_SWARM_PUBLIC_URL
   // store. A missing stacks.json is simply no stacks.
   const stacks = new StackStore(config.dataDir);
   await stacks.load();
+  // Merged tiles only -- see the route. Indexed from disk at startup so a
+  // restart does not throw away work the node has already paid for.
+  const stackCache = new StackCache({
+    dir: config.stacks?.cacheDir ?? path.join(config.dataDir, 'stack-cache'),
+    maxBytes: config.stacks?.cacheBytes,
+  });
+  await stackCache.load();
 
   const engine = createEngine(config);
   // The slowest, because it announces "stopped" to every tracker, and an
@@ -502,6 +510,7 @@ PMTILES_SWARM_PUBLIC_URL
     hooks,
     tiles,
     stacks,
+    stackCache,
     warm,
     config,
     speed,

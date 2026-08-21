@@ -31,6 +31,7 @@ describe('what actually needs the process to stop', () => {
       'savePath',
       'secondaryEngines',
       'secondaryShareIntervalSeconds',
+      'stacks',
       'tiles',
       'webtorrent',
     ]);

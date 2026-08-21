@@ -7,6 +7,7 @@ import { createApp } from '../src/api.js';
 import { Catalog } from '../src/catalog.js';
 import { loadCodec } from '../src/codec.js';
 import { decodeHeights, encodeHeights } from '../src/elevation.js';
+import { StackCache } from '../src/stack-cache.js';
 import {
   StackStore,
   isPinned,
@@ -45,7 +46,7 @@ const archive = (infoHash, name, categories, pmtiles = {}) => ({
  * @param {object} [tileData] - infoHash to a map of "z/x/y" to bytes.
  * @returns {Promise<object>} - get() and close().
  */
-async function serve(entries, stackList, tileData = {}) {
+async function serve(entries, stackList, tileData = {}, options = {}) {
   const dir = await fs.mkdtemp(path.join(workspace, 'node-'));
   const catalog = new Catalog(dir);
   await catalog.load();
@@ -67,8 +68,10 @@ async function serve(entries, stackList, tileData = {}) {
     stacks,
     engine: { name: 'webtorrent', list: async () => [] },
     subscriptions: {},
+    stackCache: options.stackCache,
     tiles: {
       getTile: async (infoHash, z, x, y) => {
+        options.onRead?.(infoHash, z, x, y);
         const found = tileData[infoHash]?.[`${z}/${x}/${y}`];
         return found ? { data: Buffer.from(found) } : null;
       },
@@ -369,6 +372,24 @@ describe('serving a stack', () => {
     assert.match(doc.tiles[0], /\/stacks\/terrain\/\{z\}\/\{x\}\/\{y\}\.webp$/);
   });
 
+  it('declares itself sparse, so a client overzooms a missing tile', async () => {
+    const node = await serve([global, region], [stack]);
+    after(() => node.close());
+    const doc = await (await node.get('/stacks/terrain/tiles.json')).json();
+    // maxzoom is the deepest any source reaches, so most of the pyramid below
+    // it is covered by only some of them. 404 is what makes maplibre overzoom
+    // the parent rather than draw nothing.
+    assert.equal(doc.sparse, true);
+    assert.equal(doc.maxzoom, 14);
+  });
+
+  it('lets a stack say it is not sparse', async () => {
+    const node = await serve([global, region], [{ ...stack, sparse: false }]);
+    after(() => node.close());
+    const doc = await (await node.get('/stacks/terrain/tiles.json')).json();
+    assert.equal(doc.sparse, false);
+  });
+
   it('names what it resolved to, so a rebuild is visible', async () => {
     const node = await serve([global, region], [stack]);
     after(() => node.close());
@@ -409,6 +430,14 @@ describe('serving a stack', () => {
     const node = await serve([global, region], [stack]);
     after(() => node.close());
     assert.equal((await node.get('/stacks/terrain/2/3/3.webp')).status, 404);
+  });
+
+  it('204s instead when the stack says it is not sparse', async () => {
+    // tileserver-gl reads the same flag the same way: 404 allows overzoom,
+    // 204 says the tile is empty and nothing should be drawn.
+    const node = await serve([global, region], [{ ...stack, sparse: false }]);
+    after(() => node.close());
+    assert.equal((await node.get('/stacks/terrain/2/3/3.webp')).status, 204);
   });
 
   it('caches by the hour for a category, and by the year when pinned', async () => {
@@ -634,5 +663,133 @@ describe('merging a stack for real', { skip: !codec }, () => {
     // A client overzooms a lower tile, which is cheaper and better looking
     // than a tile that is entirely nodata.
     assert.equal((await node.get('/stacks/empty/1/0/0.webp')).status, 404);
+  });
+});
+
+describe('caching what a merge produced', { skip: !codec }, () => {
+  const size = 8;
+
+  /**
+   * An encoded terrain tile of one height.
+   * @param {number} metres - The height.
+   * @returns {Promise<Buffer>} - A lossless WebP tile.
+   */
+  const terrainTile = async (metres) =>
+    codec.encode(
+      encodeHeights(new Float32Array(size * size).fill(metres), {
+        width: size,
+        height: size,
+      }),
+      { format: 'webp', lossless: true },
+    );
+
+  it('answers the second request without reading the sources again', async () => {
+    const one = archive('b1'.repeat(20), 'one.pmtiles', ['one']);
+    const dir = await fs.mkdtemp(path.join(workspace, 'e2e-'));
+    const stackCache = new StackCache({ dir, maxBytes: 1024 * 1024 });
+    await stackCache.load();
+
+    let reads = 0;
+    const node = await serve(
+      [one],
+      [
+        {
+          id: 'cached',
+          sources: [{ category: 'one', heightAdjustment: 10 }],
+          output: { format: 'webp' },
+        },
+      ],
+      { [one.infoHash]: { '1/0/0': await terrainTile(100) } },
+      { stackCache, onRead: () => (reads += 1) },
+    );
+    after(() => node.close());
+
+    const first = await node.get('/stacks/cached/1/0/0.webp');
+    assert.equal(first.status, 200);
+    const afterFirst = reads;
+    assert.ok(afterFirst > 0, 'the first request should read the source');
+
+    const second = await node.get('/stacks/cached/1/0/0.webp');
+    assert.equal(second.status, 200);
+    assert.equal(reads, afterFirst, 'the second should read nothing');
+    assert.match(second.headers.get('x-stack-sources'), /cache=hit/);
+
+    // And the bytes are the same tile, not merely a successful response.
+    assert.ok(
+      Buffer.from(await second.arrayBuffer()).equals(
+        Buffer.from(await first.arrayBuffer()),
+      ),
+    );
+    assert.equal(stackCache.stats().hits, 1);
+  });
+
+  it('does not cache the passthrough path', async () => {
+    // Passthrough costs one read of one archive; keeping its answer would put
+    // a second copy of the archive's own bytes on the same disk for nothing.
+    const one = archive('b2'.repeat(20), 'one.pmtiles', ['one']);
+    const dir = await fs.mkdtemp(path.join(workspace, 'pass-'));
+    const stackCache = new StackCache({ dir, maxBytes: 1024 * 1024 });
+    await stackCache.load();
+
+    const node = await serve(
+      [one],
+      [{ id: 'plain', sources: [{ category: 'one' }] }],
+      { [one.infoHash]: { '1/0/0': await terrainTile(100) } },
+      { stackCache },
+    );
+    after(() => node.close());
+
+    assert.equal((await node.get('/stacks/plain/1/0/0.webp')).status, 200);
+    assert.equal(stackCache.stats().entries, 0);
+  });
+
+  it('serves a different tile after the recipe is edited', async () => {
+    // The key is the ETag, which covers the recipe's revision -- so an edit
+    // produces a different key rather than needing anything to invalidate the
+    // old one.
+    const one = archive('b3'.repeat(20), 'one.pmtiles', ['one']);
+    const dir = await fs.mkdtemp(path.join(workspace, 'edit-'));
+    const stackCache = new StackCache({ dir, maxBytes: 1024 * 1024 });
+    await stackCache.load();
+    const tiles = { [one.infoHash]: { '1/0/0': await terrainTile(100) } };
+
+    const first = await serve(
+      [one],
+      [
+        {
+          id: 'shift',
+          sources: [{ category: 'one', heightAdjustment: 10 }],
+          output: { format: 'webp' },
+        },
+      ],
+      tiles,
+      { stackCache },
+    );
+    const before = Buffer.from(
+      await (await first.get('/stacks/shift/1/0/0.webp')).arrayBuffer(),
+    );
+    await first.close();
+
+    const second = await serve(
+      [one],
+      [
+        {
+          id: 'shift',
+          sources: [{ category: 'one', heightAdjustment: 900 }],
+          output: { format: 'webp' },
+        },
+      ],
+      tiles,
+      { stackCache },
+    );
+    after(() => second.close());
+    const afterEdit = Buffer.from(
+      await (await second.get('/stacks/shift/1/0/0.webp')).arrayBuffer(),
+    );
+
+    assert.ok(
+      !before.equals(afterEdit),
+      'the edit must not serve a stale tile',
+    );
   });
 });

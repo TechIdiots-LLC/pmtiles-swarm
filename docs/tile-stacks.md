@@ -1,9 +1,10 @@
 # Tile stacks
 
-**Status: stages 1 to 4 are implemented.** Elevation stacks work: a recipe is
+**Status: stages 1 to 5 are implemented.** Elevation stacks work: a recipe is
 defined, resolved and served, and a source is masked, shifted, resampled from a
-parent and painted in order. What remains design is the tile cache (stage 5),
-RGBA blending (stage 6) and the editor (stage 7). A node with no codec installed
+parent and painted in order. Merged tiles are cached on disk against a
+byte budget. What remains design is RGBA blending (stage 6) and the editor
+(stage 7). A node with no codec installed
 still serves the passthrough case and answers 501 for the rest.
 
 A stack is a recipe for combining several archives into one tile endpoint,
@@ -680,7 +681,8 @@ still requested and still composited.
    and encode for png and webp, lossless by default.
 4. ~~**Elevation space.**~~ Done. `src/elevation.js`: decode, mask by height or
    colour, float resample from a parent, blur, paint, encode.
-5. **The tile cache.** With a size budget and eviction, plus the benchmark.
+5. ~~**The tile cache.**~~ Done. `src/stack-cache.js`: merged tiles on disk,
+   with a byte budget, LRU eviction and single-flight.
 6. **RGBA space.** Opacity and the separable blend modes.
 7. **Console.** The stack editor, per‑source settings and the preview. See
    [The stack editor](#the-stack-editor).
@@ -709,6 +711,9 @@ handling whatsoever.
   source's size and hopes. Stacking a 256px source under a 512px one needs
   either a declared output size that everything is resampled to, or a refusal at
   validation time. The second is probably right.
-- **Where the cache lives.** `data/stack-cache/` is the obvious answer, and
-  makes stacks the first thing in the project that writes tiles to disk on its
-  own — which has consequences for the retention sweep and for backups.
+- **The cache and the retention sweep.** `data/stack-cache/` is where merged
+  tiles live, which makes stacks the first thing in the project that writes
+  tiles to disk on its own. The sweep does not know about it yet. Nothing is
+  wrong today — the cache evicts against its own budget and the contents are
+  derived, so losing them costs only recomputation — but a backup that copies
+  `data/` wholesale now carries tiles it does not need.

@@ -342,6 +342,29 @@ const DEFAULTS = {
     sparse: undefined,
   },
   /**
+   * Tile stacks: several archives served as one endpoint. See
+   * docs/tile-stacks.md.
+   */
+  stacks: {
+    /**
+     * Byte budget for merged tiles kept on disk. Zero turns the cache off,
+     * which is correct for a node whose stacks are all passthrough — those
+     * cost one read and caching them would put a second copy of the archive
+     * beside the first.
+     *
+     * Not optional in the sense that matters: a merged tile is expensive
+     * enough that a map without this is unusable, and a cache without a
+     * budget is a disk that fills overnight.
+     */
+    cacheBytes: 2 * 1024 * 1024 * 1024,
+    /**
+     * Where those tiles go. Under dataDir by default, which puts them beside
+     * the catalog rather than among the archives -- they are derived and can
+     * be thrown away, and a backup should be able to tell the difference.
+     */
+    cacheDir: undefined,
+  },
+  /**
    * Folders scanned for new archives. Each entry is `{ path, categories,
    * match, webSeedBase, publishDir, latestLink, latestLinkType, keep,
    * keepDays, sparse, md5, serveArchive, selfWebSeed, publicDownload }` — see
@@ -733,6 +756,9 @@ export const RESTART_REQUIRED = new Set([
   // failure it prevents is a setting that reports success and does nothing,
   // which costs more than being told to restart when you need not have.
   'tiles',
+  // The cache is built from these when the process starts, and nothing
+  // rebuilds it.
+  'stacks',
   // Captured into the save timer at startup, and nothing rebuilds that timer.
   'resumeSaveIntervalSeconds',
 ]);

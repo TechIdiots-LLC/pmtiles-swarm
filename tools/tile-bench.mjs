@@ -12,6 +12,15 @@
  *     --a https://tiles.wifidb.net/data/Planet_Merged_Sparse_2024_z0-Z16_cubic_webp.json \
  *     --b https://swarm.wifidb.net/latest/terrain_sparse/tiles.json
  *
+ * A stack is a TileJSON like any other, so the same command measures one:
+ *
+ *   node tools/tile-bench.mjs  *     --a http://localhost:8080/latest/terrain/tiles.json  *     --b http://localhost:8080/stacks/terrain/tiles.json
+ *
+ * Run it twice against a stack. The first pass merges every tile and the second
+ * answers them from the cache, so the gap between the two runs is what the
+ * cache is worth on this hardware -- the number to look at before changing
+ * `stacks.cacheBytes`.
+ *
  * Both arguments are TileJSON documents; the tile template, the zoom range and
  * the bounds are read from them. Tiles are chosen inside the range *both* can
  * serve, so neither is asked for something it would answer 404 to and neither

@@ -36,6 +36,7 @@ import { buildTileJson, extensionMatches, tileExtension } from './tilejson.js';
 import { SUMMARY_VERSION } from './pmtiles-probe.js';
 import { TileReadError } from './tiles.js';
 import { loadCodec } from './codec.js';
+import { StackCache } from './stack-cache.js';
 import { encodeHeights, fillNodata, mergeElevation } from './elevation.js';
 import {
   isPinned,
@@ -213,6 +214,7 @@ export function createApp({
   hooks,
   tiles,
   stacks,
+  stackCache,
   warm,
   config,
   speed,
@@ -3202,6 +3204,16 @@ export function createApp({
       };
       if (coverage.format) doc.format = coverage.format;
       if (coverage.attribution) doc.attribution = coverage.attribution;
+      // Sparse by default, and for a stack that is not a guess.
+      //
+      // maxzoom is the deepest any source reaches, so most of the pyramid
+      // below it is covered by only some of them -- and a tile no source
+      // covered is answered 404 rather than as a slab of nodata. 404 is what
+      // makes maplibre-gl-js and maplibre-native overzoom the parent instead
+      // of drawing nothing, which is the only way a partial stack renders
+      // continuous terrain. A stack can say otherwise, but nothing here has a
+      // reason to.
+      doc.sparse = resolved.stack.sparse ?? true;
 
       // A stack whose sources are all pinned can never change; one following a
       // category moves when that category rebuilds. Same split, and the same
@@ -3394,7 +3406,9 @@ export function createApp({
         }
 
         stackHeaders(res, resolved, contributors, z, x, y);
-        if (!answered) return res.status(404).end();
+        if (!answered) {
+          return res.status(resolved.stack.sparse === false ? 204 : 404).end();
+        }
         res.type(
           answered.source.entry.pmtiles?.contentType ??
             'application/octet-stream',
@@ -3405,96 +3419,152 @@ export function createApp({
         return res.send(answered.tile.data);
       }
 
-      // ---- Merging: every source contributes, in the recipe's order. ------
+      // Cached only on this path. Passthrough already costs one read of one
+      // archive, and keeping its answer here would put a second copy of the
+      // archive's own bytes on the same disk for nothing.
       //
-      // Bottom first, because that is the order they are painted in, and all
-      // of them are read rather than stopping at the first hit: a source that
-      // is masked over the ocean has to let the one beneath it show through,
-      // which cannot be known without looking at both.
-      const reads = await Promise.all(
-        resolved.sources.map(async (source) => {
-          if (!source.entry) return { source, found: null };
-          try {
-            return { source, found: await readFrom(source, true) };
-          } catch (error) {
-            if (error.name === 'AbortError') throw error;
-            return { source, error };
-          }
-        }),
-      ).catch((error) => {
-        if (error?.name === 'AbortError') return null;
-        throw error;
-      });
-      if (!reads) return;
-
-      const contributions = [];
-      for (const read of reads) {
-        if (read.error) {
-          if (read.source.required) {
-            const status =
-              read.error instanceof TileReadError ? read.error.status : 503;
-            return res.status(status).json({
-              error: `${read.source.name} is required and could not be read: ${read.error.message}`,
-            });
-          }
-          contributors.push(`${read.source.name}=error`);
-          contributions.push(null);
-          continue;
+      // Keyed by the ETag, which already covers the recipe's revision and what
+      // its sources resolved to -- so an edited stack or a rebuilt source
+      // produces a different key rather than needing anything to remember to
+      // invalidate the old one.
+      const format = resolved.stack.output?.format ?? coverage.format ?? 'webp';
+      const cacheKey = stackCache?.enabled
+        ? StackCache.key(stackEtag(resolved, z, x, y), format)
+        : null;
+      if (cacheKey) {
+        const hit = await stackCache.get(cacheKey);
+        if (hit) {
+          stackHeaders(res, resolved, ['cache=hit'], z, x, y);
+          res.type(format === 'png' ? 'image/png' : 'image/webp');
+          return res.send(hit);
         }
-        if (!read.found) {
-          contributors.push(`${read.source.name}=absent`);
-          contributions.push(null);
-          continue;
-        }
-        contributors.push(
-          read.found.parentZ === z
-            ? `${read.source.name}=${read.source.entry.infoHash}`
-            : `${read.source.name}=z${read.found.parentZ}`,
-        );
-        contributions.push({
-          source: read.source.source,
-          parentZ: read.found.parentZ,
-          raster: await codec.decode(Buffer.from(read.found.tile.data), {
-            channels: 3,
-          }),
-        });
       }
 
-      stackHeaders(res, resolved, contributors, z, x, y);
+      // ---- Merging: every source contributes, in the recipe's order. ------
+      //
+      // Produced through a function rather than written straight to the
+      // response, so the whole of it can be run once for however many requests
+      // arrive for the same tile at the same moment. A panning map does that
+      // routinely, and a merge is expensive enough per tile -- a read of every
+      // source, a decode each, then an encode -- that doing it four times over
+      // is worth the indirection.
+      const produce = async () => {
+        const said = [];
 
-      const first = contributions.find(Boolean);
-      if (!first) return res.status(404).end();
-      const size = first.raster.width;
+        // Bottom first, because that is the order they are painted in, and all
+        // of them are read rather than stopping at the first hit: a source
+        // masked over the ocean has to let the one beneath it show through,
+        // which cannot be known without looking at both.
+        const reads = await Promise.all(
+          resolved.sources.map(async (source) => {
+            if (!source.entry) return { source, found: null };
+            try {
+              return { source, found: await readFrom(source, true) };
+            } catch (error) {
+              if (error.name === 'AbortError') throw error;
+              return { source, error };
+            }
+          }),
+        );
 
-      const merged = mergeElevation(contributions, {
-        z,
-        x,
-        y,
-        size,
-        gaussianBlurSigma: resolved.stack.gaussianBlurSigma,
-      });
-      // Nothing covered this tile, so there is none worth sending. The client
-      // overzooms a lower one, which is both cheaper and better looking than a
-      // slab of nodata.
-      if (!merged) return res.status(404).end();
+        const contributions = [];
+        for (const read of reads) {
+          if (read.error) {
+            if (read.source.required) {
+              const status =
+                read.error instanceof TileReadError ? read.error.status : 503;
+              return {
+                said,
+                status,
+                error: `${read.source.name} is required and could not be read: ${read.error.message}`,
+              };
+            }
+            said.push(`${read.source.name}=error`);
+            contributions.push(null);
+            continue;
+          }
+          if (!read.found) {
+            said.push(`${read.source.name}=absent`);
+            contributions.push(null);
+            continue;
+          }
+          said.push(
+            read.found.parentZ === z
+              ? `${read.source.name}=${read.source.entry.infoHash}`
+              : `${read.source.name}=z${read.found.parentZ}`,
+          );
+          contributions.push({
+            source: read.source.source,
+            parentZ: read.found.parentZ,
+            raster: await codec.decode(Buffer.from(read.found.tile.data), {
+              channels: 3,
+            }),
+          });
+        }
 
-      const output = resolved.stack.output ?? {};
-      fillNodata(merged, output.nodata);
-      const raster = encodeHeights(merged, {
-        width: size,
-        height: size,
-        encoding:
-          output.encoding ?? contributions.find(Boolean)?.source?.encoding,
-        baseVal: output.baseVal,
-        interval: output.interval,
-      });
-      const format = output.format ?? coverage.format ?? 'webp';
-      // Never lossy. The three channels are the three bytes of one height, so
-      // a codec that shifts red by one moves the ground by 65 kilometres.
-      const body = await codec.encode(raster, { format, lossless: true });
+        const first = contributions.find(Boolean);
+        if (!first) return { said, empty: true };
+        const size = first.raster.width;
+
+        const merged = mergeElevation(contributions, {
+          z,
+          x,
+          y,
+          size,
+          gaussianBlurSigma: resolved.stack.gaussianBlurSigma,
+        });
+        // Nothing covered this tile, so there is none worth sending. The
+        // client overzooms a lower one, which is cheaper and better looking
+        // than a slab of nodata.
+        if (!merged) return { said, empty: true };
+
+        const output = resolved.stack.output ?? {};
+        fillNodata(merged, output.nodata);
+        const raster = encodeHeights(merged, {
+          width: size,
+          height: size,
+          encoding: output.encoding ?? first.source?.encoding,
+          baseVal: output.baseVal,
+          interval: output.interval,
+        });
+        // Never lossy. The three channels are the three bytes of one height,
+        // so a codec that shifts red by one moves the ground by 65 kilometres.
+        const body = await codec.encode(raster, { format, lossless: true });
+
+        // Awaited, though it is tempting not to be. The write is a local disk
+        // write of a few tens of kilobytes against a merge that just read
+        // every source and decoded each one -- and leaving it in flight means
+        // the next request for this tile, arriving a millisecond later, finds
+        // nothing and merges it all over again.
+        if (cacheKey) await stackCache.put(cacheKey, body).catch(() => {});
+        return { said, body };
+      };
+
+      let result;
+      try {
+        result = cacheKey
+          ? await stackCache.once(cacheKey, produce)
+          : await produce();
+      } catch (error) {
+        // The client went away mid-merge. Nothing to answer and nobody to
+        // answer it to.
+        if (error?.name === 'AbortError') return;
+        throw error;
+      }
+
+      stackHeaders(res, resolved, [...contributors, ...result.said], z, x, y);
+      if (result.error) {
+        return res.status(result.status).json({ error: result.error });
+      }
+      // The flag the document advertises, honoured rather than restated: 404
+      // lets a client overzoom the parent, 204 tells it the tile is genuinely
+      // empty and to draw nothing. Same rule and same name tileserver-gl uses.
+      if (result.empty) {
+        return res.status(resolved.stack.sparse === false ? 204 : 404).end();
+      }
 
       res.type(format === 'png' ? 'image/png' : 'image/webp');
-      return res.send(body);
+      return res.send(result.body);
     }),
   );
 

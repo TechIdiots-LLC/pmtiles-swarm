@@ -40,6 +40,8 @@ import { parseColor } from './elevation.js';
  * @property {number[]} [bounds] - Explicit [w, s, e, n]. Wins over boundsSource.
  * @property {number} [boundsSource] - Index into sources.
  * @property {string} [attribution] - Falls back to every source's, joined.
+ * @property {boolean} [sparse] - Whether a missing tile answers 404 so a client
+ *   overzooms its parent. Defaults true, which is what a stack wants.
  */
 
 /** Pixel spaces a stack can combine in. */
