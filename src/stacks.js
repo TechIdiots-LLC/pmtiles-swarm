@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { parseColor } from './elevation.js';
+import { hasUsableEncoding, parseColor } from './elevation.js';
 import { BLEND_MODES, isBlendMode } from './rgba.js';
 
 /**
@@ -20,7 +20,11 @@ import { BLEND_MODES, isBlendMode } from './rgba.js';
  * @property {string} [category] - Resolve to the newest build in this category.
  * @property {string} [archive] - Or pin one infohash. Exactly one of the two.
  * @property {boolean} [required] - Fail a tile rather than serve without it.
- * @property {string} [encoding] - 'mapbox' or 'terrarium'. Elevation only.
+ * @property {string} [encoding] - 'mapbox', 'terrarium' or 'custom'.
+ * @property {number} [redFactor] - Custom encoding, all four required.
+ * @property {number} [greenFactor] - Custom encoding.
+ * @property {number} [blueFactor] - Custom encoding.
+ * @property {number} [baseShift] - Custom encoding. Subtracted, per MapLibre.
  * @property {number} [baseVal] - Mapbox decode offset.
  * @property {number} [interval] - Mapbox decode step.
  * @property {number[]} [maskValues] - Heights meaning "no data here".
@@ -90,6 +94,14 @@ export function validateStack(stack) {
     }
     if (source?.maskValues !== undefined && !Array.isArray(source.maskValues)) {
       problems.push(`sources[${index}].maskValues must be a list`);
+    }
+    if (source?.encoding === 'custom' && !hasUsableEncoding(source)) {
+      // Three of four is no better than none: the tile is unreadable either
+      // way, and saying which is missing is the only useful answer.
+      problems.push(
+        `sources[${index}] uses encoding "custom" and needs all of ` +
+          'redFactor, greenFactor, blueFactor, baseShift',
+      );
     }
     if (source?.blend !== undefined && !isBlendMode(source.blend)) {
       problems.push(

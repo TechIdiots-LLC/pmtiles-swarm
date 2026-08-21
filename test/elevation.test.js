@@ -2,6 +2,8 @@ import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import {
   blurHeights,
+  encodingFactors,
+  hasUsableEncoding,
   maskColors,
   parseColor,
   decodeHeights,
@@ -48,6 +50,115 @@ describe('reading a height out of three bytes', () => {
     const [high, low] = decodeHeights(raster);
     assert.ok(high > 1e6, `expected the ceiling, got ${high}`);
     assert.ok(low <= -10000 + 0.05, `expected the floor, got ${low}`);
+  });
+});
+
+describe('the custom encoding, where the recipe supplies the formula', () => {
+  /** MapLibre's own unpack, to check ours against. */
+  const maplibreUnpack = (r, g, b, f) =>
+    r * f.redFactor + g * f.greenFactor + b * f.blueFactor - f.baseShift;
+
+  it('expresses the named encodings as the same four numbers', () => {
+    // Both are special cases, which is why custom is not a third code path.
+    assert.deepEqual(encodingFactors({ encoding: 'mapbox' }), {
+      redFactor: 6553.6,
+      greenFactor: 25.6,
+      blueFactor: 0.1,
+      baseShift: 10000,
+    });
+    assert.deepEqual(encodingFactors({ encoding: 'terrarium' }), {
+      redFactor: 256,
+      greenFactor: 1,
+      blueFactor: 1 / 256,
+      baseShift: 32768,
+    });
+  });
+
+  it('agrees with MapLibre on what a pixel means', () => {
+    const source = {
+      encoding: 'custom',
+      redFactor: 256,
+      greenFactor: 1,
+      blueFactor: 1 / 256,
+      baseShift: 32768,
+    };
+    const raster = {
+      data: Buffer.from([130, 45, 200]),
+      width: 1,
+      height: 1,
+      channels: 3,
+    };
+    const [got] = decodeHeights(raster, source);
+    assert.equal(got, maplibreUnpack(130, 45, 200, encodingFactors(source)));
+  });
+
+  it('round-trips a height through a formula of its own', () => {
+    // Half-metre steps over a wider range than mapbox's 0.1 m, which is the
+    // reason somebody reaches for custom in the first place.
+    const source = {
+      encoding: 'custom',
+      redFactor: 32768,
+      greenFactor: 128,
+      blueFactor: 0.5,
+      baseShift: 40000,
+    };
+    for (const metres of [0, 500.5, -1200, 8848]) {
+      const raster = encodeHeights(new Float32Array([metres]), {
+        width: 1,
+        height: 1,
+        ...source,
+      });
+      const [got] = decodeHeights(raster, source);
+      assert.ok(
+        Math.abs(got - metres) <= 0.5,
+        `expected about ${metres}, got ${got}`,
+      );
+    }
+  });
+
+  it('knows when the four numbers are not all there', () => {
+    // custom without them publishes an archive nobody can read, and three of
+    // four is no better than none.
+    assert.ok(hasUsableEncoding({ encoding: 'mapbox' }));
+    assert.ok(
+      hasUsableEncoding({
+        encoding: 'custom',
+        redFactor: 1,
+        greenFactor: 1,
+        blueFactor: 1,
+        baseShift: 0,
+      }),
+    );
+    assert.ok(
+      !hasUsableEncoding({ encoding: 'custom', redFactor: 1, greenFactor: 1 }),
+    );
+  });
+
+  it('merges a custom source against a mapbox one', () => {
+    // The two are decoded to metres before anything else happens, so a stack
+    // may mix them freely -- which is the point of working in metres.
+    const custom = {
+      encoding: 'custom',
+      redFactor: 256,
+      greenFactor: 1,
+      blueFactor: 1 / 256,
+      baseShift: 32768,
+    };
+    const base = encodeHeights(new Float32Array(4).fill(-500), {
+      width: 2,
+      height: 2,
+    });
+    const top = encodeHeights(new Float32Array(4).fill(250), {
+      width: 2,
+      height: 2,
+      ...custom,
+    });
+
+    const merged = mergeElevation(
+      [{ raster: base }, { raster: top, source: custom }],
+      { z: 1, x: 0, y: 0, size: 2 },
+    );
+    for (const value of merged) assert.ok(Math.abs(value - 250) < 0.5);
   });
 });
 

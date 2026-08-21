@@ -630,10 +630,35 @@ Enough to understand the stack at a glance:
 Per-source fields, driven by the stack's `space` — there is no point offering
 `blend` on an elevation stack or `maskValues` on an RGBA one:
 
-| `space`     | Fields                                                                                        |
-| ----------- | --------------------------------------------------------------------------------------------- |
-| `elevation` | `encoding`, `baseVal`, `interval`, `maskValues`, `maskColors`, `heightAdjustment`, `required` |
-| `rgba`      | `opacity`, `blend`, `required`                                                                |
+| `space`     | Fields                                                                                                                           |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `elevation` | `encoding`, `baseVal`, `interval`, `maskValues`, `maskColors`, `heightAdjustment`, `required`, and for `custom` the four factors |
+| `rgba`      | `opacity`, `blend`, `required`                                                                                                   |
+
+### Encodings, including one the recipe describes itself
+
+`mapbox` and `terrarium` are named, and `custom` takes the formula from the
+recipe — the same four numbers MapLibre's style-spec uses:
+
+```
+height = r · redFactor + g · greenFactor + b · blueFactor − baseShift
+```
+
+The two named encodings are special cases of it: mapbox is
+`(6553.6, 25.6, 0.1, 10000)` and terrarium is `(256, 1, 1/256, 32768)`. They are
+derived rather than branched on, so `custom` is not a third code path but the
+same one with the numbers supplied instead of assumed — which is also what stops
+the two drifting apart over a rounding.
+
+Note the sign: `baseShift` is **subtracted**, where a mapbox config's `baseVal`
+is the same quantity with the opposite sign. `-10000` there is a `baseShift` of
+`10000` here.
+
+`custom` without all four numbers is refused rather than half-read. Three of
+four is no better than none — the tile is unreadable either way, and saying
+which is missing is the only useful answer. A stack that re-encodes into
+`custom` publishes the four numbers in its TileJSON beside the word, since the
+word alone describes an archive nobody can read.
 
 A source can say "nothing here" two ways, and they are not interchangeable.
 `maskValues` names decoded heights; `maskColors` names the pixel colours

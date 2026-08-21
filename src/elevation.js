@@ -19,26 +19,83 @@ const MAPBOX = { baseVal: -10000, interval: 0.1 };
 const TERRARIUM_OFFSET = 32768;
 
 /**
+ * The four numbers that describe how a source packs a height.
+ *
+ * MapLibre's style-spec expresses every terrain encoding this way, and both
+ * named ones are special cases of it:
+ *
+ *   height = r * redFactor + g * greenFactor + b * blueFactor - baseShift
+ *
+ * mapbox is (6553.6, 25.6, 0.1, 10000) and terrarium is (256, 1, 1/256,
+ * 32768). Deriving them here rather than branching on the name means `custom`
+ * is not a third code path -- it is the same one with the numbers supplied
+ * instead of assumed, which is also what stops the two disagreeing about a
+ * rounding somewhere.
+ *
+ * The sign of baseShift is MapLibre's, and it is subtracted. Worth stating,
+ * because `baseVal` in a mapbox config is the same quantity with the opposite
+ * sign: -10000 there is a baseShift of 10000 here.
+ * @param {object} [source] - encoding, baseVal, interval, or the four factors.
+ * @returns {object} - redFactor, greenFactor, blueFactor, baseShift.
+ */
+export function encodingFactors(source = {}) {
+  if (source.encoding === 'terrarium') {
+    return {
+      redFactor: 256,
+      greenFactor: 1,
+      blueFactor: 1 / 256,
+      baseShift: TERRARIUM_OFFSET,
+    };
+  }
+  if (source.encoding === 'custom') {
+    return {
+      redFactor: Number(source.redFactor),
+      greenFactor: Number(source.greenFactor),
+      blueFactor: Number(source.blueFactor),
+      baseShift: Number(source.baseShift),
+    };
+  }
+  // mapbox, and anything unnamed. The interval scales all three channels and
+  // baseVal is the shift, so a source with its own interval is still one of
+  // these rather than a custom encoding.
+  const interval = source.interval ?? MAPBOX.interval;
+  return {
+    redFactor: 65536 * interval,
+    greenFactor: 256 * interval,
+    blueFactor: interval,
+    baseShift: -(source.baseVal ?? MAPBOX.baseVal),
+  };
+}
+
+/**
+ * Whether a source describes an encoding this can actually read.
+ * @param {object} [source] - The source.
+ * @returns {boolean} - True when the four factors are all numbers.
+ */
+export function hasUsableEncoding(source = {}) {
+  const factors = encodingFactors(source);
+  return Object.values(factors).every((value) => Number.isFinite(value));
+}
+
+/**
  * Decodes a raster into heights.
  * @param {object} raster - Raw samples from the codec.
- * @param {object} [source] - encoding, baseVal, interval.
+ * @param {object} [source] - encoding, and whatever that encoding needs.
  * @returns {Float32Array} - Metres, one per pixel.
  */
 export function decodeHeights(raster, source = {}) {
   const { data, width, height, channels } = raster;
   const out = new Float32Array(width * height);
-  const terrarium = source.encoding === 'terrarium';
-  const baseVal = source.baseVal ?? MAPBOX.baseVal;
-  const interval = source.interval ?? MAPBOX.interval;
+  const { redFactor, greenFactor, blueFactor, baseShift } =
+    encodingFactors(source);
 
   for (let i = 0; i < out.length; i += 1) {
     const at = i * channels;
-    const r = data[at];
-    const g = data[at + 1];
-    const b = data[at + 2];
-    out[i] = terrarium
-      ? r * 256 + g + b / 256 - TERRARIUM_OFFSET
-      : baseVal + (r * 65536 + g * 256 + b) * interval;
+    out[i] =
+      data[at] * redFactor +
+      data[at + 1] * greenFactor +
+      data[at + 2] * blueFactor -
+      baseShift;
   }
   return out;
 }
@@ -55,27 +112,26 @@ export function decodeHeights(raster, source = {}) {
  */
 export function encodeHeights(heights, options) {
   const { width, height } = options;
-  const terrarium = options.encoding === 'terrarium';
-  const baseVal = options.baseVal ?? MAPBOX.baseVal;
-  const interval = options.interval ?? MAPBOX.interval;
   const data = Buffer.alloc(width * height * 3);
+  const { redFactor, greenFactor, blueFactor, baseShift } =
+    encodingFactors(options);
+  // MapLibre's own packing, so a tile written here unpacks there to the height
+  // it went in as. Scaling by the smallest factor is what lets the three
+  // channels carry different weights without the smallest one being rounded
+  // away first.
+  const minScale = Math.min(redFactor, greenFactor, blueFactor);
 
   for (let i = 0; i < heights.length; i += 1) {
-    const metres = heights[i];
     const at = i * 3;
-    if (terrarium) {
-      const value = Math.min(65535.99, Math.max(0, metres + TERRARIUM_OFFSET));
-      const whole = Math.floor(value);
-      data[at] = Math.floor(whole / 256);
-      data[at + 1] = whole % 256;
-      data[at + 2] = Math.floor((value - whole) * 256);
-    } else {
-      const raw = Math.round((metres - baseVal) / interval);
-      const value = Math.min(0xffffff, Math.max(0, raw));
-      data[at] = (value >> 16) & 255;
-      data[at + 1] = (value >> 8) & 255;
-      data[at + 2] = value & 255;
-    }
+    const scaled = Math.round((heights[i] + baseShift) / minScale);
+    // Clamped rather than allowed to wrap. A height outside what three bytes
+    // can carry is a bug upstream, but wrapping turns it into a plausible
+    // height somewhere else entirely, which is far harder to see.
+    const ceiling = Math.round((256 * 256 * 256 - 1) * (blueFactor / minScale));
+    const value = Math.min(ceiling, Math.max(0, scaled));
+    data[at] = Math.floor((value * minScale) / redFactor) % 256;
+    data[at + 1] = Math.floor((value * minScale) / greenFactor) % 256;
+    data[at + 2] = Math.floor((value * minScale) / blueFactor) % 256;
   }
   return { data, width, height, channels: 3 };
 }

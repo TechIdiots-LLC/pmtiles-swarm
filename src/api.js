@@ -3259,6 +3259,25 @@ export function createApp({
           })),
         },
       };
+      // A stack that re-encodes says how, so a style pointing at it does not
+      // have to restate an encoding the document already knows -- which is how
+      // a style and its data drift into disagreeing. `custom` is unreadable
+      // without its four numbers, so they travel with the word.
+      const outputEncoding = resolved.stack.output?.encoding;
+      if (outputEncoding) {
+        doc.encoding = outputEncoding;
+        if (outputEncoding === 'custom') {
+          for (const name of [
+            'redFactor',
+            'greenFactor',
+            'blueFactor',
+            'baseShift',
+          ]) {
+            const value = Number(resolved.stack.output[name]);
+            if (Number.isFinite(value)) doc[name] = value;
+          }
+        }
+      }
       if (coverage.format) doc.format = coverage.format;
       if (coverage.attribution) doc.attribution = coverage.attribution;
       // Sparse by default, and for a stack that is not a guess.

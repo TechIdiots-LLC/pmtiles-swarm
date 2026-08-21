@@ -805,6 +805,7 @@
                 <option value="">same as the sources</option>
                 <option value="mapbox">mapbox</option>
                 <option value="terrarium">terrarium</option>
+                <option value="custom">custom</option>
               </select>
             </label>
             <label class="choice">No-data height
@@ -6211,8 +6212,25 @@ Every piece is hashed against the ` +
                  <option value="terrarium"${
                    source.encoding === 'terrarium' ? ' selected' : ''
                  }>terrarium</option>
+                 <option value="custom"${
+                   source.encoding === 'custom' ? ' selected' : ''
+                 }>custom</option>
                </select>
              </label>
+             ${
+               source.encoding === 'custom'
+                 ? `<span class="sub">height = r·red + g·green + b·blue − shift</span>
+                    ${['redFactor', 'greenFactor', 'blueFactor', 'baseShift']
+                      .map(
+                        (name) =>
+                          `<label class="choice">${name.replace('Factor', '')}
+                             <input type="number" step="any" style="width:6rem"
+                                    data-stack-field="${name}" data-stack-index="${index}"
+                                    value="${source[name] ?? ''}" /></label>`,
+                      )
+                      .join('')}`
+                 : ''
+             }
              <label class="choice">Shift by
                <input type="number" step="any" style="width:6rem"
                       data-stack-field="heightAdjustment" data-stack-index="${index}"
@@ -6273,11 +6291,25 @@ Every piece is hashed against the ` +
             .filter(Boolean);
         } else if (field === 'required') {
           source.required = event.target.checked;
-        } else if (field === 'opacity' || field === 'heightAdjustment') {
+        } else if (
+          field === 'opacity' ||
+          field === 'heightAdjustment' ||
+          field === 'redFactor' ||
+          field === 'greenFactor' ||
+          field === 'blueFactor' ||
+          field === 'baseShift'
+        ) {
           source[field] = Number(event.target.value);
         } else {
           source[field] = event.target.value;
         }
+      });
+
+      $('stack-sources').addEventListener('change', (event) => {
+        if (event.target.dataset.stackField !== 'encoding') return;
+        // Redrawn so the four custom fields appear or disappear with the
+        // choice, rather than sitting there meaning nothing.
+        renderStackDraft();
       });
 
       $('stack-sources').addEventListener('click', (event) => {
