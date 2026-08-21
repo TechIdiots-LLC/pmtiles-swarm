@@ -722,6 +722,19 @@ export const RESTART_REQUIRED = new Set([
   'maxConnections',
   // Only read once, when deciding whether it is safe to listen at all.
   'allowUnauthenticated',
+  // The tile reader's directory cache is sized when the store is built, and
+  // `tiles.prewarmIntervalSeconds` is read when the warmer starts. Neither is
+  // consulted again, so a change to this object applies to nothing until the
+  // process comes back.
+  //
+  // Blunter than it could be -- `tiles.maxOpenArchives` and the timeouts
+  // beside it *are* read live -- and deliberately so. The console edits this
+  // object as a whole, so a badge on part of it is not expressible; and the
+  // failure it prevents is a setting that reports success and does nothing,
+  // which costs more than being told to restart when you need not have.
+  'tiles',
+  // Captured into the save timer at startup, and nothing rebuilds that timer.
+  'resumeSaveIntervalSeconds',
 ]);
 
 /**
@@ -743,6 +756,11 @@ export const RELOADABLE = new Map([
   ['subscriptionIntervalSeconds', 'subscriptions'],
   ['subscriptionsEnabled', 'subscriptions'],
   ['seeding', 'seeding'],
+  // The sweep reads its own interval when it starts, and the reloader above
+  // restarts the sweep -- so this is reloadable for exactly the same reason
+  // `seeding` is, and was left out only because it is a sibling rather than
+  // part of the object.
+  ['seedingCheckIntervalSeconds', 'seeding'],
   // Applied to a running session, so a schedule can be corrected at the moment
   // it turns out to be wrong rather than at the next convenient restart.
   ['speed', 'speed'],

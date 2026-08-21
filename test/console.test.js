@@ -1324,3 +1324,118 @@ describe('the local-file dropdown on an import row', () => {
     ]);
   });
 });
+
+describe('the settings schema', () => {
+  /** The schema table and the reader, lifted out of the inlined script. */
+  const script = page.split('<script type="module">')[1].split('</script>')[0];
+  const schema = script.slice(
+    script.indexOf('const SETTINGS_SCHEMA'),
+    script.indexOf('/** Reads `a.b`'),
+  );
+  const reader = script.slice(
+    script.indexOf('function readSchemaEditors'),
+    script.indexOf('async function loadSettings'),
+  );
+  const read = (controls) =>
+    new Function('document', `${reader}; return readSchemaEditors;`)({
+      querySelectorAll: () => controls,
+    })();
+
+  it('describes settings the generic renderer then leaves alone', () => {
+    // Rendered in both places a setting would be shown twice and saved twice,
+    // as a labelled field and as a JSON blob, with whichever ran last winning.
+    assert.match(script, /const described = new Set\(/);
+    assert.match(script, /if \(described\.has\(key\)\) continue;/);
+  });
+
+  it('sends nothing when nothing was touched', () => {
+    // The reason this matters is the restart notice: the server decides one is
+    // needed by comparing what it was sent against what it holds, so a pane
+    // that always sends its whole group would claim a restart was needed every
+    // time somebody pressed Save.
+    assert.deepEqual(
+      read([
+        {
+          dataset: {
+            setting: 'tiles.maxOpenArchives',
+            type: 'number',
+            initial: '16',
+          },
+          value: '16',
+        },
+        {
+          dataset: {
+            setting: 'tiles.pieceCacheBytes',
+            type: 'number',
+            initial: 'null',
+          },
+          value: '',
+        },
+      ]),
+      {},
+    );
+  });
+
+  it('collects nested keys into one update for the top-level key', () => {
+    assert.deepEqual(
+      read([
+        {
+          dataset: {
+            setting: 'tiles.directoryCacheEntries',
+            type: 'number',
+            initial: '200',
+          },
+          value: '5000',
+        },
+        {
+          dataset: {
+            setting: 'tiles.maxOpenArchives',
+            type: 'number',
+            initial: '16',
+          },
+          value: '100',
+        },
+      ]),
+      { tiles: { directoryCacheEntries: 5000, maxOpenArchives: 100 } },
+    );
+  });
+
+  it('sends null for a value that was cleared, not undefined', () => {
+    // JSON.stringify drops undefined entirely, so "unset this" would never
+    // reach the server.
+    assert.deepEqual(
+      read([
+        {
+          dataset: {
+            setting: 'tiles.pieceCacheBytes',
+            type: 'number',
+            initial: '4194304',
+          },
+          value: '',
+        },
+      ]),
+      { tiles: { pieceCacheBytes: null } },
+    );
+  });
+
+  it('marks the setting that is read once, not the object holding it', () => {
+    // The whole point of describing settings one at a time: the server has to
+    // mark `tiles` restart-required because the console used to edit it as one
+    // blob, but only directoryCacheEntries and prewarmIntervalSeconds are
+    // actually read once.
+    assert.match(
+      schema,
+      /key: 'tiles\.directoryCacheEntries',[\s\S]*?restart: true/,
+    );
+    assert.match(
+      schema,
+      /key: 'tiles\.prewarmIntervalSeconds',[\s\S]*?restart: true/,
+    );
+    // And this one is read live, so it must not carry the badge.
+    const live = schema.slice(schema.indexOf("key: 'tiles.maxOpenArchives'"));
+    assert.ok(
+      !live.slice(0, live.indexOf('},')).includes('restart: true'),
+      'maxOpenArchives is read live and must not claim otherwise',
+    );
+  });
+});

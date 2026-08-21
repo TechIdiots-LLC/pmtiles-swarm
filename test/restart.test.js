@@ -27,11 +27,38 @@ describe('what actually needs the process to stop', () => {
       'maxConnections',
       'port',
       'qbittorrent',
+      'resumeSaveIntervalSeconds',
       'savePath',
       'secondaryEngines',
       'secondaryShareIntervalSeconds',
+      'tiles',
       'webtorrent',
     ]);
+  });
+
+  it('names the settings that are read once and never again', () => {
+    // The failure this list prevents is not a restart nobody wanted; it is a
+    // setting that reports success and changes nothing. Both of these are
+    // captured while the process starts -- the tile reader's directory cache
+    // when the store is built, the resume timer when it is created -- and
+    // neither is consulted again.
+    //
+    // `tiles` is blunter than it could be: `maxOpenArchives` beside
+    // `directoryCacheEntries` really is read live. The console edits the
+    // object as a whole, so a badge on half of it is not expressible, and
+    // over-warning is the cheaper mistake.
+    for (const key of ['tiles', 'resumeSaveIntervalSeconds']) {
+      assert.ok(RESTART_REQUIRED.has(key), `${key} must warn`);
+      assert.ok(!RELOADABLE.has(key), `${key} cannot be reloaded`);
+    }
+  });
+
+  it('reloads the seeding sweep rather than asking for a restart', () => {
+    // The sweep reads its own interval when it starts and the reloader
+    // restarts the sweep, so this needed neither a restart nor a new
+    // reloader -- only to be listed beside the object it belongs to.
+    assert.equal(RELOADABLE.get('seedingCheckIntervalSeconds'), 'seeding');
+    assert.equal(RELOADABLE.get('seeding'), 'seeding');
   });
 
   it('applies the rest by restarting one subsystem', () => {

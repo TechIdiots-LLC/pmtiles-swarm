@@ -5,7 +5,22 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **Two settings reported success and changed nothing.** `tiles` and `resumeSaveIntervalSeconds`
+  are read while the process starts — the tile reader's directory cache when the store is
+  built, the resume timer when it is created — and neither is consulted again. Both were
+  absent from `RESTART_REQUIRED`, so the console applied them, said so, and the node went on
+  behaving exactly as before. Being told to restart when you need not have is a small cost;
+  a setting that lies about taking effect is not.
+
+  `tiles` is blunter than it could be, deliberately: `maxOpenArchives` beside
+  `directoryCacheEntries` really is read live, but the console edits the object as a whole so
+  a badge on half of it is not expressible. That resolves when the settings pane grows real
+  fields for it.
+
+- **`seedingCheckIntervalSeconds` is reloadable, and was neither.** The sweep reads its own
+  interval when it starts and there is already a reloader that restarts the sweep, so this
+  needed no restart and no new machinery — only to be listed beside the `seeding` object it
+  belongs to.
 
 ## 0.61.0
 ### ✨ Features and improvements
