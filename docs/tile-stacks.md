@@ -546,19 +546,24 @@ element tree — puts the topmost layer at the top of the list. An editor that
 renders the array in storage order would invert the mental model of every person
 who opens it, and dragging would do the opposite of what it looks like.
 
-So the editor reverses on load and reverses again on save, and says which end is
-which rather than relying on the reader to remember:
+So the editor reverses on load and reverses again on save. The two orderings are
+the same stack said twice, and worth seeing together at least once:
 
 ```
-┌─ Layers ──────────────────────────────┐
-│  ⠿  planet-bathymetry      z0–z16  ▲  │  ← top: paints over everything below
-│  ⠿  gebco                  z0–z8   ▼  │  ← bottom: the base
-└───────────────────────────────────────┘
+   the editor                              the file it saves
+
+┌─ Layers ─────────────────────┐          "sources": [
+│ ⠿ planet-bathymetry  z0–z16  │ ── top ──▶  { "category": "gebco" },
+│ ⠿ gebco              z0–z8   │ ─ bottom ─▶ { "category": "planet-bathymetry" }
+└──────────────────────────────┘          ]
+                                          ▲ last in the file paints over
 ```
 
-The JSON this writes lists `gebco` first. Nobody editing the file by hand should
-be surprised by that, which is why
-[Painting order](#painting-order) says it too.
+Read either way it says one thing: **`planet-bathymetry` covers `gebco`**. It is
+at the top of the list because it is last in the file, and it is last in the
+file because the last source wins. Nobody editing the file by hand should be
+surprised to find the base layer written first, which is why
+[Painting order](#painting-order) says it there too.
 
 ### What a row shows without being clicked
 
