@@ -517,6 +517,7 @@
 
       <section id="view-stacks" hidden>
         <div class="bar">
+          <button id="stacks-add">Add stack…</button>
           <button id="stacks-refresh">Refresh</button>
           <span class="bar-gap"></span>
           <span class="muted" id="stacks-where"></span>
@@ -747,6 +748,89 @@
         <menu>
           <button value="cancel">Cancel</button>
           <button id="adopt-go" value="default" disabled>Adopt selected</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="stack-dialog">
+      <form method="dialog" id="stack-form">
+        <h2 id="stack-dialog-title">Add stack</h2>
+        <div class="sub" style="margin-bottom:0.8rem">
+          A stack serves several archives as one tile endpoint. Sources are
+          listed lowest first: each one covers the one before it wherever it has
+          data, and the last wins. What shows through from underneath is
+          whatever the source above masked or never had.
+        </div>
+
+        <div class="field">
+          <label for="stack-id">Name</label>
+          <input id="stack-id" placeholder="planet-terrain" autocomplete="off" />
+          <div class="sub">
+            Used in the URL: <code id="stack-url-preview">/stacks/…/tiles.json</code>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="stack-title">Title</label>
+          <input id="stack-title" placeholder="Planet terrain with bathymetry" autocomplete="off" />
+        </div>
+
+        <div class="field">
+          <label>What these tiles are</label>
+          <label class="choice">
+            <input type="radio" name="stack-space" value="elevation" checked />
+            Terrain — the channels are a packed height
+          </label>
+          <label class="choice">
+            <input type="radio" name="stack-space" value="rgba" />
+            Imagery — the channels are a colour
+          </label>
+          <div class="sub" id="stack-space-note"></div>
+        </div>
+
+        <div class="field">
+          <label>Sources</label>
+          <div id="stack-sources"></div>
+          <div class="bar" style="margin-top:0.4rem">
+            <select id="stack-add-source"></select>
+            <button type="button" id="stack-add-source-go">Add source</button>
+          </div>
+        </div>
+
+        <div class="field" id="stack-output-elevation">
+          <label>Output</label>
+          <div class="bar">
+            <label class="choice">Encoding
+              <select id="stack-out-encoding">
+                <option value="">same as the sources</option>
+                <option value="mapbox">mapbox</option>
+                <option value="terrarium">terrarium</option>
+              </select>
+            </label>
+            <label class="choice">No-data height
+              <input id="stack-out-nodata" type="number" step="any" placeholder="-10000" style="width:8rem" />
+            </label>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Tile format</label>
+          <div class="bar">
+            <label class="choice">
+              <select id="stack-out-format">
+                <option value="">same as the sources</option>
+                <option value="webp">webp</option>
+                <option value="png">png</option>
+              </select>
+            </label>
+            <span class="sub" id="stack-format-note"></span>
+          </div>
+        </div>
+
+        <div class="sub" id="stack-error" style="color:var(--danger)"></div>
+        <menu>
+          <button value="cancel" type="button" id="stack-cancel">Cancel</button>
+          <button id="stack-save" value="default">Save</button>
         </menu>
       </form>
     </dialog>
@@ -5868,12 +5952,17 @@ Every piece is hashed against the ` +
             ? ''
             : `z${stack.minzoom}–z${stack.maxzoom}`;
 
-        const links = broken
-          ? ''
-          : `<a href="/stacks/${encodeURIComponent(stack.id)}/preview" target="_blank" rel="noreferrer">
-               <button type="button">Preview</button></a>
-             <a href="/stacks/${encodeURIComponent(stack.id)}/tiles.json" target="_blank" rel="noreferrer">
-               <button type="button">TileJSON</button></a>`;
+        const links = `
+          ${
+            broken
+              ? ''
+              : `<a href="/stacks/${encodeURIComponent(stack.id)}/preview" target="_blank" rel="noreferrer">
+                   <button type="button">Preview</button></a>
+                 <a href="/stacks/${encodeURIComponent(stack.id)}/tiles.json" target="_blank" rel="noreferrer">
+                   <button type="button">TileJSON</button></a>`
+          }
+          <button type="button" data-stack-edit="${escapeHtml(stack.id)}">Edit</button>
+          <button type="button" data-stack-delete="${escapeHtml(stack.id)}">Delete</button>`;
 
         return `
           <div class="card">
@@ -5955,6 +6044,330 @@ Every piece is hashed against the ` +
 
       $('stacks-refresh').onclick = () =>
         loadStacks().catch((e) => toast(e.message));
+
+      // ── Building a stack ──────────────────────────────────────────────────
+      //
+      // The recipe being edited, held here rather than read back out of the
+      // DOM. Source order carries meaning and the per-source fields differ by
+      // space, so a form that re-derived itself from its own inputs would have
+      // to know which of them are currently real.
+      let stackDraft = null;
+
+      /** Whether the draft is imagery rather than terrain. */
+      const draftIsRgba = () => stackDraft?.space === 'rgba';
+
+      /**
+       * Opens the dialog on a new stack, or on one that already exists.
+       * @param {object} [existing] - The stack to edit.
+       * @returns {Promise<void>} - Resolves once the dialog is open.
+       */
+      const openStackDialog = async (existing) => {
+        stackDraft = existing
+          ? JSON.parse(JSON.stringify(existing))
+          : { id: '', title: '', space: 'elevation', sources: [], output: {} };
+        stackDraft.sources ??= [];
+        stackDraft.output ??= {};
+
+        $('stack-dialog-title').textContent = existing
+          ? 'Edit stack'
+          : 'Add stack';
+        // An id is what the URL is made of, so changing one would silently
+        // orphan whatever points at the old address.
+        $('stack-id').value = stackDraft.id ?? '';
+        $('stack-id').disabled = Boolean(existing);
+        $('stack-title').value = stackDraft.title ?? '';
+        for (const radio of document.querySelectorAll(
+          'input[name="stack-space"]',
+        )) {
+          radio.checked = radio.value === (stackDraft.space ?? 'elevation');
+        }
+        $('stack-out-encoding').value = stackDraft.output.encoding ?? '';
+        $('stack-out-nodata').value = stackDraft.output.nodata ?? '';
+        $('stack-out-format').value = stackDraft.output.format ?? '';
+        $('stack-error').textContent = '';
+
+        await fillStackSourceChoices();
+        renderStackDraft();
+        $('stack-dialog').showModal();
+      };
+
+      /**
+       * Fills the "add a source" menu with the categories this node has.
+       *
+       * Categories rather than archives, because that is the reason to do this
+       * in the swarm at all: a stack over a category follows the rebuild, where
+       * one over an infohash pins to a build that will eventually be retired.
+       * @returns {Promise<void>} - Resolves once filled.
+       */
+      const fillStackSourceChoices = async () => {
+        const select = $('stack-add-source');
+        try {
+          const { categories } = await api('/api/categories');
+          const taken = new Set(
+            (stackDraft?.sources ?? []).map((s) => s.category),
+          );
+          const free = (categories ?? []).filter((c) => !taken.has(c.name));
+          select.innerHTML = free.length
+            ? free
+                .map(
+                  (c) =>
+                    `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`,
+                )
+                .join('')
+            : '<option value="">no categories left to add</option>';
+          select.disabled = free.length === 0;
+          $('stack-add-source-go').disabled = free.length === 0;
+        } catch {
+          select.innerHTML = '<option value="">could not list categories</option>';
+          select.disabled = true;
+        }
+      };
+
+      /** Redraws the source list and the fields that depend on the space. */
+      const renderStackDraft = () => {
+        const rgba = draftIsRgba();
+        $('stack-space-note').textContent = rgba
+          ? 'Sources are composited with opacity and a blend mode. Output may be compressed.'
+          : 'Sources are decoded to metres, masked and merged. Output is always lossless.';
+        $('stack-output-elevation').hidden = rgba;
+        $('stack-format-note').textContent = rgba
+          ? ''
+          : 'Terrain is encoded losslessly whichever format is chosen.';
+        $('stack-url-preview').textContent = `/stacks/${
+          $('stack-id').value || '…'
+        }/tiles.json`;
+
+        const list = $('stack-sources');
+        if (!stackDraft.sources.length) {
+          list.innerHTML =
+            '<div class="sub">No sources yet. Add the base first — the one that ' +
+            'should show wherever nothing above it has data.</div>';
+          return;
+        }
+        list.innerHTML = stackDraft.sources
+          .map((source, index) => renderDraftSource(source, index, rgba))
+          .join('');
+      };
+
+      /**
+       * One editable source row.
+       * @param {object} source - The source.
+       * @param {number} index - Its position, which is its priority.
+       * @param {boolean} rgba - Whether this stack is imagery.
+       * @returns {string} - HTML.
+       */
+      const renderDraftSource = (source, index, rgba) => {
+        const last = index === stackDraft.sources.length - 1;
+        const role =
+          stackDraft.sources.length === 1
+            ? ''
+            : index === 0
+              ? '<span class="pill">base</span>'
+              : last
+                ? '<span class="pill">wins</span>'
+                : '';
+
+        const perSpace = rgba
+          ? `<label class="choice">Opacity
+               <input type="number" min="0" max="1" step="0.05" style="width:5rem"
+                      data-stack-field="opacity" data-stack-index="${index}"
+                      value="${source.opacity ?? 1}" />
+             </label>
+             <label class="choice">Blend
+               <select data-stack-field="blend" data-stack-index="${index}">
+                 ${['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten']
+                   .map(
+                     (mode) =>
+                       `<option value="${mode}"${
+                         (source.blend ?? 'normal') === mode ? ' selected' : ''
+                       }>${mode}</option>`,
+                   )
+                   .join('')}
+               </select>
+             </label>`
+          : `<label class="choice">Encoding
+               <select data-stack-field="encoding" data-stack-index="${index}">
+                 <option value="mapbox"${
+                   (source.encoding ?? 'mapbox') === 'mapbox' ? ' selected' : ''
+                 }>mapbox</option>
+                 <option value="terrarium"${
+                   source.encoding === 'terrarium' ? ' selected' : ''
+                 }>terrarium</option>
+               </select>
+             </label>
+             <label class="choice">Shift by
+               <input type="number" step="any" style="width:6rem"
+                      data-stack-field="heightAdjustment" data-stack-index="${index}"
+                      value="${source.heightAdjustment ?? 0}" /> m
+             </label>
+             <label class="choice">Mask heights
+               <input style="width:12rem" placeholder="-10000, 0, -1"
+                      data-stack-field="maskValues" data-stack-index="${index}"
+                      value="${escapeHtml((source.maskValues ?? []).join(', '))}" />
+             </label>`;
+
+        return `
+          <div class="card tight">
+            <div class="row">
+              <span class="muted">${index}</span>
+              <code>${escapeHtml(source.category ?? source.archive ?? '')}</code>
+              ${role}
+              <span class="bar-gap"></span>
+              <button type="button" data-stack-move="${index}" data-stack-dir="-1"
+                      ${index === 0 ? 'disabled' : ''} title="Earlier: covered by more">↑</button>
+              <button type="button" data-stack-move="${index}" data-stack-dir="1"
+                      ${last ? 'disabled' : ''} title="Later: covers more">↓</button>
+              <button type="button" data-stack-remove="${index}">Remove</button>
+            </div>
+            <div class="bar">
+              ${perSpace}
+              <label class="choice">Mask colours
+                <input style="width:10rem" placeholder="#000000"
+                       data-stack-field="maskColors" data-stack-index="${index}"
+                       value="${escapeHtml((source.maskColors ?? []).join(', '))}" />
+              </label>
+              <label class="choice">
+                <input type="checkbox" data-stack-field="required" data-stack-index="${index}"
+                       ${source.required ?? index === 0 ? 'checked' : ''} /> required
+              </label>
+            </div>
+          </div>`;
+      };
+
+      // One listener for the whole list rather than one per control, because
+      // the list is redrawn on every change and per-row handlers would have to
+      // be reattached each time.
+      $('stack-sources').addEventListener('input', (event) => {
+        const field = event.target.dataset.stackField;
+        if (!field) return;
+        const source = stackDraft.sources[Number(event.target.dataset.stackIndex)];
+        if (!source) return;
+
+        if (field === 'maskValues') {
+          source.maskValues = event.target.value
+            .split(',')
+            .map((part) => Number(part.trim()))
+            .filter((value) => Number.isFinite(value));
+        } else if (field === 'maskColors') {
+          source.maskColors = event.target.value
+            .split(',')
+            .map((part) => part.trim())
+            .filter(Boolean);
+        } else if (field === 'required') {
+          source.required = event.target.checked;
+        } else if (field === 'opacity' || field === 'heightAdjustment') {
+          source[field] = Number(event.target.value);
+        } else {
+          source[field] = event.target.value;
+        }
+      });
+
+      $('stack-sources').addEventListener('click', (event) => {
+        const move = event.target.dataset.stackMove;
+        const remove = event.target.dataset.stackRemove;
+        if (move !== undefined) {
+          const from = Number(move);
+          const to = from + Number(event.target.dataset.stackDir);
+          if (to < 0 || to >= stackDraft.sources.length) return;
+          const [moved] = stackDraft.sources.splice(from, 1);
+          stackDraft.sources.splice(to, 0, moved);
+          renderStackDraft();
+        } else if (remove !== undefined) {
+          stackDraft.sources.splice(Number(remove), 1);
+          renderStackDraft();
+          fillStackSourceChoices();
+        }
+      });
+
+      $('stack-add-source-go').onclick = () => {
+        const category = $('stack-add-source').value;
+        if (!category) return;
+        // Appended, so the newest source is the one that covers the rest --
+        // which is what somebody adding a more detailed layer means.
+        stackDraft.sources.push({ category });
+        renderStackDraft();
+        fillStackSourceChoices();
+      };
+
+      for (const radio of document.querySelectorAll(
+        'input[name="stack-space"]',
+      )) {
+        radio.onchange = () => {
+          stackDraft.space = radio.value;
+          renderStackDraft();
+        };
+      }
+      $('stack-id').addEventListener('input', renderStackDraft);
+      $('stack-cancel').onclick = () => $('stack-dialog').close();
+
+      $('stack-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const id = $('stack-id').value.trim();
+        const body = {
+          title: $('stack-title').value.trim() || undefined,
+          space: stackDraft.space,
+          sources: stackDraft.sources,
+          output: {},
+        };
+        if ($('stack-out-format').value) {
+          body.output.format = $('stack-out-format').value;
+        }
+        if (!draftIsRgba()) {
+          if ($('stack-out-encoding').value) {
+            body.output.encoding = $('stack-out-encoding').value;
+          }
+          if ($('stack-out-nodata').value !== '') {
+            body.output.nodata = Number($('stack-out-nodata').value);
+          }
+        }
+
+        try {
+          await api(`/api/stacks/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            body,
+          });
+        } catch (error) {
+          // Shown in the dialog rather than as a toast: the thing that is wrong
+          // is on this form, and closing it to read the reason would lose it.
+          $('stack-error').textContent = error.message;
+          return;
+        }
+        $('stack-dialog').close();
+        toast(`Saved ${id}`);
+        loadStacks().catch((e) => toast(e.message));
+      });
+
+      $('stacks-add').onclick = () =>
+        openStackDialog().catch((e) => toast(e.message));
+
+      // Editing and deleting hang off the list, which is redrawn on every
+      // change, so they are delegated the same way the source rows are.
+      $('stacks-list').addEventListener('click', async (event) => {
+        const edit = event.target.dataset.stackEdit;
+        const drop = event.target.dataset.stackDelete;
+        if (edit !== undefined) {
+          const { stacks } = await api('/api/stacks');
+          const found = stacks.find((s) => s.id === edit);
+          if (found) {
+            // The list is a report -- it holds what each source resolved to,
+            // not the recipe. Read the file's own shape back before editing it,
+            // or saving would write the report in place of the recipe.
+            const raw = await api(`/api/stacks/${encodeURIComponent(edit)}/raw`);
+            await openStackDialog(raw.stack);
+          }
+        } else if (drop !== undefined) {
+          if (!confirm(`Delete the stack "${drop}"?`)) return;
+          try {
+            await api(`/api/stacks/${encodeURIComponent(drop)}`, {
+              method: 'DELETE',
+            });
+            toast(`Deleted ${drop}`);
+            loadStacks().catch((e) => toast(e.message));
+          } catch (error) {
+            toast(error.message);
+          }
+        }
+      });
 
       // ── Traffic ───────────────────────────────────────────────────────────
       //

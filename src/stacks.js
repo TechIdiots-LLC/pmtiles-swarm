@@ -432,4 +432,62 @@ export class StackStore {
   problems(id) {
     return this.#problems.get(id) ?? [];
   }
+
+  /**
+   * Adds or replaces a stack, refusing one that is not valid.
+   *
+   * Checked before it is written rather than after. A file the console wrote
+   * is a file somebody will trust, and an invalid stack reaching disk turns a
+   * form that could have said what was wrong into a row that says it is
+   * broken.
+   * @param {Stack} stack - The definition.
+   * @returns {Promise<Stack>} - What was stored.
+   */
+  async put(stack) {
+    const problems = validateStack(stack);
+    if (problems.length) {
+      const error = new Error(problems.join('; '));
+      error.status = 400;
+      error.problems = problems;
+      throw error;
+    }
+    this.#stacks.set(stack.id, stack);
+    this.#problems.delete(stack.id);
+    await this.#flush();
+    return stack;
+  }
+
+  /**
+   * Removes a stack.
+   * @param {string} id - The stack id.
+   * @returns {Promise<boolean>} - Whether anything was there.
+   */
+  async remove(id) {
+    if (!this.#stacks.delete(id)) return false;
+    this.#problems.delete(id);
+    await this.#flush();
+    return true;
+  }
+
+  /**
+   * Writes the file, one write at a time.
+   *
+   * Through a temp file and a rename, so a crash cannot leave a half-written
+   * stacks.json that reads as an empty one -- the same reason the catalog
+   * writes that way. The mtime is taken afterwards so this node's own write
+   * does not read back as somebody else's edit.
+   * @returns {Promise<void>} - Resolves once written.
+   */
+  async #flush() {
+    const body = JSON.stringify({ stacks: this.list() }, null, 2);
+    const temp = `${this.#file}.tmp`;
+    await fs.mkdir(path.dirname(this.#file), { recursive: true });
+    await fs.writeFile(
+      temp,
+      `${body}
+`,
+    );
+    await fs.rename(temp, this.#file);
+    this.#mtime = (await fs.stat(this.#file)).mtimeMs;
+  }
 }

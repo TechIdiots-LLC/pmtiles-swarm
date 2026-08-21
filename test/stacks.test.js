@@ -8,6 +8,7 @@ import { Catalog } from '../src/catalog.js';
 import { loadCodec } from '../src/codec.js';
 import { decodeHeights, encodeHeights } from '../src/elevation.js';
 import { StackCache } from '../src/stack-cache.js';
+import { generateToken, hashToken, isPublicSurface } from '../src/auth.js';
 import {
   StackStore,
   isPinned,
@@ -76,12 +77,19 @@ async function serve(entries, stackList, tileData = {}, options = {}) {
         return found ? { data: Buffer.from(found) } : null;
       },
     },
-    config: { watch: [], subscriptions: [], dataDir: dir },
+    config: {
+      watch: [],
+      subscriptions: [],
+      dataDir: dir,
+      ...options.config,
+    },
   });
   const server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   return {
+    base,
+    dir,
     get: (url) => fetch(`${base}${url}`),
     close: () => new Promise((resolve) => server.close(resolve)),
   };
@@ -797,5 +805,162 @@ describe('caching what a merge produced', { skip: !codec }, () => {
       !before.equals(afterEdit),
       'the edit must not serve a stale tile',
     );
+  });
+});
+
+describe('writing a stack from the console', () => {
+  const one = archive('c9'.repeat(20), 'one.pmtiles', ['one']);
+
+  /**
+   * A node whose stacks can be written to.
+   * @returns {Promise<object>} - get(), send() and close().
+   */
+  const editable = async () => {
+    const node = await serve([one], []);
+    return {
+      ...node,
+      send: (method, url, body) =>
+        fetch(`${node.base}${url}`, {
+          method,
+          headers: { 'content-type': 'application/json' },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        }),
+    };
+  };
+
+  it('saves a stack and serves it without a restart', async () => {
+    const node = await editable();
+    after(() => node.close());
+
+    const saved = await node.send('PUT', '/api/stacks/made', {
+      title: 'Made in the console',
+      sources: [{ category: 'one' }],
+    });
+    assert.equal(saved.status, 200);
+
+    // The store wrote the file and holds it, so the endpoint answers at once.
+    const doc = await (await node.get('/stacks/made/tiles.json')).json();
+    assert.equal(doc.name, 'Made in the console');
+  });
+
+  it('refuses an invalid recipe and says what is wrong with it', async () => {
+    const node = await editable();
+    after(() => node.close());
+
+    const res = await node.send('PUT', '/api/stacks/bad', { sources: [] });
+    assert.equal(res.status, 400);
+    // Returned rather than logged, so a form can put each problem beside the
+    // field it belongs to.
+    assert.ok((await res.json()).problems.length > 0);
+  });
+
+  it('hands back the recipe rather than what it resolved to', async () => {
+    // Loading the report into an editor and saving it would replace every
+    // category with the infohash it happened to point at -- the opposite of
+    // what naming a category was for.
+    const node = await editable();
+    after(() => node.close());
+    await node.send('PUT', '/api/stacks/made', {
+      sources: [{ category: 'one' }],
+    });
+
+    const { stack } = await (await node.get('/api/stacks/made/raw')).json();
+    assert.deepEqual(stack.sources, [{ category: 'one' }]);
+    assert.equal(stack.sources[0].infohash, undefined);
+  });
+
+  it('deletes one, and says so when there was none', async () => {
+    const node = await editable();
+    after(() => node.close());
+    await node.send('PUT', '/api/stacks/made', {
+      sources: [{ category: 'one' }],
+    });
+
+    assert.equal((await node.send('DELETE', '/api/stacks/made')).status, 200);
+    assert.equal((await node.get('/stacks/made/tiles.json')).status, 404);
+    assert.equal((await node.send('DELETE', '/api/stacks/made')).status, 404);
+  });
+
+  it('survives a restart, because it wrote the file', async () => {
+    const node = await editable();
+    after(() => node.close());
+    await node.send('PUT', '/api/stacks/made', {
+      title: 'Persisted',
+      sources: [{ category: 'one' }],
+    });
+
+    const reopened = new StackStore(node.dir);
+    await reopened.load();
+    assert.equal(reopened.get('made')?.title, 'Persisted');
+  });
+});
+
+describe('who may change a stack', () => {
+  const one = archive('d7'.repeat(20), 'one.pmtiles', ['one']);
+
+  /**
+   * A node that actually checks credentials.
+   * @param {string} role - The role the token carries.
+   * @returns {Promise<object>} - The node, and its token.
+   */
+  const guarded = async (role) => {
+    const token = generateToken();
+    const node = await serve(
+      [one],
+      [],
+      {},
+      {
+        config: {
+          auth: {
+            tokens: [
+              { id: 't', name: 'a token', role, hash: hashToken(token) },
+            ],
+          },
+        },
+      },
+    );
+    return { ...node, token };
+  };
+
+  const put = (node, token) =>
+    fetch(`${node.base}/api/stacks/made`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ sources: [{ category: 'one' }] }),
+    });
+
+  it('refuses to write without a credential', async () => {
+    const node = await guarded('admin');
+    after(() => node.close());
+    assert.equal((await put(node)).status, 401);
+  });
+
+  it('refuses a read-only peer, which is what the role is for', async () => {
+    // A peer is given the catalogue and the tiles so it can mirror this node.
+    // Writing a stack is not mirroring.
+    const node = await guarded('peer');
+    after(() => node.close());
+    assert.equal((await put(node, node.token)).status, 403);
+  });
+
+  it('lets an admin through', async () => {
+    const node = await guarded('admin');
+    after(() => node.close());
+    assert.equal((await put(node, node.token)).status, 200);
+  });
+
+  it('keeps the recipes off the public listener and the tiles on it', () => {
+    // A node with a split admin port answers 404 on the public one for
+    // anything not on this list. Tiles and TileJSON belong there -- serving
+    // them is the point -- and the recipes that produce them do not.
+    assert.equal(isPublicSurface('/stacks/x/tiles.json'), true);
+    assert.equal(isPublicSurface('/stacks/x/1/0/0.webp'), true);
+    assert.equal(isPublicSurface('/stacks/x/preview'), true);
+    assert.equal(isPublicSurface('/api/stacks'), false);
+    assert.equal(isPublicSurface('/api/stacks/x'), false);
+    assert.equal(isPublicSurface('/api/stacks/x/raw'), false);
   });
 });

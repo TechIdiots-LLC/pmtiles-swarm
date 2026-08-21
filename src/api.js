@@ -3137,6 +3137,58 @@ export function createApp({
   );
 
   /**
+   * Creates or replaces a stack.
+   *
+   * One route for both, because a stack is identified by the id in its own
+   * body rather than by where it was posted -- and an editor that saves an
+   * existing stack is doing the same thing as one that saves a new one.
+   */
+  /**
+   * The recipe as it is written, rather than what it resolved to.
+   *
+   * `/api/stacks` is a report: it says what each source became, which is what
+   * a list wants and exactly the wrong thing to load into an editor. Saving
+   * the report back would replace the recipe with a snapshot of one moment's
+   * resolution -- categories turned into the infohashes they happened to point
+   * at, which is the opposite of what naming a category was for.
+   */
+  app.get(
+    '/api/stacks/:id/raw',
+    route(async (req, res) => {
+      await stacks?.refresh();
+      const stack = stacks?.get(req.params.id);
+      if (!stack) return res.status(404).json({ error: 'no such stack' });
+      res.json({ stack, problems: stacks.problems(stack.id) });
+    }),
+  );
+
+  app.put(
+    '/api/stacks/:id',
+    route(async (req, res) => {
+      const stack = { ...req.body, id: req.params.id };
+      try {
+        await stacks.put(stack);
+      } catch (error) {
+        // The recipe is the caller's, so the problems go back rather than into
+        // a log. A form can put each one beside the field it belongs to.
+        return res
+          .status(error.status ?? 400)
+          .json({ error: error.message, problems: error.problems ?? [] });
+      }
+      res.json({ ok: true, stack });
+    }),
+  );
+
+  app.delete(
+    '/api/stacks/:id',
+    route(async (req, res) => {
+      const removed = await stacks.remove(req.params.id);
+      if (!removed) return res.status(404).json({ error: 'no such stack' });
+      res.json({ ok: true });
+    }),
+  );
+
+  /**
    * Looks a stack up and resolves it, or answers why it cannot be served.
    * @param {import('express').Request} req - The request.
    * @param {import('express').Response} res - The response.
