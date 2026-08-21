@@ -8,10 +8,11 @@ evaluated per request rather than baked into a file. Where
 an ordered list of them: bathymetry under terrain, hillshade over satellite, a
 regional lidar patch over a global DEM.
 
-This is the on-the-fly counterpart to the offline merge in rio-rgbify's
-`merge_sparse` branch. The pixel maths is the same and is deliberately kept the
-same, so a stack can be previewed live and then baked into a real archive
-without the two disagreeing. What the swarm adds is that a source is named by
+This is the on-the-fly counterpart to the offline merge in
+[rio-rgbify-merge](https://github.com/TechIdiots-LLC/rio-rgbify-merge)
+(`pip install rio-rgbify-merge`). The pixel maths is the same and is
+deliberately kept the same, so a stack can be previewed live and then baked into
+a real archive without the two disagreeing. What the swarm adds is that a source is named by
 _category_ rather than by path, so a stack keeps working across a rebuild of any
 of its parts.
 
@@ -22,7 +23,7 @@ of its parts.
 - [The two pixel spaces](#the-two-pixel-spaces)
 - [Naming a source](#naming-a-source)
 - [The config file](#the-config-file)
-- [Translating a rio-rgbify merge config](#translating-a-rio-rgbify-merge-config)
+- [Translating a rio-rgbify-merge config](#translating-a-rio-rgbify-merge-config)
 - [Evaluating one tile](#evaluating-one-tile)
 - [Resampling from a parent tile](#resampling-from-a-parent-tile)
 - [Where a stack stops](#where-a-stack-stops)
@@ -33,7 +34,7 @@ of its parts.
 - [TileJSON for a stack](#tilejson-for-a-stack)
 - [When a source will not answer](#when-a-source-will-not-answer)
 - [Baking a stack into an archive](#baking-a-stack-into-an-archive)
-- [Two bugs in the offline merge worth not inheriting](#two-bugs-in-the-offline-merge-worth-not-inheriting)
+- [What the offline merge got wrong](#what-the-offline-merge-got-wrong)
 - [Staging](#staging)
 - [Open questions](#open-questions)
 
@@ -59,7 +60,7 @@ The name "stack" rather than "composite" is only to stay out of the way of
 ## Painting order
 
 `sources` is listed **bottom to top**. The last entry wins wherever it has data,
-the way a painter's algorithm works and the way rio-rgbify's merge already
+the way a painter's algorithm works and the way rio-rgbify-merge already
 works.
 
 Photoshop's layer palette shows the reverse — topmost first — so anyone
@@ -113,7 +114,7 @@ rather than offline:
 
 `category` resolves through the same `newestIn` the `/latest/<category>/` routes
 use, so a stack over `{ "category": "terrain" }` picks up tomorrow's build with
-no edit. That is what a path in a rio-rgbify config cannot do.
+no edit. That is what a path in a rio-rgbify-merge config cannot do.
 
 `archive` pins content. Use it when a stack is a reference output that must not
 move — and accept that retention will eventually delete the build out from under
@@ -185,7 +186,7 @@ It is plain JSON with no comments, so the examples below copy straight in.
 ```
 
 Field naming is camelCase to match `swarm.config.json`, which is the only reason
-it differs from the snake_case rio-rgbify uses.
+it differs from the snake_case rio-rgbify-merge uses.
 
 ### Stack fields
 
@@ -225,11 +226,11 @@ source in it, and the thing that reliably gets lost when tiles are combined is
 who the data belongs to. If it is omitted, the implementation should concatenate
 the sources' own TileJSON `attribution` strings rather than emit nothing.
 
-## Translating a rio-rgbify merge config
+## Translating a rio-rgbify-merge config
 
 The config maps across one-for-one, with paths becoming categories:
 
-| rio-rgbify                        | stack                              | note                                                                         |
+| rio-rgbify-merge                  | stack                              | note                                                                         |
 | --------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------- |
 | `source_type: "mbtiles"`          | —                                  | the source's own kind decides; MBTiles works only from a complete local copy |
 | `sources[].path`                  | `sources[].category` or `.archive` | the substantive change                                                       |
@@ -479,7 +480,7 @@ new `.pmtiles` — which is then a real archive with a real infohash, torrented
 and seeded like any other, and the on-the-fly endpoint becomes the preview of
 what the bake will produce.
 
-That is rio-rgbify's actual job, done by the node that already holds the inputs,
+That is rio-rgbify-merge's actual job, done by the node that already holds the inputs,
 and the merge code is shared. It also inverts the cost argument completely: the
 swarm-read latency that makes on-the-fly stacking painful is irrelevant to a
 batch job that runs overnight.
@@ -488,33 +489,41 @@ Not in scope for the first version, but the merge implementation should be a
 pure function of (tile coordinate, source tiles) → tile bytes, so the bake is a
 different driver over the same core rather than a second implementation.
 
-## Two bugs in the offline merge worth not inheriting
+## What the offline merge got wrong
 
-Found while reading `merge_sparse` for this design. Both are in
-`rio_rgbify/merger.py` and both affect the offline tool today.
+All three are fixed in rio-rgbify-merge as of 2026-08-21, with tests. They are
+recorded here because the rules they produced are the ones this design follows,
+and because the third is the reason the painting order above is stated so
+insistently.
 
-**`height_adjustment` is applied twice.** `_decode_tile` does
-`elevation += source.height_adjustment`, and then `_merge_tiles` does
-`resampled_data += self.sources[i].height_adjustment` on the result. A source
-configured with `-5.0` is shifted by `-10.0`. It has not bitten the configs in
-use because they all set `0.0` or omit it, but `merge_example.json` advertises
-`-5.0` and `10.0`.
+**Layer priority was inverted.** `_merge_tiles` was changed in March 2026 so the
+_first_ source wins and later ones only fill its holes — the opposite of what the
+README, the shipped example config and every production config assume. The
+change was made to satisfy a test written the same day CI was introduced, which
+asserted the inverted behaviour from birth and was never checked against the
+fourteen months of code it contradicted. The implementation was bent to match the
+test rather than the other way round.
 
-**The sparse all-nodata check is dead code.** `_merge_tiles` substitutes
-`output_nodata` for NaN and _then_ tests `np.all(np.isnan(result))`, which by
-then can never be true. Reordering it does not make it fire either: the earlier
-`has_native_with_data` guard already returns for every input that would produce
-an all-NaN result, so the check is unreachable however it is ordered. It is
-worth keeping — the guard asks the stricter "is any source native here?" and the
-two are not interchangeable — but it is not a live safety net today, and the
-ordering is still the mistake described in
-[Deciding a tile is empty](#deciding-a-tile-is-empty).
+That is worth knowing here for two reasons. The order this document specifies is
+the documented one, not one branch's opinion. And a stack over
+`[coarse global, detailed regional]` under the inverted rule loses every zoom
+past the coarse source's maximum, because a missing tile falls back to a parent
+and the upscaled coarse tile keeps winning — which is exactly the failure
+[Where a stack stops](#where-a-stack-stops) is designed to avoid.
 
-Both are fixed on rio-rgbify's `merge_sparse` as of 2026-08-21, with tests. Note
-while doing so that `master` and `merge_sparse` **disagree on layer priority**:
-`merge_sparse` paints the last source over the others, which is what both
-READMEs describe, and `master` inverts it so the first source wins. The stack
-design follows the documented order.
+**`height_adjustment` was applied twice**, once in `_decode_tile` and again in
+`_merge_tiles`, so a source configured with `-5.0` shifted by `-10.0`. The fix
+keeps it at decode time, which is the only place it can go: mask values are
+compared against raw decoded heights, so shifting earlier stops them matching.
+That is why [Evaluating one tile](#evaluating-one-tile) masks before adjusting.
+
+**The sparse all-nodata check was dead code.** It ran after `output_nodata` had
+replaced every NaN, by which point none was left to find. Reordering does not
+make it fire either — `has_native_with_data` returns first for every input that
+would produce an all-NaN result — so it is unreachable however it is ordered. It
+was kept, correctly ordered, because that guard asks the stricter "is any source
+native here?" and the two are not interchangeable. The ordering rule it violated
+is [Deciding a tile is empty](#deciding-a-tile-is-empty).
 
 ## Staging
 
@@ -527,7 +536,7 @@ design follows the documented order.
    at all.
 3. **The codec module.** Probed, optional, decode and encode for png and webp.
 4. **Elevation space.** Decode, mask, float resample, paint, encode. The
-   rio-rgbify parity case, and the one that motivated this.
+   rio-rgbify-merge parity case, and the one that motivated this.
 5. **The tile cache.** With a size budget and eviction, plus the benchmark.
 6. **RGBA space.** Opacity and the separable blend modes.
 7. **Console.** Stack editor, preview, per-source swarm-read warnings.
