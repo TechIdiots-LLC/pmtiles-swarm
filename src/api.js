@@ -3091,6 +3091,7 @@ export function createApp({
   app.get(
     '/api/stacks',
     route(async (req, res) => {
+      await stacks?.refresh();
       const list = (stacks?.list() ?? []).map((stack) => {
         const resolved = resolveFor(stack, req);
         const coverage = stackCoverage(resolved);
@@ -3158,9 +3159,16 @@ export function createApp({
     return resolved;
   };
 
+  // The page works out which document to fetch from its own path, so a stack
+  // previews through the same file an archive and a category do.
+  app.get('/stacks/:id/preview', (_req, res) => {
+    res.sendFile(path.join(here, 'web', 'preview.html'));
+  });
+
   app.get(
     '/stacks/:id/tiles.json',
     route(async (req, res) => {
+      await stacks?.refresh();
       const resolved = stackOr404(req, res);
       if (!resolved) return;
 
@@ -3225,6 +3233,7 @@ export function createApp({
   app.get(
     '/stacks/:id/:z/:x/:y.:ext',
     route(async (req, res) => {
+      await stacks?.refresh();
       const resolved = stackOr404(req, res);
       if (!resolved) return;
 
@@ -3265,6 +3274,28 @@ export function createApp({
       res.on('close', () => {
         if (!res.writableEnded) controller.abort();
       });
+
+      // Counted the same way an archive's tiles are, and for the same reason:
+      // this handler ends in several places and one hook catches all of them.
+      // Recorded against the stack rather than whichever source answered --
+      // the traffic view is asking what this node serves, and what it serves
+      // here is the stack.
+      if (stats) {
+        const startedAt = process.hrtime.bigint();
+        res.on('finish', () => {
+          stats.record({
+            infoHash: `stack:${resolved.stack.id}`,
+            name: resolved.stack.title ?? resolved.stack.id,
+            z,
+            x,
+            y,
+            status: res.statusCode,
+            bytes: Number(res.getHeader('content-length')) || 0,
+            ms: Number(process.hrtime.bigint() - startedAt) / 1e6,
+            ip: req.ip,
+          });
+        });
+      }
 
       // Top down, because the last source in the recipe paints over the ones
       // before it — so the first one holding this tile is the answer, and

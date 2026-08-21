@@ -310,6 +310,8 @@ export class StackStore {
   #file;
   #stacks = new Map();
   #problems = new Map();
+  #mtime = null;
+  #checkedAt = 0;
 
   /**
    * Creates a store backed by a file.
@@ -333,8 +335,12 @@ export class StackStore {
     let raw;
     try {
       raw = JSON.parse(await fs.readFile(this.#file, 'utf8'));
+      this.#mtime = (await fs.stat(this.#file)).mtimeMs;
     } catch (error) {
-      if (error.code === 'ENOENT') return;
+      if (error.code === 'ENOENT') {
+        this.#mtime = null;
+        return;
+      }
       throw error;
     }
     for (const stack of raw.stacks ?? []) {
@@ -345,6 +351,31 @@ export class StackStore {
       this.#stacks.set(stack.id, stack);
       if (problems.length) this.#problems.set(stack.id, problems);
     }
+  }
+
+  /**
+   * Re-reads the file when it has changed on disk.
+   *
+   * Stacks are edited while the node runs -- that is the reason they are not in
+   * swarm.config.json, which is read once while the process starts. Noticing
+   * the change here rather than through a restart is what makes that true.
+   *
+   * Guarded twice: by the file's mtime, so an unchanged file is not parsed
+   * again, and by a one-second floor, so a map pulling two hundred tiles does
+   * not stat the same file two hundred times. Neither guard changes what is
+   * served, only how often the question is asked.
+   * @returns {Promise<boolean>} - Whether anything was re-read.
+   */
+  async refresh() {
+    const now = Date.now();
+    if (now - this.#checkedAt < 1000) return false;
+    this.#checkedAt = now;
+
+    const stat = await fs.stat(this.#file).catch(() => null);
+    const mtime = stat?.mtimeMs ?? null;
+    if (mtime === this.#mtime) return false;
+    await this.load();
+    return true;
   }
 
   /**

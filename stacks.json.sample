@@ -1,0 +1,12 @@
+{
+  "stacks": [
+    {
+      "id": "terrain",
+      "title": "Global terrain with a regional patch",
+      "sources": [
+        { "category": "gebco" },
+        { "category": "alps" }
+      ]
+    }
+  ]
+}

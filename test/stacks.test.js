@@ -134,6 +134,48 @@ describe('what a stack recipe has to say to be usable', () => {
   });
 });
 
+describe('noticing that the file changed', () => {
+  it('re-reads a stack edited while the node runs', async () => {
+    const dir = await fs.mkdtemp(path.join(workspace, 'reload-'));
+    const file = path.join(dir, 'stacks.json');
+    await fs.writeFile(
+      file,
+      JSON.stringify({ stacks: [{ id: 'one', sources: [{ category: 'a' }] }] }),
+    );
+    const store = new StackStore(dir);
+    await store.load();
+    assert.equal(store.list().length, 1);
+
+    // Stacks are edited while the node runs -- that is why they are not in
+    // swarm.config.json, which is only read at startup.
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        stacks: [
+          { id: 'one', sources: [{ category: 'a' }] },
+          { id: 'two', sources: [{ category: 'b' }] },
+        ],
+      }),
+    );
+    // Past the one-second floor that stops a map statting per tile.
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assert.equal(await store.refresh(), true);
+    assert.equal(store.list().length, 2);
+  });
+
+  it('does not re-read a file that has not changed', async () => {
+    const dir = await fs.mkdtemp(path.join(workspace, 'noreload-'));
+    await fs.writeFile(
+      path.join(dir, 'stacks.json'),
+      JSON.stringify({ stacks: [{ id: 'one', sources: [{ category: 'a' }] }] }),
+    );
+    const store = new StackStore(dir);
+    await store.load();
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assert.equal(await store.refresh(), false);
+  });
+});
+
 describe('what the passthrough path can and cannot do', () => {
   it('knows that a mask, a shift, an opacity or a blend needs pixels', () => {
     const base = { id: 'a', sources: [{ category: 'x' }] };
