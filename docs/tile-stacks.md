@@ -546,24 +546,24 @@ element tree — puts the topmost layer at the top of the list. An editor that
 renders the array in storage order would invert the mental model of every person
 who opens it, and dragging would do the opposite of what it looks like.
 
-So the editor reverses on load and reverses again on save. The two orderings are
-the same stack said twice, and worth seeing together at least once:
+The file keeps the order the merge configs already use: the base layer is
+written first, each source after it draws over the one before, and the last
+entry is the highest-priority one — usually the highest-resolution.
 
-```
-   the editor                              the file it saves
+The editor shows that list upside down, because a layers panel puts the top
+layer at the top. Same stack, opposite order:
 
-┌─ Layers ─────────────────────┐          "sources": [
-│ ⠿ planet-bathymetry  z0–z16  │ ── top ──▶  { "category": "gebco" },
-│ ⠿ gebco              z0–z8   │ ─ bottom ─▶ { "category": "planet-bathymetry" }
-└──────────────────────────────┘          ]
-                                          ▲ last in the file paints over
-```
+| In the editor, top first | In the file, bottom first | Covers        |
+| ------------------------ | ------------------------- | ------------- |
+| `planet-bathymetry`      | `sources[1]` — **last**   | everything    |
+| `gebco`                  | `sources[0]` — first      | the base only |
 
-Read either way it says one thing: **`planet-bathymetry` covers `gebco`**. It is
-at the top of the list because it is last in the file, and it is last in the
-file because the last source wins. Nobody editing the file by hand should be
-surprised to find the base layer written first, which is why
-[Painting order](#painting-order) says it there too.
+So the row at the top of the editor is the last line of the `sources` array, and
+the row at the bottom is the first. The editor reverses on load and reverses
+again on save; nothing else in the system sees anything but the file's order.
+
+Nobody editing the file by hand should be surprised to find the base written
+first, which is why [Painting order](#painting-order) says it there too.
 
 ### What a row shows without being clicked
 
