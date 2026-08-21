@@ -74,5 +74,8 @@
     "eslint-plugin-security": "^4.0.1",
     "globals": "^17.11.0",
     "prettier": "^3.9.6"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.35.3"
   }
 }

@@ -377,12 +377,19 @@ Three ways, none free:
   deflate plus five row filters, and both directions are a couple of hundred
   lines with no dependency at all. It does nothing for WebP.
 
-**Make the codec a probed, optional module, the way engines already are.** Prefer
-`sharp` when it is installed, fall back to the WASM codecs, and when neither is
-present let the stack routes answer 501 naming what to install. The base install
-stays exactly as heavy as it is now, and a node that wants stacks opts in. If
-PNG-only is acceptable for a first cut, the zlib route ships with nothing added
-at all.
+**Resolved: `sharp`, as a probed `optionalDependency`.** It is what tileserver-gl
+already uses for image work, so the same library covers both ends of this
+pipeline rather than two doing the same job differently. Probed once at first
+use, so a missing or unloadable build is a 501 naming what to install rather
+than a crash at startup — the base install stays as heavy as it was, and a node
+that only distributes archives never needs it.
+
+**Encoding terrain is lossless or it is nothing.** A terrain-RGB pixel is not a
+colour: the three channels are the three bytes of one height, so a lossy codec
+that shifts red by one does not degrade the picture, it moves the ground by 65
+kilometres. Measured over an ordinary gradient, lossy WebP is wrong by about
+125 km at worst while lossless is byte-exact. `lossless` therefore defaults to
+true and has to be turned off by name.
 
 Whichever is chosen, the resampling stays hand-rolled for elevation space — see
 [The two pixel spaces](#the-two-pixel-spaces). The codec is for decode and
@@ -662,7 +669,8 @@ still requested and still composited.
    resolve sources, `/api/stacks`, `/stacks/<id>/tiles.json`.
 2. ~~**Passthrough.**~~ Done. `/stacks/<id>/{z}/{x}/{y}.<ext>`, answered by the
    topmost source holding the tile. No codec involved.
-3. **The codec module.** Probed, optional, decode and encode for png and webp.
+3. ~~**The codec module.**~~ Done. `src/codec.js`: probed, optional, decode
+   and encode for png and webp, lossless by default.
 4. **Elevation space.** Decode, mask, float resample, paint, encode. The
    rio-rgbify-merge parity case, and the one that motivated this.
 5. **The tile cache.** With a size budget and eviction, plus the benchmark.

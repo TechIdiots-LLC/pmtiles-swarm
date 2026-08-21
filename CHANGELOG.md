@@ -21,6 +21,18 @@
   which this node does not have yet; approximating them would be worse than
   refusing. See docs/tile-stacks.md.
 
+- **A pixel codec, for the parts of a stack that are not passthrough.** `sharp`,
+  as an optional dependency probed at first use — the same library tileserver-gl
+  uses, so one image stack covers both ends of the pipeline. A node that only
+  distributes archives never needs it, and a node without it answers 501 naming
+  what to install rather than failing at the first tile.
+
+  Encoding is **lossless by default and has to be made lossy by name**. A
+  terrain-RGB pixel is not a colour: the three channels are the three bytes of
+  one height, so a lossy codec that shifts red by one moves the ground by 65
+  kilometres. Over an ordinary gradient, lossy WebP is wrong by about 125 km at
+  worst where lossless is byte-exact.
+
 ### 🐞 Bug fixes
 - **Two settings reported success and changed nothing.** `tiles` and `resumeSaveIntervalSeconds`
   are read while the process starts — the tile reader's directory cache when the store is
