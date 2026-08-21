@@ -500,14 +500,21 @@ configured with `-5.0` is shifted by `-10.0`. It has not bitten the configs in
 use because they all set `0.0` or omit it, but `merge_example.json` advertises
 `-5.0` and `10.0`.
 
-**The sparse all-nodata check is dead when `output_nodata` is set.**
-`_merge_tiles` substitutes `output_nodata` for NaN and _then_ tests
-`np.all(np.isnan(result))`, which by then can never be true. With
-`output_nodata: -10000` — the configuration actually in use — that branch never
-fires. The earlier `has_native_with_data` guard catches most of what it was for,
-so the practical effect is small, but it is the same ordering mistake described
-in [Deciding a tile is empty](#deciding-a-tile-is-empty), and the on-the-fly
-version should get it the right way round.
+**The sparse all-nodata check is dead code.** `_merge_tiles` substitutes
+`output_nodata` for NaN and _then_ tests `np.all(np.isnan(result))`, which by
+then can never be true. Reordering it does not make it fire either: the earlier
+`has_native_with_data` guard already returns for every input that would produce
+an all-NaN result, so the check is unreachable however it is ordered. It is
+worth keeping — the guard asks the stricter "is any source native here?" and the
+two are not interchangeable — but it is not a live safety net today, and the
+ordering is still the mistake described in
+[Deciding a tile is empty](#deciding-a-tile-is-empty).
+
+Both are fixed on rio-rgbify's `merge_sparse` as of 2026-08-21, with tests. Note
+while doing so that `master` and `merge_sparse` **disagree on layer priority**:
+`merge_sparse` paints the last source over the others, which is what both
+READMEs describe, and `master` inverts it so the first source wins. The stack
+design follows the documented order.
 
 ## Staging
 
