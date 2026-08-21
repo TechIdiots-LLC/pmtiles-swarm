@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { parseColor } from './elevation.js';
+import { BLEND_MODES, isBlendMode } from './rgba.js';
 
 /**
  * Stacks: several archives combined into one tile endpoint.
@@ -89,6 +90,11 @@ export function validateStack(stack) {
     }
     if (source?.maskValues !== undefined && !Array.isArray(source.maskValues)) {
       problems.push(`sources[${index}].maskValues must be a list`);
+    }
+    if (source?.blend !== undefined && !isBlendMode(source.blend)) {
+      problems.push(
+        `sources[${index}].blend must be one of ${BLEND_MODES.join(', ')}`,
+      );
     }
     if (source?.maskColors !== undefined) {
       if (!Array.isArray(source.maskColors)) {

@@ -505,8 +505,14 @@ describe('serving a stack', () => {
       ],
     );
     after(() => node.close());
-    const { stacks: list } = await (await node.get('/api/stacks')).json();
+    const body = await (await node.get('/api/stacks')).json();
+    const list = body.stacks;
     assert.equal(list.length, 3);
+    // Reported so the console can say "install sharp" beside the stacks that
+    // need one, rather than leaving a 501 to be found at the first tile. A
+    // fact about the node, not about any recipe -- passthrough stacks work
+    // either way.
+    assert.ok(body.codec === null || typeof body.codec === 'string');
     assert.ok(list.find((s) => s.id === 'broken').problems.length > 0);
     // Not a mistake, just not servable yet — reported apart from `problems`.
     assert.match(list.find((s) => s.id === 'masked').needsCodec, /maskValues/);

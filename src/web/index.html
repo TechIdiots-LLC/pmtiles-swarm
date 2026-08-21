@@ -413,6 +413,7 @@
       <nav>
         <button id="tab-archives" class="on">Archives</button>
         <button id="tab-categories">Categories</button>
+        <button id="tab-stacks" hidden>Stacks</button>
         <button id="tab-traffic">Traffic</button>
         <button id="tab-settings">Settings</button>
         <button id="logout" hidden>Sign out</button>
@@ -512,6 +513,15 @@
           No categories yet. Tag an archive when you add it, or from its detail
           panel, and it will appear here.
         </div>
+      </section>
+
+      <section id="view-stacks" hidden>
+        <div class="bar">
+          <button id="stacks-refresh">Refresh</button>
+          <span class="bar-gap"></span>
+          <span class="muted" id="stacks-where"></span>
+        </div>
+        <div id="stacks-list"></div>
       </section>
 
       <section id="view-traffic" hidden>
@@ -5748,13 +5758,24 @@ Every piece is hashed against the ` +
       }
 
       // ── Tabs ──────────────────────────────────────────────────────────────
+      // Once a node has shown stacks, the tab stays: a stack deleted while
+      // somebody is looking should not take the page they are on with it.
+      let stacksEverSeen = false;
+
       const showTab = (name) => {
-        for (const tab of ['archives', 'categories', 'traffic', 'settings']) {
+        for (const tab of [
+          'archives',
+          'categories',
+          'stacks',
+          'traffic',
+          'settings',
+        ]) {
           $(`view-${tab}`).hidden = tab !== name;
           $(`tab-${tab}`).classList.toggle('on', tab === name);
         }
         if (name === 'settings') loadSettings().catch((e) => toast(e.message));
         if (name === 'categories') loadCategories().catch((e) => toast(e.message));
+        if (name === 'stacks') loadStacks().catch((e) => toast(e.message));
         if (name === 'traffic') {
           loadTraffic().catch((e) => toast(e.message));
           loadSwarmTraffic();
@@ -5767,7 +5788,173 @@ Every piece is hashed against the ` +
 
       $('tab-archives').onclick = () => showTab('archives');
       $('tab-categories').onclick = () => showTab('categories');
+      $('tab-stacks').onclick = () => showTab('stacks');
+      // Asked once on load, only so the tab knows whether to appear.
+      loadStacks().catch(() => {});
       $('tab-traffic').onclick = () => showTab('traffic');
+
+      // ── Stacks ────────────────────────────────────────────────────────────
+      //
+      // Read-only for now: the recipes live in data/stacks.json and the node
+      // re-reads that file when it changes, so this shows what is there and
+      // why a stack is or is not working rather than offering to edit it.
+      // Editing is worth doing and is a larger thing than a list — see
+      // docs/tile-stacks.md, "The stack editor".
+      //
+      // Sources are listed in the file's order, first to last, with their
+      // indices beside them. A layers panel would normally invert that, and
+      // deliberately does not here: data/stacks.json is meant to be edited by
+      // hand, and two orders for one list costs a mental flip on every switch
+      // between the file and this screen — a flip that fails silently, because
+      // the map simply renders the coarse source over the detailed one.
+      const loadStacks = async () => {
+        const { stacks, codec } = await api('/api/stacks');
+        const list = $('stacks-list');
+        // Shown only where there is something to show. Deliberately keyed on
+        // having stacks rather than on having a codec: a passthrough stack --
+        // a regional archive over a global one -- needs no codec at all, and
+        // hiding the tab for a node without sharp would hide a feature that
+        // works there.
+        $('tab-stacks').hidden = stacks.length === 0 && !stacksEverSeen;
+        if (stacks.length) stacksEverSeen = true;
+        $('stacks-where').textContent = stacks.length
+          ? `${stacks.length} stack${stacks.length === 1 ? '' : 's'} in data/stacks.json`
+          : '';
+
+        if (!stacks.length) {
+          list.innerHTML =
+            '<p class="muted">No stacks. Add them to <code>data/stacks.json</code> — ' +
+            'see <code>stacks.json.sample</code>. Changes are picked up without a restart.</p>';
+          return;
+        }
+
+        const needing = stacks.filter((s) => s.needsCodec).length;
+        const banner =
+          !codec && needing
+            ? `<p class="banner">This node has no pixel codec, so ${needing} of these
+               ${needing === 1 ? 'stacks answers' : 'stacks answer'} 501 for their tiles.
+               <code>npm install sharp</code> to enable them. The rest are passthrough
+               and work without it.</p>`
+            : '';
+        list.innerHTML = banner + stacks.map(renderStack).join('');
+      };
+
+      /**
+       * One stack: what it is, what is wrong with it, and what it is made of.
+       * @param {object} stack - A row from /api/stacks.
+       * @returns {string} - HTML.
+       */
+      const renderStack = (stack) => {
+        const broken = stack.problems.length > 0;
+        const unresolved = stack.sources.filter((s) => !s.resolved);
+
+        // Three different things, deliberately not merged into one badge. A
+        // problem is a mistake in the recipe; needsCodec is a recipe that is
+        // fine and cannot be served here; an unresolved source is a recipe
+        // that is fine and whose inputs are missing. They call for different
+        // actions from whoever is looking.
+        const badges = [];
+        if (broken) badges.push('<span class="pill bad">invalid</span>');
+        if (unresolved.length) {
+          badges.push('<span class="pill warn">sources missing</span>');
+        }
+        if (stack.needsCodec) {
+          badges.push('<span class="pill warn">needs a codec</span>');
+        }
+        if (stack.pinned) badges.push('<span class="pill">pinned</span>');
+
+        const zooms =
+          stack.minzoom === null || stack.maxzoom === null
+            ? ''
+            : `z${stack.minzoom}–z${stack.maxzoom}`;
+
+        const links = broken
+          ? ''
+          : `<a href="/stacks/${encodeURIComponent(stack.id)}/preview" target="_blank" rel="noreferrer">
+               <button type="button">Preview</button></a>
+             <a href="/stacks/${encodeURIComponent(stack.id)}/tiles.json" target="_blank" rel="noreferrer">
+               <button type="button">TileJSON</button></a>`;
+
+        return `
+          <div class="card">
+            <div class="row">
+              <strong>${escapeHtml(stack.title)}</strong>
+              <code class="muted">${escapeHtml(stack.id)}</code>
+              <span class="pill">${escapeHtml(stack.space)}</span>
+              ${zooms ? `<span class="muted">${zooms}</span>` : ''}
+              ${badges.join(' ')}
+              <span class="bar-gap"></span>
+              ${links}
+            </div>
+            ${
+              broken
+                ? `<ul class="bad">${stack.problems
+                    .map((p) => `<li>${escapeHtml(p)}</li>`)
+                    .join('')}</ul>`
+                : ''
+            }
+            ${
+              stack.needsCodec
+                ? `<p class="muted">Serving this means decoding pixels
+                   (<code>${escapeHtml(stack.needsCodec)}</code>). Without
+                   <code>sharp</code> installed, its tiles answer 501.</p>`
+                : ''
+            }
+            <table class="tight">
+              <thead>
+                <tr><th>#</th><th>Source</th><th>Resolves to</th><th>Zooms</th><th></th></tr>
+              </thead>
+              <tbody>
+                ${stack.sources.map(renderStackSource).join('')}
+              </tbody>
+            </table>
+            <p class="muted">
+              Listed in the file's order: the first is the base, each one covers
+              the one before it wherever it has data, and the last wins.
+            </p>
+          </div>`;
+      };
+
+      /**
+       * One source row.
+       * @param {object} source - A source from /api/stacks.
+       * @param {number} index - Its position, which is its priority.
+       * @param {object[]} all - Every source, to know which one is last.
+       * @returns {string} - HTML.
+       */
+      const renderStackSource = (source, index, all) => {
+        const kind = source.pinned ? 'archive' : 'category';
+        const zooms =
+          source.minzoom === null
+            ? '<span class="muted">—</span>'
+            : `z${source.minzoom}–z${source.maxzoom}`;
+
+        const notes = [];
+        if (index === all.length - 1 && all.length > 1) {
+          notes.push('<span class="pill">wins</span>');
+        }
+        if (index === 0 && all.length > 1) {
+          notes.push('<span class="pill">base</span>');
+        }
+        if (source.required) notes.push('<span class="pill">required</span>');
+
+        return `
+          <tr${source.resolved ? '' : ' class="bad"'}>
+            <td class="muted">${index}</td>
+            <td><code>${escapeHtml(source.name)}</code>
+                <span class="muted">${kind}</span></td>
+            <td>${
+              source.resolved
+                ? `<code class="muted">${escapeHtml(source.archiveName ?? '')}</code>`
+                : '<span class="bad">does not resolve</span>'
+            }</td>
+            <td>${zooms}</td>
+            <td>${notes.join(' ')}</td>
+          </tr>`;
+      };
+
+      $('stacks-refresh').onclick = () =>
+        loadStacks().catch((e) => toast(e.message));
 
       // ── Traffic ───────────────────────────────────────────────────────────
       //

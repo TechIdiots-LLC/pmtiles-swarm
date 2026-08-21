@@ -1,10 +1,10 @@
 # Tile stacks
 
-**Status: stages 1 to 5 are implemented.** Elevation stacks work: a recipe is
+**Status: stages 1 to 6 are implemented, and 7 in part.** Elevation stacks work: a recipe is
 defined, resolved and served, and a source is masked, shifted, resampled from a
 parent and painted in order. Merged tiles are cached on disk against a
-byte budget. What remains design is RGBA blending (stage 6) and the editor
-(stage 7). A node with no codec installed
+byte budget, and image stacks composite with opacity and blend modes. The
+console lists stacks and diagnoses them; editing them there is still design. A node with no codec installed
 still serves the passthrough case and answers 501 for the rest.
 
 A stack is a recipe for combining several archives into one tile endpoint,
@@ -562,6 +562,15 @@ the fields differ per source. Hand-editing `data/stacks.json` works and should
 keep working; the console's job is to make the order legible and the per-source
 settings discoverable.
 
+The console has a **Stacks** view already. It lists every stack with what each
+source resolved to, the zooms each covers, and why one cannot be served —
+reading rather than editing, which is the smaller half of this section and the
+half that exists. The tab hides itself on a node with no stacks, and keys that
+on having stacks rather than on having a codec: a passthrough stack needs no
+codec, so hiding it there would hide something that works.
+
+What follows is the editing half, which does not exist yet.
+
 ### The list is shown in the file's order
 
 `sources` is a priority list: the base is written first, each entry after it
@@ -683,9 +692,11 @@ still requested and still composited.
    colour, float resample from a parent, blur, paint, encode.
 5. ~~**The tile cache.**~~ Done. `src/stack-cache.js`: merged tiles on disk,
    with a byte budget, LRU eviction and single-flight.
-6. **RGBA space.** Opacity and the separable blend modes.
-7. **Console.** The stack editor, per‑source settings and the preview. See
-   [The stack editor](#the-stack-editor).
+6. ~~**RGBA space.**~~ Done. `src/rgba.js`: opacity, the separable blend
+   modes, colour masking and alpha-correct resampling.
+7. **Console.** A Stacks view exists, listing every stack with what each source
+   resolved to and why one cannot be served. It reads rather than edits; the
+   editor in [The stack editor](#the-stack-editor) is still design.
 8. **Bake.** Whole-pyramid run to a new `.pmtiles`, published like any other.
 
 Stages 1 and 2 are worth doing on their own even if the rest waits: a

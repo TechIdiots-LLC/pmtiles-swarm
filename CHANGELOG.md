@@ -79,6 +79,32 @@
   same rule tileserver-gl reads. A stack can set `sparse: false` to answer 204
   instead.
 
+- **Image stacks composite, with opacity and blend modes.** `space: "rgba"`
+  treats a tile as what it looks like rather than as packed numbers: each source
+  carries an `opacity` and a `blend` (`normal`, `multiply`, `screen`, `overlay`,
+  `darken`, `lighten`), and `maskColors` clears coverage so what is underneath
+  shows through. Hillshade over satellite is the case it exists for.
+
+  The W3C compositing model in full, not the source-over shortcut — the shortcut
+  is only correct when the backdrop is opaque, and a hillshade over a satellite
+  tile with transparent edges is exactly where that shows. Resampling from a
+  parent interpolates with alpha premultiplied, which is what stops a
+  transparent pixel dragging its colour into its neighbours and ringing
+  everything with a dark halo.
+
+  Terrain stays lossless; imagery may be compressed as a picture, which is the
+  only place the two spaces disagree about encoding.
+
+- **A Stacks view in the console.** Every stack, what each source resolved to,
+  the zooms each covers, and — kept apart, because they call for different
+  things — what is invalid in a recipe, what cannot be served without a codec,
+  and whose sources are missing. Sources are listed in the file's order with
+  their indices, so the screen and `data/stacks.json` never disagree.
+
+  The tab hides itself on a node with no stacks, keyed on that rather than on
+  having a codec: a passthrough stack needs none, so hiding it there would hide
+  a feature that works.
+
 ### 🐞 Bug fixes
 - **Two settings reported success and changed nothing.** `tiles` and `resumeSaveIntervalSeconds`
   are read while the process starts — the tile reader's directory cache when the store is

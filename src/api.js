@@ -38,6 +38,7 @@ import { TileReadError } from './tiles.js';
 import { loadCodec } from './codec.js';
 import { StackCache } from './stack-cache.js';
 import { encodeHeights, fillNodata, mergeElevation } from './elevation.js';
+import { compositeRgba, toRaster } from './rgba.js';
 import {
   isPinned,
   needsCodec,
@@ -3127,7 +3128,11 @@ export function createApp({
           })),
         };
       });
-      res.json({ stacks: list });
+      // Reported so the console can say "install sharp" beside the stacks
+      // that need it, rather than leaving a 501 to be discovered at the first
+      // tile. Null is a fact about this node, not about the recipes.
+      const codec = await loadCodec();
+      res.json({ stacks: list, codec: codec?.name ?? null });
     }),
   );
 
@@ -3448,6 +3453,7 @@ export function createApp({
       // routinely, and a merge is expensive enough per tile -- a read of every
       // source, a decode each, then an encode -- that doing it four times over
       // is worth the indirection.
+      const rgba = resolved.stack.space === 'rgba';
       const produce = async () => {
         const said = [];
 
@@ -3497,7 +3503,7 @@ export function createApp({
             source: read.source.source,
             parentZ: read.found.parentZ,
             raster: await codec.decode(Buffer.from(read.found.tile.data), {
-              channels: 3,
+              channels: rgba ? 4 : 3,
             }),
           });
         }
@@ -3505,31 +3511,49 @@ export function createApp({
         const first = contributions.find(Boolean);
         if (!first) return { said, empty: true };
         const size = first.raster.width;
-
-        const merged = mergeElevation(contributions, {
-          z,
-          x,
-          y,
-          size,
-          gaussianBlurSigma: resolved.stack.gaussianBlurSigma,
-        });
-        // Nothing covered this tile, so there is none worth sending. The
-        // client overzooms a lower one, which is cheaper and better looking
-        // than a slab of nodata.
-        if (!merged) return { said, empty: true };
-
         const output = resolved.stack.output ?? {};
-        fillNodata(merged, output.nodata);
-        const raster = encodeHeights(merged, {
-          width: size,
-          height: size,
-          encoding: output.encoding ?? first.source?.encoding,
-          baseVal: output.baseVal,
-          interval: output.interval,
+
+        // The two spaces differ only here. Everything around this -- reading,
+        // the parent fallback, the cache, the headers -- is the same either
+        // way, which is why they are one route rather than two.
+        let raster;
+        if (rgba) {
+          const composited = compositeRgba(contributions, { z, x, y });
+          if (!composited) return { said, empty: true };
+          // Alpha is kept unless the recipe asks for a flat tile. A stack
+          // whose top layer is masked has transparency by construction, and
+          // dropping it would paint the mask black.
+          raster = toRaster(composited, output.alpha !== false);
+        } else {
+          const merged = mergeElevation(contributions, {
+            z,
+            x,
+            y,
+            size,
+            gaussianBlurSigma: resolved.stack.gaussianBlurSigma,
+          });
+          // Nothing covered this tile, so there is none worth sending. The
+          // client overzooms a lower one, which is cheaper and better looking
+          // than a slab of nodata.
+          if (!merged) return { said, empty: true };
+          fillNodata(merged, output.nodata);
+          raster = encodeHeights(merged, {
+            width: size,
+            height: size,
+            encoding: output.encoding ?? first.source?.encoding,
+            baseVal: output.baseVal,
+            interval: output.interval,
+          });
+        }
+        // Terrain is lossless or it is nothing: the three channels are the
+        // three bytes of one height, so a codec that shifts red by one moves
+        // the ground by 65 kilometres. Imagery is a picture and may be
+        // compressed as one, which is the only place the two spaces disagree
+        // about encoding.
+        const body = await codec.encode(raster, {
+          format,
+          lossless: rgba ? output.lossless === true : true,
         });
-        // Never lossy. The three channels are the three bytes of one height,
-        // so a codec that shifts red by one moves the ground by 65 kilometres.
-        const body = await codec.encode(raster, { format, lossless: true });
 
         // Awaited, though it is tempting not to be. The write is a local disk
         // write of a few tens of kilobytes against a merge that just read
