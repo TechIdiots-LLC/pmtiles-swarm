@@ -335,10 +335,23 @@ there is nothing left to test.
 
 ## The codec problem
 
-This is the one thing that stops a stack being a small feature. pmtiles-swarm
-has no image dependency at all today — it moves opaque tile bytes and never
-looks inside one. Compositing means decoding and encoding PNG and WebP, and the
-archives that motivate this are `_cubic_webp`.
+This is the one thing that stops a stack being a small feature, and it is
+narrower than "the node cannot handle tiles". It already does, in most of the
+ways a stack needs:
+
+- `identify.js` reads an archive's magic bytes; the prober reads PMTiles
+  headers, directories and metadata; `mbtiles.js` queries tile rows out of
+  SQLite.
+- `TileStore.getTile` resolves an archive, reads a tile through the local file
+  or the swarm, and knows its format from the header rather than by guessing.
+- The tile route already gzips vector tiles through `node:zlib`, abandons a
+  read when the client goes away, and records the outcome to the stats hook.
+
+Hang a stack off `getTile` and every one of those comes with it. The single
+thing missing is a **pixel** codec: nothing in the project decodes a tile's
+contents into a raster, because nothing has needed to. Compositing does, in
+both directions, and the archives that motivate this are `_cubic_webp` — so
+that is a new dependency of a kind the project has so far avoided.
 
 Three ways, none free:
 
