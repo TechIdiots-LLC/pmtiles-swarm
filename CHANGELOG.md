@@ -101,9 +101,9 @@
   and whose sources are missing. Sources are listed in the file's order with
   their indices, so the screen and `data/stacks.json` never disagree.
 
-  The tab hides itself on a node with no stacks, keyed on that rather than on
-  having a codec: a passthrough stack needs none, so hiding it there would hide
-  a feature that works.
+  The tab is always present, including on a node with no stacks — that is where
+  a stack gets made, so hiding it until one exists would make the first one
+  unreachable. An empty state says what a stack is and how to add one.
 
 ### 🐞 Bug fixes
 - **Two settings reported success and changed nothing.** `tiles` and `resumeSaveIntervalSeconds`

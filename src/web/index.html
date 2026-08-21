@@ -413,7 +413,7 @@
       <nav>
         <button id="tab-archives" class="on">Archives</button>
         <button id="tab-categories">Categories</button>
-        <button id="tab-stacks" hidden>Stacks</button>
+        <button id="tab-stacks">Stacks</button>
         <button id="tab-traffic">Traffic</button>
         <button id="tab-settings">Settings</button>
         <button id="logout" hidden>Sign out</button>
@@ -5758,10 +5758,6 @@ Every piece is hashed against the ` +
       }
 
       // ── Tabs ──────────────────────────────────────────────────────────────
-      // Once a node has shown stacks, the tab stays: a stack deleted while
-      // somebody is looking should not take the page they are on with it.
-      let stacksEverSeen = false;
-
       const showTab = (name) => {
         for (const tab of [
           'archives',
@@ -5808,21 +5804,27 @@ Every piece is hashed against the ` +
       const loadStacks = async () => {
         const { stacks, codec } = await api('/api/stacks');
         const list = $('stacks-list');
-        // Shown only where there is something to show. Deliberately keyed on
-        // having stacks rather than on having a codec: a passthrough stack --
-        // a regional archive over a global one -- needs no codec at all, and
-        // hiding the tab for a node without sharp would hide a feature that
-        // works there.
-        $('tab-stacks').hidden = stacks.length === 0 && !stacksEverSeen;
-        if (stacks.length) stacksEverSeen = true;
         $('stacks-where').textContent = stacks.length
           ? `${stacks.length} stack${stacks.length === 1 ? '' : 's'} in data/stacks.json`
           : '';
 
         if (!stacks.length) {
-          list.innerHTML =
-            '<p class="muted">No stacks. Add them to <code>data/stacks.json</code> — ' +
-            'see <code>stacks.json.sample</code>. Changes are picked up without a restart.</p>';
+          list.innerHTML = `
+            <div class="card">
+              <p><strong>No stacks yet.</strong> A stack serves several archives as one
+                 tile endpoint — a regional archive over a global one, or terrain over
+                 bathymetry.</p>
+              <p class="muted">Add them to <code>data/stacks.json</code>; there is a
+                 <code>stacks.json.sample</code> beside the config to copy. The node
+                 re-reads the file when it changes, so no restart is needed.</p>
+              ${
+                codec
+                  ? ''
+                  : `<p class="muted">This node has no pixel codec. Stacks that only pick
+                     whichever source has the tile work anyway; masking, blending and
+                     re-encoding need <code>npm install sharp</code>.</p>`
+              }
+            </div>`;
           return;
         }
 
@@ -5953,12 +5955,6 @@ Every piece is hashed against the ` +
 
       $('stacks-refresh').onclick = () =>
         loadStacks().catch((e) => toast(e.message));
-
-      // Asked once on load, only so the tab knows whether to appear at all.
-      // Below the definition rather than beside the other tab handlers: these
-      // are `const`, so calling one from above it is a ReferenceError rather
-      // than a hoisted no-op, and it takes the whole console down with it.
-      loadStacks().catch(() => {});
 
       // ── Traffic ───────────────────────────────────────────────────────────
       //

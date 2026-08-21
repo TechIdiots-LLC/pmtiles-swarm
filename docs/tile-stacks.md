@@ -565,9 +565,14 @@ settings discoverable.
 The console has a **Stacks** view already. It lists every stack with what each
 source resolved to, the zooms each covers, and why one cannot be served —
 reading rather than editing, which is the smaller half of this section and the
-half that exists. The tab hides itself on a node with no stacks, and keys that
-on having stacks rather than on having a codec: a passthrough stack needs no
-codec, so hiding it there would hide something that works.
+half that exists.
+
+The tab is always there, including on a node with no stacks. It was briefly
+hidden in that case and should not have been: this view is where a stack gets
+made, so hiding it until one exists makes the first one unreachable. An empty
+state says what a stack is and how to add one instead. It is not conditioned on
+having a codec either — a passthrough stack needs none, and a node without
+`sharp` can still build and serve one.
 
 What follows is the editing half, which does not exist yet.
 
