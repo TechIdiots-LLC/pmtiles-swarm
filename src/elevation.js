@@ -1,0 +1,369 @@
+/**
+ * Merging terrain tiles, in metres rather than in pixels.
+ *
+ * Every function here works on a `Float32Array` of heights, one per pixel, with
+ * `NaN` meaning "no data here". That is the whole design decision: terrain-RGB
+ * packs one height into three channels, so the red byte is the most significant
+ * eight bits of a number. Blending, resampling or averaging those channels as
+ * if they were a colour interpolates across byte boundaries and produces cliffs
+ * wherever the encoding carries — a mountain range where two tiles meet.
+ *
+ * So the tile is decoded to metres once, everything happens there, and it is
+ * encoded once at the end. See docs/tile-stacks.md — "The two pixel spaces".
+ */
+
+/** Mapbox Terrain-RGB defaults, and what rio-rgbify-merge uses. */
+const MAPBOX = { baseVal: -10000, interval: 0.1 };
+
+/** Terrarium packs its height differently and has no parameters. */
+const TERRARIUM_OFFSET = 32768;
+
+/**
+ * Decodes a raster into heights.
+ * @param {object} raster - Raw samples from the codec.
+ * @param {object} [source] - encoding, baseVal, interval.
+ * @returns {Float32Array} - Metres, one per pixel.
+ */
+export function decodeHeights(raster, source = {}) {
+  const { data, width, height, channels } = raster;
+  const out = new Float32Array(width * height);
+  const terrarium = source.encoding === 'terrarium';
+  const baseVal = source.baseVal ?? MAPBOX.baseVal;
+  const interval = source.interval ?? MAPBOX.interval;
+
+  for (let i = 0; i < out.length; i += 1) {
+    const at = i * channels;
+    const r = data[at];
+    const g = data[at + 1];
+    const b = data[at + 2];
+    out[i] = terrarium
+      ? r * 256 + g + b / 256 - TERRARIUM_OFFSET
+      : baseVal + (r * 65536 + g * 256 + b) * interval;
+  }
+  return out;
+}
+
+/**
+ * Encodes heights back into a raster.
+ *
+ * Clamped rather than allowed to wrap. A height outside what three bytes can
+ * carry is a bug upstream, but wrapping turns it into a plausible-looking
+ * height somewhere else entirely, which is far harder to see than a plateau.
+ * @param {Float32Array} heights - Metres, NaN for no data.
+ * @param {object} options - width, height, encoding, baseVal, interval.
+ * @returns {object} - A raster the codec can encode.
+ */
+export function encodeHeights(heights, options) {
+  const { width, height } = options;
+  const terrarium = options.encoding === 'terrarium';
+  const baseVal = options.baseVal ?? MAPBOX.baseVal;
+  const interval = options.interval ?? MAPBOX.interval;
+  const data = Buffer.alloc(width * height * 3);
+
+  for (let i = 0; i < heights.length; i += 1) {
+    const metres = heights[i];
+    const at = i * 3;
+    if (terrarium) {
+      const value = Math.min(65535.99, Math.max(0, metres + TERRARIUM_OFFSET));
+      const whole = Math.floor(value);
+      data[at] = Math.floor(whole / 256);
+      data[at + 1] = whole % 256;
+      data[at + 2] = Math.floor((value - whole) * 256);
+    } else {
+      const raw = Math.round((metres - baseVal) / interval);
+      const value = Math.min(0xffffff, Math.max(0, raw));
+      data[at] = (value >> 16) & 255;
+      data[at + 1] = (value >> 8) & 255;
+      data[at + 2] = value & 255;
+    }
+  }
+  return { data, width, height, channels: 3 };
+}
+
+/**
+ * Blanks the heights a source uses to mean "nothing here".
+ *
+ * Compared exactly, which is why this has to run before any height adjustment:
+ * the values in a config (`-10000`, `0`, `-1`, `-0.1`) are the numbers the
+ * encoding produces, and shifting the terrain first leaves none of them
+ * matching anything. Decoding lands on exact multiples of the interval, so
+ * equality is the right comparison and a tolerance would mask real ground.
+ * @param {Float32Array} heights - Metres, modified in place.
+ * @param {number[]} [maskValues] - Heights meaning no data.
+ * @returns {Float32Array} - The same array.
+ */
+export function maskHeights(heights, maskValues) {
+  if (!maskValues?.length) return heights;
+  // Rounded to the nearest thousandth before comparing. Decoding produces
+  // base + n * interval in floating point, so a mask of -0.1 meets a decoded
+  // -0.09999999999763531 and exact equality alone would never fire.
+  const wanted = new Set(maskValues.map((value) => Math.round(value * 1000)));
+  for (let i = 0; i < heights.length; i += 1) {
+    if (wanted.has(Math.round(heights[i] * 1000))) heights[i] = Number.NaN;
+  }
+  return heights;
+}
+
+/**
+ * Reads one colour from a recipe into a packed 24-bit value.
+ *
+ * Accepts `"#rrggbb"`, `"rrggbb"` and `[r, g, b]`, because a colour is the one
+ * field here somebody will want to paste from an image editor.
+ * @param {string|number[]} value - The colour.
+ * @returns {number | null} - Packed RGB, or null when unreadable.
+ */
+export function parseColor(value) {
+  if (Array.isArray(value)) {
+    if (value.length < 3) return null;
+    const [r, g, b] = value.map(Number);
+    if (![r, g, b].every((c) => Number.isInteger(c) && c >= 0 && c <= 255)) {
+      return null;
+    }
+    return (r << 16) | (g << 8) | b;
+  }
+  if (typeof value !== 'string') return null;
+  const hex = value.trim().replace(/^#/, '');
+  if (!/^[0-9a-f]{6}$/i.test(hex)) return null;
+  return Number.parseInt(hex, 16);
+}
+
+/**
+ * Blanks the heights whose pixel is one of a source's nodata colours.
+ *
+ * A second way to say "nothing here", and the exact one. A height mask has to
+ * round before comparing, because decoding produces `base + n * interval` in
+ * floating point; a colour mask compares the bytes that were actually stored,
+ * so it matches or it does not.
+ *
+ * Worth having because not every DEM encodes its nodata as a height. Some
+ * carry a sentinel colour -- pure black, pure white, a magenta -- that decodes
+ * to whatever that triple happens to mean and is far easier to name as itself
+ * than as the height it accidentally becomes.
+ * @param {Float32Array} heights - Metres, modified in place.
+ * @param {object} raster - The samples the heights were decoded from.
+ * @param {Array<string|number[]>} [maskColors] - Colours meaning no data.
+ * @returns {Float32Array} - The same array.
+ */
+export function maskColors(heights, raster, maskColors) {
+  if (!maskColors?.length) return heights;
+  const wanted = new Set(
+    maskColors.map((colour) => parseColor(colour)).filter((c) => c !== null),
+  );
+  if (!wanted.size) return heights;
+
+  const { data, channels } = raster;
+  for (let i = 0; i < heights.length; i += 1) {
+    const at = i * channels;
+    const packed = (data[at] << 16) | (data[at + 1] << 8) | data[at + 2];
+    if (wanted.has(packed)) heights[i] = Number.NaN;
+  }
+  return heights;
+}
+
+/**
+ * Samples a parent tile's heights into a child tile's grid.
+ *
+ * Both tiles are web mercator squares, so despite what rio-rgbify-merge's
+ * `rasterio.reproject` call implies there is no reprojection to do: the child
+ * occupies one sub-square of the parent, and this is a crop and a scale. The
+ * sub-square is at `(x, y) mod 2^d` in tile space, which is the whole of the
+ * geometry.
+ *
+ * Bilinear, and NaN-aware: a sample with no data contributes nothing rather
+ * than poisoning its three neighbours. Without that, one masked pixel in a
+ * parent would erase a four-pixel block in every child, and a coastline would
+ * grow by a pixel at every zoom level it was upscaled through.
+ * @param {Float32Array} heights - The parent's heights.
+ * @param {number} size - Pixels per side, both tiles.
+ * @param {object} tile - z, x, y of the target, and parentZ.
+ * @returns {Float32Array} - The target's heights.
+ */
+export function resampleFromParent(heights, size, tile) {
+  const d = tile.z - tile.parentZ;
+  if (d <= 0) return heights;
+
+  const span = 2 ** d;
+  const sub = size / span;
+  const originX = (tile.x % span) * sub;
+  const originY = (tile.y % span) * sub;
+  const out = new Float32Array(size * size);
+
+  for (let ty = 0; ty < size; ty += 1) {
+    // The centre of the target pixel, expressed in the parent's grid.
+    const sy = originY + ((ty + 0.5) * sub) / size - 0.5;
+    const y0 = Math.floor(sy);
+    const fy = sy - y0;
+    for (let tx = 0; tx < size; tx += 1) {
+      const sx = originX + ((tx + 0.5) * sub) / size - 0.5;
+      const x0 = Math.floor(sx);
+      const fx = sx - x0;
+
+      let total = 0;
+      let weight = 0;
+      for (let dy = 0; dy <= 1; dy += 1) {
+        const py = Math.min(size - 1, Math.max(0, y0 + dy));
+        const wy = dy ? fy : 1 - fy;
+        for (let dx = 0; dx <= 1; dx += 1) {
+          const px = Math.min(size - 1, Math.max(0, x0 + dx));
+          const value = heights[py * size + px];
+          if (Number.isNaN(value)) continue;
+          const w = wy * (dx ? fx : 1 - fx);
+          total += value * w;
+          weight += w;
+        }
+      }
+      out[ty * size + tx] = weight > 0 ? total / weight : Number.NaN;
+    }
+  }
+  return out;
+}
+
+/**
+ * Smooths heights, in proportion to how far they were upscaled.
+ *
+ * An unsmoothed 64× upscale of a DEM renders as visible terracing under a
+ * hillshade — the steps of the parent's pixel grid, lit from the side. rio-
+ * rgbify-merge scales its sigma by the zoom distance for the same reason, so a
+ * tile taken from its immediate parent is barely touched and one taken from six
+ * levels up is smoothed hard.
+ *
+ * Separable, and NaN-aware for the same reason the resample is: a blur that
+ * spread no-data outwards would eat a coastline.
+ * @param {Float32Array} heights - Metres, NaN for no data.
+ * @param {number} size - Pixels per side.
+ * @param {number} sigma - Standard deviation in pixels. Zero does nothing.
+ * @returns {Float32Array} - The smoothed heights.
+ */
+export function blurHeights(heights, size, sigma) {
+  if (!(sigma > 0)) return heights;
+  const radius = Math.max(1, Math.ceil(sigma * 3));
+  const kernel = new Float64Array(radius * 2 + 1);
+  for (let i = -radius; i <= radius; i += 1) {
+    kernel[i + radius] = Math.exp(-(i * i) / (2 * sigma * sigma));
+  }
+
+  /**
+   * One separable pass.
+   * @param {Float32Array} input - Source heights.
+   * @param {boolean} horizontal - Direction of the pass.
+   * @returns {Float32Array} - Blurred heights.
+   */
+  const pass = (input, horizontal) => {
+    const out = new Float32Array(input.length);
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        let total = 0;
+        let weight = 0;
+        for (let k = -radius; k <= radius; k += 1) {
+          const px = horizontal ? Math.min(size - 1, Math.max(0, x + k)) : x;
+          const py = horizontal ? y : Math.min(size - 1, Math.max(0, y + k));
+          const value = input[py * size + px];
+          if (Number.isNaN(value)) continue;
+          const w = kernel[k + radius];
+          total += value * w;
+          weight += w;
+        }
+        out[y * size + x] = weight > 0 ? total / weight : Number.NaN;
+      }
+    }
+    return out;
+  };
+
+  return pass(pass(heights, true), false);
+}
+
+/**
+ * Paints contributions in order, later ones covering earlier ones.
+ *
+ * `sources` is a priority list: the base is first, each entry covers the one
+ * before it wherever it has data, and the last wins. What shows through from
+ * underneath is whatever the entry above masked or never had — which is the
+ * arrangement the whole feature exists for, and the one an inverted mask
+ * silently destroys.
+ * @param {Float32Array[]} layers - Heights, in the recipe's order.
+ * @returns {Float32Array | null} - The merged heights, or null when empty.
+ */
+export function paintHeights(layers) {
+  let result = null;
+  for (const layer of layers) {
+    if (!layer) continue;
+    if (!result) {
+      result = Float32Array.from(layer);
+      continue;
+    }
+    for (let i = 0; i < result.length; i += 1) {
+      const value = layer[i];
+      if (!Number.isNaN(value)) result[i] = value;
+    }
+  }
+  // Decided on the heights themselves, before any nodata is substituted in.
+  // Once nodata has been written every pixel holds a real value and there is
+  // nothing left to test -- the ordering mistake rio-rgbify-merge made, and
+  // the reason it is stated here rather than left to the caller.
+  if (!result) return null;
+  for (let i = 0; i < result.length; i += 1) {
+    if (!Number.isNaN(result[i])) return result;
+  }
+  return null;
+}
+
+/**
+ * Merges decoded contributions into one tile's worth of heights.
+ *
+ * The order is the whole of the correctness: mask before adjusting, because
+ * mask values are compared against raw decoded heights; resample after
+ * adjusting, because a constant added before a linear resample survives it;
+ * and decide emptiness before filling nodata, because afterwards there is
+ * nothing to decide.
+ * @param {object[]} contributions - `{raster, source, parentZ}`, in recipe order.
+ * @param {object} options - z, x, y, size, gaussianBlurSigma.
+ * @returns {Float32Array | null} - Merged heights, or null when nothing covered.
+ */
+export function mergeElevation(contributions, options) {
+  const { size } = options;
+  const layers = contributions.map((contribution) => {
+    if (!contribution?.raster) return null;
+    const source = contribution.source ?? {};
+
+    let heights = decodeHeights(contribution.raster, source);
+    // Both masks say the same thing -- nothing here -- and both have to run
+    // before the height adjustment, which would otherwise shift the values
+    // out from under the comparison.
+    maskHeights(heights, source.maskValues);
+    maskColors(heights, contribution.raster, source.maskColors);
+    if (source.heightAdjustment) {
+      for (let i = 0; i < heights.length; i += 1) {
+        heights[i] += source.heightAdjustment;
+      }
+    }
+
+    const parentZ = contribution.parentZ ?? options.z;
+    if (parentZ < options.z) {
+      heights = resampleFromParent(heights, size, {
+        z: options.z,
+        x: options.x,
+        y: options.y,
+        parentZ,
+      });
+      const sigma = (options.gaussianBlurSigma ?? 0) * (options.z - parentZ);
+      heights = blurHeights(heights, size, sigma);
+    }
+    return heights;
+  });
+
+  return paintHeights(layers);
+}
+
+/**
+ * Fills the pixels nothing covered, so the tile can be encoded.
+ * @param {Float32Array} heights - Merged heights, modified in place.
+ * @param {number} [nodata] - What an uncovered pixel becomes.
+ * @returns {Float32Array} - The same array.
+ */
+export function fillNodata(heights, nodata) {
+  const value = nodata ?? MAPBOX.baseVal;
+  for (let i = 0; i < heights.length; i += 1) {
+    if (Number.isNaN(heights[i])) heights[i] = value;
+  }
+  return heights;
+}

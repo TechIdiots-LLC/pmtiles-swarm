@@ -5,6 +5,8 @@ import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { createApp } from '../src/api.js';
 import { Catalog } from '../src/catalog.js';
+import { loadCodec } from '../src/codec.js';
+import { decodeHeights, encodeHeights } from '../src/elevation.js';
 import {
   StackStore,
   isPinned,
@@ -423,7 +425,11 @@ describe('serving a stack', () => {
     assert.match(fixed.headers.get('cache-control'), /immutable/);
   });
 
-  it('refuses a recipe that needs pixels, naming the field', async () => {
+  it('merges rather than refusing, now that a codec is installed', async () => {
+    // Before sharp was a dependency this answered 501. The refusal still
+    // exists and still names the field -- it is now conditional on there
+    // being no codec, which is what `needsCodec` is separate from `problems`
+    // for.
     const node = await serve(
       [global],
       [
@@ -435,8 +441,7 @@ describe('serving a stack', () => {
     );
     after(() => node.close());
     const res = await node.get('/stacks/masked/1/0/0.webp');
-    assert.equal(res.status, 501);
-    assert.match((await res.json()).error, /maskValues/);
+    assert.notEqual(res.status, 501);
   });
 
   it('says the inputs are missing, not the stack', async () => {
@@ -476,5 +481,158 @@ describe('serving a stack', () => {
     assert.ok(list.find((s) => s.id === 'broken').problems.length > 0);
     // Not a mistake, just not servable yet — reported apart from `problems`.
     assert.match(list.find((s) => s.id === 'masked').needsCodec, /maskValues/);
+  });
+});
+
+const codec = await loadCodec();
+
+describe('merging a stack for real', { skip: !codec }, () => {
+  const size = 8;
+
+  /**
+   * An encoded terrain tile of one height, with an optional masked patch.
+   * @param {number} metres - The height.
+   * @param {number} [maskedTo] - A value to write into the left half.
+   * @returns {Promise<Buffer>} - A lossless WebP tile.
+   */
+  const terrainTile = async (metres, maskedTo) => {
+    const heights = new Float32Array(size * size).fill(metres);
+    if (maskedTo !== undefined) {
+      for (let y = 0; y < size; y += 1) {
+        for (let x = 0; x < size / 2; x += 1) heights[y * size + x] = maskedTo;
+      }
+    }
+    return codec.encode(encodeHeights(heights, { width: size, height: size }), {
+      format: 'webp',
+      lossless: true,
+    });
+  };
+
+  /**
+   * Pulls the heights back out of a served tile.
+   * @param {Response} res - The response.
+   * @returns {Promise<Float32Array>} - Metres.
+   */
+  const heightsOf = async (res) =>
+    decodeHeights(
+      await codec.decode(Buffer.from(await res.arrayBuffer()), { channels: 3 }),
+    );
+
+  it('lets the base show through where the source above is masked', async () => {
+    // The GEBCO-under-bathymetry case: the detailed source is masked over the
+    // ocean, so the coarse global one is what shows there.
+    const bathymetry = archive('c'.repeat(40), 'gebco.pmtiles', ['gebco']);
+    const detailed = archive('d'.repeat(40), 'planet.pmtiles', ['planet']);
+    const node = await serve(
+      [bathymetry, detailed],
+      [
+        {
+          id: 'terrain',
+          sources: [
+            { category: 'gebco' },
+            { category: 'planet', maskValues: [0] },
+          ],
+          output: { format: 'webp', nodata: -10000 },
+        },
+      ],
+      {
+        [bathymetry.infoHash]: { '1/0/0': await terrainTile(-500) },
+        // 200 m of land on the right, masked to 0 on the left.
+        [detailed.infoHash]: { '1/0/0': await terrainTile(200, 0) },
+      },
+    );
+    after(() => node.close());
+
+    const res = await node.get('/stacks/terrain/1/0/0.webp');
+    assert.equal(res.status, 200);
+    const heights = await heightsOf(res);
+
+    // Left half: the detailed source is masked, so the bathymetry shows.
+    assert.ok(
+      Math.abs(heights[0] + 500) < 1,
+      `left should be bathymetry, got ${heights[0]}`,
+    );
+    // Right half: the detailed source has data and covers the base.
+    assert.ok(
+      Math.abs(heights[size - 1] - 200) < 1,
+      `right should be land, got ${heights[size - 1]}`,
+    );
+  });
+
+  it('applies a height adjustment once, not twice', async () => {
+    const one = archive('e'.repeat(40), 'one.pmtiles', ['one']);
+    const node = await serve(
+      [one],
+      [
+        {
+          id: 'shifted',
+          sources: [{ category: 'one', heightAdjustment: 50 }],
+          output: { format: 'webp' },
+        },
+      ],
+      { [one.infoHash]: { '1/0/0': await terrainTile(100) } },
+    );
+    after(() => node.close());
+
+    const heights = await heightsOf(
+      await node.get('/stacks/shifted/1/0/0.webp'),
+    );
+    // 150. Applying it twice -- the bug this project found in the offline
+    // merge -- would give 200.
+    assert.ok(
+      Math.abs(heights[0] - 150) < 1,
+      `expected 150, got ${heights[0]}`,
+    );
+  });
+
+  it('takes a source from its parent when it has no tile at this zoom', async () => {
+    // What lets a z8 global source keep contributing at z14. The passthrough
+    // path cannot do this -- a parent's bytes are the wrong tile -- but once
+    // the pixels are decoded the parent can be cropped to the right square.
+    const coarse = archive('f'.repeat(40), 'coarse.pmtiles', ['coarse'], {
+      maxZoom: 1,
+    });
+    const node = await serve(
+      [coarse],
+      [
+        {
+          id: 'over',
+          sources: [{ category: 'coarse', maskValues: [-9999] }],
+          output: { format: 'webp' },
+        },
+      ],
+      { [coarse.infoHash]: { '1/0/0': await terrainTile(300) } },
+    );
+    after(() => node.close());
+
+    const res = await node.get('/stacks/over/3/0/0.webp');
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('x-stack-sources'), /coarse=z1/);
+    const heights = await heightsOf(res);
+    assert.ok(
+      Math.abs(heights[0] - 300) < 1,
+      `expected 300, got ${heights[0]}`,
+    );
+  });
+
+  it('404s a tile no source covered, rather than a slab of nodata', async () => {
+    const one = archive('a1'.repeat(20), 'one.pmtiles', ['one']);
+    const node = await serve(
+      [one],
+      [
+        {
+          id: 'empty',
+          sources: [{ category: 'one', maskValues: [0] }],
+          output: { format: 'webp', nodata: -10000 },
+        },
+      ],
+      // Every pixel is the masked value, so nothing survives the merge.
+      { [one.infoHash]: { '1/0/0': await terrainTile(0) } },
+    );
+    after(() => node.close());
+
+    // A client overzooms a lower tile, which is cheaper and better looking
+    // than a tile that is entirely nodata.
+    assert.equal((await node.get('/stacks/empty/1/0/0.webp')).status, 404);
   });
 });

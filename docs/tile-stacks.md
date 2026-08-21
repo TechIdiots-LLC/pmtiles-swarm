@@ -1,10 +1,10 @@
 # Tile stacks
 
-**Status: stages 1 and 2 are implemented.** A stack can be defined, resolved
-and served, so long as serving it means handing back bytes rather than changing
-them. Everything from [The codec problem](#the-codec-problem) onwards — masking,
-height shifts, blending, re-encoding, the tile cache and the editor — is still
-design. A recipe asking for any of it answers 501 naming the field.
+**Status: stages 1 to 4 are implemented.** Elevation stacks work: a recipe is
+defined, resolved and served, and a source is masked, shifted, resampled from a
+parent and painted in order. What remains design is the tile cache (stage 5),
+RGBA blending (stage 6) and the editor (stage 7). A node with no codec installed
+still serves the passthrough case and answers 501 for the rest.
 
 A stack is a recipe for combining several archives into one tile endpoint,
 evaluated per request rather than baked into a file. Where
@@ -615,10 +615,17 @@ Enough to understand the stack at a glance:
 Per-source fields, driven by the stack's `space` — there is no point offering
 `blend` on an elevation stack or `maskValues` on an RGBA one:
 
-| `space`     | Fields                                                                          |
-| ----------- | ------------------------------------------------------------------------------- |
-| `elevation` | `encoding`, `baseVal`, `interval`, `maskValues`, `heightAdjustment`, `required` |
-| `rgba`      | `opacity`, `blend`, `required`                                                  |
+| `space`     | Fields                                                                                        |
+| ----------- | --------------------------------------------------------------------------------------------- |
+| `elevation` | `encoding`, `baseVal`, `interval`, `maskValues`, `maskColors`, `heightAdjustment`, `required` |
+| `rgba`      | `opacity`, `blend`, `required`                                                                |
+
+A source can say "nothing here" two ways, and they are not interchangeable.
+`maskValues` names decoded heights; `maskColors` names the pixel colours
+themselves, as `"#rrggbb"` or `[r, g, b]`. The colour form is the exact one — it
+compares the bytes that were stored, where a height mask has to round to survive
+the floating point that decoding introduces — and it is the right one for a DEM
+whose nodata is a sentinel colour rather than a height that means anything.
 
 `maskValues` is a list of decoded heights and deserves better than a
 comma-separated string — the values that matter (`-10000`, `0`, `-1`, `-0.1`)
@@ -671,8 +678,8 @@ still requested and still composited.
    topmost source holding the tile. No codec involved.
 3. ~~**The codec module.**~~ Done. `src/codec.js`: probed, optional, decode
    and encode for png and webp, lossless by default.
-4. **Elevation space.** Decode, mask, float resample, paint, encode. The
-   rio-rgbify-merge parity case, and the one that motivated this.
+4. ~~**Elevation space.**~~ Done. `src/elevation.js`: decode, mask by height or
+   colour, float resample from a parent, blur, paint, encode.
 5. **The tile cache.** With a size budget and eviction, plus the benchmark.
 6. **RGBA space.** Opacity and the separable blend modes.
 7. **Console.** The stack editor, per‑source settings and the preview. See

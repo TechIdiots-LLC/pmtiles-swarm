@@ -33,6 +33,25 @@
   kilometres. Over an ordinary gradient, lossy WebP is wrong by about 125 km at
   worst where lossless is byte-exact.
 
+- **Elevation stacks merge for real.** A stack whose sources mask, shift or
+  re-encode is now served rather than refused: each source is decoded to metres,
+  masked, adjusted, resampled in float space and painted in the recipe's order,
+  then encoded once. A source with no tile at the requested zoom is taken from
+  its parent and cropped to the right sub-square, which is what lets a z8 global
+  source keep contributing at z14 — the passthrough path cannot do that, because
+  a parent's *bytes* are the wrong tile.
+
+  Two ways to say "no data here": `maskValues` names decoded heights, and
+  `maskColors` names pixel colours as `"#rrggbb"` or `[r, g, b]`. The colour form
+  is exact, comparing the bytes that were stored; the height form rounds, because
+  decoding produces `base + n * interval` in floating point and a mask of `-0.1`
+  meets a decoded `-0.09999999999763531`.
+
+  A tile no source covered answers 404 rather than a slab of nodata, so a client
+  overzooms a lower one. That decision is made on the coverage before nodata is
+  substituted in — afterwards every pixel holds a real value and there is nothing
+  left to test.
+
 ### 🐞 Bug fixes
 - **Two settings reported success and changed nothing.** `tiles` and `resumeSaveIntervalSeconds`
   are read while the process starts — the tile reader's directory cache when the store is

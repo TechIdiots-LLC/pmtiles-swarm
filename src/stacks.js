@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { parseColor } from './elevation.js';
 
 /**
  * Stacks: several archives combined into one tile endpoint.
@@ -22,6 +23,8 @@ import path from 'node:path';
  * @property {number} [baseVal] - Mapbox decode offset.
  * @property {number} [interval] - Mapbox decode step.
  * @property {number[]} [maskValues] - Heights meaning "no data here".
+ * @property {Array<string|number[]>} [maskColors] - Pixel colours meaning the
+ *   same, as "#rrggbb" or [r, g, b]. Exact, where a height mask has to round.
  * @property {number} [heightAdjustment] - Metres, added after masking.
  * @property {number} [opacity] - 0-1, scales source alpha. RGBA only.
  * @property {string} [blend] - Blend operator. RGBA only.
@@ -85,6 +88,23 @@ export function validateStack(stack) {
     if (source?.maskValues !== undefined && !Array.isArray(source.maskValues)) {
       problems.push(`sources[${index}].maskValues must be a list`);
     }
+    if (source?.maskColors !== undefined) {
+      if (!Array.isArray(source.maskColors)) {
+        problems.push(`sources[${index}].maskColors must be a list`);
+      } else {
+        // Named individually rather than as "one of these is wrong": a colour
+        // that does not parse masks nothing, and a mask that silently does
+        // nothing is the failure this whole feature is most prone to.
+        source.maskColors.forEach((colour, at) => {
+          if (parseColor(colour) === null) {
+            problems.push(
+              `sources[${index}].maskColors[${at}] is not a colour: ` +
+                'use "#rrggbb" or [r, g, b]',
+            );
+          }
+        });
+      }
+    }
   });
 
   if (stack.boundsSource !== undefined) {
@@ -120,6 +140,7 @@ export function validateStack(stack) {
 export function needsCodec(stack) {
   for (const [index, source] of (stack.sources ?? []).entries()) {
     if (source.maskValues?.length) return `sources[${index}].maskValues`;
+    if (source.maskColors?.length) return `sources[${index}].maskColors`;
     if (source.heightAdjustment) return `sources[${index}].heightAdjustment`;
     if (source.opacity !== undefined && Number(source.opacity) !== 1) {
       return `sources[${index}].opacity`;

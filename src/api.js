@@ -35,6 +35,8 @@ import { limitFor, remaining } from './seeding.js';
 import { buildTileJson, extensionMatches, tileExtension } from './tilejson.js';
 import { SUMMARY_VERSION } from './pmtiles-probe.js';
 import { TileReadError } from './tiles.js';
+import { loadCodec } from './codec.js';
+import { encodeHeights, fillNodata, mergeElevation } from './elevation.js';
 import {
   isPinned,
   needsCodec,
@@ -3230,6 +3232,32 @@ export function createApp({
    * encoding gets a 501 naming the field, instead of tiles that quietly ignore
    * half the recipe.
    */
+  /**
+   * The headers every stack tile carries, whichever path produced it.
+   *
+   * X-Stack-Sources names which sources were asked and what each one said.
+   * Silence is the bad option: a stack missing a layer still renders, and flat
+   * ocean looks like a plausible map rather than like a failure.
+   * @param {import('express').Response} res - The response.
+   * @param {object} resolved - The resolution.
+   * @param {string[]} contributors - What each source answered.
+   * @param {number} z - Zoom.
+   * @param {number} x - Column.
+   * @param {number} y - Row.
+   * @returns {void}
+   */
+  const stackHeaders = (res, resolved, contributors, z, x, y) => {
+    res.setHeader('access-control-allow-origin', '*');
+    res.setHeader('x-stack-sources', contributors.join(', '));
+    res.setHeader('etag', stackEtag(resolved, z, x, y));
+    res.setHeader(
+      'cache-control',
+      isPinned(resolved)
+        ? 'public, max-age=31536000, immutable'
+        : 'public, max-age=300, must-revalidate',
+    );
+  };
+
   app.get(
     '/stacks/:id/:z/:x/:y.:ext',
     route(async (req, res) => {
@@ -3237,13 +3265,17 @@ export function createApp({
       const resolved = stackOr404(req, res);
       if (!resolved) return;
 
-      const blocked = needsCodec(resolved.stack);
-      if (blocked) {
+      // Everything the recipe asks for beyond handing bytes back needs the
+      // pixels. Answered per recipe rather than per tile, so a stack that
+      // cannot be served says so once and names the field responsible.
+      const wants = needsCodec(resolved.stack);
+      const codec = wants ? await loadCodec() : null;
+      if (wants && !codec) {
         return res.status(501).json({
           error:
-            'serving this stack means decoding pixels, which this node cannot ' +
-            `do yet: ${blocked} asks for the tile to be changed, not passed through`,
-          hint: 'remove the field, or wait for the pixel codec',
+            `serving this stack means decoding pixels: ${wants} asks for the ` +
+            'tile to be changed, not passed through, and this node has no codec',
+          hint: 'npm install sharp',
         });
       }
 
@@ -3297,67 +3329,172 @@ export function createApp({
         });
       }
 
-      // Top down, because the last source in the recipe paints over the ones
-      // before it — so the first one holding this tile is the answer, and
-      // every source below it would have been painted over anyway.
-      let answered = null;
+      /**
+       * Reads one source's tile, walking up to a parent when it has none.
+       *
+       * Only the merging path climbs. Passthrough hands back bytes, and a
+       * parent's bytes are the wrong tile — the client would get its
+       * neighbourhood rather than its own square. Once the pixels are being
+       * decoded anyway the parent can be cropped to the right sub-square, and
+       * that is what lets a z8 global source keep contributing at z14.
+       *
+       * Bounded: six levels is already a 64x upscale, and past that the
+       * contribution is a smear that costs a swarm read to fetch.
+       * @param {object} source - The resolved source.
+       * @param {boolean} climb - Whether to fall back to a parent.
+       * @returns {Promise<object|null>} - The tile and the zoom it came from.
+       */
+      const readFrom = async (source, climb) => {
+        const floor = climb ? Math.max(0, z - 6) : z;
+        for (let at = z; at >= floor; at -= 1) {
+          const shift = z - at;
+          const tile = await tiles.getTile(
+            source.entry.infoHash,
+            at,
+            x >> shift,
+            y >> shift,
+            { signal: controller.signal },
+          );
+          if (tile?.data) return { tile, parentZ: at };
+        }
+        return null;
+      };
+
       const contributors = [];
-      for (const source of [...resolved.sources].reverse()) {
-        if (!source.entry) continue;
-        let tile;
-        try {
-          tile = await tiles.getTile(source.entry.infoHash, z, x, y, {
-            signal: controller.signal,
-          });
-        } catch (error) {
-          if (error.name === 'AbortError') return;
-          // A source that cannot be read is only fatal when the recipe says it
-          // is. Otherwise the stack carries on without it, and the header below
-          // says so — a layer that quietly vanished looks like a plausible map
-          // rather than like a failure.
-          if (source.required) {
-            const status = error instanceof TileReadError ? error.status : 503;
+
+      // ---- Passthrough: no pixel is decoded, so no codec is involved. -----
+      if (!wants) {
+        let answered = null;
+        // Top down, because the last source in the recipe covers the ones
+        // before it -- so the first one holding this tile is the answer, and
+        // every source below it would have been covered anyway.
+        for (const source of [...resolved.sources].reverse()) {
+          if (!source.entry) continue;
+          let found;
+          try {
+            found = await readFrom(source, false);
+          } catch (error) {
+            if (error.name === 'AbortError') return;
+            if (source.required) {
+              const status =
+                error instanceof TileReadError ? error.status : 503;
+              return res.status(status).json({
+                error: `${source.name} is required and could not be read: ${error.message}`,
+              });
+            }
+            contributors.push(`${source.name}=error`);
+            continue;
+          }
+          if (found) {
+            answered = { source, tile: found.tile };
+            contributors.push(`${source.name}=${source.entry.infoHash}`);
+            break;
+          }
+          contributors.push(`${source.name}=absent`);
+        }
+
+        stackHeaders(res, resolved, contributors, z, x, y);
+        if (!answered) return res.status(404).end();
+        res.type(
+          answered.source.entry.pmtiles?.contentType ??
+            'application/octet-stream',
+        );
+        if (answered.tile.encoding) {
+          res.setHeader('content-encoding', answered.tile.encoding);
+        }
+        return res.send(answered.tile.data);
+      }
+
+      // ---- Merging: every source contributes, in the recipe's order. ------
+      //
+      // Bottom first, because that is the order they are painted in, and all
+      // of them are read rather than stopping at the first hit: a source that
+      // is masked over the ocean has to let the one beneath it show through,
+      // which cannot be known without looking at both.
+      const reads = await Promise.all(
+        resolved.sources.map(async (source) => {
+          if (!source.entry) return { source, found: null };
+          try {
+            return { source, found: await readFrom(source, true) };
+          } catch (error) {
+            if (error.name === 'AbortError') throw error;
+            return { source, error };
+          }
+        }),
+      ).catch((error) => {
+        if (error?.name === 'AbortError') return null;
+        throw error;
+      });
+      if (!reads) return;
+
+      const contributions = [];
+      for (const read of reads) {
+        if (read.error) {
+          if (read.source.required) {
+            const status =
+              read.error instanceof TileReadError ? read.error.status : 503;
             return res.status(status).json({
-              error: `${source.name} is required and could not be read: ${error.message}`,
+              error: `${read.source.name} is required and could not be read: ${read.error.message}`,
             });
           }
-          contributors.push(`${source.name}=error`);
+          contributors.push(`${read.source.name}=error`);
+          contributions.push(null);
           continue;
         }
-        if (tile?.data) {
-          answered = { source, tile };
-          contributors.push(`${source.name}=${source.entry.infoHash}`);
-          break;
+        if (!read.found) {
+          contributors.push(`${read.source.name}=absent`);
+          contributions.push(null);
+          continue;
         }
-        contributors.push(`${source.name}=absent`);
+        contributors.push(
+          read.found.parentZ === z
+            ? `${read.source.name}=${read.source.entry.infoHash}`
+            : `${read.source.name}=z${read.found.parentZ}`,
+        );
+        contributions.push({
+          source: read.source.source,
+          parentZ: read.found.parentZ,
+          raster: await codec.decode(Buffer.from(read.found.tile.data), {
+            channels: 3,
+          }),
+        });
       }
 
-      res.setHeader('access-control-allow-origin', '*');
-      // Which sources were consulted and what each of them said. Silence is
-      // the bad option: a stack missing a layer still renders, and without this
-      // there is nothing to tell you it did.
-      res.setHeader('x-stack-sources', contributors.join(', '));
-      res.setHeader('etag', stackEtag(resolved, z, x, y));
-      res.setHeader(
-        'cache-control',
-        isPinned(resolved)
-          ? 'public, max-age=31536000, immutable'
-          : 'public, max-age=300, must-revalidate',
-      );
+      stackHeaders(res, resolved, contributors, z, x, y);
 
-      // No source had it. 404 rather than 204 for a raster stack, which is what
-      // lets a client overzoom the parent — the same rule, and the same reason,
-      // as a sparse archive.
-      if (!answered) return res.status(404).end();
+      const first = contributions.find(Boolean);
+      if (!first) return res.status(404).end();
+      const size = first.raster.width;
 
-      res.type(
-        answered.source.entry.pmtiles?.contentType ??
-          'application/octet-stream',
-      );
-      if (answered.tile.encoding) {
-        res.setHeader('content-encoding', answered.tile.encoding);
-      }
-      res.send(answered.tile.data);
+      const merged = mergeElevation(contributions, {
+        z,
+        x,
+        y,
+        size,
+        gaussianBlurSigma: resolved.stack.gaussianBlurSigma,
+      });
+      // Nothing covered this tile, so there is none worth sending. The client
+      // overzooms a lower one, which is both cheaper and better looking than a
+      // slab of nodata.
+      if (!merged) return res.status(404).end();
+
+      const output = resolved.stack.output ?? {};
+      fillNodata(merged, output.nodata);
+      const raster = encodeHeights(merged, {
+        width: size,
+        height: size,
+        encoding:
+          output.encoding ?? contributions.find(Boolean)?.source?.encoding,
+        baseVal: output.baseVal,
+        interval: output.interval,
+      });
+      const format = output.format ?? coverage.format ?? 'webp';
+      // Never lossy. The three channels are the three bytes of one height, so
+      // a codec that shifts red by one moves the ground by 65 kilometres.
+      const body = await codec.encode(raster, { format, lossless: true });
+
+      res.type(format === 'png' ? 'image/png' : 'image/webp');
+      return res.send(body);
     }),
   );
 
