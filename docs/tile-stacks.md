@@ -1,6 +1,10 @@
 # Tile stacks
 
-**Status: design. Nothing here is implemented yet.**
+**Status: stages 1 and 2 are implemented.** A stack can be defined, resolved
+and served, so long as serving it means handing back bytes rather than changing
+them. Everything from [The codec problem](#the-codec-problem) onwards — masking,
+height shifts, blending, re-encoding, the tile cache and the editor — is still
+design. A recipe asking for any of it answers 501 naming the field.
 
 A stack is a recipe for combining several archives into one tile endpoint,
 evaluated per request rather than baked into a file. Where
@@ -627,13 +631,10 @@ still requested and still composited.
 
 ## Staging
 
-1. **Recipe and resolution.** `data/stacks.json`, load and validate, resolve
-   sources, `/api/stacks`, `/stacks/<id>/tiles.json`. No pixels yet. This alone
-   is testable and shakes out the category-resolution and TileJSON questions.
-2. **Passthrough.** `/stacks/<id>/{z}/{x}/{y}.<ext>` implementing only step 5 of
-   the pipeline — top-most native source, no transform, bytes streamed through.
-   Proves the URL space, the ETag scheme and the caching headers with no codec
-   at all.
+1. ~~**Recipe and resolution.**~~ Done. `data/stacks.json`, load and validate,
+   resolve sources, `/api/stacks`, `/stacks/<id>/tiles.json`.
+2. ~~**Passthrough.**~~ Done. `/stacks/<id>/{z}/{x}/{y}.<ext>`, answered by the
+   topmost source holding the tile. No codec involved.
 3. **The codec module.** Probed, optional, decode and encode for png and webp.
 4. **Elevation space.** Decode, mask, float resample, paint, encode. The
    rio-rgbify-merge parity case, and the one that motivated this.

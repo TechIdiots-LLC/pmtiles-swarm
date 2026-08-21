@@ -35,6 +35,13 @@ import { limitFor, remaining } from './seeding.js';
 import { buildTileJson, extensionMatches, tileExtension } from './tilejson.js';
 import { SUMMARY_VERSION } from './pmtiles-probe.js';
 import { TileReadError } from './tiles.js';
+import {
+  isPinned,
+  needsCodec,
+  resolveStack,
+  stackCoverage,
+  stackEtag,
+} from './stacks.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -203,6 +210,7 @@ export function createApp({
   sources,
   hooks,
   tiles,
+  stacks,
   warm,
   config,
   speed,
@@ -3053,6 +3061,271 @@ export function createApp({
         });
       }
       return serveTile(entry, req, res, { immutable: false });
+    }),
+  );
+
+  /**
+   * Resolves a stack's sources against the catalog, as this caller sees it.
+   *
+   * Category resolution goes through the same `newestIn` the `/latest/` routes
+   * use, so a stack sees exactly the builds that caller is allowed to see — a
+   * stack cannot become a way around the credential that gates them.
+   * @param {object} stack - The stack definition.
+   * @param {import('express').Request} req - The request, for its credential.
+   * @returns {object} - The resolution.
+   */
+  const resolveFor = (stack, req) =>
+    resolveStack(stack, {
+      archive: (hash) => catalog.get(hash) ?? null,
+      category: (name) => newestIn(name, req),
+    });
+
+  /**
+   * Everything the console needs to list and diagnose the stacks.
+   *
+   * Reports rather than repairs: a stack whose sources do not resolve is
+   * listed with what is missing, because the console's job is to show why a
+   * recipe is not working, and a list that silently omits the broken ones
+   * cannot.
+   */
+  app.get(
+    '/api/stacks',
+    route(async (req, res) => {
+      const list = (stacks?.list() ?? []).map((stack) => {
+        const resolved = resolveFor(stack, req);
+        const coverage = stackCoverage(resolved);
+        return {
+          id: stack.id,
+          title: stack.title ?? stack.id,
+          space: stack.space ?? 'elevation',
+          problems: stacks.problems(stack.id),
+          // Named separately from `problems` because it is not a mistake: a
+          // recipe asking for pixel work is perfectly valid and simply cannot
+          // be served yet. See docs/tile-stacks.md — "The codec problem".
+          needsCodec: needsCodec(stack),
+          pinned: isPinned(resolved),
+          ...coverage,
+          // Bottom first, the order the recipe lists them. The console
+          // reverses this for display; see "The stack editor" in the design.
+          sources: resolved.sources.map((source) => ({
+            index: source.index,
+            name: source.name,
+            pinned: source.pinned,
+            required: source.required,
+            resolved: Boolean(source.entry),
+            infohash: source.entry?.infoHash ?? null,
+            archiveName: source.entry?.name ?? null,
+            minzoom: source.entry?.pmtiles?.minZoom ?? null,
+            maxzoom: source.entry?.pmtiles?.maxZoom ?? null,
+            format: source.entry?.pmtiles?.format ?? null,
+          })),
+        };
+      });
+      res.json({ stacks: list });
+    }),
+  );
+
+  /**
+   * Looks a stack up and resolves it, or answers why it cannot be served.
+   * @param {import('express').Request} req - The request.
+   * @param {import('express').Response} res - The response.
+   * @returns {object | null} - The resolution, or null once answered.
+   */
+  const stackOr404 = (req, res) => {
+    const stack = stacks?.get(req.params.id);
+    if (!stack) {
+      res.status(404).json({ error: 'no such stack' });
+      return null;
+    }
+    const problems = stacks.problems(stack.id);
+    if (problems.length) {
+      // 409 rather than 500: the recipe is the thing that is wrong, and it is
+      // the caller's to fix rather than a fault on this node.
+      res.status(409).json({ error: 'this stack is not valid', problems });
+      return null;
+    }
+    const resolved = resolveFor(stack, req);
+    if (resolved.missing.length) {
+      // The stack exists; its inputs do not. A 404 would say the wrong thing
+      // about which of the two is missing.
+      res.status(409).json({
+        error: 'this stack has sources that do not resolve',
+        missing: resolved.missing.map((source) => source.name),
+      });
+      return null;
+    }
+    return resolved;
+  };
+
+  app.get(
+    '/stacks/:id/tiles.json',
+    route(async (req, res) => {
+      const resolved = stackOr404(req, res);
+      if (!resolved) return;
+
+      const coverage = stackCoverage(resolved);
+      const root = `${baseUrl(req)}/stacks/${encodeURIComponent(req.params.id)}`;
+      const extension = tileExtension(coverage.format);
+
+      res.setHeader('access-control-allow-origin', '*');
+      const doc = {
+        tilejson: '3.0.0',
+        scheme: 'xyz',
+        tiles: [`${root}/{z}/{x}/{y}.${extension}`],
+        name: resolved.stack.title ?? resolved.stack.id,
+        minzoom: coverage.minzoom,
+        maxzoom: coverage.maxzoom,
+        bounds: coverage.bounds,
+        // Names what it resolved to, so a consumer can tell one resolution
+        // from the next without diffing tile URLs — the same reason the
+        // `/latest/` document carries a `latest` block.
+        stack: {
+          id: resolved.stack.id,
+          space: resolved.stack.space ?? 'elevation',
+          sources: resolved.sources.map((source) => ({
+            name: source.name,
+            infohash: source.entry?.infoHash ?? null,
+            archive: source.entry?.name ?? null,
+          })),
+        },
+      };
+      if (coverage.format) doc.format = coverage.format;
+      if (coverage.attribution) doc.attribution = coverage.attribution;
+
+      // A stack whose sources are all pinned can never change; one following a
+      // category moves when that category rebuilds. Same split, and the same
+      // reasoning, as the tile routes make.
+      res.setHeader(
+        'cache-control',
+        isPinned(resolved)
+          ? 'public, max-age=31536000, immutable'
+          : 'public, max-age=300, must-revalidate',
+      );
+      res.json(doc);
+    }),
+  );
+
+  /**
+   * Serves one tile of a stack, by handing back the bytes of whichever source
+   * has it.
+   *
+   * This is the passthrough path, and it is the whole of the merge that can be
+   * done without decoding a pixel: ask the sources from the top down, and the
+   * first one holding a tile at this zoom answers. No parent fallback, no
+   * blending, no re-encoding.
+   *
+   * That is less than the design describes and is still useful on its own — a
+   * regional archive over a global one is exactly this, and it is the common
+   * shape of a stack. What it cannot do it refuses rather than approximates: a
+   * recipe asking for masking, height shifts, opacity or a different output
+   * encoding gets a 501 naming the field, instead of tiles that quietly ignore
+   * half the recipe.
+   */
+  app.get(
+    '/stacks/:id/:z/:x/:y.:ext',
+    route(async (req, res) => {
+      const resolved = stackOr404(req, res);
+      if (!resolved) return;
+
+      const blocked = needsCodec(resolved.stack);
+      if (blocked) {
+        return res.status(501).json({
+          error:
+            'serving this stack means decoding pixels, which this node cannot ' +
+            `do yet: ${blocked} asks for the tile to be changed, not passed through`,
+          hint: 'remove the field, or wait for the pixel codec',
+        });
+      }
+
+      const z = Number(req.params.z);
+      const x = Number(req.params.x);
+      const y = Number(req.params.y);
+      if (![z, x, y].every(Number.isInteger)) {
+        return res.status(400).json({ error: 'z, x and y must be integers' });
+      }
+      const limit = 2 ** z;
+      if (z < 0 || z > 26 || x < 0 || y < 0 || x >= limit || y >= limit) {
+        return res.status(400).json({ error: 'tile coordinates out of range' });
+      }
+
+      const coverage = stackCoverage(resolved);
+      if (
+        coverage.format &&
+        req.params.ext !== tileExtension(coverage.format)
+      ) {
+        return res
+          .status(400)
+          .json({ error: `this stack serves ${coverage.format} tiles` });
+      }
+
+      const controller = new AbortController();
+      // A panning map abandons requests constantly, and a stack multiplies
+      // that: one abandoned request here is one per source underneath it.
+      res.on('close', () => {
+        if (!res.writableEnded) controller.abort();
+      });
+
+      // Top down, because the last source in the recipe paints over the ones
+      // before it — so the first one holding this tile is the answer, and
+      // every source below it would have been painted over anyway.
+      let answered = null;
+      const contributors = [];
+      for (const source of [...resolved.sources].reverse()) {
+        if (!source.entry) continue;
+        let tile;
+        try {
+          tile = await tiles.getTile(source.entry.infoHash, z, x, y, {
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (error.name === 'AbortError') return;
+          // A source that cannot be read is only fatal when the recipe says it
+          // is. Otherwise the stack carries on without it, and the header below
+          // says so — a layer that quietly vanished looks like a plausible map
+          // rather than like a failure.
+          if (source.required) {
+            const status = error instanceof TileReadError ? error.status : 503;
+            return res.status(status).json({
+              error: `${source.name} is required and could not be read: ${error.message}`,
+            });
+          }
+          contributors.push(`${source.name}=error`);
+          continue;
+        }
+        if (tile?.data) {
+          answered = { source, tile };
+          contributors.push(`${source.name}=${source.entry.infoHash}`);
+          break;
+        }
+        contributors.push(`${source.name}=absent`);
+      }
+
+      res.setHeader('access-control-allow-origin', '*');
+      // Which sources were consulted and what each of them said. Silence is
+      // the bad option: a stack missing a layer still renders, and without this
+      // there is nothing to tell you it did.
+      res.setHeader('x-stack-sources', contributors.join(', '));
+      res.setHeader('etag', stackEtag(resolved, z, x, y));
+      res.setHeader(
+        'cache-control',
+        isPinned(resolved)
+          ? 'public, max-age=31536000, immutable'
+          : 'public, max-age=300, must-revalidate',
+      );
+
+      // No source had it. 404 rather than 204 for a raster stack, which is what
+      // lets a client overzoom the parent — the same rule, and the same reason,
+      // as a sparse archive.
+      if (!answered) return res.status(404).end();
+
+      res.type(
+        answered.source.entry.pmtiles?.contentType ??
+          'application/octet-stream',
+      );
+      if (answered.tile.encoding) {
+        res.setHeader('content-encoding', answered.tile.encoding);
+      }
+      res.send(answered.tile.data);
     }),
   );
 

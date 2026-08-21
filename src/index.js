@@ -5,6 +5,7 @@ import { parseArgs } from 'node:util';
 import { createApp } from './api.js';
 import { assertSafeToListen, createAuth } from './auth.js';
 import { Catalog } from './catalog.js';
+import { StackStore } from './stacks.js';
 import { loadConfig } from './config.js';
 import { CompositeEngine } from './engines/composite.js';
 import { LibtorrentEngine } from './engines/libtorrent.js';
@@ -240,6 +241,10 @@ PMTILES_SWARM_PUBLIC_URL
 
   const catalog = new Catalog(config.dataDir);
   await catalog.load();
+  // Recipes rather than archives, so this is its own file and its own
+  // store. A missing stacks.json is simply no stacks.
+  const stacks = new StackStore(config.dataDir);
+  await stacks.load();
 
   const engine = createEngine(config);
   // The slowest, because it announces "stopped" to every tracker, and an
@@ -496,6 +501,7 @@ PMTILES_SWARM_PUBLIC_URL
     sources,
     hooks,
     tiles,
+    stacks,
     warm,
     config,
     speed,

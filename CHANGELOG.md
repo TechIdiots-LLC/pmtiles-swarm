@@ -2,7 +2,24 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **Tile stacks: several archives served as one tile endpoint.** A stack is a
+  recipe rather than a file — an ordered list of sources, bottom first, with the
+  last painting over the ones before it. Sources are named by category, so a
+  stack follows a rebuild the way `/latest/<category>/` does, or by infohash
+  where it must not move.
+
+  What ships is the part that needs no image handling: `/stacks/<id>/tiles.json`
+  and `/stacks/<id>/{z}/{x}/{y}.<ext>`, answered by the topmost source holding
+  the tile. That is enough for the common shape — a regional archive over a
+  global one — and it costs nothing per tile beyond the read it would have done
+  anyway. `X-Stack-Sources` names which sources were asked and what each said,
+  because a stack missing a layer still renders, and flat ocean looks like a
+  plausible map rather than like a failure.
+
+  A recipe asking for masking, height shifts, opacity, blending or a different
+  output encoding answers 501 and names the field. Those need a pixel codec,
+  which this node does not have yet; approximating them would be worse than
+  refusing. See docs/tile-stacks.md.
 
 ### 🐞 Bug fixes
 - **Two settings reported success and changed nothing.** `tiles` and `resumeSaveIntervalSeconds`
