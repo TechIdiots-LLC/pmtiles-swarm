@@ -6102,24 +6102,42 @@ Every piece is hashed against the ` +
       const fillStackSourceChoices = async () => {
         const select = $('stack-add-source');
         try {
-          const { categories } = await api('/api/categories');
+          // /api/categories answers with a bare array, and each entry names
+          // itself `category` rather than `name`. Both are worth stating: the
+          // console's other reader of this endpoint assigns the array
+          // directly, and destructuring `{ categories }` here silently
+          // produced undefined and an empty menu rather than an error.
+          const categories = await api('/api/categories');
           const taken = new Set(
             (stackDraft?.sources ?? []).map((s) => s.category),
           );
-          const free = (categories ?? []).filter((c) => !taken.has(c.name));
+          const free = (categories ?? []).filter(
+            (c) => !taken.has(c.category),
+          );
           select.innerHTML = free.length
             ? free
-                .map(
-                  (c) =>
-                    `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`,
-                )
+                .map((c) => {
+                  // A category whose newest build is MBTiles, or which has not
+                  // been probed, has no tiles to contribute. Offered anyway
+                  // and labelled, because it may become servable later and
+                  // hiding it would look like the category did not exist.
+                  const note = c.servable
+                    ? `${c.archives} archive${c.archives === 1 ? '' : 's'}`
+                    : 'no tiles yet';
+                  return `<option value="${escapeHtml(c.category)}">${escapeHtml(
+                    c.category,
+                  )} — ${note}</option>`;
+                })
                 .join('')
             : '<option value="">no categories left to add</option>';
           select.disabled = free.length === 0;
           $('stack-add-source-go').disabled = free.length === 0;
-        } catch {
-          select.innerHTML = '<option value="">could not list categories</option>';
+        } catch (error) {
+          select.innerHTML = `<option value="">could not list categories: ${escapeHtml(
+            error.message,
+          )}</option>`;
           select.disabled = true;
+          $('stack-add-source-go').disabled = true;
         }
       };
 

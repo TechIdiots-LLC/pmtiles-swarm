@@ -964,3 +964,22 @@ describe('who may change a stack', () => {
     assert.equal(isPublicSurface('/api/stacks/x/raw'), false);
   });
 });
+
+describe('what the console reads to offer sources', () => {
+  it('answers a bare array whose entries name themselves `category`', async () => {
+    // The stack dialog fills its "add a source" menu from this. It first read
+    // `{ categories }` and `c.name`, and got an empty menu rather than an
+    // error -- destructuring a property off an array is undefined, not a
+    // throw, so nothing said anything was wrong.
+    const one = archive('e5'.repeat(20), 'one.pmtiles', ['alpha', 'beta']);
+    const node = await serve([one], []);
+    after(() => node.close());
+
+    const body = await (await node.get('/api/categories')).json();
+    assert.ok(Array.isArray(body), 'the response is the list itself');
+    assert.deepEqual(body.map((c) => c.category).sort(), ['alpha', 'beta']);
+    // The other fields the menu uses to label an entry.
+    assert.equal(typeof body[0].archives, 'number');
+    assert.equal(typeof body[0].servable, 'boolean');
+  });
+});
