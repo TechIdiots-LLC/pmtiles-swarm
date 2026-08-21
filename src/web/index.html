@@ -5789,8 +5789,6 @@ Every piece is hashed against the ` +
       $('tab-archives').onclick = () => showTab('archives');
       $('tab-categories').onclick = () => showTab('categories');
       $('tab-stacks').onclick = () => showTab('stacks');
-      // Asked once on load, only so the tab knows whether to appear.
-      loadStacks().catch(() => {});
       $('tab-traffic').onclick = () => showTab('traffic');
 
       // ── Stacks ────────────────────────────────────────────────────────────
@@ -5955,6 +5953,12 @@ Every piece is hashed against the ` +
 
       $('stacks-refresh').onclick = () =>
         loadStacks().catch((e) => toast(e.message));
+
+      // Asked once on load, only so the tab knows whether to appear at all.
+      // Below the definition rather than beside the other tab handlers: these
+      // are `const`, so calling one from above it is a ReferenceError rather
+      // than a hoisted no-op, and it takes the whole console down with it.
+      loadStacks().catch(() => {});
 
       // ── Traffic ───────────────────────────────────────────────────────────
       //
