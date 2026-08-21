@@ -477,7 +477,9 @@ unprobed build, an archive that has been retired — all of these will happen, a
 the honest answers differ.
 
 `required: true` on a source means a tile fails (503) rather than being served
-without it. It should default to true for the **bottom-most** source, which is
+without it, when that source cannot be **read**. It says nothing about whether
+the source has a tile at these coordinates: a source with none there is simply
+absent, which is normal and is the arrangement the whole feature exists for. It should default to true for the **bottom-most** source, which is
 usually the global base and whose absence turns the whole tile into holes, and
 to false above.
 

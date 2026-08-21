@@ -6163,9 +6163,15 @@ Every piece is hashed against the ` +
             'should show wherever nothing above it has data.</div>';
           return;
         }
-        list.innerHTML = stackDraft.sources
-          .map((source, index) => renderDraftSource(source, index, rgba))
-          .join('');
+        list.innerHTML =
+          stackDraft.sources
+            .map((source, index) => renderDraftSource(source, index, rgba))
+            .join('') +
+          `<div class="sub">A <strong>required</strong> source that cannot be read
+             makes the whole tile answer 503, instead of quietly serving the rest —
+             a layer that vanished looks like a plausible map rather than a failure.
+             It does not mean the source must have a tile everywhere; covering
+             different areas is the point.</div>`;
       };
 
       /**
@@ -6262,9 +6268,15 @@ Every piece is hashed against the ` +
                        data-stack-field="maskColors" data-stack-index="${index}"
                        value="${escapeHtml((source.maskColors ?? []).join(', '))}" />
               </label>
-              <label class="choice">
+              <label class="choice"
+                     title="If this source cannot be read — a swarm timeout, an unreadable archive — the whole tile answers 503 rather than being served without it. Unchecked, it is skipped and the tile is built from the rest. This is about read failures, not about whether the source has a tile here: a source with no tile at these coordinates is simply absent, which is normal.">
                 <input type="checkbox" data-stack-field="required" data-stack-index="${index}"
-                       ${source.required ?? index === 0 ? 'checked' : ''} /> required
+                       ${source.required ?? index === 0 ? 'checked' : ''} />
+                required${
+                  index === 0
+                    ? ' <span class="sub">— fail rather than serve without the base</span>'
+                    : ''
+                }
               </label>
             </div>
           </div>`;
