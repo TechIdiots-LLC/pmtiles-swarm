@@ -64,14 +64,19 @@ The name "stack" rather than "composite" is only to stay out of the way of
 
 ## Painting order
 
-`sources` is listed **bottom to top**. The last entry wins wherever it has data,
-the way a painter's algorithm works and the way rio-rgbify-merge already
-works.
+`sources` is a priority list, written **lowest priority first**. The base goes
+at the top of the array, each entry after it covers the one before wherever it
+has data, and the last entry wins — the same order rio-rgbify-merge uses, and
+the same order the merge configs already have.
 
-Photoshop's layer palette shows the reverse — topmost first — so anyone
-reasoning from that mental picture will write the list upside down and get
-global bathymetry painted over their high-resolution terrain. Say it in the file
-rather than relying on the reader:
+What shows through from an earlier source is whatever the later one masked or
+never had. So a coarse global layer written first is visible exactly where the
+detailed layer above it is absent, which is the arrangement the whole feature
+exists for.
+
+Anyone reasoning from a Photoshop layers palette — topmost first — will write
+this upside down and get global bathymetry painted over their high-resolution
+terrain. Say it in the file rather than relying on the reader:
 
 ```jsonc
 "sources": [ /* bottom first; the last entry paints over the others */ ]
@@ -537,33 +542,38 @@ the fields differ per source. Hand-editing `data/stacks.json` works and should
 keep working; the console's job is to make the order legible and the per-source
 settings discoverable.
 
-### The list is shown top-first, and saved bottom-first
+### The list is shown in the file's order
 
-This is the one thing the editor has to get right. `sources` is stored bottom
-first, because that is painting order and it is what the offline merge does. But
-every layers panel anyone has ever used — Photoshop, QGIS, the browser's own
-element tree — puts the topmost layer at the top of the list. An editor that
-renders the array in storage order would invert the mental model of every person
-who opens it, and dragging would do the opposite of what it looks like.
+`sources` is a priority list: the base is written first, each entry after it
+covers the one before wherever it has data, and the last entry is the
+highest-priority — usually the highest-resolution. What shows through from
+underneath is whatever the layer above has masked or does not have.
 
-The file keeps the order the merge configs already use: the base layer is
-written first, each source after it draws over the one before, and the last
-entry is the highest-priority one — usually the highest-resolution.
+The editor shows exactly that order, first to last:
 
-The editor shows that list upside down, because a layers panel puts the top
-layer at the top. Same stack, opposite order:
+```
+┌─ Sources ─────────────────────────────────────────┐
+│ 1  ⠿  gebco              z0–z8    base            │
+│ 2  ⠿  planet-bathymetry  z0–z16   covers 1 ▲ wins │
+└───────────────────────────────────────────────────┘
+```
 
-| In the editor, top first | In the file, bottom first | Covers        |
-| ------------------------ | ------------------------- | ------------- |
-| `planet-bathymetry`      | `sources[1]` — **last**   | everything    |
-| `gebco`                  | `sources[0]` — first      | the base only |
+The numbers are the array indices, so row 2 is `sources[1]` and nothing has to
+be translated between the screen and the file.
 
-So the row at the top of the editor is the last line of the `sources` array, and
-the row at the bottom is the first. The editor reverses on load and reverses
-again on save; nothing else in the system sees anything but the file's order.
+A layers panel would normally invert this — Photoshop, QGIS and the browser's
+element tree all put the topmost layer at the top of the list, and an earlier
+draft of this document followed them. That is the wrong convention to borrow
+here, for a reason those tools do not have: nobody hand-edits a `.psd`, and
+`data/stacks.json` is meant to be edited by hand. Two orders for one list costs
+a mental flip on every switch between the file and the screen, and the flip is
+silent when you get it wrong — the map simply renders the coarse source over the
+detailed one.
 
-Nobody editing the file by hand should be surprised to find the base written
-first, which is why [Painting order](#painting-order) says it there too.
+So the vertical metaphor is dropped rather than half-kept. "Above" and "below"
+are not used in the editor at all: a row is earlier or later, and the last one
+wins. [Painting order](#painting-order) says the same about the file, and now
+means the same thing on screen.
 
 ### What a row shows without being clicked
 

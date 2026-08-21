@@ -3105,8 +3105,9 @@ export function createApp({
           needsCodec: needsCodec(stack),
           pinned: isPinned(resolved),
           ...coverage,
-          // Bottom first, the order the recipe lists them. The console
-          // reverses this for display; see "The stack editor" in the design.
+          // The order the recipe lists them: lowest priority first, last
+          // wins. The console shows this order as it stands rather than
+          // inverting it, so the screen and the file never disagree.
           sources: resolved.sources.map((source) => ({
             index: source.index,
             name: source.name,
