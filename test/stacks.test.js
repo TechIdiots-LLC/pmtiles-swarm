@@ -1022,8 +1022,11 @@ describe('what the console reads to offer sources', () => {
 });
 
 describe('what a removal would break', () => {
-  const size = (stacks, entry, counts) =>
-    stacksUsing(stacks, entry, (category) => counts[category] ?? 0);
+  const size = (stacks, entry, counts, newest) =>
+    stacksUsing(stacks, entry, (category) => ({
+      count: counts[category] ?? 0,
+      newest: newest?.[category],
+    }));
 
   it('names a stack that pinned the archive being removed', () => {
     const entry = archive('f1'.repeat(20), 'one.pmtiles', ['terrain']);
@@ -1037,16 +1040,31 @@ describe('what a removal would break', () => {
     assert.equal(found[0].how, 'pinned');
   });
 
-  it('is relaxed about a category that still has other archives', () => {
-    // The stack resolves to whichever build is newest, so removing an older
-    // one changes nothing worth interrupting somebody for.
+  it('is relaxed about an older build in a category with others', () => {
+    // The stack resolves to whichever build is newest, so removing one it was
+    // not using changes nothing it can see.
     const entry = archive('f2'.repeat(20), 'old.pmtiles', ['terrain']);
     const found = size(
       [{ id: 's', sources: [{ category: 'terrain' }] }],
       entry,
       { terrain: 3 },
+      { terrain: 'something-else' },
     );
     assert.equal(found[0].how, 'category');
+  });
+
+  it('flags removing the build a category currently resolves to', () => {
+    // The stack does not stop -- it quietly starts serving an older build,
+    // which is harder to notice than a stack that broke, because the map
+    // still draws.
+    const entry = archive('f6'.repeat(20), 'current.pmtiles', ['terrain']);
+    const found = size(
+      [{ id: 's', sources: [{ category: 'terrain' }] }],
+      entry,
+      { terrain: 3 },
+      { terrain: entry.infoHash },
+    );
+    assert.equal(found[0].how, 'newest-in-category');
   });
 
   it('flags the last archive in a category a stack depends on', () => {
@@ -1055,17 +1073,53 @@ describe('what a removal would break', () => {
       [{ id: 's', sources: [{ category: 'terrain' }] }],
       entry,
       { terrain: 1 },
+      { terrain: entry.infoHash },
     );
     // Removing it empties the category, so the stack stops resolving.
     assert.equal(found[0].how, 'last-in-category');
   });
 
+  it('catches a category being emptied one archive at a time', () => {
+    // Each removal is judged against what would be left. Taking three
+    // archives out one by one is silent, silent, then caught -- and the last
+    // one is the removal that actually breaks the stack, so that is the right
+    // moment to say so rather than the first.
+    const stacks = [{ id: 's', sources: [{ category: 'terrain' }] }];
+    const seen = [];
+    for (let left = 3; left >= 1; left -= 1) {
+      const entry = archive(String(left).repeat(40), `build-${left}.pmtiles`, [
+        'terrain',
+      ]);
+      // Whatever is left, this is the newest of them -- the worst case, since
+      // it is the build the stack is actually resolving to.
+      const [found] = size(
+        stacks,
+        entry,
+        { terrain: left },
+        {
+          terrain: entry.infoHash,
+        },
+      );
+      seen.push(found.how);
+    }
+    assert.deepEqual(seen, [
+      'newest-in-category',
+      'newest-in-category',
+      'last-in-category',
+    ]);
+  });
+
   it('says nothing about a stack that does not use it', () => {
     const entry = archive('f4'.repeat(20), 'other.pmtiles', ['imagery']);
     assert.deepEqual(
-      size([{ id: 's', sources: [{ category: 'terrain' }] }], entry, {
-        terrain: 2,
-      }),
+      size(
+        [{ id: 's', sources: [{ category: 'terrain' }] }],
+        entry,
+        {
+          terrain: 2,
+        },
+        {},
+      ),
       [],
     );
   });

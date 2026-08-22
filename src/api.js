@@ -3178,11 +3178,13 @@ export function createApp({
       if (!entry) return res.status(404).json({ error: 'unknown archive' });
       await stacks?.refresh();
       res.json({
-        stacks: stacksUsing(
-          stacks?.list() ?? [],
-          entry,
-          (category) => catalog.byCategory(category).length,
-        ),
+        stacks: stacksUsing(stacks?.list() ?? [], entry, (category) => {
+          // byCategory is newest first, the same rule /latest/<category>/
+          // uses -- so the first entry is what a stack over this category
+          // currently resolves to.
+          const entries = catalog.byCategory(category);
+          return { count: entries.length, newest: entries[0]?.infoHash };
+        }),
       });
     }),
   );

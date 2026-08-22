@@ -243,20 +243,30 @@ export function resolveStack(stack, resolvers) {
 }
 
 /**
- * The stacks that would be affected by an archive going away.
+ * The stacks that would notice an archive going away, and how badly.
  *
- * Two ways a stack can depend on one, and they are worth telling apart. A
- * pinned source names the infohash, so removing that archive breaks the stack
- * outright and there is nothing to fall back to. A category source names a
- * category the archive is in, which usually survives -- the stack resolves to
- * whatever build is newest, and removing an older one changes nothing. It only
- * breaks when the archive being removed is the *only* one in that category.
+ * Four answers, because they are not equally bad and they call for different
+ * things from whoever is about to press the button.
+ *
+ *   pinned             The source names this infohash. It stops resolving,
+ *                      and there is nothing to fall back to.
+ *   last-in-category   The category has no other archive. Same outcome, but
+ *                      the fix is to add a build rather than repoint a stack.
+ *   newest-in-category The category has others, and this is the one it
+ *                      currently resolves to. The stack keeps working and
+ *                      quietly starts serving an older build -- which is worth
+ *                      saying out loud, because a map that changed without
+ *                      anybody being told is harder to notice than one that
+ *                      stopped.
+ *   category           An older build in a category with others. Removing it
+ *                      changes nothing the stack can see.
+ *
  * @param {Stack[]} stacks - Every stack.
  * @param {object} entry - The catalog entry about to go.
- * @param {Function} categorySize - How many archives a category still holds.
+ * @param {Function} categoryInfo - Name to `{ count, newest }` infohash.
  * @returns {object[]} - `{ id, title, how, source }` per affected stack.
  */
-export function stacksUsing(stacks, entry, categorySize) {
+export function stacksUsing(stacks, entry, categoryInfo) {
   const categories = new Set(normalizeCategories(entry));
   const found = [];
   for (const stack of stacks ?? []) {
@@ -268,17 +278,24 @@ export function stacksUsing(stacks, entry, categorySize) {
           how: 'pinned',
           source: source.archive,
         });
-      } else if (source.category && categories.has(source.category)) {
-        // Only a problem when this is the last one: a category with others in
-        // it simply resolves to the next newest.
-        const remaining = categorySize(source.category) - 1;
-        found.push({
-          id: stack.id,
-          title: stack.title ?? stack.id,
-          how: remaining > 0 ? 'category' : 'last-in-category',
-          source: source.category,
-        });
+        continue;
       }
+      if (!source.category || !categories.has(source.category)) continue;
+
+      const info = categoryInfo(source.category) ?? {};
+      const remaining = (info.count ?? 0) - 1;
+      const how =
+        remaining <= 0
+          ? 'last-in-category'
+          : info.newest === entry.infoHash
+            ? 'newest-in-category'
+            : 'category';
+      found.push({
+        id: stack.id,
+        title: stack.title ?? stack.id,
+        how,
+        source: source.category,
+      });
     }
   }
   return found;

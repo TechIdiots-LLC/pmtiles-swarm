@@ -2779,22 +2779,37 @@ Every piece is hashed against the ` +
             const { stacks: using } = await api(
               `/api/torrents/${infoHash}/stacks`,
             );
-            // A category source that still has other archives is fine: the
-            // stack resolves to whichever build is newest, so removing an
-            // older one changes nothing worth interrupting somebody for.
-            const broken = using.filter((u) => u.how !== 'category');
-            if (broken.length) {
-              const lines = broken.map(
-                (u) =>
-                  `  • ${u.title} — ${
-                    u.how === 'pinned'
-                      ? 'pinned to this archive'
-                      : `its only archive in "${u.source}"`
-                  }`,
-              );
-              warning = `${
-                broken.length === 1 ? 'A stack uses' : 'Stacks use'
-              } this archive and will stop working:\n${lines.join('\n')}\n\n`;
+            // Only an older build in a category with others left is silent.
+            // Emptying a category one archive at a time gets caught on the
+            // last one, which is the removal that actually breaks the stack --
+            // the ones before it genuinely change nothing.
+            const stops = using.filter(
+              (u) => u.how === 'pinned' || u.how === 'last-in-category',
+            );
+            const changes = using.filter((u) => u.how === 'newest-in-category');
+
+            const describe = (u) =>
+              ({
+                pinned: 'pinned to this archive',
+                'last-in-category': `its only archive in "${u.source}"`,
+                'newest-in-category': `the newest in "${u.source}" — would fall back to an older build`,
+              })[u.how];
+
+            if (stops.length) {
+              warning += `${
+                stops.length === 1 ? 'A stack uses' : 'Stacks use'
+              } this archive and will stop working:\n${stops
+                .map((u) => `  • ${u.title} — ${describe(u)}`)
+                .join('\n')}\n\n`;
+            }
+            if (changes.length) {
+              // Harder to notice than a stack that stopped: the map still
+              // draws, with different data underneath it.
+              warning += `${
+                changes.length === 1 ? 'A stack serves' : 'Stacks serve'
+              } this build and would quietly serve an older one:\n${changes
+                .map((u) => `  • ${u.title} — ${describe(u)}`)
+                .join('\n')}\n\n`;
             }
           } catch {
             // Not worth blocking a removal over. The worst case is the same
