@@ -6225,8 +6225,15 @@ Every piece is hashed against the ` +
                 .join('')}</optgroup>`,
             );
           }
-        } catch {
-          // Archives may still be listable, so this is not fatal on its own.
+        } catch (error) {
+          // Archives may still be listable, so this is not fatal on its own --
+          // but it has to be visible. A group that silently fails to appear
+          // reads as "there are none", which is indistinguishable from working.
+          groups.push(
+            `<optgroup label="Categories — could not load: ${escapeHtml(
+              error.message,
+            )}"></optgroup>`,
+          );
         }
 
         try {
@@ -6234,8 +6241,14 @@ Every piece is hashed against the ` +
           // offering even though a category is usually the better answer:
           // a reference output that must not move wants exactly this, and an
           // archive in no category has no other way to be named.
-          const { entries } = await api('/api/catalog');
-          const free = (entries ?? []).filter(
+          //
+          // /api/torrents rather than /api/catalog. They are different
+          // questions: the catalogue is the peer-facing list and is filtered
+          // by what this node publishes, so an archive held privately would be
+          // missing from a menu the operator is looking at. This is the same
+          // endpoint the Archives view reads, and it answers a bare array.
+          const held = await api('/api/torrents');
+          const free = (held ?? []).filter(
             (entry) =>
               !taken.has(entry.infoHash) &&
               (entry.kind ?? 'pmtiles') === 'pmtiles',
@@ -6244,16 +6257,24 @@ Every piece is hashed against the ` +
             groups.push(
               `<optgroup label="Archives — pinned to one build">${free
                 .map(
-                  (entry) =>
-                    `<option value="arc:${escapeHtml(entry.infoHash)}">${escapeHtml(
-                      entry.name,
-                    )}</option>`,
+                  (entry) => {
+                    const inCategories = (entry.categories ?? []).join(', ');
+                    return `<option value="arc:${escapeHtml(
+                      entry.infoHash,
+                    )}">${escapeHtml(entry.name)}${
+                      inCategories ? ` — also in ${escapeHtml(inCategories)}` : ''
+                    }</option>`;
+                  },
                 )
                 .join('')}</optgroup>`,
             );
           }
-        } catch {
-          // Same again: whichever list did load is still worth offering.
+        } catch (error) {
+          groups.push(
+            `<optgroup label="Archives — could not load: ${escapeHtml(
+              error.message,
+            )}"></optgroup>`,
+          );
         }
 
         select.innerHTML = groups.length

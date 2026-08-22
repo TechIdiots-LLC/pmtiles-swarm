@@ -63,7 +63,9 @@ async function serve(entries, stackList, tileData = {}, options = {}) {
 
   const app = createApp({
     library: {
-      listWithStatus: async () => [],
+      // /api/torrents answers from here, not from the catalog -- it is the
+      // list of what this node actually holds, decorated with engine status.
+      listWithStatus: async () => entries,
       resolveSavePath: async () => dir,
     },
     catalog,
@@ -1018,6 +1020,22 @@ describe('what the console reads to offer sources', () => {
     // The other fields the menu uses to label an entry.
     assert.equal(typeof body[0].archives, 'number');
     assert.equal(typeof body[0].servable, 'boolean');
+  });
+
+  it('lists what this node holds, as a bare array', async () => {
+    // /api/torrents, not /api/catalog. They answer different questions: the
+    // catalogue is peer-facing and filtered by what this node publishes, so an
+    // archive held privately is absent from it -- which would leave it out of
+    // a menu the operator is looking at.
+    const one = archive('e6'.repeat(20), 'one.pmtiles', ['alpha']);
+    const node = await serve([one], []);
+    after(() => node.close());
+
+    const held = await (await node.get('/api/torrents')).json();
+    assert.ok(Array.isArray(held), 'the response is the list itself');
+    assert.equal(held[0].infoHash, one.infoHash);
+    assert.equal(held[0].name, 'one.pmtiles');
+    assert.deepEqual(held[0].categories, ['alpha']);
   });
 });
 
