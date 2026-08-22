@@ -7,6 +7,25 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.68.3
+### 🐞 Bug fixes
+- **Exporting a stack failed on its first merged tile.** "Cannot transfer object of unsupported
+  type", and the export stopped — reported on the stack, with its checkpoint kept, but stopped.
+
+  The pixel worker hands a decoded tile over rather than copying it, because a raster is most of a
+  megabyte per source and copying each one is work on the very thread the worker exists to keep
+  free. It only did that where the buffer looked like it owned its memory: byte offset zero, and a
+  backing buffer exactly its own length.
+
+  A tile decoded by `sharp` passes that check and cannot be transferred anyway. Its memory comes
+  from libvips, so the backing store is externally allocated and Node refuses it — while looking,
+  by every property there is to look at, exactly like one it would accept. There is nothing to
+  test for, so the copy is now unconditional.
+
+  The tests never caught it because every one of them built its rasters with `Buffer.alloc`, whose
+  memory Node owns and will happily hand over. There is a test now that decodes a tile through the
+  codec first, and it fails against the old code.
+
 ## 0.68.2
 ### 🐞 Bug fixes
 - **Archives were listed under a heading that said Stacks.** The catalogue page's Archives

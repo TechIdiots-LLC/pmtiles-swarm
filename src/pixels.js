@@ -75,28 +75,25 @@ export class PixelWorker {
     const id = this.#next;
     this.#next += 1;
 
-    // Rasters are handed over rather than cloned, and where possible without
-    // being copied first either. A decoded tile is most of a megabyte per
-    // source, and copying every one of them is work on the very thread this
-    // exists to keep free -- enough of it to cost more than it saves.
+    // Copied into a buffer this thread allocated, then transferred.
     //
-    // Copied only when the buffer does not own its memory. Node pools
-    // allocations under 4 KiB, and transferring a pooled buffer would hand
-    // over the whole pool with everything else in it; a raster is far larger
-    // than that and so is always its own allocation, but the check is what
-    // makes that a fact rather than an assumption.
+    // An earlier version handed the raster over as it stood where it looked
+    // like it owned its memory -- byteOffset zero and a buffer exactly its own
+    // length -- to save copying most of a megabyte per source. A decoded tile
+    // passes that check and cannot be transferred anyway: `sharp` gets its
+    // memory from libvips, so the backing store is externally allocated, and
+    // Node refuses it with "Cannot transfer object of unsupported type". There
+    // is no property that tells the two apart, so there is nothing to check
+    // for -- the copy is the only thing that is always right.
     //
-    // Either way the caller gives up these rasters. Nothing reads them after a
-    // merge, which is what makes that safe.
+    // The caller gives up these rasters either way. Nothing reads a
+    // contribution after its merge, which is what makes that safe.
     const transfers = [];
-    const owned = (bytes) =>
-      bytes.byteOffset === 0 && bytes.buffer.byteLength === bytes.byteLength;
     const contributions = job.contributions.map((contribution) => {
       if (!contribution?.raster?.data) return contribution;
       const source = contribution.raster.data;
-      const bytes = owned(source)
-        ? source
-        : Uint8Array.prototype.slice.call(source);
+      const bytes = new Uint8Array(source.byteLength);
+      bytes.set(source);
       transfers.push(bytes.buffer);
       return {
         ...contribution,

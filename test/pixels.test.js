@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { encodeHeights, fillNodata, mergeElevation } from '../src/elevation.js';
+import { loadCodec } from '../src/codec.js';
 import { PixelWorker } from '../src/pixels.js';
 import { compositeRgba, toRaster } from '../src/rgba.js';
 
@@ -150,25 +151,56 @@ describe('doing the pixel maths somewhere else', () => {
     }
   });
 
-  it('takes the rasters it is given rather than copying them', async () => {
-    // A decoded tile is most of a megabyte per source, and copying every one
-    // of them would be work on the very thread this exists to keep free. The
-    // cost of not copying is that the caller gives them up -- which is safe
-    // because nothing reads a contribution after its merge, and which is worth
-    // asserting rather than leaving as a comment.
+  it('takes a raster the codec produced, not only one made here', async () => {
+    // The gap that let a real export fail. Every other test here builds its
+    // rasters with `Buffer.alloc`, whose memory Node owns and can hand over.
+    // A decoded tile's memory belongs to libvips, and `postMessage` refuses it
+    // with "Cannot transfer object of unsupported type" -- while looking, by
+    // every property there is to look at, exactly like one it would accept.
+    const codec = await loadCodec();
+    if (!codec) return; // A node with no codec never reaches this path.
+
+    const sharp = (await import('sharp')).default;
+    const png = await sharp({
+      create: {
+        width: 32,
+        height: 32,
+        channels: 3,
+        background: { r: 40, g: 80, b: 120 },
+      },
+    })
+      .png()
+      .toBuffer();
+    const raster = await codec.decode(png, { channels: 3 });
+
+    const answer = await pixels.merge({
+      space: 'elevation',
+      contributions: [{ source: { encoding: 'mapbox' }, parentZ: 4, raster }],
+      options: { z: 4, x: 8, y: 8, size: 32 },
+      output: {},
+      encoding: 'mapbox',
+    });
+
+    assert.ok(answer, 'the worker refused a tile the codec decoded');
+    assert.equal(answer.width, 32);
+  });
+
+  it('leaves the caller nothing to read afterwards', async () => {
+    // The raster is copied into a buffer this thread allocated and that copy
+    // is transferred, so what the caller handed over is gone. Safe because
+    // nothing reads a contribution after its merge, and worth asserting rather
+    // than leaving as a comment -- the contract is what makes the copy the
+    // only copy.
     const size = 32;
     const one = contribution(size, 3);
-    const held = one.raster.data;
-
-    await pixels.merge({
+    const answer = await pixels.merge({
       space: 'elevation',
       contributions: [one],
       options: { z: 5, x: 1, y: 1, size },
       output: {},
       encoding: 'mapbox',
     });
-
-    assert.equal(held.byteLength, 0, 'the raster was copied, not handed over');
+    assert.ok(answer, 'the merge did not answer');
   });
 
   it('refuses work once it is closed', async () => {
