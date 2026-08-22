@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.62.0
+### ✨ Features and improvements
 - **Tile stacks: several archives served as one tile endpoint.** A stack is a
   recipe rather than a file — an ordered list of sources, bottom first, with the
   last painting over the ones before it. Sources are named by category, so a
