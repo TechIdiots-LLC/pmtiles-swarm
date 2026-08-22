@@ -66,6 +66,11 @@
       nav button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
       main { padding: 1.25rem; }
       .bar { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+      /* The custom encoding is one formula, not four settings, so its inputs
+         sit inside it: tighter gaps and a shared baseline keep it reading as a
+         line of maths rather than as a row of fields. */
+      .bar.formula { gap: 0.35rem; align-items: baseline; margin-bottom: 0.4rem; }
+      .bar.formula .sub { white-space: nowrap; }
       input, select, button, textarea {
         font: inherit;
         padding: 0.4rem 0.6rem;
@@ -413,6 +418,7 @@
       <nav>
         <button id="tab-archives" class="on">Archives</button>
         <button id="tab-categories">Categories</button>
+        <button id="tab-stacks">Stacks</button>
         <button id="tab-traffic">Traffic</button>
         <button id="tab-settings">Settings</button>
         <button id="logout" hidden>Sign out</button>
@@ -512,6 +518,15 @@
           No categories yet. Tag an archive when you add it, or from its detail
           panel, and it will appear here.
         </div>
+      </section>
+
+      <section id="view-stacks" hidden>
+        <div class="bar">
+          <button id="stacks-add">Add stack…</button>
+          <span class="bar-gap"></span>
+          <span class="muted" id="stacks-where"></span>
+        </div>
+        <div id="stacks-list"></div>
       </section>
 
       <section id="view-traffic" hidden>
@@ -737,6 +752,138 @@
         <menu>
           <button value="cancel">Cancel</button>
           <button id="adopt-go" value="default" disabled>Adopt selected</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="stack-dialog">
+      <form method="dialog" id="stack-form">
+        <h2 id="stack-dialog-title">Add stack</h2>
+        <div class="sub" style="margin-bottom:0.8rem">
+          A stack serves several archives as one tile endpoint. Sources are
+          listed lowest first: each one covers the one before it wherever it has
+          data, and the last wins. What shows through from underneath is
+          whatever the source above masked or never had.
+        </div>
+
+        <div class="field">
+          <label for="stack-id">Name</label>
+          <input id="stack-id" placeholder="planet-terrain" autocomplete="off" />
+          <div class="sub">
+            Used in the URL: <code id="stack-url-preview">/stacks/…/tiles.json</code>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="stack-title">Title</label>
+          <input id="stack-title" placeholder="Planet terrain with bathymetry" autocomplete="off" />
+        </div>
+
+        <div class="field">
+          <label>What these tiles are</label>
+          <label class="choice">
+            <input type="radio" name="stack-space" value="elevation" checked />
+            Terrain — the channels are a packed height
+          </label>
+          <label class="choice">
+            <input type="radio" name="stack-space" value="rgba" />
+            Imagery — the channels are a colour
+          </label>
+          <div class="sub" id="stack-space-note"></div>
+        </div>
+
+        <div class="field">
+          <label>Sources</label>
+          <div id="stack-sources"></div>
+          <div class="bar" style="margin-top:0.4rem">
+            <select id="stack-add-source"></select>
+            <button type="button" id="stack-add-source-go">Add source</button>
+          </div>
+        </div>
+
+        <div class="field" id="stack-output-elevation">
+          <label>Output</label>
+          <div class="bar">
+            <label class="choice">Encoding
+              <select id="stack-out-encoding">
+                <option value="">same as the sources</option>
+                <option value="mapbox">mapbox</option>
+                <option value="terrarium">terrarium</option>
+                <option value="custom">custom</option>
+              </select>
+            </label>
+            <label class="choice">No-data height
+              <input id="stack-out-nodata" type="number" step="any" placeholder="-10000" style="width:8rem" />
+            </label>
+          </div>
+          <div class="bar" id="stack-out-mapbox">
+            <label class="choice">Base value
+              <input id="stack-out-baseval" type="number" step="any" placeholder="-10000" style="width:7rem" />
+            </label>
+            <label class="choice">Interval
+              <input id="stack-out-interval" type="number" step="any" min="0" placeholder="0.1" style="width:6rem" />
+            </label>
+          </div>
+          <div class="bar formula" id="stack-out-custom">
+            <span class="sub">height =</span>
+            <span class="sub">red ×</span>
+            <input id="stack-out-redFactor" type="number" step="any" style="width:6rem" title="redFactor" />
+            <span class="sub">+ green ×</span>
+            <input id="stack-out-greenFactor" type="number" step="any" style="width:6rem" title="greenFactor" />
+            <span class="sub">+ blue ×</span>
+            <input id="stack-out-blueFactor" type="number" step="any" style="width:6rem" title="blueFactor" />
+            <span class="sub">−</span>
+            <input id="stack-out-baseShift" type="number" step="any" style="width:6rem" title="baseShift" />
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Resampling</label>
+          <div class="bar">
+            <select id="stack-resampling">
+              <option value="">bilinear (default)</option>
+              <option value="nearest">nearest</option>
+              <option value="bilinear">bilinear</option>
+              <option value="cubic">cubic</option>
+              <option value="lanczos">lanczos</option>
+            </select>
+            <span class="sub">Used where a source has no tile at this zoom and
+              one is taken from its parent.</span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Tile format and size</label>
+          <div class="bar">
+            <label class="choice">
+              <select id="stack-out-format">
+                <option value="">format: same as the sources</option>
+                <option value="webp">webp</option>
+                <option value="png">png</option>
+              </select>
+            </label>
+            <label class="choice">
+              <select id="stack-out-tilesize">
+                <option value="">size: follow the sources</option>
+                <option value="256">256 px</option>
+                <option value="512">512 px</option>
+              </select>
+            </label>
+            <span class="sub" id="stack-format-note"></span>
+          </div>
+          <div class="sub">
+            A tile's coordinates are an extent rather than a pixel count, so a
+            size is not a crop: it is the same ground on a finer or coarser
+            grid. Left to follow the sources, the largest one decides — which
+            keeps the finest data the stack has. A request can override this
+            with <code>/stacks/&lt;id&gt;/512/{z}/{x}/{y}</code>.
+          </div>
+        </div>
+
+        <div class="sub" id="stack-error" style="color:var(--danger)"></div>
+        <menu>
+          <button value="cancel" type="button" id="stack-cancel">Cancel</button>
+          <button id="stack-save" value="default">Save</button>
         </menu>
       </form>
     </dialog>
@@ -2653,8 +2800,53 @@ Every piece is hashed against the ` +
         };
 
         $('remove').onclick = async () => {
+          // Asked before the removal rather than discovered after it. A stack
+          // that pinned this infohash stops working the moment it is gone, and
+          // has nothing to fall back to.
+          let warning = '';
+          try {
+            const { stacks: using } = await api(
+              `/api/torrents/${infoHash}/stacks`,
+            );
+            // Only an older build in a category with others left is silent.
+            // Emptying a category one archive at a time gets caught on the
+            // last one, which is the removal that actually breaks the stack --
+            // the ones before it genuinely change nothing.
+            const stops = using.filter(
+              (u) => u.how === 'pinned' || u.how === 'last-in-category',
+            );
+            const changes = using.filter((u) => u.how === 'newest-in-category');
+
+            const describe = (u) =>
+              ({
+                pinned: 'pinned to this archive',
+                'last-in-category': `its only archive in "${u.source}"`,
+                'newest-in-category': `the newest in "${u.source}" — would fall back to an older build`,
+              })[u.how];
+
+            if (stops.length) {
+              warning += `${
+                stops.length === 1 ? 'A stack uses' : 'Stacks use'
+              } this archive and will stop working:\n${stops
+                .map((u) => `  • ${u.title} — ${describe(u)}`)
+                .join('\n')}\n\n`;
+            }
+            if (changes.length) {
+              // Harder to notice than a stack that stopped: the map still
+              // draws, with different data underneath it.
+              warning += `${
+                changes.length === 1 ? 'A stack serves' : 'Stacks serve'
+              } this build and would quietly serve an older one:\n${changes
+                .map((u) => `  • ${u.title} — ${describe(u)}`)
+                .join('\n')}\n\n`;
+            }
+          } catch {
+            // Not worth blocking a removal over. The worst case is the same
+            // removal without the warning, which is where this started.
+          }
+
           const deleteData = window.confirm(
-            'Remove this archive.\n\nOK also deletes its data; Cancel keeps the files.',
+            `${warning}Remove this archive.\n\nOK also deletes its data; Cancel keeps the files.`,
           );
           try {
             await api(
@@ -4892,6 +5084,42 @@ Every piece is hashed against the ` +
           ],
         },
         {
+          group: 'Serving tiles',
+          title: 'Merged tiles',
+          blurb:
+            'A stack serves several archives as one endpoint. Merging one ' +
+            'tile costs a read of every source, a decode each and an encode, ' +
+            'and against a cache-mode source those reads may go to the ' +
+            'swarm — so the answers are kept. What the stacks themselves are ' +
+            'lives under Stacks; this is only where their output is held.',
+          fields: [
+            {
+              key: 'stacks.cacheBytes',
+              label: 'Disk kept for merged tiles',
+              type: 'number',
+              placeholder: '2147483648',
+              unit: 'bytes',
+              restart: true,
+              help:
+                'Zero turns it off, which is right for a node whose stacks ' +
+                'all pass a source through untouched — those cost one read, ' +
+                'and caching them would put a second copy of the archive ' +
+                'beside the first. Evicted least-recently-used.',
+            },
+            {
+              key: 'stacks.cacheDir',
+              label: 'Where they go',
+              type: 'text',
+              placeholder: 'under the data directory',
+              restart: true,
+              help:
+                'Beside the catalog rather than among the archives: a merged ' +
+                'tile is derived and can be thrown away, and a backup should ' +
+                'be able to tell the difference.',
+            },
+          ],
+        },
+        {
           group: 'Network',
           title: 'Listening',
           blurb:
@@ -6639,12 +6867,19 @@ Every piece is hashed against the ` +
 
       // ── Tabs ──────────────────────────────────────────────────────────────
       const showTab = (name) => {
-        for (const tab of ['archives', 'categories', 'traffic', 'settings']) {
+        for (const tab of [
+          'archives',
+          'categories',
+          'stacks',
+          'traffic',
+          'settings',
+        ]) {
           $(`view-${tab}`).hidden = tab !== name;
           $(`tab-${tab}`).classList.toggle('on', tab === name);
         }
         if (name === 'settings') loadSettings().catch((e) => toast(e.message));
         if (name === 'categories') loadCategories().catch((e) => toast(e.message));
+        if (name === 'stacks') loadStacks().catch((e) => toast(e.message));
         if (name === 'traffic') {
           loadTraffic().catch((e) => toast(e.message));
           loadSwarmTraffic();
@@ -6657,7 +6892,723 @@ Every piece is hashed against the ` +
 
       $('tab-archives').onclick = () => showTab('archives');
       $('tab-categories').onclick = () => showTab('categories');
+      $('tab-stacks').onclick = () => showTab('stacks');
       $('tab-traffic').onclick = () => showTab('traffic');
+
+      // ── Stacks ────────────────────────────────────────────────────────────
+      //
+      // Read-only for now: the recipes live in data/stacks.json and the node
+      // re-reads that file when it changes, so this shows what is there and
+      // why a stack is or is not working rather than offering to edit it.
+      // Editing is worth doing and is a larger thing than a list — see
+      // docs/tile-stacks.md, "The stack editor".
+      //
+      // Sources are listed in the file's order, first to last, with their
+      // indices beside them. A layers panel would normally invert that, and
+      // deliberately does not here: data/stacks.json is meant to be edited by
+      // hand, and two orders for one list costs a mental flip on every switch
+      // between the file and this screen — a flip that fails silently, because
+      // the map simply renders the coarse source over the detailed one.
+      let stacksLastDrawn = null;
+
+      const loadStacks = async () => {
+        const body = await api('/api/stacks');
+        const { stacks, codec } = body;
+        // A category resolving to a new build changes this, which is the
+        // reason to poll at all -- but most polls change nothing, and
+        // repainting a list somebody is about to click is worse than not.
+        const signature = JSON.stringify(body);
+        if (signature === stacksLastDrawn) return;
+        stacksLastDrawn = signature;
+        const list = $('stacks-list');
+        $('stacks-where').textContent = stacks.length
+          ? `${stacks.length} stack${stacks.length === 1 ? '' : 's'} in data/stacks.json`
+          : '';
+
+        if (!stacks.length) {
+          list.innerHTML = `
+            <div class="card">
+              <p><strong>No stacks yet.</strong> A stack serves several archives as one
+                 tile endpoint — a regional archive over a global one, or terrain over
+                 bathymetry.</p>
+              <p class="muted">Add them to <code>data/stacks.json</code>; there is a
+                 <code>stacks.json.sample</code> beside the config to copy. The node
+                 re-reads the file when it changes, so no restart is needed.</p>
+              ${
+                codec
+                  ? ''
+                  : `<p class="muted">This node has no pixel codec. Stacks that only pick
+                     whichever source has the tile work anyway; masking, blending and
+                     re-encoding need <code>npm install sharp</code>.</p>`
+              }
+            </div>`;
+          return;
+        }
+
+        const needing = stacks.filter((s) => s.needsCodec).length;
+        const banner =
+          !codec && needing
+            ? `<p class="banner">This node has no pixel codec, so ${needing} of these
+               ${needing === 1 ? 'stacks answers' : 'stacks answer'} 501 for their tiles.
+               <code>npm install sharp</code> to enable them. The rest are passthrough
+               and work without it.</p>`
+            : '';
+        list.innerHTML = banner + stacks.map(renderStack).join('');
+      };
+
+      /**
+       * One stack: what it is, what is wrong with it, and what it is made of.
+       * @param {object} stack - A row from /api/stacks.
+       * @returns {string} - HTML.
+       */
+      const renderStack = (stack) => {
+        const broken = stack.problems.length > 0;
+        const unresolved = stack.sources.filter((s) => !s.resolved);
+
+        // Three different things, deliberately not merged into one badge. A
+        // problem is a mistake in the recipe; needsCodec is a recipe that is
+        // fine and cannot be served here; an unresolved source is a recipe
+        // that is fine and whose inputs are missing. They call for different
+        // actions from whoever is looking.
+        const badges = [];
+        if (broken) badges.push('<span class="pill bad">invalid</span>');
+        if (unresolved.length) {
+          badges.push('<span class="pill warn">sources missing</span>');
+        }
+        if (stack.needsCodec) {
+          badges.push('<span class="pill warn">needs a codec</span>');
+        }
+        if (stack.pinned) badges.push('<span class="pill">pinned</span>');
+
+        const zooms =
+          stack.minzoom === null || stack.maxzoom === null
+            ? ''
+            : `z${stack.minzoom}–z${stack.maxzoom}`;
+
+        const links = `
+          ${
+            broken
+              ? ''
+              : `<a href="/stacks/${encodeURIComponent(stack.id)}/preview" target="_blank" rel="noreferrer">
+                   <button type="button">Preview</button></a>
+                 <a href="/stacks/${encodeURIComponent(stack.id)}/tiles.json" target="_blank" rel="noreferrer">
+                   <button type="button">TileJSON</button></a>`
+          }
+          <button type="button" data-stack-edit="${escapeHtml(stack.id)}">Edit</button>
+          <button type="button" data-stack-delete="${escapeHtml(stack.id)}">Delete</button>`;
+
+        return `
+          <div class="card">
+            <div class="row">
+              <strong>${escapeHtml(stack.title)}</strong>
+              <code class="muted">${escapeHtml(stack.id)}</code>
+              <span class="pill">${escapeHtml(stack.space)}</span>
+              ${zooms ? `<span class="muted">${zooms}</span>` : ''}
+              ${badges.join(' ')}
+              <span class="bar-gap"></span>
+              ${links}
+            </div>
+            ${
+              broken
+                ? `<ul class="bad">${stack.problems
+                    .map((p) => `<li>${escapeHtml(p)}</li>`)
+                    .join('')}</ul>`
+                : ''
+            }
+            ${
+              stack.needsCodec
+                ? `<p class="muted">Serving this means decoding pixels
+                   (<code>${escapeHtml(stack.needsCodec)}</code>). Without
+                   <code>sharp</code> installed, its tiles answer 501.</p>`
+                : ''
+            }
+            <table class="tight">
+              <thead>
+                <tr><th>#</th><th>Source</th><th>Resolves to</th><th>Zooms</th><th></th></tr>
+              </thead>
+              <tbody>
+                ${stack.sources.map(renderStackSource).join('')}
+              </tbody>
+            </table>
+            <p class="muted">
+              Listed in the file's order: the first is the base, each one covers
+              the one before it wherever it has data, and the last wins.
+            </p>
+          </div>`;
+      };
+
+      /**
+       * One source row.
+       * @param {object} source - A source from /api/stacks.
+       * @param {number} index - Its position, which is its priority.
+       * @param {object[]} all - Every source, to know which one is last.
+       * @returns {string} - HTML.
+       */
+      const renderStackSource = (source, index, all) => {
+        const kind = source.pinned ? 'archive' : 'category';
+        const zooms =
+          source.minzoom === null
+            ? '<span class="muted">—</span>'
+            : `z${source.minzoom}–z${source.maxzoom}`;
+
+        const notes = [];
+        if (index === all.length - 1 && all.length > 1) {
+          notes.push('<span class="pill">wins</span>');
+        }
+        if (index === 0 && all.length > 1) {
+          notes.push('<span class="pill">base</span>');
+        }
+        if (source.required) notes.push('<span class="pill">required</span>');
+
+        return `
+          <tr${source.resolved ? '' : ' class="bad"'}>
+            <td class="muted">${index}</td>
+            <td><code>${escapeHtml(source.name)}</code>
+                <span class="muted">${kind}</span></td>
+            <td>${
+              source.resolved
+                ? `<code class="muted">${escapeHtml(source.archiveName ?? '')}</code>`
+                : '<span class="bad">does not resolve</span>'
+            }</td>
+            <td>${zooms}</td>
+            <td>${notes.join(' ')}</td>
+          </tr>`;
+      };
+
+
+      // ── Building a stack ──────────────────────────────────────────────────
+      //
+      // The recipe being edited, held here rather than read back out of the
+      // DOM. Source order carries meaning and the per-source fields differ by
+      // space, so a form that re-derived itself from its own inputs would have
+      // to know which of them are currently real.
+      let stackDraft = null;
+
+      /** Forty characters of hex is not a label. */
+      const shortHash = (hash) => (hash ? `${hash.slice(0, 12)}…` : hash);
+
+      /** Whether the draft is imagery rather than terrain. */
+      const draftIsRgba = () => stackDraft?.space === 'rgba';
+
+      /**
+       * Opens the dialog on a new stack, or on one that already exists.
+       * @param {object} [existing] - The stack to edit.
+       * @returns {Promise<void>} - Resolves once the dialog is open.
+       */
+      const openStackDialog = async (existing) => {
+        stackDraft = existing
+          ? JSON.parse(JSON.stringify(existing))
+          : { id: '', title: '', space: 'elevation', sources: [], output: {} };
+        stackDraft.sources ??= [];
+        stackDraft.output ??= {};
+
+        $('stack-dialog-title').textContent = existing
+          ? 'Edit stack'
+          : 'Add stack';
+        // An id is what the URL is made of, so changing one would silently
+        // orphan whatever points at the old address.
+        $('stack-id').value = stackDraft.id ?? '';
+        $('stack-id').disabled = Boolean(existing);
+        $('stack-title').value = stackDraft.title ?? '';
+        for (const radio of document.querySelectorAll(
+          'input[name="stack-space"]',
+        )) {
+          radio.checked = radio.value === (stackDraft.space ?? 'elevation');
+        }
+        $('stack-out-encoding').value = stackDraft.output.encoding ?? '';
+        $('stack-out-nodata').value = stackDraft.output.nodata ?? '';
+        $('stack-out-baseval').value = stackDraft.output.baseVal ?? '';
+        $('stack-out-interval').value = stackDraft.output.interval ?? '';
+        for (const name of [
+          'redFactor',
+          'greenFactor',
+          'blueFactor',
+          'baseShift',
+        ]) {
+          $(`stack-out-${name}`).value = stackDraft.output[name] ?? '';
+        }
+        $('stack-out-format').value = stackDraft.output.format ?? '';
+        $('stack-resampling').value = stackDraft.resampling ?? '';
+        $('stack-out-tilesize').value = stackDraft.output.tileSize ?? '';
+        $('stack-error').textContent = '';
+
+        await fillStackSourceChoices();
+        renderStackDraft();
+        $('stack-dialog').showModal();
+      };
+
+      /**
+       * Fills the "add a source" menu with the categories this node has.
+       *
+       * Categories rather than archives, because that is the reason to do this
+       * in the swarm at all: a stack over a category follows the rebuild, where
+       * one over an infohash pins to a build that will eventually be retired.
+       * @returns {Promise<void>} - Resolves once filled.
+       */
+      const fillStackSourceChoices = async () => {
+        const select = $('stack-add-source');
+        const taken = new Set(
+          (stackDraft?.sources ?? []).flatMap((source) =>
+            [source.category, source.archive].filter(Boolean),
+          ),
+        );
+        const groups = [];
+
+        try {
+          // /api/categories answers with a bare array, and each entry names
+          // itself `category` rather than `name`. Both are worth stating: the
+          // console's other reader of this endpoint assigns the array
+          // directly, and destructuring `{ categories }` here silently
+          // produced undefined and an empty menu rather than an error.
+          const categories = await api('/api/categories');
+          const free = (categories ?? []).filter(
+            (c) => !taken.has(c.category),
+          );
+          if (free.length) {
+            groups.push(
+              `<optgroup label="Categories — follow the newest build">${free
+                .map((c) => {
+                  // A category whose newest build is MBTiles, or which has not
+                  // been probed, has no tiles to contribute yet. Offered and
+                  // labelled rather than hidden: it may become servable later,
+                  // and leaving it out looks like it does not exist.
+                  const note = c.servable
+                    ? `${c.archives} archive${c.archives === 1 ? '' : 's'}`
+                    : 'no tiles yet';
+                  return `<option value="cat:${escapeHtml(
+                    c.category,
+                  )}">${escapeHtml(c.category)} — ${note}</option>`;
+                })
+                .join('')}</optgroup>`,
+            );
+          }
+        } catch (error) {
+          // Archives may still be listable, so this is not fatal on its own --
+          // but it has to be visible. A group that silently fails to appear
+          // reads as "there are none", which is indistinguishable from working.
+          groups.push(
+            `<optgroup label="Categories — could not load: ${escapeHtml(
+              error.message,
+            )}"></optgroup>`,
+          );
+        }
+
+        try {
+          // Pinning one build is the other way to name a source. Worth
+          // offering even though a category is usually the better answer:
+          // a reference output that must not move wants exactly this, and an
+          // archive in no category has no other way to be named.
+          //
+          // /api/torrents rather than /api/catalog. They are different
+          // questions: the catalogue is the peer-facing list and is filtered
+          // by what this node publishes, so an archive held privately would be
+          // missing from a menu the operator is looking at. This is the same
+          // endpoint the Archives view reads, and it answers a bare array.
+          const held = await api('/api/torrents');
+          const free = (held ?? []).filter(
+            (entry) =>
+              !taken.has(entry.infoHash) &&
+              (entry.kind ?? 'pmtiles') === 'pmtiles',
+          );
+          if (free.length) {
+            groups.push(
+              `<optgroup label="Archives — pinned to one build">${free
+                .map(
+                  (entry) => {
+                    const inCategories = (entry.categories ?? []).join(', ');
+                    return `<option value="arc:${escapeHtml(
+                      entry.infoHash,
+                    )}">${escapeHtml(entry.name)}${
+                      inCategories ? ` — also in ${escapeHtml(inCategories)}` : ''
+                    }</option>`;
+                  },
+                )
+                .join('')}</optgroup>`,
+            );
+          }
+        } catch (error) {
+          groups.push(
+            `<optgroup label="Archives — could not load: ${escapeHtml(
+              error.message,
+            )}"></optgroup>`,
+          );
+        }
+
+        select.innerHTML = groups.length
+          ? groups.join('')
+          : '<option value="">nothing left to add</option>';
+        select.disabled = groups.length === 0;
+        $('stack-add-source-go').disabled = groups.length === 0;
+      };
+
+      /** Redraws the source list and the fields that depend on the space. */
+      const renderStackDraft = () => {
+        const rgba = draftIsRgba();
+        $('stack-space-note').textContent = rgba
+          ? 'Sources are composited with opacity and a blend mode. Output may be compressed.'
+          : 'Sources are decoded to metres, masked and merged. Output is always lossless.';
+        $('stack-output-elevation').hidden = rgba;
+        // Blank means "same as the sources", which for terrain is mapbox
+        // unless a source says otherwise -- so its base and interval are worth
+        // offering there too.
+        const outEncoding = $('stack-out-encoding').value;
+        $('stack-out-mapbox').hidden =
+          rgba || (outEncoding !== '' && outEncoding !== 'mapbox');
+        $('stack-out-custom').hidden = rgba || outEncoding !== 'custom';
+        $('stack-format-note').textContent = rgba
+          ? ''
+          : 'Terrain is encoded losslessly whichever format is chosen.';
+        $('stack-url-preview').textContent = `/stacks/${
+          $('stack-id').value || '…'
+        }/tiles.json`;
+
+        const list = $('stack-sources');
+        if (!stackDraft.sources.length) {
+          list.innerHTML =
+            '<div class="sub">No sources yet. Add the base first — the one that ' +
+            'should show wherever nothing above it has data.</div>';
+          return;
+        }
+        list.innerHTML =
+          stackDraft.sources
+            .map((source, index) => renderDraftSource(source, index, rgba))
+            .join('') +
+          `<div class="sub">A <strong>required</strong> source that cannot be read
+             makes the whole tile answer 503, instead of quietly serving the rest —
+             a layer that vanished looks like a plausible map rather than a failure.
+             It does not mean the source must have a tile everywhere; covering
+             different areas is the point.</div>`;
+      };
+
+      /**
+       * One editable source row.
+       * @param {object} source - The source.
+       * @param {number} index - Its position, which is its priority.
+       * @param {boolean} rgba - Whether this stack is imagery.
+       * @returns {string} - HTML.
+       */
+      const renderDraftSource = (source, index, rgba) => {
+        const last = index === stackDraft.sources.length - 1;
+        const role =
+          stackDraft.sources.length === 1
+            ? ''
+            : index === 0
+              ? '<span class="pill">base</span>'
+              : last
+                ? '<span class="pill">wins</span>'
+                : '';
+
+        const perSpace = rgba
+          ? `<label class="choice">Opacity
+               <input type="number" min="0" max="1" step="0.05" style="width:5rem"
+                      data-stack-field="opacity" data-stack-index="${index}"
+                      value="${source.opacity ?? 1}" />
+             </label>
+             <label class="choice">Blend
+               <select data-stack-field="blend" data-stack-index="${index}">
+                 ${['normal', 'multiply', 'screen', 'overlay', 'darken', 'lighten']
+                   .map(
+                     (mode) =>
+                       `<option value="${mode}"${
+                         (source.blend ?? 'normal') === mode ? ' selected' : ''
+                       }>${mode}</option>`,
+                   )
+                   .join('')}
+               </select>
+             </label>`
+          : `<label class="choice">Encoding
+               <select data-stack-field="encoding" data-stack-index="${index}">
+                 <option value="mapbox"${
+                   (source.encoding ?? 'mapbox') === 'mapbox' ? ' selected' : ''
+                 }>mapbox</option>
+                 <option value="terrarium"${
+                   source.encoding === 'terrarium' ? ' selected' : ''
+                 }>terrarium</option>
+                 <option value="custom"${
+                   source.encoding === 'custom' ? ' selected' : ''
+                 }>custom</option>
+               </select>
+             </label>
+             ${
+               (source.encoding ?? 'mapbox') === 'mapbox'
+                 ? `<label class="choice">Base value
+                      <input type="number" step="any" style="width:7rem"
+                             data-stack-field="baseVal" data-stack-index="${index}"
+                             placeholder="-10000" value="${source.baseVal ?? ''}" />
+                    </label>
+                    <label class="choice">Interval
+                      <input type="number" step="any" min="0" style="width:6rem"
+                             data-stack-field="interval" data-stack-index="${index}"
+                             placeholder="0.1" value="${source.interval ?? ''}" />
+                    </label>`
+                 : ''
+             }
+             ${
+               source.encoding === 'custom'
+                 ? `<div class="bar formula">
+                      <span class="sub">height =</span>
+                      <span class="sub">red ×</span>
+                      <input type="number" step="any" style="width:6rem" title="redFactor"
+                             data-stack-field="redFactor" data-stack-index="${index}"
+                             value="${source.redFactor ?? ''}" />
+                      <span class="sub">+ green ×</span>
+                      <input type="number" step="any" style="width:6rem" title="greenFactor"
+                             data-stack-field="greenFactor" data-stack-index="${index}"
+                             value="${source.greenFactor ?? ''}" />
+                      <span class="sub">+ blue ×</span>
+                      <input type="number" step="any" style="width:6rem" title="blueFactor"
+                             data-stack-field="blueFactor" data-stack-index="${index}"
+                             value="${source.blueFactor ?? ''}" />
+                      <span class="sub">−</span>
+                      <input type="number" step="any" style="width:6rem" title="baseShift"
+                             data-stack-field="baseShift" data-stack-index="${index}"
+                             value="${source.baseShift ?? ''}" />
+                    </div>
+                    <div class="sub">Each channel is 0–255. The first three are
+                      multipliers; the last is subtracted, so a mapbox base value
+                      of −10000 is a shift of 10000. mapbox is
+                      <code>6553.6, 25.6, 0.1, 10000</code> and terrarium is
+                      <code>256, 1, 0.00390625, 32768</code>.</div>`
+                 : ''
+             }
+             <label class="choice">Shift by
+               <input type="number" step="any" style="width:6rem"
+                      data-stack-field="heightAdjustment" data-stack-index="${index}"
+                      value="${source.heightAdjustment ?? 0}" /> m
+             </label>
+             <label class="choice">Mask heights
+               <input style="width:12rem" placeholder="-10000, 0, -1"
+                      data-stack-field="maskValues" data-stack-index="${index}"
+                      value="${escapeHtml((source.maskValues ?? []).join(', '))}" />
+             </label>`;
+
+        return `
+          <div class="card tight">
+            <div class="row">
+              <span class="muted">${index}</span>
+              <code>${escapeHtml(
+                source.category ?? shortHash(source.archive) ?? '',
+              )}</code>
+              <span class="sub" title="${
+                source.archive
+                  ? 'Pinned to this build. It will not follow a rebuild, and breaks if the archive is removed.'
+                  : 'Follows whichever build in this category is newest.'
+              }">${source.archive ? 'pinned' : 'category'}</span>
+              ${role}
+              <span class="bar-gap"></span>
+              <button type="button" data-stack-move="${index}" data-stack-dir="-1"
+                      ${index === 0 ? 'disabled' : ''} title="Earlier: covered by more">↑</button>
+              <button type="button" data-stack-move="${index}" data-stack-dir="1"
+                      ${last ? 'disabled' : ''} title="Later: covers more">↓</button>
+              <button type="button" data-stack-remove="${index}">Remove</button>
+            </div>
+            <div class="bar">
+              ${perSpace}
+              <label class="choice">Mask colours
+                <input style="width:10rem" placeholder="#000000"
+                       data-stack-field="maskColors" data-stack-index="${index}"
+                       value="${escapeHtml((source.maskColors ?? []).join(', '))}" />
+              </label>
+              <label class="choice"
+                     title="If this source cannot be read — a swarm timeout, an unreadable archive — the whole tile answers 503 rather than being served without it. Unchecked, it is skipped and the tile is built from the rest. This is about read failures, not about whether the source has a tile here: a source with no tile at these coordinates is simply absent, which is normal.">
+                <input type="checkbox" data-stack-field="required" data-stack-index="${index}"
+                       ${source.required ?? index === 0 ? 'checked' : ''} />
+                required${
+                  index === 0
+                    ? ' <span class="sub">— fail rather than serve without the base</span>'
+                    : ''
+                }
+              </label>
+            </div>
+          </div>`;
+      };
+
+      // One listener for the whole list rather than one per control, because
+      // the list is redrawn on every change and per-row handlers would have to
+      // be reattached each time.
+      $('stack-sources').addEventListener('input', (event) => {
+        const field = event.target.dataset.stackField;
+        if (!field) return;
+        const source = stackDraft.sources[Number(event.target.dataset.stackIndex)];
+        if (!source) return;
+
+        if (field === 'maskValues') {
+          source.maskValues = event.target.value
+            .split(',')
+            .map((part) => Number(part.trim()))
+            .filter((value) => Number.isFinite(value));
+        } else if (field === 'maskColors') {
+          source.maskColors = event.target.value
+            .split(',')
+            .map((part) => part.trim())
+            .filter(Boolean);
+        } else if (field === 'required') {
+          source.required = event.target.checked;
+        } else if (field === 'baseVal' || field === 'interval') {
+          // Blank means "the default", not zero -- an interval of 0 would make
+          // every height the base value.
+          if (event.target.value === '') delete source[field];
+          else source[field] = Number(event.target.value);
+        } else if (
+          field === 'opacity' ||
+          field === 'heightAdjustment' ||
+          field === 'redFactor' ||
+          field === 'greenFactor' ||
+          field === 'blueFactor' ||
+          field === 'baseShift'
+        ) {
+          source[field] = Number(event.target.value);
+        } else {
+          source[field] = event.target.value;
+        }
+      });
+
+      $('stack-sources').addEventListener('change', (event) => {
+        if (event.target.dataset.stackField !== 'encoding') return;
+        // Redrawn so the four custom fields appear or disappear with the
+        // choice, rather than sitting there meaning nothing.
+        renderStackDraft();
+      });
+
+      $('stack-sources').addEventListener('click', (event) => {
+        const move = event.target.dataset.stackMove;
+        const remove = event.target.dataset.stackRemove;
+        if (move !== undefined) {
+          const from = Number(move);
+          const to = from + Number(event.target.dataset.stackDir);
+          if (to < 0 || to >= stackDraft.sources.length) return;
+          const [moved] = stackDraft.sources.splice(from, 1);
+          stackDraft.sources.splice(to, 0, moved);
+          renderStackDraft();
+        } else if (remove !== undefined) {
+          stackDraft.sources.splice(Number(remove), 1);
+          renderStackDraft();
+          fillStackSourceChoices();
+        }
+      });
+
+      $('stack-add-source-go').onclick = () => {
+        const chosen = $('stack-add-source').value;
+        if (!chosen) return;
+        const [kind, ...rest] = chosen.split(':');
+        const name = rest.join(':');
+        // Appended, so the newest source is the one that covers the rest --
+        // which is what somebody adding a more detailed layer means.
+        stackDraft.sources.push(
+          kind === 'arc' ? { archive: name } : { category: name },
+        );
+        renderStackDraft();
+        fillStackSourceChoices();
+      };
+
+      for (const radio of document.querySelectorAll(
+        'input[name="stack-space"]',
+      )) {
+        radio.onchange = () => {
+          stackDraft.space = radio.value;
+          renderStackDraft();
+        };
+      }
+      $('stack-id').addEventListener('input', renderStackDraft);
+      // Redrawn so the base/interval and the four factors appear with the
+      // encoding they belong to rather than sitting there meaning nothing.
+      $('stack-out-encoding').addEventListener('change', renderStackDraft);
+      $('stack-cancel').onclick = () => $('stack-dialog').close();
+
+      $('stack-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const id = $('stack-id').value.trim();
+        const body = {
+          title: $('stack-title').value.trim() || undefined,
+          space: stackDraft.space,
+          sources: stackDraft.sources,
+          output: {},
+        };
+        if ($('stack-out-format').value) {
+          body.output.format = $('stack-out-format').value;
+        }
+        if ($('stack-resampling').value) {
+          body.resampling = $('stack-resampling').value;
+        }
+        if ($('stack-out-tilesize').value) {
+          body.output.tileSize = Number($('stack-out-tilesize').value);
+        }
+        if (!draftIsRgba()) {
+          const encoding = $('stack-out-encoding').value;
+          if (encoding) body.output.encoding = encoding;
+          if ($('stack-out-nodata').value !== '') {
+            body.output.nodata = Number($('stack-out-nodata').value);
+          }
+          if (encoding === '' || encoding === 'mapbox') {
+            // Left out when blank rather than written as a default, so a
+            // recipe says only what it means to change.
+            for (const [id, key] of [
+              ['stack-out-baseval', 'baseVal'],
+              ['stack-out-interval', 'interval'],
+            ]) {
+              if ($(id).value !== '') body.output[key] = Number($(id).value);
+            }
+          }
+          if (encoding === 'custom') {
+            for (const name of [
+              'redFactor',
+              'greenFactor',
+              'blueFactor',
+              'baseShift',
+            ]) {
+              const value = $(`stack-out-${name}`).value;
+              if (value !== '') body.output[name] = Number(value);
+            }
+          }
+        }
+
+        try {
+          await api(`/api/stacks/${encodeURIComponent(id)}`, {
+            method: 'PUT',
+            body,
+          });
+        } catch (error) {
+          // Shown in the dialog rather than as a toast: the thing that is wrong
+          // is on this form, and closing it to read the reason would lose it.
+          $('stack-error').textContent = error.message;
+          return;
+        }
+        $('stack-dialog').close();
+        toast(`Saved ${id}`);
+        loadStacks().catch((e) => toast(e.message));
+      });
+
+      $('stacks-add').onclick = () =>
+        openStackDialog().catch((e) => toast(e.message));
+
+      // Editing and deleting hang off the list, which is redrawn on every
+      // change, so they are delegated the same way the source rows are.
+      $('stacks-list').addEventListener('click', async (event) => {
+        const edit = event.target.dataset.stackEdit;
+        const drop = event.target.dataset.stackDelete;
+        if (edit !== undefined) {
+          const { stacks } = await api('/api/stacks');
+          const found = stacks.find((s) => s.id === edit);
+          if (found) {
+            // The list is a report -- it holds what each source resolved to,
+            // not the recipe. Read the file's own shape back before editing it,
+            // or saving would write the report in place of the recipe.
+            const raw = await api(`/api/stacks/${encodeURIComponent(edit)}/raw`);
+            await openStackDialog(raw.stack);
+          }
+        } else if (drop !== undefined) {
+          if (!confirm(`Delete the stack "${drop}"?`)) return;
+          try {
+            await api(`/api/stacks/${encodeURIComponent(drop)}`, {
+              method: 'DELETE',
+            });
+            toast(`Deleted ${drop}`);
+            loadStacks().catch((e) => toast(e.message));
+          } catch (error) {
+            toast(error.message);
+          }
+        }
+      });
 
       // ── Traffic ───────────────────────────────────────────────────────────
       //
@@ -7002,6 +7953,20 @@ Every piece is hashed against the ` +
       setInterval(() => {
         if (!$('view-archives').hidden && $('login').hidden) refresh();
       }, 3000);
+
+      // Slower than the archive list, because what moves here moves slowly: a
+      // recipe edited on disk, or a category resolving to a rebuilt archive.
+      // Paused while the editor is open -- nothing it shows would change, and
+      // repainting behind a dialog is work nobody sees.
+      setInterval(() => {
+        if (
+          !$('view-stacks').hidden &&
+          $('login').hidden &&
+          !$('stack-dialog').open
+        ) {
+          loadStacks().catch(() => {});
+        }
+      }, 5000);
     </script>
   </body>
 </html>

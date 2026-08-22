@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
-import { declarationDepths } from './helpers/js-scope.js';
+import { declarationDepths, useBeforeDeclaration } from './helpers/js-scope.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const page = await fs.readFile(
@@ -120,6 +120,21 @@ describe('the map preview', () => {
 describe('console script structure', () => {
   const script = page.split('<script type="module">')[1].split('</script>')[0];
   const depths = declarationDepths(script);
+
+  it('calls nothing at the top level before it has been declared', () => {
+    // `node --check` accepts this and a scope check accepts it too: the name
+    // exists and is reachable. It is a temporal dead zone error thrown the
+    // moment the script runs, which for a single-file console means the whole
+    // page dies before drawing anything -- one line in the browser console and
+    // a blank screen. Shipped exactly once, calling loadStacks() beside the
+    // other tab handlers and declaring it two hundred lines further down.
+    const offenders = useBeforeDeclaration(script);
+    assert.deepEqual(
+      offenders.map((o) => o.name),
+      [],
+      'these run before their const is initialised',
+    );
+  });
 
   it('declares shared helpers where everything can reach them', () => {
     // `node --check` catches syntax and stops there. It will happily accept a
@@ -1181,11 +1196,15 @@ describe('the two pages that show a size', () => {
    * @returns {string} - From `const bytes` to its closing brace.
    */
   const bytesHelper = (source) => {
-    const at = source.indexOf('const bytes = (n) => {');
+    // Line endings normalised first. Git checks these files out with
+    // whatever the platform wants, and one page having been touched more
+    // recently than the other is not the two helpers disagreeing.
+    const text = source.replace(/\r\n/g, '\n');
+    const at = text.indexOf('const bytes = (n) => {');
     assert.ok(at > 0, 'no bytes helper on this page');
-    const end = source.indexOf('\n      };', at);
+    const end = text.indexOf('\n      };', at);
     assert.ok(end > at, 'could not find the end of it');
-    return source.slice(at, end);
+    return text.slice(at, end);
   };
 
   it('agree character for character on how to format one', async () => {

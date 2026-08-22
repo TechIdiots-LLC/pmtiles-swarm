@@ -163,3 +163,56 @@ export function declarationDepths(source) {
 
   return depths;
 }
+
+/**
+ * Top-level statements that call a `const` helper declared further down.
+ *
+ * `node --check` accepts this, and so does a scope check: the name exists and
+ * is reachable from where it is called. It is a temporal dead zone error,
+ * thrown the moment the script runs — which for a single-file console means the
+ * whole page dies before drawing anything, leaving one line in the browser's
+ * console and a blank screen.
+ *
+ * Only depth-zero calls count. A call inside a function body is fine however
+ * far above the declaration it sits, because it does not run until something
+ * invokes it — which is the whole difference between this and a scope check.
+ * @param {string} source - JavaScript source.
+ * @returns {Array<object>} - `{ name, calledAt, declaredAt }` for each offender.
+ */
+export function useBeforeDeclaration(source) {
+  const code = stripLiterals(source);
+
+  /**
+   * Walks the brace depth forward to an offset, from wherever it was.
+   * @param {object} state - `{ cursor, depth }`, advanced in place.
+   * @param {number} to - Offset to stop at.
+   * @returns {number} - The depth there.
+   */
+  const depthAt = (state, to) => {
+    for (; state.cursor < to; state.cursor += 1) {
+      if (code[state.cursor] === '{') state.depth += 1;
+      else if (code[state.cursor] === '}') state.depth -= 1;
+    }
+    return state.depth;
+  };
+
+  const declared = new Map();
+  const walk = { cursor: 0, depth: 0 };
+  const declaration = /(?:^|\n)\s*(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=/g;
+  for (const match of code.matchAll(declaration)) {
+    if (depthAt(walk, match.index) !== 0) continue;
+    if (!declared.has(match[1])) declared.set(match[1], match.index);
+  }
+
+  const offenders = [];
+  const second = { cursor: 0, depth: 0 };
+  const call = /(?:^|\n)\s*([A-Za-z_$][\w$]*)\s*\(/g;
+  for (const match of code.matchAll(call)) {
+    if (depthAt(second, match.index) !== 0) continue;
+    const declaredAt = declared.get(match[1]);
+    if (declaredAt !== undefined && match.index < declaredAt) {
+      offenders.push({ name: match[1], calledAt: match.index, declaredAt });
+    }
+  }
+  return offenders;
+}

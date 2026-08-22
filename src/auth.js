@@ -161,7 +161,8 @@ export function isPublicSurface(path, options = {}) {
     path === '/feed.xml' ||
     path.startsWith('/feed/') ||
     path.startsWith('/archives/') ||
-    path.startsWith('/latest/')
+    path.startsWith('/latest/') ||
+    path.startsWith('/stacks/')
   );
 }
 

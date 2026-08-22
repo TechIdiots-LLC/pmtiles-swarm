@@ -2,6 +2,109 @@
 
 ## master
 ### ✨ Features and improvements
+- **Tile stacks: several archives served as one tile endpoint.** A stack is a
+  recipe rather than a file — an ordered list of sources, bottom first, with the
+  last painting over the ones before it. Sources are named by category, so a
+  stack follows a rebuild the way `/latest/<category>/` does, or by infohash
+  where it must not move.
+
+  What ships is the part that needs no image handling: `/stacks/<id>/tiles.json`
+  and `/stacks/<id>/{z}/{x}/{y}.<ext>`, answered by the topmost source holding
+  the tile. That is enough for the common shape — a regional archive over a
+  global one — and it costs nothing per tile beyond the read it would have done
+  anyway. `X-Stack-Sources` names which sources were asked and what each said,
+  because a stack missing a layer still renders, and flat ocean looks like a
+  plausible map rather than like a failure.
+
+  A recipe asking for masking, height shifts, opacity, blending or a different
+  output encoding answers 501 and names the field. Those need a pixel codec,
+  which this node does not have yet; approximating them would be worse than
+  refusing. See docs/tile-stacks.md.
+
+- **A pixel codec, for the parts of a stack that are not passthrough.** `sharp`,
+  as an optional dependency probed at first use — the same library tileserver-gl
+  uses, so one image stack covers both ends of the pipeline. A node that only
+  distributes archives never needs it, and a node without it answers 501 naming
+  what to install rather than failing at the first tile.
+
+  Encoding is **lossless by default and has to be made lossy by name**. A
+  terrain-RGB pixel is not a colour: the three channels are the three bytes of
+  one height, so a lossy codec that shifts red by one moves the ground by 65
+  kilometres. Over an ordinary gradient, lossy WebP is wrong by about 125 km at
+  worst where lossless is byte-exact.
+
+- **Elevation stacks merge for real.** A stack whose sources mask, shift or
+  re-encode is now served rather than refused: each source is decoded to metres,
+  masked, adjusted, resampled in float space and painted in the recipe's order,
+  then encoded once. A source with no tile at the requested zoom is taken from
+  its parent and cropped to the right sub-square, which is what lets a z8 global
+  source keep contributing at z14 — the passthrough path cannot do that, because
+  a parent's *bytes* are the wrong tile.
+
+  Two ways to say "no data here": `maskValues` names decoded heights, and
+  `maskColors` names pixel colours as `"#rrggbb"` or `[r, g, b]`. The colour form
+  is exact, comparing the bytes that were stored; the height form rounds, because
+  decoding produces `base + n * interval` in floating point and a mask of `-0.1`
+  meets a decoded `-0.09999999999763531`.
+
+  A tile no source covered answers 404 rather than a slab of nodata, so a client
+  overzooms a lower one. That decision is made on the coverage before nodata is
+  substituted in — afterwards every pixel holds a real value and there is nothing
+  left to test.
+
+- **Merged tiles are cached on disk.** A merged tile costs a read of every
+  source, a decode each and an encode, and against a cache-mode source those
+  reads may go to the swarm — doing that again for a tile somebody already asked
+  for is the difference between a map that pans and one that does not. Bounded
+  by `stacks.cacheBytes` (2 GiB by default, zero to turn it off), evicted
+  least-recently-used, and indexed from disk at startup so a restart does not
+  throw the work away.
+
+  Keyed by the tile's ETag, which already covers the recipe's revision and what
+  its sources resolved to — so editing a stack or rebuilding a source produces a
+  different key rather than needing anything to remember to invalidate the old
+  one. Only the merging path is cached: passthrough already costs one read, and
+  keeping its answer would put a second copy of the archive's own bytes beside
+  the first.
+
+  Several requests for the same tile at once run one merge between them, which
+  matters because each duplicate would otherwise issue its own reads to every
+  source underneath it.
+
+- **A stack's TileJSON declares `sparse`.** True by default, which for a stack
+  is not a guess: `maxzoom` is the deepest any source reaches, so most of the
+  pyramid below it is covered by only some of them. A tile no source covered
+  answers 404, which is what makes maplibre-gl-js and maplibre-native overzoom
+  the parent rather than draw nothing — the same flag, the same name and the
+  same rule tileserver-gl reads. A stack can set `sparse: false` to answer 204
+  instead.
+
+- **Image stacks composite, with opacity and blend modes.** `space: "rgba"`
+  treats a tile as what it looks like rather than as packed numbers: each source
+  carries an `opacity` and a `blend` (`normal`, `multiply`, `screen`, `overlay`,
+  `darken`, `lighten`), and `maskColors` clears coverage so what is underneath
+  shows through. Hillshade over satellite is the case it exists for.
+
+  The W3C compositing model in full, not the source-over shortcut — the shortcut
+  is only correct when the backdrop is opaque, and a hillshade over a satellite
+  tile with transparent edges is exactly where that shows. Resampling from a
+  parent interpolates with alpha premultiplied, which is what stops a
+  transparent pixel dragging its colour into its neighbours and ringing
+  everything with a dark halo.
+
+  Terrain stays lossless; imagery may be compressed as a picture, which is the
+  only place the two spaces disagree about encoding.
+
+- **A Stacks view in the console.** Every stack, what each source resolved to,
+  the zooms each covers, and — kept apart, because they call for different
+  things — what is invalid in a recipe, what cannot be served without a codec,
+  and whose sources are missing. Sources are listed in the file's order with
+  their indices, so the screen and `data/stacks.json` never disagree.
+
+  The tab is always present, including on a node with no stacks — that is where
+  a stack gets made, so hiding it until one exists would make the first one
+  unreachable. An empty state says what a stack is and how to add one.
+
 - **`savePathLayout: "name"`**, giving each joined archive `<savePath>/<archive name>/`. The
   infohash layout already separated two builds of the same map, but nothing in
   `<savePath>/7fae2931a9269684a7d4ed6e5fdd7d0014e6bcd1/` tells you which map is in it. This is
