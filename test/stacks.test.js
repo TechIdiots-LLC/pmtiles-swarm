@@ -1157,3 +1157,137 @@ describe('what a removal would break', () => {
     assert.equal(body.stacks[0].how, 'pinned');
   });
 });
+
+describe('sources whose tiles are a different size', { skip: !codec }, () => {
+  /**
+   * An encoded terrain tile of one height, at a chosen size.
+   * @param {number} metres - The height.
+   * @param {number} size - Pixels per side.
+   * @returns {Promise<Buffer>} - A lossless WebP tile.
+   */
+  const tileOf = async (metres, size) =>
+    codec.encode(
+      encodeHeights(new Float32Array(size * size).fill(metres), {
+        width: size,
+        height: size,
+      }),
+      { format: 'webp', lossless: true },
+    );
+
+  it('serves the size the URL asks for', async () => {
+    const one = archive('a7'.repeat(20), 'one.pmtiles', ['one']);
+    const node = await serve(
+      [one],
+      [
+        {
+          id: 'sized',
+          sources: [{ category: 'one', heightAdjustment: 1 }],
+          output: { format: 'webp' },
+        },
+      ],
+      { [one.infoHash]: { '1/0/0': await tileOf(100, 256) } },
+    );
+    after(() => node.close());
+
+    const at = async (url) =>
+      (
+        await codec.decode(
+          Buffer.from(await (await node.get(url)).arrayBuffer()),
+          { channels: 3 },
+        )
+      ).width;
+
+    assert.equal(await at('/stacks/sized/256/1/0/0.webp'), 256);
+    // A tile's coordinates are an extent, not a pixel count, so the same
+    // ground comes back on a finer grid.
+    assert.equal(await at('/stacks/sized/512/1/0/0.webp'), 512);
+  });
+
+  it('refuses a size that is not one of the three', async () => {
+    const one = archive('a8'.repeat(20), 'one.pmtiles', ['one']);
+    const node = await serve(
+      [one],
+      [{ id: 'sized', sources: [{ category: 'one' }] }],
+      { [one.infoHash]: { '1/0/0': await tileOf(100, 256) } },
+    );
+    after(() => node.close());
+    assert.equal((await node.get('/stacks/sized/300/1/0/0.webp')).status, 400);
+  });
+
+  it('takes a smaller source from its children rather than stretching it', async () => {
+    // The detail-preserving half. Four 256px children at z+1 cover the ground
+    // of one 512px tile at z, so the finer data survives instead of being
+    // scaled up from a tile that never had it.
+    const one = archive('a9'.repeat(20), 'one.pmtiles', ['one']);
+    const children = {};
+    for (const [key, metres] of [
+      ['2/0/0', 100],
+      ['2/1/0', 200],
+      ['2/0/1', 300],
+      ['2/1/1', 400],
+    ]) {
+      children[key] = await tileOf(metres, 256);
+    }
+    const node = await serve(
+      [one],
+      [
+        {
+          id: 'stitched',
+          sources: [{ category: 'one', heightAdjustment: 0.0001 }],
+          output: { format: 'webp' },
+        },
+      ],
+      { [one.infoHash]: { '1/0/0': await tileOf(0, 256), ...children } },
+    );
+    after(() => node.close());
+
+    const res = await node.get('/stacks/stitched/512/1/0/0.webp');
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get('x-stack-sources'), /\+z2/);
+
+    const raster = await codec.decode(Buffer.from(await res.arrayBuffer()), {
+      channels: 3,
+    });
+    const heights = decodeHeights(raster);
+    const at = (x, y) => heights[y * 512 + x];
+    // Each quadrant carries its own child's height, not the parent's zero.
+    assert.ok(Math.abs(at(10, 10) - 100) < 1, `top-left ${at(10, 10)}`);
+    assert.ok(Math.abs(at(400, 10) - 200) < 1, `top-right ${at(400, 10)}`);
+    assert.ok(Math.abs(at(10, 400) - 300) < 1, `bottom-left ${at(10, 400)}`);
+    assert.ok(Math.abs(at(400, 400) - 400) < 1, `bottom-right ${at(400, 400)}`);
+  });
+
+  it('falls back to the one tile when the children are not all there', async () => {
+    // A partial square would stitch real detail beside holes the scaled-up
+    // tile would have covered, which is worse than either on its own.
+    const one = archive('b7'.repeat(20), 'one.pmtiles', ['one']);
+    const node = await serve(
+      [one],
+      [
+        {
+          id: 'partial',
+          sources: [{ category: 'one', heightAdjustment: 0.0001 }],
+          output: { format: 'webp' },
+        },
+      ],
+      {
+        [one.infoHash]: {
+          '1/0/0': await tileOf(50, 256),
+          '2/0/0': await tileOf(100, 256),
+        },
+      },
+    );
+    after(() => node.close());
+
+    const res = await node.get('/stacks/partial/512/1/0/0.webp');
+    assert.equal(res.status, 200);
+    assert.ok(!/\+z2/.test(res.headers.get('x-stack-sources')));
+    const heights = decodeHeights(
+      await codec.decode(Buffer.from(await res.arrayBuffer()), {
+        channels: 3,
+      }),
+    );
+    // The whole tile is the parent's height, scaled up.
+    assert.ok(Math.abs(heights[0] - 50) < 1, `got ${heights[0]}`);
+  });
+});

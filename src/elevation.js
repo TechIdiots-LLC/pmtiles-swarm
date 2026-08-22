@@ -343,6 +343,98 @@ export function resampleFromParent(heights, size, tile, kernel = 'bilinear') {
 }
 
 /**
+ * Scales a whole tile's heights to a different grid.
+ *
+ * A tile's coordinates are an extent, not a pixel count: a 256px tile at
+ * (z, x, y) covers exactly the ground a 512px one at (z, x, y) does. So a
+ * source whose tiles are a different size is not misaligned, only sampled more
+ * or less finely, and putting it on the output's grid is a plain scale.
+ *
+ * Correct in both directions and lossy in one: scaling a 256px source up to
+ * 512 keeps the extent and invents no detail. `assembleChildren` is how that
+ * detail is recovered where it exists.
+ * @param {Float32Array} heights - The source's heights.
+ * @param {number} from - Its pixels per side.
+ * @param {number} to - The output's pixels per side.
+ * @param {string} [kernel] - nearest, bilinear, cubic or lanczos.
+ * @returns {Float32Array} - Heights on the output grid.
+ */
+export function resampleToSize(heights, from, to, kernel = 'bilinear') {
+  if (from === to) return heights;
+  const { radius, weight } = kernelFor(kernel);
+  const reach = Math.ceil(radius);
+  const out = new Float32Array(to * to);
+  const ratio = from / to;
+
+  for (let ty = 0; ty < to; ty += 1) {
+    const sy = (ty + 0.5) * ratio - 0.5;
+    const y0 = Math.floor(sy);
+    for (let tx = 0; tx < to; tx += 1) {
+      const sx = (tx + 0.5) * ratio - 0.5;
+      const x0 = Math.floor(sx);
+      let total = 0;
+      let sum = 0;
+      for (let dy = 1 - reach; dy <= reach; dy += 1) {
+        const py = Math.min(from - 1, Math.max(0, y0 + dy));
+        const wy = weight(sy - (y0 + dy));
+        if (wy === 0) continue;
+        for (let dx = 1 - reach; dx <= reach; dx += 1) {
+          const px = Math.min(from - 1, Math.max(0, x0 + dx));
+          const w = wy * weight(sx - (x0 + dx));
+          if (w === 0) continue;
+          const value = heights[py * from + px];
+          if (Number.isNaN(value)) continue;
+          total += value * w;
+          sum += w;
+        }
+      }
+      out[ty * to + tx] = sum !== 0 ? total / sum : Number.NaN;
+    }
+  }
+  return out;
+}
+
+/**
+ * Stitches a square of child tiles into one raster.
+ *
+ * The detail-preserving half of a tile size mismatch. A 512px tile at zoom z
+ * covers the same ground as four 256px tiles at z+1, so a 256px source asked
+ * for its children one level down contributes at its own full resolution
+ * instead of being stretched to fit.
+ *
+ * MapLibre does this arithmetic to decide what to request in the first place --
+ * `coveringZoomLevel` offsets the zoom by `log2(transformSize / sourceSize)`.
+ * This is the same offset, applied on the server.
+ *
+ * Works on raw samples rather than heights so both pixel spaces can use it: a
+ * stitch is a byte copy, and nothing about it depends on what the bytes mean.
+ * @param {Array<object|null>} children - Row-major, `span * span` rasters.
+ * @param {number} span - Children per side, `2 ** offset`.
+ * @param {object} shape - `{ width, channels }` of one child.
+ * @returns {object} - One raster, `width * span` per side.
+ */
+export function assembleChildren(children, span, shape) {
+  const { width: childSize, channels } = shape;
+  const size = childSize * span;
+  const data = Buffer.alloc(size * size * channels);
+  for (let cy = 0; cy < span; cy += 1) {
+    for (let cx = 0; cx < span; cx += 1) {
+      const child = children[cy * span + cx];
+      // A missing child is a hole rather than a failure: the sources under it
+      // may still cover this corner, which is the whole arrangement. The gap
+      // is left as zeroes, which masking turns into no-data.
+      if (!child) continue;
+      for (let y = 0; y < childSize; y += 1) {
+        const from = y * childSize * channels;
+        const to = ((cy * childSize + y) * size + cx * childSize) * channels;
+        child.data.copy(data, to, from, from + childSize * channels);
+      }
+    }
+  }
+  return { data, width: size, height: size, channels };
+}
+
+/**
  * Smooths heights, in proportion to how far they were upscaled.
  *
  * An unsmoothed 64× upscale of a DEM renders as visible terracing under a
@@ -459,6 +551,18 @@ export function mergeElevation(contributions, options) {
       for (let i = 0; i < heights.length; i += 1) {
         heights[i] += source.heightAdjustment;
       }
+    }
+
+    // On the output's grid before anything else: a source whose tiles are a
+    // different size covers the same extent, only sampled more or less
+    // finely, so this is a plain scale rather than a realignment.
+    if (contribution.raster.width !== size) {
+      heights = resampleToSize(
+        heights,
+        contribution.raster.width,
+        size,
+        options.resampling,
+      );
     }
 
     const parentZ = contribution.parentZ ?? options.z;

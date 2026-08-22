@@ -792,9 +792,17 @@ handling whatsoever.
     other direction: fetch the four children at `z+1` and assemble them into
     one grid before merging. That is the piece that does not exist yet.
 
-  Until it does, the merge takes the first contributing source's size and the
-  others are resampled to it by the parent path — which is right whenever the
-  first source is the smallest, and loses detail when it is not.
+  **Both are implemented.** A size may be asked for in the URL —
+  `/stacks/<id>/512/{z}/{x}/{y}.webp`, the way tileserver-gl takes one — or set
+  as `output.tileSize`. With neither, the largest contributing source decides:
+  512 for anything rio-rgbify-merge wrote, the finer source where sizes are
+  mixed, and never an upscale of a stack of small tiles into something bigger
+  than the data behind it.
+
+  A source smaller than the output is read one level deeper and its children
+  stitched, so its detail survives. All of them or none — a partial square
+  would put real detail beside holes that the scaled-up tile would have
+  covered, which is worse than either alone.
 
 - **The cache and the retention sweep.** `data/stack-cache/` is where merged
   tiles live, which makes stacks the first thing in the project that writes
