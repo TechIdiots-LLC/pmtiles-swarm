@@ -189,6 +189,42 @@ describe('noticing that the file changed', () => {
   });
 });
 
+describe('the numbers an encoding needs', () => {
+  it('refuses a custom source missing any of its four', () => {
+    const problems = validateStack({
+      id: 'a',
+      sources: [{ category: 'x', encoding: 'custom', redFactor: 1 }],
+    });
+    assert.match(problems.join(' '), /redFactor, greenFactor/);
+  });
+
+  it('refuses a custom output missing any of its four', () => {
+    // As unreadable as a source would be, and it fails later -- at the first
+    // tile rather than when the recipe is saved.
+    const problems = validateStack({
+      id: 'a',
+      sources: [{ category: 'x' }],
+      output: { encoding: 'custom', redFactor: 1, greenFactor: 1 },
+    });
+    assert.match(problems.join(' '), /output uses encoding "custom"/);
+  });
+
+  it('accepts a mapbox source that states its own base and interval', () => {
+    // A DEM at half-metre steps from a different floor is still mapbox, not a
+    // custom encoding -- the interval scales all three channels and baseVal is
+    // the shift.
+    assert.deepEqual(
+      validateStack({
+        id: 'a',
+        sources: [
+          { category: 'x', encoding: 'mapbox', baseVal: -20000, interval: 0.5 },
+        ],
+      }),
+      [],
+    );
+  });
+});
+
 describe('what the passthrough path can and cannot do', () => {
   it('knows that a mask, a shift, an opacity or a blend needs pixels', () => {
     const base = { id: 'a', sources: [{ category: 'x' }] };

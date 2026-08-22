@@ -811,6 +811,25 @@
               <input id="stack-out-nodata" type="number" step="any" placeholder="-10000" style="width:8rem" />
             </label>
           </div>
+          <div class="bar" id="stack-out-mapbox">
+            <label class="choice">Base value
+              <input id="stack-out-baseval" type="number" step="any" placeholder="-10000" style="width:7rem" />
+            </label>
+            <label class="choice">Interval
+              <input id="stack-out-interval" type="number" step="any" min="0" placeholder="0.1" style="width:6rem" />
+            </label>
+          </div>
+          <div class="bar" id="stack-out-custom">
+            <span class="sub">height = r·red + g·green + b·blue − shift</span>
+            <label class="choice">red
+              <input id="stack-out-redFactor" type="number" step="any" style="width:6rem" /></label>
+            <label class="choice">green
+              <input id="stack-out-greenFactor" type="number" step="any" style="width:6rem" /></label>
+            <label class="choice">blue
+              <input id="stack-out-blueFactor" type="number" step="any" style="width:6rem" /></label>
+            <label class="choice">baseShift
+              <input id="stack-out-baseShift" type="number" step="any" style="width:6rem" /></label>
+          </div>
         </div>
 
         <div class="field">
@@ -6090,6 +6109,16 @@ Every piece is hashed against the ` +
         }
         $('stack-out-encoding').value = stackDraft.output.encoding ?? '';
         $('stack-out-nodata').value = stackDraft.output.nodata ?? '';
+        $('stack-out-baseval').value = stackDraft.output.baseVal ?? '';
+        $('stack-out-interval').value = stackDraft.output.interval ?? '';
+        for (const name of [
+          'redFactor',
+          'greenFactor',
+          'blueFactor',
+          'baseShift',
+        ]) {
+          $(`stack-out-${name}`).value = stackDraft.output[name] ?? '';
+        }
         $('stack-out-format').value = stackDraft.output.format ?? '';
         $('stack-error').textContent = '';
 
@@ -6155,6 +6184,13 @@ Every piece is hashed against the ` +
           ? 'Sources are composited with opacity and a blend mode. Output may be compressed.'
           : 'Sources are decoded to metres, masked and merged. Output is always lossless.';
         $('stack-output-elevation').hidden = rgba;
+        // Blank means "same as the sources", which for terrain is mapbox
+        // unless a source says otherwise -- so its base and interval are worth
+        // offering there too.
+        const outEncoding = $('stack-out-encoding').value;
+        $('stack-out-mapbox').hidden =
+          rgba || (outEncoding !== '' && outEncoding !== 'mapbox');
+        $('stack-out-custom').hidden = rgba || outEncoding !== 'custom';
         $('stack-format-note').textContent = rgba
           ? ''
           : 'Terrain is encoded losslessly whichever format is chosen.';
@@ -6229,6 +6265,20 @@ Every piece is hashed against the ` +
                  }>custom</option>
                </select>
              </label>
+             ${
+               (source.encoding ?? 'mapbox') === 'mapbox'
+                 ? `<label class="choice">Base value
+                      <input type="number" step="any" style="width:7rem"
+                             data-stack-field="baseVal" data-stack-index="${index}"
+                             placeholder="-10000" value="${source.baseVal ?? ''}" />
+                    </label>
+                    <label class="choice">Interval
+                      <input type="number" step="any" min="0" style="width:6rem"
+                             data-stack-field="interval" data-stack-index="${index}"
+                             placeholder="0.1" value="${source.interval ?? ''}" />
+                    </label>`
+                 : ''
+             }
              ${
                source.encoding === 'custom'
                  ? `<span class="sub">height = r·red + g·green + b·blue − shift</span>
@@ -6309,6 +6359,11 @@ Every piece is hashed against the ` +
             .filter(Boolean);
         } else if (field === 'required') {
           source.required = event.target.checked;
+        } else if (field === 'baseVal' || field === 'interval') {
+          // Blank means "the default", not zero -- an interval of 0 would make
+          // every height the base value.
+          if (event.target.value === '') delete source[field];
+          else source[field] = Number(event.target.value);
         } else if (
           field === 'opacity' ||
           field === 'heightAdjustment' ||
@@ -6366,6 +6421,9 @@ Every piece is hashed against the ` +
         };
       }
       $('stack-id').addEventListener('input', renderStackDraft);
+      // Redrawn so the base/interval and the four factors appear with the
+      // encoding they belong to rather than sitting there meaning nothing.
+      $('stack-out-encoding').addEventListener('change', renderStackDraft);
       $('stack-cancel').onclick = () => $('stack-dialog').close();
 
       $('stack-form').addEventListener('submit', async (event) => {
@@ -6381,11 +6439,31 @@ Every piece is hashed against the ` +
           body.output.format = $('stack-out-format').value;
         }
         if (!draftIsRgba()) {
-          if ($('stack-out-encoding').value) {
-            body.output.encoding = $('stack-out-encoding').value;
-          }
+          const encoding = $('stack-out-encoding').value;
+          if (encoding) body.output.encoding = encoding;
           if ($('stack-out-nodata').value !== '') {
             body.output.nodata = Number($('stack-out-nodata').value);
+          }
+          if (encoding === '' || encoding === 'mapbox') {
+            // Left out when blank rather than written as a default, so a
+            // recipe says only what it means to change.
+            for (const [id, key] of [
+              ['stack-out-baseval', 'baseVal'],
+              ['stack-out-interval', 'interval'],
+            ]) {
+              if ($(id).value !== '') body.output[key] = Number($(id).value);
+            }
+          }
+          if (encoding === 'custom') {
+            for (const name of [
+              'redFactor',
+              'greenFactor',
+              'blueFactor',
+              'baseShift',
+            ]) {
+              const value = $(`stack-out-${name}`).value;
+              if (value !== '') body.output[name] = Number(value);
+            }
           }
         }
 

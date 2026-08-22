@@ -162,6 +162,43 @@ describe('the custom encoding, where the recipe supplies the formula', () => {
   });
 });
 
+describe('a mapbox source with a base and interval of its own', () => {
+  it('round-trips at a different step and floor', () => {
+    // Half-metre steps from a lower floor is still mapbox: the interval scales
+    // all three channels and baseVal is the shift, so this is not a reason to
+    // reach for the custom encoding.
+    const source = { encoding: 'mapbox', baseVal: -20000, interval: 0.5 };
+    for (const metres of [0, 1234.5, -15000, 8848]) {
+      const raster = encodeHeights(new Float32Array([metres]), {
+        width: 1,
+        height: 1,
+        ...source,
+      });
+      const [got] = decodeHeights(raster, source);
+      assert.ok(
+        Math.abs(got - metres) <= 0.5,
+        `expected about ${metres}, got ${got}`,
+      );
+    }
+  });
+
+  it('reads a tile written with a different interval as different heights', () => {
+    // The failure this prevents: decoding with the default 0.1 a tile written
+    // at 0.5 gives a fifth of the height, which looks like terrain and is
+    // wrong everywhere.
+    const written = { encoding: 'mapbox', baseVal: -10000, interval: 0.5 };
+    const raster = encodeHeights(new Float32Array([1000]), {
+      width: 1,
+      height: 1,
+      ...written,
+    });
+    const [right] = decodeHeights(raster, written);
+    const [wrong] = decodeHeights(raster, { encoding: 'mapbox' });
+    assert.ok(Math.abs(right - 1000) < 0.5);
+    assert.ok(Math.abs(wrong - 1000) > 100, 'the default must not agree');
+  });
+});
+
 describe('masking, which decides what shows through', () => {
   it('blanks the values a source uses to mean nothing', () => {
     const heights = Float32Array.from([100, 0, -1, 250]);

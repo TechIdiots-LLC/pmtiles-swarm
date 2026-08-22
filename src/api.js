@@ -3608,12 +3608,14 @@ export function createApp({
           // than a slab of nodata.
           if (!merged) return { said, empty: true };
           fillNodata(merged, output.nodata);
+          // The whole output block is passed, not three fields of it: a
+          // custom output needs its four factors, and naming them one at a
+          // time is how the next encoding's parameters get forgotten.
           raster = encodeHeights(merged, {
+            ...output,
             width: size,
             height: size,
             encoding: output.encoding ?? first.source?.encoding,
-            baseVal: output.baseVal,
-            interval: output.interval,
           });
         }
         // Terrain is lossless or it is nothing: the three channels are the

@@ -127,6 +127,15 @@ export function validateStack(stack) {
     }
   });
 
+  // An output that re-encodes into custom is as unreadable without its four
+  // numbers as a source is, and fails later -- at the first tile rather than
+  // when the recipe is saved.
+  if (stack.output?.encoding === 'custom' && !hasUsableEncoding(stack.output)) {
+    problems.push(
+      'output uses encoding "custom" and needs all of redFactor, ' +
+        'greenFactor, blueFactor, baseShift',
+    );
+  }
   if (stack.boundsSource !== undefined) {
     const index = Number(stack.boundsSource);
     if (
