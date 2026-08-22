@@ -9,6 +9,7 @@ import {
   stripLiterals,
   useBeforeDeclaration,
 } from './helpers/js-scope.js';
+import { safeSegment } from '../src/savepath.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const page = await fs.readFile(
@@ -234,6 +235,40 @@ describe('the terrain preview', () => {
       /location\.pathname \+ \(terrain \? '\?raw=1' : ''\) \+ location\.hash/,
     );
   });
+});
+
+describe('the filename an export preview promises', () => {
+  // The console shows what the file will be called as the name is typed, which
+  // means the naming rule now exists in the browser as well as on the server.
+  // A preview that promises one filename and a server that writes another is
+  // worse than no preview.
+  const script = page.split('<script type="module">')[1].split('</script>')[0];
+
+  /** The preview's slug logic, lifted out and made callable. */
+  const preview = (typed) => {
+    const at = script.indexOf('function showBakeFilename');
+    assert.ok(at > 0, 'the filename preview moved');
+    const from = script.indexOf('const slug =', at);
+    const to = script.indexOf("|| 'stack';", from);
+    assert.ok(to > from, 'the slug rule moved');
+    const body = script.slice(from, to) + "|| 'stack'; return slug;";
+    return new Function('typed', body.replace('const slug =', 'const slug ='))(
+      typed,
+    );
+  };
+
+  for (const typed of [
+    'Terrain',
+    'Bathymetry and terrain',
+    '../../etc/passwd',
+    'a:b*c?d"e<f>g|h',
+    '  trailing.  ',
+    'x'.repeat(300),
+  ]) {
+    it(`agrees with the server about ${JSON.stringify(typed.slice(0, 24))}`, () => {
+      assert.equal(preview(typed), safeSegment(typed) || 'stack');
+    });
+  }
 });
 
 describe('the three pages that decide what terrain is', () => {

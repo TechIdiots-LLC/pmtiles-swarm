@@ -730,6 +730,20 @@ worth writing at all.
 planet bake is hours, and a request that waited for the archive is a request
 nothing could hold open. `DELETE` on the same address stops it.
 
+The button opens a dialog rather than a confirmation, because there is
+something to decide. **Where it lands** uses the same picker every other
+destination in this console uses, so a location named once under Settings is
+offered here too — and a baked planet is hundreds of gigabytes, so which disk it
+goes on is not a detail. The location is resolved _before_ anything is merged:
+a name this node does not know, or a path it cannot write, is the caller's
+mistake and they can fix it, but only if they are told now rather than an hour
+later.
+
+**What it is called** defaults to the stack's title and can be changed, as can
+the description. The dialog shows the filename as the name is typed, because a
+name is not a filename — the same sanitising the server does, and a preview that
+promised something else would be worse than no preview.
+
 A bake has two halves and they are watched in two places, deliberately. Merging
 is about a stack, so it is reported on the stack — tiles written, tiles skipped,
 the zoom it is working through. What happens afterwards is an archive being

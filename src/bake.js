@@ -232,12 +232,16 @@ function stamp(when = new Date()) {
  * map and two files cannot share a path. The archive's *name* is not dated --
  * see `bakedMetadata` -- so a rebuild keeps its identity the way every other
  * rebuild here does.
+ *
+ * Follows the name it is given, so renaming an export in the dialog renames the
+ * file too. A name and a filename that disagree is a small thing that costs an
+ * afternoon the first time somebody goes looking on disk.
  * @param {object} resolved - The resolved stack.
- * @param {object} [options] - `when`, and `suffix` to break a tie.
+ * @param {object} [options] - `name` to override the stack's, `when`, `suffix`.
  * @returns {string} - A filename.
  */
 export function bakedName(resolved, options = {}) {
-  const title = resolved.stack.title ?? resolved.stack.id;
+  const title = options.name ?? resolved.stack.title ?? resolved.stack.id;
   const slug = safeSegment(title) || 'stack';
   const tail = options.suffix ? `-${options.suffix}` : '';
   return `${slug}-${stamp(options.when)}${tail}.pmtiles`;

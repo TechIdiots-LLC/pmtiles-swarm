@@ -113,9 +113,21 @@ export class BakeManager {
       throw error;
     }
 
+    // Resolved before anything starts, and allowed to throw. A location that
+    // does not exist or cannot be written is the caller's mistake and they can
+    // fix it -- but only if they are told now. Checked at the end instead, it
+    // is an hour of merging answered with a shrug and the default disk.
+    const publishDir =
+      options.publishDir ?? (await this.#savePath(options)) ?? undefined;
+
+    // What the archive will be called, which the caller may have chosen. The
+    // file follows it; the date is what keeps successive builds apart.
+    const archiveName = options.name?.trim() || resolved.stack.title || stackId;
+
     const job = {
       stackId,
       title: resolved.stack.title ?? stackId,
+      archiveName,
       phase: 'merging',
       startedAt: new Date().toISOString(),
       written: 0,
@@ -126,7 +138,8 @@ export class BakeManager {
       finishedAt: null,
       error: null,
       infoHash: null,
-      name: bakedName(resolved, { when: new Date() }),
+      name: bakedName(resolved, { when: new Date(), name: archiveName }),
+      publishDir,
     };
     this.#jobs.set(stackId, job);
 
@@ -171,6 +184,7 @@ export class BakeManager {
         workDir,
         destination,
         format,
+        options,
       );
     } finally {
       await pixels?.close().catch(() => {});
@@ -185,7 +199,7 @@ export class BakeManager {
       // Moved out of the working directory as it is taken on, so a finished
       // archive does not live among the checkpoint files of the job that made
       // it.
-      publishDir: options.publishDir ?? (await this.#savePath(options)),
+      publishDir: job.publishDir,
       mode: 'mirror',
     });
 
@@ -205,7 +219,16 @@ export class BakeManager {
    * @param {string} format - The output format.
    * @returns {Promise<void>} - Resolves when the file is written.
    */
-  async #merge(job, resolved, codec, pixels, workDir, destination, format) {
+  async #merge(
+    job,
+    resolved,
+    codec,
+    pixels,
+    workDir,
+    destination,
+    format,
+    options,
+  ) {
     // Read through the tile store rather than off the disk, so a cache-mode
     // source is scanned the same way it is served: its directories come out of
     // the swarm, and the store holds them to its own byte budget.
@@ -249,8 +272,8 @@ export class BakeManager {
       header: { format },
       pauseMs: this.#config.stacks?.bakePauseMs ?? 0,
       metadata: {
-        name: resolved.stack.title ?? job.stackId,
-        description: resolved.stack.description,
+        name: job.archiveName,
+        description: options.description ?? resolved.stack.description,
         attribution: resolved.stack.attribution,
         encoding: resolved.stack.output?.encoding,
         encodingFactors: resolved.stack.output,
@@ -273,9 +296,10 @@ export class BakeManager {
    * @returns {Promise<string|undefined>} - A path, or undefined for the default.
    */
   async #savePath(options) {
-    const explicit = await this.#library
-      .resolveSavePath(options)
-      .catch(() => undefined);
+    // Not caught. `resolveSavePath` refuses a name this node does not know and
+    // a path it cannot write, and both are worth refusing rather than quietly
+    // putting hundreds of gigabytes somewhere else.
+    const explicit = await this.#library.resolveSavePath(options);
     return explicit ?? this.#config.savePath ?? undefined;
   }
 
@@ -295,6 +319,8 @@ export class BakeManager {
       skipped: job.skipped,
       zoom: job.zoom,
       name: job.name,
+      archiveName: job.archiveName,
+      publishDir: job.publishDir ?? null,
       infoHash: job.infoHash,
       error: job.error,
     };

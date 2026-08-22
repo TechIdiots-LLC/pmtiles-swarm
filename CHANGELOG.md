@@ -7,6 +7,31 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.66.0
+### ✨ Features and improvements
+- **An export asks where it should go, and what to call it.** **Export to archive** now opens a
+  dialog instead of a confirmation, because there is something to decide. The save location uses
+  the same picker every other destination in this console uses, so a location named once under
+  Settings is offered here too — a baked planet is hundreds of gigabytes and which disk it lands on
+  is not a detail. The name and description default to the stack's and can be changed.
+
+  The filename is shown as the name is typed. A name is not a filename — separators and the
+  characters Windows refuses become dashes, and the date is appended so successive builds do not
+  collide — and a preview promising one thing while the server writes another would be worse than
+  no preview at all. A test asserts the browser's rule and `safeSegment` agree.
+
+### 🐞 Bug fixes
+- **A save location the node did not know was silently ignored.** The export resolved it after the
+  merge and swallowed the error, so naming a location that did not exist, or one that could not be
+  written, meant an hour of merging answered with a shrug and the archive on the default disk. It
+  is resolved before anything starts and the error is allowed through, which is what lets the
+  dialog put it beside the field that caused it.
+
+
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
 ## 0.65.0
 ### ✨ Features and improvements
 - **A bake stays out of the way of the node it runs on.** It runs in the main process — unlike

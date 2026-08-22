@@ -644,6 +644,59 @@
       </form>
     </dialog>
 
+    <dialog id="bake-dialog">
+      <form method="dialog" id="bake-form">
+        <h2>Export to archive</h2>
+        <div class="sub" style="margin-bottom:0.8rem">
+          Runs the recipe over its sources and writes the result as a real
+          archive, with its own infohash, seeded like any other. It reads every
+          tile the sources hold, so it can take hours — and it can be stopped,
+          which keeps the work for the next run to carry on from.
+        </div>
+
+        <div class="field">
+          <label>Stack</label>
+          <div class="sub"><code id="bake-stack"></code></div>
+        </div>
+
+        <div class="field">
+          <label for="bake-name">Name</label>
+          <input id="bake-name" placeholder="Terrain" />
+          <div class="sub">
+            What the archive is called, and what a rebuild of it keeps — so
+            leave the date out of it. The file gets one:
+            <code id="bake-filename"></code>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="bake-description">Description</label>
+          <input id="bake-description" placeholder="Bathymetry under terrain" />
+          <div class="sub">
+            Optional. The date this was baked is added to whatever is here.
+          </div>
+        </div>
+
+        <div id="bake-location"></div>
+
+        <div class="field">
+          <label for="bake-categories">Categories</label>
+          <input id="bake-categories" placeholder="terrain, weekly" />
+          <div class="sub">
+            Comma separated. What the archive is filed under once it is added,
+            which is what <code>/latest/&lt;category&gt;/</code> follows. Left
+            empty, it takes the stack's own.
+          </div>
+        </div>
+
+        <div class="sub" id="bake-error" style="color: var(--danger)"></div>
+        <menu>
+          <button value="cancel">Cancel</button>
+          <button id="bake-go" value="default">Export</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="adopt-dialog">
       <form method="dialog" id="adopt-form">
         <h2>Adopt existing torrents</h2>
@@ -7678,6 +7731,87 @@ Every piece is hashed against the ` +
       $('stacks-add').onclick = () =>
         openStackDialog().catch((e) => toast(e.message));
 
+      /**
+       * Asks where an export should land before starting it.
+       *
+       * A dialog rather than a confirm, because there is something to decide:
+       * a baked planet is hundreds of gigabytes and the disk it goes on is not
+       * a detail. The same picker every other destination in this console
+       * uses, so a location named once under Settings is offered here too.
+       * @param {string} id - The stack to export.
+       * @returns {Promise<void>} - Resolves once it is asked for or dismissed.
+       */
+      async function openBakeDialog(id, stack) {
+        $('bake-stack').textContent = id;
+        $('bake-error').textContent = '';
+        $('bake-name').value = stack?.title ?? id;
+        $('bake-description').value = stack?.description ?? '';
+        $('bake-categories').value = (stack?.categories ?? []).join(', ');
+        showBakeFilename();
+        $('bake-location').innerHTML = locationPicker('bake-loc');
+        await fillLocations('bake-loc');
+        $('bake-dialog').showModal();
+      }
+
+      /**
+       * Shows what the file will be called, as the name is typed.
+       *
+       * The same rules the server applies, because a name is not a filename:
+       * separators and the characters Windows refuses become dashes, and the
+       * date is appended so successive builds do not collide. Seeing that
+       * before pressing the button beats finding it on disk afterwards.
+       * @returns {void}
+       */
+      function showBakeFilename() {
+        const typed = $('bake-name').value.trim() || $('bake-stack').textContent;
+        const slug =
+          typed
+            .replace(/[/\\<>:"|?*\u0000-\u001f\u007f -]/g, '-')
+            .replace(/-{2,}/g, '-')
+            .replace(/^[.\s-]+/, '')
+            .replace(/[.\s-]+$/, '')
+            .slice(0, 120) || 'stack';
+        const day = new Date().toISOString().slice(0, 10).replaceAll('-', '');
+        $('bake-filename').textContent = `${slug}-${day}.pmtiles`;
+      }
+
+      $('bake-name').addEventListener('input', showBakeFilename);
+
+      $('bake-form').addEventListener('submit', async (event) => {
+        if (event.submitter?.value === 'cancel') return;
+        event.preventDefault();
+
+        const id = $('bake-stack').textContent;
+        const categories = $('bake-categories')
+          .value.split(',')
+          .map((one) => one.trim())
+          .filter(Boolean);
+        const name = $('bake-name').value.trim();
+        const description = $('bake-description').value.trim();
+
+        try {
+          await api(`/api/stacks/${encodeURIComponent(id)}/bake`, {
+            method: 'POST',
+            body: {
+              ...chosenLocation('bake-loc'),
+              ...(categories.length > 0 ? { categories } : {}),
+              ...(name ? { name } : {}),
+              ...(description ? { description } : {}),
+            },
+          });
+        } catch (error) {
+          // Kept open, because the answer is usually something to change here
+          // -- a location that does not exist, or a codec that is not
+          // installed -- rather than something to go away and think about.
+          $('bake-error').textContent = error.message;
+          return;
+        }
+
+        $('bake-dialog').close();
+        toast(`Exporting ${id}`);
+        loadStacks().catch((e) => toast(e.message));
+      });
+
       // Editing and deleting hang off the list, which is redrawn on every
       // change, so they are delegated the same way the source rows are.
       $('stacks-list').addEventListener('click', async (event) => {
@@ -7686,27 +7820,11 @@ Every piece is hashed against the ` +
         const bake = event.target.dataset.stackBake;
         const stopBake = event.target.dataset.stackBakeStop;
         if (bake !== undefined) {
-          // Confirmed, because it is not a small thing: it reads every tile
-          // every source holds, writes a whole archive, and then hashes it.
-          if (
-            !confirm(
-              `Run "${bake}" over its sources and write the result as a new ` +
-                'archive?\n\nThis reads every tile the sources hold and can ' +
-                'take hours. It can be stopped, and stopping keeps the work.',
-            )
-          ) {
-            return;
-          }
-          try {
-            await api(`/api/stacks/${encodeURIComponent(bake)}/bake`, {
-              method: 'POST',
-              body: {},
-            });
-            toast(`Exporting ${bake}`);
-          } catch (error) {
-            toast(error.message);
-          }
-          loadStacks().catch((e) => toast(e.message));
+          const { stacks } = await api('/api/stacks');
+          await openBakeDialog(
+            bake,
+            stacks.find((one) => one.id === bake),
+          ).catch((e) => toast(e.message));
         } else if (stopBake !== undefined) {
           try {
             await api(`/api/stacks/${encodeURIComponent(stopBake)}/bake`, {

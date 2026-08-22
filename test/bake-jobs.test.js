@@ -217,6 +217,97 @@ describe('refusing a bake that cannot produce what was asked for', () => {
   });
 });
 
+describe('choosing where an export goes and what it is called', () => {
+  /**
+   * A manager whose library records what the import was asked for.
+   * @param {object} archive - What `sourceArchive` returned.
+   * @param {object} [library] - Overrides for the fake library.
+   * @returns {object} - `{manager, imported}`.
+   */
+  const managerWith = (archive, library = {}) => {
+    const imported = [];
+    const manager = new BakeManager({
+      tiles: storeOver(archive),
+      config: {
+        dataDir: path.join(workspace, 'data-loc'),
+        savePath: '/default',
+      },
+      loadCodec: async () => null,
+      library: {
+        addLocalArchive: async (file, options) => {
+          imported.push({ file, options });
+          return { infoHash: 'c'.repeat(40) };
+        },
+        resolveSavePath: async (options) => options.savePath,
+        ...library,
+      },
+    });
+    return { manager, imported };
+  };
+
+  it('sends the export to the location it was given', async () => {
+    const archive = await sourceArchive('where', [[1, 0, 0]]);
+    const { manager, imported } = managerWith(archive);
+
+    await manager.start({
+      resolved: stackOver(archive),
+      savePath: path.join(workspace, 'chosen'),
+    });
+    await settled(manager, 'terrain');
+
+    assert.equal(
+      imported[0].options.publishDir,
+      path.join(workspace, 'chosen'),
+    );
+  });
+
+  it('refuses a location this node does not know, before merging anything', async () => {
+    // Checked at the end instead, this is an hour of merging answered with a
+    // shrug and the default disk.
+    const archive = await sourceArchive('nowhere', [[1, 0, 0]]);
+    const { manager, imported } = managerWith(archive, {
+      resolveSavePath: async () => {
+        const error = new Error('no save location named "gone"');
+        error.status = 400;
+        throw error;
+      },
+    });
+
+    await assert.rejects(
+      () => manager.start({ resolved: stackOver(archive), location: 'gone' }),
+      /no save location named/,
+    );
+    assert.equal(imported.length, 0, 'it merged before checking');
+    assert.equal(manager.get('terrain'), null, 'it left a job behind');
+  });
+
+  it('takes the name it was given, for the archive and the file', async () => {
+    const archive = await sourceArchive('named-export', [[1, 0, 0]]);
+    const { manager } = managerWith(archive);
+
+    const job = await manager.start({
+      resolved: stackOver(archive),
+      name: 'Bathymetry and terrain',
+    });
+    assert.equal(job.archiveName, 'Bathymetry and terrain');
+    // A name is not a filename, and the two not agreeing costs an afternoon
+    // the first time somebody goes looking on disk.
+    assert.match(job.name, /^Bathymetry-and-terrain-\d{8}\.pmtiles$/);
+    await settled(manager, 'terrain');
+  });
+
+  it('falls back to the stack when no name was typed', async () => {
+    const archive = await sourceArchive('unnamed-export', [[1, 0, 0]]);
+    const { manager } = managerWith(archive);
+    const job = await manager.start({
+      resolved: stackOver(archive),
+      name: '   ',
+    });
+    assert.equal(job.archiveName, 'Terrain');
+    await settled(manager, 'terrain');
+  });
+});
+
 describe('running a bake as a job', () => {
   /**
    * A manager over one source, with a library that records what it was given.
