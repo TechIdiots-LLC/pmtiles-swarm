@@ -7,6 +7,32 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.63.0
+### ✨ Features and improvements
+- **A terrain archive previews as terrain.** An archive whose `encoding` is `terrarium`,
+  `mapbox`, or `custom` with all four factors present now opens as hillshade with 3D relief
+  rather than as the raster it literally is — a terrain-RGB image drawn as colour says nothing
+  about the ground. The pitch ceiling goes to 85°, since MapLibre's default of 60 is not enough
+  to look across a landscape, and terrain itself is a control rather than a setting, because
+  flat hillshade is easier to compare against a map than a perspective is.
+
+  No server change was needed. The TileJSON has carried `encoding` and the four custom factors
+  for a while, and the preview already fetches it — so this is the page reading what was
+  already there. Stacks preview through the same file, which means a terrain stack gets the
+  view from its own declared output encoding.
+
+  `mlt` is not terrain. It travels in the same field and is a vector format, so the check names
+  the three encodings it can draw rather than testing that an encoding is set.
+
+  The raw tiles stay one click away and the map position survives the switch, because a missing
+  DEM tile hillshades as flat ground rather than as missing — the only way to see a hole is to
+  look at the pixels. A `custom` archive carrying none of its factors is drawn as an ordinary
+  raster with a note saying why.
+
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
 ## 0.62.0
 ### ✨ Features and improvements
 - **Tile stacks: several archives served as one tile endpoint.** A stack is a

@@ -36,7 +36,8 @@
       header h1 { font-size: 1rem; margin: 0; }
       header .sub { color: var(--muted); font-size: 0.8rem; }
       header code { font-size: 0.75rem; color: var(--muted); }
-      header a { color: var(--accent); font-size: 0.8rem; margin-left: auto; }
+      header .links { margin-left: auto; display: flex; gap: 0.9rem; }
+      header a { color: var(--accent); font-size: 0.8rem; }
       #map { flex: 1; min-height: 0; }
       .banner {
         margin: auto;
@@ -66,7 +67,10 @@
       <h1 id="name">Loading…</h1>
       <span class="sub" id="summary"></span>
       <code id="endpoint"></code>
-      <a href="/">← console</a>
+      <span class="links">
+        <a id="mode" href="#" hidden></a>
+        <a href="/">← console</a>
+      </span>
     </header>
     <div id="note" hidden></div>
     <div id="map"></div>
@@ -113,6 +117,26 @@
       const vector =
         vectorLayers.length > 0 || /\.(pbf|mvt)(\?|$)/.test(tilejson.tiles?.[0] ?? '');
 
+      // The encodings MapLibre can read as a raster-dem source. Named rather
+      // than tested as "encoding is set", because `mlt` travels in the same
+      // field and is a vector format -- treating it as terrain would render a
+      // hillshade of nothing.
+      const TERRAIN = ['terrarium', 'mapbox', 'custom'];
+      const FACTORS = ['redFactor', 'greenFactor', 'blueFactor', 'baseShift'];
+      // `custom` is unreadable without all four, so an archive that declares it
+      // and carries none is not terrain this page can draw.
+      const terrainReady =
+        !vector &&
+        TERRAIN.includes(tilejson.encoding) &&
+        (tilejson.encoding !== 'custom' ||
+          FACTORS.every((name) => Number.isFinite(tilejson[name])));
+      // Terrain by default where there is terrain: a terrain-RGB archive drawn
+      // as an ordinary raster is a psychedelic mess that says nothing about the
+      // ground. The raw tiles stay one click away, because they are what shows
+      // a hole in the data -- a missing tile reads as flat, not as missing.
+      const raw = new URLSearchParams(location.search).has('raw');
+      const terrain = terrainReady && !raw;
+
       $('name').textContent = tilejson.name ?? tileJsonUrl;
       $('summary').textContent =
         `${vector ? 'vector' : 'raster'} · z${tilejson.minzoom ?? 0}–${tilejson.maxzoom ?? 14}` +
@@ -120,22 +144,102 @@
           ? vectorLayers.length > 0
             ? ` · ${vectorLayers.length} layers`
             : ' · no layer list yet'
-          : '');
+          : terrainReady
+            ? ` · ${tilejson.encoding} terrain`
+            : '');
       $('endpoint').textContent = tilejson.tiles?.[0] ?? '';
 
       // One source, described entirely by the archive's own TileJSON. That
       // endpoint is already a complete, valid source description, so there is
       // nothing to reconstruct here — which is most of the reason it is worth
       // having.
-      const style = {
-        version: 8,
-        sources: { archive: { type: vector ? 'vector' : 'raster', url: tileJsonUrl } },
-        layers: [
-          { id: 'bg', type: 'background', paint: { 'background-color': '#12141a' } },
-        ],
-      };
-      if (!vector) {
+      /**
+       * The archive as a DEM source, described by its own TileJSON.
+       * @returns {object} - A raster-dem source.
+       */
+      const demSource = () => ({
+        type: 'raster-dem',
+        url: tileJsonUrl,
+        encoding: tilejson.encoding,
+        ...(tilejson.encoding === 'custom'
+          ? Object.fromEntries(FACTORS.map((name) => [name, tilejson[name]]))
+          : {}),
+      });
+
+      const style = terrain
+        ? {
+            version: 8,
+            // Two sources over one URL, which is what MapLibre's own terrain
+            // example does and what tileserver-gl ships. Terrain and hillshade
+            // ask a DEM source for different things -- one is sampled for
+            // height across the whole viewport, the other is shaded per tile --
+            // and sharing one source between them has a history of rendering
+            // artefacts. The tiles are requested once either way: the HTTP
+            // cache answers the second source.
+            sources: { terrain: demSource(), hillshade: demSource() },
+            terrain: { source: 'terrain' },
+            layers: [
+              {
+                id: 'bg',
+                type: 'background',
+                // Sea, not page furniture. Where a terrain archive has no data
+                // it is usually because there is water there.
+                paint: { 'background-color': '#16323f' },
+              },
+              {
+                id: 'hillshade',
+                type: 'hillshade',
+                source: 'hillshade',
+                paint: {
+                  'hillshade-shadow-color': 'hsl(39, 21%, 33%)',
+                  'hillshade-illumination-direction': 315,
+                  'hillshade-exaggeration': 0.8,
+                },
+              },
+            ],
+          }
+        : {
+            version: 8,
+            sources: {
+              archive: { type: vector ? 'vector' : 'raster', url: tileJsonUrl },
+            },
+            layers: [
+              {
+                id: 'bg',
+                type: 'background',
+                paint: { 'background-color': '#12141a' },
+              },
+            ],
+          };
+      if (!vector && !terrain) {
         style.layers.push({ id: 'archive', type: 'raster', source: 'archive' });
+      }
+
+      // Offered rather than assumed, both ways round. Reading heights off the
+      // raw pixels is the only way to see that a tile is present but wrong.
+      if (terrainReady) {
+        const toggle = $('mode');
+        toggle.hidden = false;
+        toggle.textContent = terrain ? 'raw tiles →' : 'terrain →';
+        toggle.addEventListener('click', (event) => {
+          event.preventDefault();
+          // Assembled at click time so the hash, which is where the map keeps
+          // the position it is currently showing, survives the reload.
+          location.href =
+            location.pathname + (terrain ? '?raw=1' : '') + location.hash;
+        });
+      }
+
+      // An archive that says `custom` and carries none of the four factors
+      // cannot be read as heights by anything, this page included.
+      if (!vector && tilejson.encoding === 'custom' && !terrainReady) {
+        $('note').hidden = false;
+        $('note').textContent =
+          'This archive declares the custom terrain encoding but not the four ' +
+          'factors it is unreadable without — redFactor, greenFactor, ' +
+          'blueFactor and baseShift. It is drawn as an ordinary raster, which ' +
+          'is the only honest thing to do with pixels whose meaning is not ' +
+          'stated.';
       }
 
       // An archive whose metadata has not been read yet cannot be drawn: a
@@ -157,10 +261,27 @@
         center: tilejson.center?.slice(0, 2) ?? [0, 0],
         zoom: tilejson.center?.[2] ?? 2,
         maxZoom: (tilejson.maxzoom ?? 14) + 2,
+        // 60 is the default and it is not enough to see relief: the whole
+        // point of the terrain view is looking across a landscape rather than
+        // down at it.
+        ...(terrain ? { maxPitch: 85 } : {}),
         hash: true,
       });
-      map.addControl(new maplibregl.NavigationControl(), 'top-left');
+      map.addControl(
+        new maplibregl.NavigationControl({ visualizePitch: terrain }),
+        'top-left',
+      );
       map.addControl(new maplibregl.ScaleControl(), 'bottom-left');
+
+      if (terrain) {
+        // Terrain off is a useful view of a DEM in its own right -- hillshade
+        // flat on the screen is easier to compare against a map than a
+        // perspective is -- so this stays a switch rather than being set once.
+        map.addControl(
+          new maplibregl.TerrainControl({ source: 'terrain' }),
+          'top-left',
+        );
+      }
 
       if (vector) {
         // MapLibre's own inspect control, rather than something equivalent

@@ -748,6 +748,35 @@ first tile can be seconds away.
 **Raster archives get the raster.** There is nothing to inspect in an image, so
 the panel says so and the map is for checking coverage.
 
+**Terrain archives get hillshade and 3D relief**, and open in it. An archive
+whose [`encoding`](tilejson.md#encoding) is `terrarium`, `mapbox`, or `custom`
+with all four factors present is drawn as a `raster-dem` source: a hillshade
+layer over sea-coloured background, terrain switchable from the control beside
+the compass, and the pitch ceiling raised to 85° — MapLibre's default of 60 is
+not enough to see relief, and looking across a landscape rather than down at it
+is the point of the view.
+
+`mlt` is not terrain. It travels in the same `encoding` field and is a vector
+format, which is why the check names the three it can draw rather than testing
+that an encoding is set at all.
+
+Terrain and hillshade get a source each over the same URL, which is what
+MapLibre's own terrain example does and what tileserver-gl ships. The two ask a
+DEM source for different things — one is sampled for height across the whole
+viewport, the other is shaded per tile — and sharing one between them has a
+history of rendering artefacts. The tiles are requested once either way, since
+the HTTP cache answers the second source.
+
+**The raw tiles stay one click away**, from the link in the header, and the map
+position survives the switch. That view is not decorative: a missing DEM tile
+hillshades as flat ground rather than as missing, so the only way to see a hole
+is to look at the pixels. A `custom` archive carrying none of its four factors
+is drawn as an ordinary raster with a note saying why — pixels whose meaning is
+not stated cannot honestly be rendered as heights.
+
+Stacks preview through the same page, so a terrain stack gets the terrain view
+from its own declared output encoding. See [tile stacks](tile-stacks.md).
+
 **What it has actually served** is on the archive's detail, as `served`, and
 across the node at `GET /api/stats` — requests, bytes, a breakdown by zoom and
 status, and which client addresses asked. Worth reading beside `reading`: an

@@ -117,6 +117,121 @@ describe('the map preview', () => {
   });
 });
 
+describe('the terrain preview', () => {
+  const preview = fsSync.readFileSync(
+    path.join(here, '..', 'src', 'web', 'preview.html'),
+    'utf8',
+  );
+
+  /** The detection, lifted out and run against a TileJSON. */
+  const detect = (tilejson, vector = false, search = '') => {
+    const from = preview.indexOf('const TERRAIN =');
+    const to = preview.indexOf('const terrain = terrainReady && !raw;');
+    assert.ok(from > 0 && to > from, 'the terrain detection moved');
+    const body =
+      preview.slice(from, to) + 'const terrain = terrainReady && !raw;';
+    return new Function(
+      'tilejson',
+      'vector',
+      'location',
+      `${body}; return { terrainReady, terrain };`,
+    )(tilejson, vector, { search });
+  };
+
+  it('reads the encodings MapLibre can draw as a DEM', () => {
+    for (const encoding of ['terrarium', 'mapbox']) {
+      assert.deepEqual(detect({ encoding }), {
+        terrainReady: true,
+        terrain: true,
+      });
+    }
+  });
+
+  it('does not treat MLT as terrain', () => {
+    // `mlt` travels in the same `encoding` field and is a vector format, so a
+    // check for "encoding is set" would hillshade a vector archive.
+    assert.deepEqual(detect({ encoding: 'mlt' }), {
+      terrainReady: false,
+      terrain: false,
+    });
+  });
+
+  it('refuses a custom encoding that is missing its factors', () => {
+    // All four or none: `custom` says the pixels mean something without saying
+    // what, and guessing produces heights that look plausible and are wrong.
+    assert.equal(detect({ encoding: 'custom' }).terrainReady, false);
+    assert.equal(
+      detect({ encoding: 'custom', redFactor: 256, greenFactor: 1 })
+        .terrainReady,
+      false,
+    );
+    assert.equal(
+      detect({
+        encoding: 'custom',
+        redFactor: 256,
+        greenFactor: 1,
+        blueFactor: 1 / 256,
+        baseShift: -32768,
+      }).terrainReady,
+      true,
+    );
+  });
+
+  it('leaves a vector archive alone whatever it declares', () => {
+    assert.equal(detect({ encoding: 'mapbox' }, true).terrainReady, false);
+  });
+
+  it('says nothing about an archive with no encoding at all', () => {
+    assert.deepEqual(detect({}), { terrainReady: false, terrain: false });
+  });
+
+  it('shows the raw tiles when asked, and still offers the switch back', () => {
+    // The raw view is what shows a hole: a missing DEM tile hillshades as flat
+    // ground rather than as missing, so the pixels have to stay reachable.
+    const raw = detect({ encoding: 'terrarium' }, false, '?raw=1');
+    assert.equal(raw.terrainReady, true);
+    assert.equal(raw.terrain, false);
+  });
+
+  it('gives terrain and hillshade a source each over one URL', () => {
+    // What MapLibre's own terrain example does and what tileserver-gl ships:
+    // the two ask a DEM source for different things, and sharing one has a
+    // history of rendering artefacts.
+    assert.match(
+      preview,
+      /sources: \{ terrain: demSource\(\), hillshade: demSource\(\) \}/,
+    );
+    assert.match(preview, /terrain: \{ source: 'terrain' \}/);
+    assert.match(preview, /type: 'raster-dem'/);
+  });
+
+  it('carries the custom factors into the source', () => {
+    assert.match(preview, /Object\.fromEntries\(FACTORS\.map\(/);
+  });
+
+  it('raises the pitch ceiling, which defaults too low to see relief', () => {
+    // MapLibre's default maxPitch is 60. Looking across a landscape rather
+    // than down at it is the entire point of the view.
+    assert.match(preview, /\.\.\.\(terrain \? \{ maxPitch: 85 \} : \{\}\)/);
+  });
+
+  it('offers the terrain toggle only where terrain can be drawn', () => {
+    assert.match(
+      preview,
+      /new maplibregl\.TerrainControl\(\{ source: 'terrain' \}\)/,
+    );
+    assert.match(preview, /if \(terrainReady\) \{/);
+  });
+
+  it('keeps the map position across the switch', () => {
+    // The position lives in the hash, and the switch is a reload.
+    assert.match(
+      preview,
+      /location\.pathname \+ \(terrain \? '\?raw=1' : ''\) \+ location\.hash/,
+    );
+  });
+});
+
 describe('console script structure', () => {
   const script = page.split('<script type="module">')[1].split('</script>')[0];
   const depths = declarationDepths(script);
