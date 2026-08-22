@@ -11,6 +11,7 @@ import { StackCache } from '../src/stack-cache.js';
 import { generateToken, hashToken, isPublicSurface } from '../src/auth.js';
 import {
   StackStore,
+  stacksUsing,
   isPinned,
   needsCodec,
   resolveStack,
@@ -1017,5 +1018,70 @@ describe('what the console reads to offer sources', () => {
     // The other fields the menu uses to label an entry.
     assert.equal(typeof body[0].archives, 'number');
     assert.equal(typeof body[0].servable, 'boolean');
+  });
+});
+
+describe('what a removal would break', () => {
+  const size = (stacks, entry, counts) =>
+    stacksUsing(stacks, entry, (category) => counts[category] ?? 0);
+
+  it('names a stack that pinned the archive being removed', () => {
+    const entry = archive('f1'.repeat(20), 'one.pmtiles', ['terrain']);
+    const found = size(
+      [{ id: 's', sources: [{ archive: entry.infoHash }] }],
+      entry,
+      {},
+    );
+    assert.equal(found.length, 1);
+    // Nothing to fall back to: the stack names this build and no other.
+    assert.equal(found[0].how, 'pinned');
+  });
+
+  it('is relaxed about a category that still has other archives', () => {
+    // The stack resolves to whichever build is newest, so removing an older
+    // one changes nothing worth interrupting somebody for.
+    const entry = archive('f2'.repeat(20), 'old.pmtiles', ['terrain']);
+    const found = size(
+      [{ id: 's', sources: [{ category: 'terrain' }] }],
+      entry,
+      { terrain: 3 },
+    );
+    assert.equal(found[0].how, 'category');
+  });
+
+  it('flags the last archive in a category a stack depends on', () => {
+    const entry = archive('f3'.repeat(20), 'only.pmtiles', ['terrain']);
+    const found = size(
+      [{ id: 's', sources: [{ category: 'terrain' }] }],
+      entry,
+      { terrain: 1 },
+    );
+    // Removing it empties the category, so the stack stops resolving.
+    assert.equal(found[0].how, 'last-in-category');
+  });
+
+  it('says nothing about a stack that does not use it', () => {
+    const entry = archive('f4'.repeat(20), 'other.pmtiles', ['imagery']);
+    assert.deepEqual(
+      size([{ id: 's', sources: [{ category: 'terrain' }] }], entry, {
+        terrain: 2,
+      }),
+      [],
+    );
+  });
+
+  it('answers over HTTP for the archive being looked at', async () => {
+    const pinned = archive('f5'.repeat(20), 'pinned.pmtiles', ['terrain']);
+    const node = await serve(
+      [pinned],
+      [{ id: 'uses-it', sources: [{ archive: pinned.infoHash }] }],
+    );
+    after(() => node.close());
+
+    const body = await (
+      await node.get(`/api/torrents/${pinned.infoHash}/stacks`)
+    ).json();
+    assert.equal(body.stacks[0].id, 'uses-it');
+    assert.equal(body.stacks[0].how, 'pinned');
   });
 });

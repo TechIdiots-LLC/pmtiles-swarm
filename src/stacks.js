@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { hasUsableEncoding, parseColor } from './elevation.js';
+import { normalizeCategories } from './catalog.js';
 import { BLEND_MODES, isBlendMode } from './rgba.js';
 
 /**
@@ -239,6 +240,48 @@ export function resolveStack(stack, resolvers) {
 
   const missing = sources.filter((s) => !s.entry && s.required);
   return { stack, sources, missing };
+}
+
+/**
+ * The stacks that would be affected by an archive going away.
+ *
+ * Two ways a stack can depend on one, and they are worth telling apart. A
+ * pinned source names the infohash, so removing that archive breaks the stack
+ * outright and there is nothing to fall back to. A category source names a
+ * category the archive is in, which usually survives -- the stack resolves to
+ * whatever build is newest, and removing an older one changes nothing. It only
+ * breaks when the archive being removed is the *only* one in that category.
+ * @param {Stack[]} stacks - Every stack.
+ * @param {object} entry - The catalog entry about to go.
+ * @param {Function} categorySize - How many archives a category still holds.
+ * @returns {object[]} - `{ id, title, how, source }` per affected stack.
+ */
+export function stacksUsing(stacks, entry, categorySize) {
+  const categories = new Set(normalizeCategories(entry));
+  const found = [];
+  for (const stack of stacks ?? []) {
+    for (const source of stack.sources ?? []) {
+      if (source.archive && source.archive.toLowerCase() === entry.infoHash) {
+        found.push({
+          id: stack.id,
+          title: stack.title ?? stack.id,
+          how: 'pinned',
+          source: source.archive,
+        });
+      } else if (source.category && categories.has(source.category)) {
+        // Only a problem when this is the last one: a category with others in
+        // it simply resolves to the next newest.
+        const remaining = categorySize(source.category) - 1;
+        found.push({
+          id: stack.id,
+          title: stack.title ?? stack.id,
+          how: remaining > 0 ? 'category' : 'last-in-category',
+          source: source.category,
+        });
+      }
+    }
+  }
+  return found;
 }
 
 /**

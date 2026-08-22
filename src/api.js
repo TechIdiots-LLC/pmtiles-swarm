@@ -42,6 +42,7 @@ import { compositeRgba, toRaster } from './rgba.js';
 import {
   isPinned,
   needsCodec,
+  stacksUsing,
   resolveStack,
   stackCoverage,
   stackEtag,
@@ -3159,6 +3160,30 @@ export function createApp({
       const stack = stacks?.get(req.params.id);
       if (!stack) return res.status(404).json({ error: 'no such stack' });
       res.json({ stack, problems: stacks.problems(stack.id) });
+    }),
+  );
+
+  /**
+   * Which stacks would notice this archive going away.
+   *
+   * Asked before a removal rather than discovered after one. A stack that
+   * pinned this infohash stops working the moment it is gone, and there is
+   * nothing for it to fall back to -- which is a thing to say beforehand, not
+   * a 409 somebody meets the next time a map is loaded.
+   */
+  app.get(
+    '/api/torrents/:infoHash/stacks',
+    route(async (req, res) => {
+      const entry = catalog.get(req.params.infoHash);
+      if (!entry) return res.status(404).json({ error: 'unknown archive' });
+      await stacks?.refresh();
+      res.json({
+        stacks: stacksUsing(
+          stacks?.list() ?? [],
+          entry,
+          (category) => catalog.byCategory(category).length,
+        ),
+      });
     }),
   );
 

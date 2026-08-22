@@ -2771,8 +2771,38 @@ Every piece is hashed against the ` +
         };
 
         $('remove').onclick = async () => {
+          // Asked before the removal rather than discovered after it. A stack
+          // that pinned this infohash stops working the moment it is gone, and
+          // has nothing to fall back to.
+          let warning = '';
+          try {
+            const { stacks: using } = await api(
+              `/api/torrents/${infoHash}/stacks`,
+            );
+            // A category source that still has other archives is fine: the
+            // stack resolves to whichever build is newest, so removing an
+            // older one changes nothing worth interrupting somebody for.
+            const broken = using.filter((u) => u.how !== 'category');
+            if (broken.length) {
+              const lines = broken.map(
+                (u) =>
+                  `  • ${u.title} — ${
+                    u.how === 'pinned'
+                      ? 'pinned to this archive'
+                      : `its only archive in "${u.source}"`
+                  }`,
+              );
+              warning = `${
+                broken.length === 1 ? 'A stack uses' : 'Stacks use'
+              } this archive and will stop working:\n${lines.join('\n')}\n\n`;
+            }
+          } catch {
+            // Not worth blocking a removal over. The worst case is the same
+            // removal without the warning, which is where this started.
+          }
+
           const deleteData = window.confirm(
-            'Remove this archive.\n\nOK also deletes its data; Cancel keeps the files.',
+            `${warning}Remove this archive.\n\nOK also deletes its data; Cancel keeps the files.`,
           );
           try {
             await api(
@@ -6084,6 +6114,9 @@ Every piece is hashed against the ` +
       // to know which of them are currently real.
       let stackDraft = null;
 
+      /** Forty characters of hex is not a label. */
+      const shortHash = (hash) => (hash ? `${hash.slice(0, 12)}…` : hash);
+
       /** Whether the draft is imagery rather than terrain. */
       const draftIsRgba = () => stackDraft?.space === 'rgba';
 
@@ -6142,6 +6175,13 @@ Every piece is hashed against the ` +
        */
       const fillStackSourceChoices = async () => {
         const select = $('stack-add-source');
+        const taken = new Set(
+          (stackDraft?.sources ?? []).flatMap((source) =>
+            [source.category, source.archive].filter(Boolean),
+          ),
+        );
+        const groups = [];
+
         try {
           // /api/categories answers with a bare array, and each entry names
           // itself `category` rather than `name`. Both are worth stating: the
@@ -6149,37 +6189,63 @@ Every piece is hashed against the ` +
           // directly, and destructuring `{ categories }` here silently
           // produced undefined and an empty menu rather than an error.
           const categories = await api('/api/categories');
-          const taken = new Set(
-            (stackDraft?.sources ?? []).map((s) => s.category),
-          );
           const free = (categories ?? []).filter(
             (c) => !taken.has(c.category),
           );
-          select.innerHTML = free.length
-            ? free
+          if (free.length) {
+            groups.push(
+              `<optgroup label="Categories — follow the newest build">${free
                 .map((c) => {
                   // A category whose newest build is MBTiles, or which has not
-                  // been probed, has no tiles to contribute. Offered anyway
-                  // and labelled, because it may become servable later and
-                  // hiding it would look like the category did not exist.
+                  // been probed, has no tiles to contribute yet. Offered and
+                  // labelled rather than hidden: it may become servable later,
+                  // and leaving it out looks like it does not exist.
                   const note = c.servable
                     ? `${c.archives} archive${c.archives === 1 ? '' : 's'}`
                     : 'no tiles yet';
-                  return `<option value="${escapeHtml(c.category)}">${escapeHtml(
+                  return `<option value="cat:${escapeHtml(
                     c.category,
-                  )} — ${note}</option>`;
+                  )}">${escapeHtml(c.category)} — ${note}</option>`;
                 })
-                .join('')
-            : '<option value="">no categories left to add</option>';
-          select.disabled = free.length === 0;
-          $('stack-add-source-go').disabled = free.length === 0;
-        } catch (error) {
-          select.innerHTML = `<option value="">could not list categories: ${escapeHtml(
-            error.message,
-          )}</option>`;
-          select.disabled = true;
-          $('stack-add-source-go').disabled = true;
+                .join('')}</optgroup>`,
+            );
+          }
+        } catch {
+          // Archives may still be listable, so this is not fatal on its own.
         }
+
+        try {
+          // Pinning one build is the other way to name a source. Worth
+          // offering even though a category is usually the better answer:
+          // a reference output that must not move wants exactly this, and an
+          // archive in no category has no other way to be named.
+          const { entries } = await api('/api/catalog');
+          const free = (entries ?? []).filter(
+            (entry) =>
+              !taken.has(entry.infoHash) &&
+              (entry.kind ?? 'pmtiles') === 'pmtiles',
+          );
+          if (free.length) {
+            groups.push(
+              `<optgroup label="Archives — pinned to one build">${free
+                .map(
+                  (entry) =>
+                    `<option value="arc:${escapeHtml(entry.infoHash)}">${escapeHtml(
+                      entry.name,
+                    )}</option>`,
+                )
+                .join('')}</optgroup>`,
+            );
+          }
+        } catch {
+          // Same again: whichever list did load is still worth offering.
+        }
+
+        select.innerHTML = groups.length
+          ? groups.join('')
+          : '<option value="">nothing left to add</option>';
+        select.disabled = groups.length === 0;
+        $('stack-add-source-go').disabled = groups.length === 0;
       };
 
       /** Redraws the source list and the fields that depend on the space. */
@@ -6327,7 +6393,14 @@ Every piece is hashed against the ` +
           <div class="card tight">
             <div class="row">
               <span class="muted">${index}</span>
-              <code>${escapeHtml(source.category ?? source.archive ?? '')}</code>
+              <code>${escapeHtml(
+                source.category ?? shortHash(source.archive) ?? '',
+              )}</code>
+              <span class="sub" title="${
+                source.archive
+                  ? 'Pinned to this build. It will not follow a rebuild, and breaks if the archive is removed.'
+                  : 'Follows whichever build in this category is newest.'
+              }">${source.archive ? 'pinned' : 'category'}</span>
               ${role}
               <span class="bar-gap"></span>
               <button type="button" data-stack-move="${index}" data-stack-dir="-1"
@@ -6422,11 +6495,15 @@ Every piece is hashed against the ` +
       });
 
       $('stack-add-source-go').onclick = () => {
-        const category = $('stack-add-source').value;
-        if (!category) return;
+        const chosen = $('stack-add-source').value;
+        if (!chosen) return;
+        const [kind, ...rest] = chosen.split(':');
+        const name = rest.join(':');
         // Appended, so the newest source is the one that covers the rest --
         // which is what somebody adding a more detailed layer means.
-        stackDraft.sources.push({ category });
+        stackDraft.sources.push(
+          kind === 'arc' ? { archive: name } : { category: name },
+        );
         renderStackDraft();
         fillStackSourceChoices();
       };
