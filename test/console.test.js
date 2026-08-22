@@ -1400,6 +1400,38 @@ describe('the settings schema', () => {
     );
   });
 
+  it('never collects a control the config file owns', () => {
+    // saveConfig refuses onAdded, onComplete and allowHooksFromApi outright, so
+    // a control that sent one would produce an error and no saved settings at
+    // all — the rest of the group goes down with it, because everything is
+    // checked before anything is applied.
+    assert.deepEqual(
+      read([
+        {
+          disabled: true,
+          dataset: {
+            setting: 'allowHooksFromApi',
+            type: 'boolean',
+            initial: 'false',
+          },
+          checked: true,
+        },
+      ]),
+      {},
+    );
+  });
+
+  it('marks the setting only the config file may change', () => {
+    assert.match(
+      script,
+      /key: 'allowHooksFromApi',[\s\S]{0,200}fileOnly: true/,
+    );
+    // Disabled, not merely labelled: an enabled control is an invitation to an
+    // error the server was always going to return.
+    assert.match(script, /const locked = field\.fileOnly \? ' disabled' : '';/);
+    assert.match(script, /data-setting="\$\{field\.key\}"\$\{locked\}/);
+  });
+
   it('sends null for a value that was cleared, not undefined', () => {
     // JSON.stringify drops undefined entirely, so "unset this" would never
     // reach the server.
@@ -1415,6 +1447,353 @@ describe('the settings schema', () => {
         },
       ]),
       { tiles: { pieceCacheBytes: null } },
+    );
+  });
+
+  it('agrees with the server about what costs a restart', async () => {
+    // Two lists that have to say the same thing and are edited in different
+    // files. A top-level field claiming no restart when the server demands one
+    // is a console that quietly stops applying settings.
+    const { RESTART_REQUIRED } = await import('../src/config.js');
+    const fields = [
+      ...schema.matchAll(/key: '([^']+)',[\s\S]*?(?=\n {12}\{|\n {10}\],)/g),
+    ].map((match) => ({
+      key: match[1],
+      restart: /restart: true/.test(match[0]),
+    }));
+
+    assert.ok(fields.length > 30, `only parsed ${fields.length} fields`);
+    for (const field of fields) {
+      // A nested key may be narrower than the server's answer -- that is the
+      // point of describing them one at a time -- so only top-level ones have
+      // to match exactly.
+      if (field.key.includes('.')) continue;
+      assert.equal(
+        field.restart,
+        RESTART_REQUIRED.has(field.key),
+        `${field.key} disagrees with RESTART_REQUIRED`,
+      );
+    }
+  });
+
+  it('reads a list one line at a time, trimming the blanks', () => {
+    // Trackers and feed categories are lists a person edits, and a textarea of
+    // JSON is the worst way to offer one.
+    const before = ['udp://a:1337/announce', 'wss://b'];
+    assert.deepEqual(
+      read([
+        {
+          dataset: {
+            setting: 'trackers',
+            type: 'list',
+            initial: JSON.stringify(before),
+          },
+          value: 'udp://a:1337/announce\n\n  wss://c  ',
+        },
+      ]),
+      { trackers: ['udp://a:1337/announce', 'wss://c'] },
+    );
+  });
+
+  it('does not report an empty list as a change when there was none', () => {
+    assert.deepEqual(
+      read([
+        {
+          dataset: { setting: 'feedCategories', type: 'list', initial: 'null' },
+          value: '',
+        },
+      ]),
+      {},
+    );
+  });
+
+  it('gives every declared tab something to show', () => {
+    // A tab is not only schema fields — Feeds is four tables and nothing else
+    // — so an empty one means an editor was left behind in the last tab rather
+    // than moved with the settings it belongs to.
+    const declared = [
+      ...script
+        .slice(
+          script.indexOf('const SETTINGS_GROUPS'),
+          script.indexOf('/** The tab holding'),
+        )
+        .matchAll(/'([^']+)'/g),
+    ].map((match) => match[1]);
+    assert.ok(declared.length >= 6, `only found ${declared.length} tabs`);
+
+    const withFields = new Set(
+      [...schema.matchAll(/group: '([^']+)'/g)].map((match) => match[1]),
+    );
+    const withEditor = new Set(
+      [...script.matchAll(/into: paneFor\('([^']+)'\)/g)].map(
+        (match) => match[1],
+      ),
+    );
+    // These two are appended rather than rendered through `into:`.
+    for (const match of script.matchAll(
+      /paneFor\('([^']+)'\)\.append|renderTokenEditor\(paneFor\('([^']+)'\)|renderHookEditor\(paneFor\('([^']+)'\)/g,
+    )) {
+      withEditor.add(match[1] ?? match[2] ?? match[3]);
+    }
+
+    const empty = declared.filter(
+      (group) => !withFields.has(group) && !withEditor.has(group),
+    );
+    assert.deepEqual(empty, [], 'these tabs would render blank');
+  });
+
+  it('puts what archives arrive through under one tab', () => {
+    // Monitored folders, watched web locations, RSS feeds and remote nodes are
+    // four ways of answering the same question, and they used to be four
+    // tables stacked under everything else.
+    for (const key of [
+      "key: 'watch'",
+      "key: 'sources'",
+      "key: 'feeds'",
+      "key: 'peers'",
+    ]) {
+      const at = script.indexOf(key);
+      assert.ok(at > 0, `${key} moved`);
+      const before = script.slice(Math.max(0, at - 200), at);
+      assert.match(before, /paneFor\('Feeds'\)/, `${key} is not under Feeds`);
+    }
+  });
+
+  it('does not narrow a setting that accepts more than one type', () => {
+    // trustProxy takes anything Express does: true, a hop count, or a subnet
+    // list. A checkbox for it would overwrite "172.16.1.0/24" with `true`,
+    // which means trusting the header from any caller at all — the exact
+    // failure its own help text warns about.
+    const at = schema.indexOf("key: 'trustProxy',");
+    assert.ok(at > 0, 'trustProxy is not described');
+    assert.ok(schema.slice(at, at + 200).includes("type: 'addresses'"));
+
+    const proxy = (value, initial = 'false') =>
+      read([
+        {
+          dataset: { setting: 'trustProxy', type: 'addresses', initial },
+          value,
+        },
+      ]);
+
+    // The four shapes, and Express means something different by each.
+    assert.deepEqual(proxy('172.16.1.49'), { trustProxy: ['172.16.1.49'] });
+    assert.deepEqual(proxy('172.16.1.49\n10.0.0.0/8'), {
+      trustProxy: ['172.16.1.49', '10.0.0.0/8'],
+    });
+    // A lone number is a hop count, not an address — so it must not arrive as
+    // the string "1", which Express would read as a proxy called 1.
+    assert.deepEqual(proxy('1'), { trustProxy: 1 });
+    assert.deepEqual(proxy('true'), { trustProxy: true });
+    assert.deepEqual(proxy('', '["172.16.1.49"]'), { trustProxy: null });
+  });
+
+  it('leaves a plain text setting as text, however numeric it looks', () => {
+    // The other half of the rule above: coercing every text field would turn a
+    // feed titled "2024" into the number 2024.
+    assert.deepEqual(
+      read([
+        {
+          dataset: { setting: 'feedTitle', type: 'text', initial: 'null' },
+          value: '2024',
+        },
+      ]),
+      { feedTitle: '2024' },
+    );
+  });
+
+  it('keeps a three-way setting three-way', () => {
+    // libtorrent's flags are unset, on, or off, and unset means libtorrent's
+    // own default rather than off. Rendered as a checkbox, an unset one draws
+    // unchecked and reads back as an explicit false — so merely opening the
+    // tab and saving would turn UPnP, NAT-PMP and the DHT off.
+    for (const flag of ['upnp', 'natpmp', 'dht', 'lsd']) {
+      // Sliced rather than matched: the escapes a regex needs here go through
+      // a template literal first, which eats them.
+      const at = schema.indexOf(`key: 'libtorrent.${flag}',`);
+      assert.ok(at > 0, `libtorrent.${flag} is not described`);
+      assert.ok(
+        schema.slice(at, at + 300).includes("type: 'choice'"),
+        `libtorrent.${flag} must not be a checkbox`,
+      );
+    }
+
+    const upnp = (value, initial) =>
+      read([
+        {
+          dataset: { setting: 'libtorrent.upnp', type: 'choice', initial },
+          value,
+        },
+      ]);
+    assert.deepEqual(
+      upnp('', 'null'),
+      {},
+      'unset and untouched must send nothing',
+    );
+    assert.deepEqual(upnp('false', 'null'), { libtorrent: { upnp: false } });
+    assert.deepEqual(upnp('', 'true'), { libtorrent: { upnp: null } });
+  });
+
+  it('keeps a panel in the same tab as what it says is below it', () => {
+    // The subscription switches used to sit on `body` saying "applies to every
+    // feed below" while the tables they govern had moved to another tab. A
+    // panel that refers to its neighbours has to travel with them.
+    const panel = script.indexOf("paneFor('Feeds').append(feedGlobals)");
+    assert.ok(panel > 0, 'the subscription panel is not in the Feeds tab');
+
+    for (const table of ["key: 'feeds',", "key: 'peers',"]) {
+      const at = script.indexOf(table);
+      assert.ok(at > 0, `${table} moved`);
+      assert.ok(at > panel, `${table} must render after the panel covering it`);
+    }
+  });
+
+  it('does not fold the subscription switches into the RSS table', () => {
+    // They gate the whole subscription manager, so they cover remote nodes as
+    // well — putting them inside the RSS table would say something false about
+    // what turning them off does.
+    const at = script.indexOf('Subscriptions</h2>');
+    assert.ok(at > 0, 'the panel should say what it covers');
+    assert.match(script.slice(at, at + 400), /remote node/);
+  });
+
+  it('describes every setting the config declares, or keeps a tab for the rest', () => {
+    // The point of the last tab is that nothing is unreachable. Either a
+    // setting is described somewhere, or it falls through to a tab that still
+    // exists — and the tab is removed only when the fallthrough is empty.
+    assert.match(script, /const leftovers = body\.childElementCount > 0;/);
+    assert.match(script, /if \(!leftovers\) \{/);
+  });
+
+  it('does not leave an object stranded as raw JSON', async () => {
+    // Six blobs used to sit under the last tab — webtorrent, auth, mutable,
+    // tileStats, traffic, autoRebuild — each a textarea of JSON with no label
+    // and no reason. Editing `traffic.keepHours` meant editing JSON in a
+    // browser.
+    const { readFile } = await import('node:fs/promises');
+    const config = await readFile(
+      new URL('../src/config.js', import.meta.url),
+      'utf8',
+    );
+    const block = config.slice(
+      config.indexOf('const DEFAULTS = {'),
+      config.indexOf('\n};', config.indexOf('const DEFAULTS = {')),
+    );
+    const declared = [...block.matchAll(/^ {2}([a-zA-Z][a-zA-Z0-9]*):/gm)].map(
+      (match) => match[1],
+    );
+
+    const described = new Set(
+      [...schema.matchAll(/key: '([^']+)'/g)].map(
+        (match) => match[1].split('.')[0],
+      ),
+    );
+    // These have an editor of their own rather than schema fields.
+    const bespoke = new Set([
+      'incompleteSuffix',
+      'cacheSavePath',
+      'seeding',
+      'speed',
+      'onAdded',
+      'onComplete',
+      'subscriptionsEnabled',
+      'subscriptionIntervalSeconds',
+      'watch',
+      'sources',
+      'subscriptions',
+      'locations',
+    ]);
+
+    const stranded = declared.filter(
+      (key) => !described.has(key) && !bespoke.has(key),
+    );
+    assert.deepEqual(stranded, [], 'these still render as unlabelled JSON');
+  });
+
+  it('puts the two editors that do something at the top of their tabs', () => {
+    // Schema sections are appended when a pane is built and hand-built editors
+    // afterwards, so without saying otherwise these two landed last in their
+    // tab — under every timeout and interval. Running a command when a
+    // download finishes, and choosing where archives are put, are not
+    // footnotes to those.
+    assert.match(script, /function attachPanel\(into, panel, first\)/);
+    assert.match(script, /if \(first\) into\.prepend\(panel\);/);
+
+    // Save locations, first in Feeds: a location is where an arriving archive
+    // lands, and the sources beside it are what choose one.
+    const locations = script.indexOf("key: 'locations',");
+    assert.ok(locations > 0, 'the locations editor moved');
+    const preamble = script.slice(Math.max(0, locations - 400), locations);
+    assert.match(preamble, /first: true/);
+    assert.match(preamble, /into: paneFor\('Feeds'\)/);
+
+    // Run external program, first in Transfers.
+    assert.match(
+      script,
+      /renderHookEditor\(paneFor\('Transfers'\), config, restartKeys, true\)/,
+    );
+  });
+
+  it('describes no value the server redacts on the way out', () => {
+    // A redacted field renders as the placeholder, so offering one is offering
+    // to save `********` over the real credential. The minimal-update reader
+    // would skip it untouched, but a field nobody should touch is better not
+    // shown — and this is the check that keeps it that way as groups are added.
+    // A redacted value may be offered, but only write-only: the control is
+    // rendered empty rather than holding the placeholder, so there is nothing
+    // to save back over the real one. Removing these fields entirely was worse
+    // — it left no way to set a password or rotate a key from the console at
+    // all, which is the only reason anybody opens this tab.
+    for (const secret of [
+      'auth.password',
+      'auth.apiKey',
+      'qbittorrent.password',
+    ]) {
+      const at = schema.indexOf(`key: '${secret}',`);
+      assert.ok(at > 0, `${secret} should be settable`);
+      assert.ok(
+        schema.slice(at, at + 220).includes("type: 'secret'"),
+        `${secret} must be write-only, never a plain field`,
+      );
+    }
+
+    // The hash is derived, so there is nothing to type into it.
+    assert.ok(!schema.includes("key: 'auth.passwordHash'"));
+  });
+
+  it('leaves a credential alone unless somebody types a new one', () => {
+    // The control is empty every time it renders, so emptiness cannot mean
+    // "remove this" — it has to mean "unchanged", or opening the tab and
+    // pressing Save would drop the password.
+    const secret = (value) =>
+      read([
+        {
+          dataset: { setting: 'auth.password', type: 'secret', initial: '""' },
+          value,
+        },
+      ]);
+    assert.deepEqual(secret(''), {});
+    assert.deepEqual(secret('   '), {});
+    assert.deepEqual(secret('correct horse'), {
+      auth: { password: 'correct horse' },
+    });
+  });
+
+  it('will not write a redaction back over the value it hides', () => {
+    // The guarantee behind the check above, in case one ever is described: a
+    // control nobody edited is not sent, whatever it holds.
+    assert.deepEqual(
+      read([
+        {
+          dataset: {
+            setting: 'qbittorrent.password',
+            type: 'text',
+            initial: '"********"',
+          },
+          value: '********',
+        },
+      ]),
+      {},
     );
   });
 

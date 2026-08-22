@@ -96,8 +96,9 @@ const DEFAULTS = {
    */
   torrentFormat: 'hybrid',
   /**
-   * Whether a joined archive gets a directory of its own: 'flat', or
-   * 'infohash' for `<savePath>/<infohash>/`. Only joined archives are placed.
+   * Whether a joined archive gets a directory of its own: 'flat', 'infohash'
+   * for `<savePath>/<infohash>/`, or 'name' for `<savePath>/<archive name>/`.
+   * Only joined archives are placed.
    */
   savePathLayout: 'flat',
   /** Named places for archive data to land: `[{ name, path }]`. */

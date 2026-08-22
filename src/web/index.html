@@ -3828,6 +3828,23 @@ Every piece is hashed against the ` +
        * @param {object} spec - Where to render, what key it edits, and its columns.
        * @returns {void}
        */
+      /**
+       * Puts a hand-built panel in its tab, first where it has earned that.
+       *
+       * Schema sections are appended when a pane is built and everything else
+       * afterwards, so without this a hand-built editor is always last —
+       * whatever it is. Running a command when a download finishes is not a
+       * footnote to the timeouts above it.
+       * @param {HTMLElement} into - The pane.
+       * @param {HTMLElement} panel - What to put in it.
+       * @param {boolean} [first] - Before the schema sections rather than after.
+       * @returns {void}
+       */
+      function attachPanel(into, panel, first) {
+        if (first) into.prepend(panel);
+        else into.append(panel);
+      }
+
       function renderRowEditor(spec) {
         const {
           into,
@@ -4086,7 +4103,7 @@ Every piece is hashed against the ` +
           }
         };
 
-        into.append(panel);
+        attachPanel(into, panel, spec.first);
       }
 
       /**
@@ -4187,7 +4204,7 @@ Every piece is hashed against the ` +
        * @param {Set<string>} restart - Keys needing a restart.
        * @returns {void}
        */
-      function renderHookEditor(into, config, restart) {
+      function renderHookEditor(into, config, restart, first) {
         const editable = Boolean(config.allowHooksFromApi);
         const panel = document.createElement('div');
         panel.className = 'panel';
@@ -4254,7 +4271,7 @@ Every piece is hashed against the ` +
             }
           </div>`;
 
-        into.append(panel);
+        attachPanel(into, panel, first);
       }
 
       /**
@@ -4673,6 +4690,24 @@ Every piece is hashed against the ` +
       }
 
       // ── Settings ──────────────────────────────────────────────────────────
+      /**
+       * The tabs, in the order they are read.
+       *
+       * Declared rather than derived so a group can exist with no schema
+       * fields at all — `Feeds` is four tables and nothing else — and so the
+       * order is a decision rather than whichever section happened to be
+       * written first.
+       */
+      const SETTINGS_GROUPS = [
+        'Serving tiles',
+        'Feeds',
+        'Publishing',
+        'Network',
+        'Engine',
+        'Transfers',
+        'Security',
+      ];
+
       /** The tab holding everything the schema does not describe. */
       const EVERYTHING_ELSE = 'Everything else';
       /** Which settings tab is open, so a save does not throw the reader back. */
@@ -4841,6 +4876,759 @@ Every piece is hashed against the ` +
             },
           ],
         },
+        {
+          group: 'Serving tiles',
+          title: 'What the tile endpoint remembers',
+          fields: [
+            {
+              key: 'tileStats.recent',
+              label: 'Recent requests kept',
+              type: 'number',
+              placeholder: '200',
+              help:
+                'For the list a person reads. Zero keeps the counters and ' +
+                'drops the individual requests behind them.',
+            },
+          ],
+        },
+        {
+          group: 'Network',
+          title: 'Listening',
+          blurb:
+            'The sockets this process holds, which is why every one of them ' +
+            'costs a restart to change.',
+          fields: [
+            {
+              key: 'port',
+              label: 'Public port',
+              type: 'number',
+              placeholder: '8090',
+              restart: true,
+            },
+            {
+              key: 'host',
+              label: 'Public interface',
+              type: 'text',
+              placeholder: '0.0.0.0',
+              restart: true,
+              help: '0.0.0.0 is every interface; name one to bind it alone.',
+            },
+            {
+              key: 'adminPort',
+              label: 'Admin port',
+              type: 'number',
+              placeholder: 'off — console shares the public port',
+              restart: true,
+              help:
+                'Splits this console and the API off, so the public port can ' +
+                'face the internet while this one does not.',
+            },
+            {
+              key: 'adminHost',
+              label: 'Admin interface',
+              type: 'text',
+              placeholder: 'follows the public interface',
+              restart: true,
+            },
+            {
+              key: 'maxConnections',
+              label: 'Peer connections',
+              type: 'number',
+              placeholder: '100',
+              restart: true,
+              help:
+                'What decides how hard this leans on a router: every peer is ' +
+                'a NAT table entry.',
+            },
+          ],
+        },
+        {
+          group: 'Network',
+          title: 'The address this node calls itself',
+          blurb:
+            'Left unset, every URL names whichever address the request ' +
+            'arrived as — which is what lets a node behind a proxy be right ' +
+            'without being told anything.',
+          fields: [
+            {
+              key: 'publicUrl',
+              label: 'Public URL',
+              type: 'text',
+              placeholder: 'answer as whichever name was asked for',
+              help:
+                'Overrides every URL the node emits. Right for a node with ' +
+                'one public name; wrong for one answering on several, because ' +
+                'then every URL claims the same host however it was reached.',
+            },
+            {
+              key: 'publishingUrl',
+              label: 'Publishing URL',
+              type: 'text',
+              placeholder: 'follows the public URL',
+              help:
+                'Narrower, and usually the one you want: it touches only the ' +
+                'URLs that have to outlive this address — web seeds baked ' +
+                'into a .torrent — and leaves everything else answering as ' +
+                'whichever name was asked for.',
+            },
+            {
+              key: 'trustProxy',
+              label: 'Trust X-Forwarded-For from',
+              type: 'addresses',
+              placeholder: 'off — or one address or subnet per line',
+              help:
+                'One per line: 172.16.1.49, or 172.16.1.0/24, or several. A ' +
+                'lone number is read as a hop count instead, and a lone `true` ' +
+                'trusts any caller at all — worth avoiding, since this header ' +
+                'is what decides which address the node believes a request ' +
+                'came from.',
+            },
+            {
+              key: 'publicIndex',
+              label: 'Serve the catalogue page at /',
+              type: 'boolean',
+              help:
+                'Only meaningful with an admin port, which is what leaves the ' +
+                'public root free. Off also withdraws the paths that page needs.',
+            },
+          ],
+        },
+        {
+          group: 'Publishing',
+          title: 'Torrents this node creates',
+          fields: [
+            {
+              key: 'torrentFormat',
+              label: 'Torrent format',
+              type: 'choice',
+              options: [
+                ['hybrid', 'hybrid — v1 and v2 in one torrent'],
+                ['v1', 'v1 only'],
+                ['v2', 'v2 only'],
+              ],
+              help:
+                'Hybrid needs libtorrent to be one of the engines and falls ' +
+                'back to v1 without it. It is not a trade-off: v2 clients gain ' +
+                'per-file merkle trees, v1 clients see an ordinary torrent.',
+            },
+            {
+              key: 'pieceLength',
+              label: 'Piece length',
+              type: 'number',
+              placeholder: '4194304',
+              unit: 'bytes',
+              help:
+                'Deliberately small. Every cold tile costs a whole piece, so ' +
+                'a large piece is a long wait for a few kilobytes.',
+            },
+            {
+              key: 'savePathLayout',
+              label: 'Where a joined archive lands',
+              type: 'choice',
+              options: [
+                ['flat', 'flat — all in the save path'],
+                ['infohash', 'a directory per archive, named by infohash'],
+                ['name', 'a directory per archive, named by the archive'],
+              ],
+              help:
+                'Only archives joined from a peer are placed. One built here ' +
+                'keeps the file it was made from, wherever that is. Changing ' +
+                'this places new arrivals only — everything already held stays ' +
+                'where it was put.',
+            },
+            {
+              key: 'trackers',
+              label: 'Trackers',
+              type: 'list',
+              placeholder: 'one per line',
+              help:
+                'Baked into every torrent this node creates. The wss:// ones ' +
+                'are the only entries a browser can use.',
+            },
+            {
+              key: 'torrentDropDir',
+              label: 'Also copy each .torrent to',
+              type: 'text',
+              placeholder: 'off',
+            },
+            {
+              key: 'allowUnknownArchives',
+              label: 'Publish files that are not map archives',
+              type: 'boolean',
+              help:
+                'Off by default, because "make a torrent of this path" is ' +
+                'otherwise an instruction to publish any readable file to a ' +
+                'public swarm.',
+            },
+            {
+              key: 'md5',
+              label: 'Also compute an MD5 of each archive',
+              type: 'boolean',
+              help:
+                'Costs a second full read of the file. A watched folder or a ' +
+                'scheduled source may override this either way.',
+            },
+          ],
+        },
+        {
+          group: 'Publishing',
+          title: 'Offering the archive file itself',
+          blurb:
+            'Three separate exposures, resolved per archive and then per ' +
+            'node. An archive that says nothing follows what is set here.',
+          fields: [
+            {
+              key: 'serveArchive',
+              label: 'Answer /archives/<hash>/archive.pmtiles',
+              type: 'boolean',
+              help: 'It is the whole file, so this is off by default.',
+            },
+            {
+              key: 'selfWebSeed',
+              label: 'Publish this node as a web seed',
+              type: 'boolean',
+              help: 'Read as off without the setting above.',
+            },
+            {
+              key: 'publicDownload',
+              label: 'Offer it as a download on the public page',
+              type: 'boolean',
+              help: 'Needs the archive served, and a complete copy of it.',
+            },
+            {
+              key: 'serveArchiveFromSwarm',
+              label: 'Answer a range for an archive this node does not hold',
+              type: 'boolean',
+              help:
+                'Experimental, and not for anything public: it makes this node ' +
+                'fetch from the swarm on a stranger’s behalf.',
+            },
+            {
+              key: 'swarmRangeLimitBytes',
+              label: 'Largest range fetched that way',
+              type: 'number',
+              placeholder: '8388608',
+              unit: 'bytes',
+            },
+            {
+              key: 'swarmRangeTimeoutMs',
+              label: 'Give up on it after',
+              type: 'number',
+              placeholder: '30000',
+              unit: 'ms',
+            },
+          ],
+        },
+        {
+          group: 'Publishing',
+          title: 'What the RSS feeds say',
+          blurb:
+            'One feed for everything and one per category, both built from ' +
+            'the catalog and readable by any feed reader.',
+          fields: [
+            { key: 'feedTitle', label: 'Title', type: 'text' },
+            {
+              key: 'feedCopyright',
+              label: 'Rights statement',
+              type: 'text',
+              placeholder: 'e.g. OpenStreetMap contributors, under ODbL 1.0',
+            },
+            {
+              key: 'feedMaxItems',
+              label: 'Most items in a feed',
+              type: 'number',
+              placeholder: '50',
+              help:
+                'Zero means no limit. Choose it against how often subscribers ' +
+                'poll: a feed shorter than the gap between polls drops builds ' +
+                'nobody ever saw.',
+            },
+            {
+              key: 'feedCategories',
+              label: 'Categories published at all',
+              type: 'list',
+              placeholder: 'one per line — empty means everything',
+              help:
+                'An allow-list also excludes archives that carry no category, ' +
+                'which is easy to forget when adding one.',
+            },
+          ],
+        },
+        {
+          group: 'Engine',
+          title: 'Which client, and where its files go',
+          blurb:
+            'The torrent client and the directories it owns. All of it is ' +
+            'held open by the running process, so all of it costs a restart.',
+          fields: [
+            {
+              key: 'engine',
+              label: 'Torrent client',
+              type: 'choice',
+              options: [
+                ['webtorrent', 'webtorrent — no dependencies, browser peers'],
+                ['libtorrent', 'libtorrent — hybrid torrents, needs python3'],
+                ['qbittorrent', 'qbittorrent — an existing instance'],
+              ],
+              restart: true,
+            },
+            {
+              key: 'secondaryEngines',
+              label: 'Also run, seeding only',
+              type: 'list',
+              placeholder: 'one per line',
+              restart: true,
+              help:
+                'A secondary is only ever handed an archive that is already ' +
+                'complete, and only ever as a seed. Running webtorrent beside ' +
+                'libtorrent is what lets a browser peer join at all.',
+            },
+            {
+              key: 'dataDir',
+              label: 'State directory',
+              type: 'text',
+              placeholder: './data',
+              restart: true,
+              help:
+                'The catalog, the .torrent files it made, and the resume data. ' +
+                'Never under /etc: paths resolve against the config file, and ' +
+                'the documented layout puts that in /etc.',
+            },
+            {
+              key: 'savePath',
+              label: 'Where archive data lives',
+              type: 'text',
+              restart: true,
+              help:
+                'One path for the node, not one per engine — two engines ' +
+                'seeding one archive have to be looking at the same file.',
+            },
+            {
+              key: 'secondaryShareIntervalSeconds',
+              label: 'Look for archives to hand over every',
+              type: 'number',
+              placeholder: '60',
+              unit: 'seconds',
+              restart: true,
+            },
+            {
+              key: 'secondaryShareTimeoutSeconds',
+              label: 'A secondary may take',
+              type: 'number',
+              placeholder: '3600',
+              unit: 'seconds',
+              help:
+                'Generous on purpose: it is hashing every byte against the ' +
+                '.torrent, which is hours for a real library.',
+            },
+          ],
+        },
+        {
+          group: 'Engine',
+          title: 'libtorrent',
+          blurb:
+            'Only read when libtorrent is one of the engines. These are ' +
+            'three-way rather than on/off: leaving one at libtorrent’s ' +
+            'default is not the same as turning it off, and a checkbox cannot ' +
+            'say the difference — it would quietly write "off" over "unset" ' +
+            'the first time anything here was saved.',
+          fields: [
+            {
+              key: 'libtorrent.python',
+              label: 'Python executable',
+              type: 'text',
+              placeholder: 'python3',
+              restart: true,
+              help:
+                'The interpreter the sidecar runs under, and so which ' +
+                'libtorrent it imports. A virtualenv goes here.',
+            },
+            {
+              key: 'libtorrent.resumeDir',
+              label: 'Resume data directory',
+              type: 'text',
+              placeholder: 'under the state directory',
+              restart: true,
+              help:
+                'What lets a restart skip re-hashing the whole store. Must be ' +
+                'writable by the service — under systemd that means named in ' +
+                'ReadWritePaths as well.',
+            },
+            {
+              key: 'libtorrent.listen',
+              label: 'Listen interfaces',
+              type: 'text',
+              placeholder: '0.0.0.0:6881',
+              restart: true,
+            },
+            {
+              key: 'libtorrent.upnp',
+              label: 'Ask the router to forward, by UPnP',
+              type: 'choice',
+              options: [
+                ['', 'libtorrent’s default'],
+                ['true', 'on'],
+                ['false', 'off'],
+              ],
+              restart: true,
+            },
+            {
+              key: 'libtorrent.natpmp',
+              label: 'Ask the router to forward, by NAT-PMP',
+              type: 'choice',
+              options: [
+                ['', 'libtorrent’s default'],
+                ['true', 'on'],
+                ['false', 'off'],
+              ],
+              restart: true,
+            },
+            {
+              key: 'libtorrent.dht',
+              label: 'Join the DHT',
+              type: 'choice',
+              options: [
+                ['', 'libtorrent’s default'],
+                ['true', 'on'],
+                ['false', 'off'],
+              ],
+              restart: true,
+              help: 'Turn off for a private tracker.',
+            },
+            {
+              key: 'libtorrent.lsd',
+              label: 'Local peer discovery',
+              type: 'choice',
+              options: [
+                ['', 'libtorrent’s default'],
+                ['true', 'on'],
+                ['false', 'off'],
+              ],
+              restart: true,
+            },
+          ],
+        },
+        {
+          group: 'Engine',
+          title: 'qBittorrent',
+          blurb:
+            'Only read when qbittorrent is the engine: an instance that ' +
+            'already exists, driven over its WebUI.',
+          fields: [
+            {
+              key: 'qbittorrent.url',
+              label: 'WebUI address',
+              type: 'text',
+              placeholder: 'http://127.0.0.1:8080',
+              restart: true,
+            },
+            {
+              key: 'qbittorrent.username',
+              label: 'Username',
+              type: 'text',
+              restart: true,
+            },
+            {
+              key: 'qbittorrent.password',
+              label: 'Set a new password',
+              type: 'secret',
+              restart: true,
+              help:
+                'Write-only: it is redacted on the way out, so this box is ' +
+                'always empty and blank means leave it as it is.',
+            },
+          ],
+        },
+        {
+          group: 'Transfers',
+          title: 'A download that stops',
+          blurb:
+            'A planet archive is hours of transfer, so an interruption is ' +
+            'ordinary rather than exceptional.',
+          fields: [
+            {
+              key: 'fetchAttempts',
+              label: 'Resume a stopped download',
+              type: 'number',
+              placeholder: '10',
+              unit: 'times',
+            },
+            {
+              key: 'fetchRetrySeconds',
+              label: 'Wait between attempts',
+              type: 'number',
+              placeholder: '5',
+              unit: 'seconds',
+            },
+            {
+              key: 'incomingRetentionDays',
+              label: 'Keep an unfinished download for',
+              type: 'number',
+              placeholder: '14',
+              unit: 'days',
+              help:
+                'Until then, adding the same URL again resumes it rather than ' +
+                'starting over.',
+            },
+            {
+              key: 'resumeSaveIntervalSeconds',
+              label: 'Write resume data every',
+              type: 'number',
+              placeholder: '300',
+              unit: 'seconds',
+              restart: true,
+              help:
+                'A clean stop writes it anyway; this is for the stops that are ' +
+                'not clean. What is lost is re-hashed on the way back up.',
+            },
+            {
+              key: 'completionCheckIntervalSeconds',
+              label: 'Look for finished downloads every',
+              type: 'number',
+              placeholder: '15',
+              unit: 'seconds',
+            },
+            {
+              key: 'originCheckIntervalSeconds',
+              label: 'Re-check the sources archives were built from every',
+              type: 'number',
+              placeholder: '0 — off',
+              unit: 'seconds',
+              help:
+                'A changed source does not invalidate its torrent, but it does ' +
+                'mean any web seed pointing there fails hash verification for ' +
+                'every peer that tries it.',
+            },
+          ],
+        },
+        {
+          group: 'Transfers',
+          title: 'How often the node looks at things',
+          blurb:
+            'Each of these belongs to one sweep, and changing it restarts that ' +
+            'sweep alone rather than the process.',
+          fields: [
+            {
+              key: 'seedingCheckIntervalSeconds',
+              label: 'Seeding limits',
+              type: 'number',
+              placeholder: '3600',
+              unit: 'seconds',
+            },
+            {
+              key: 'speedCheckIntervalSeconds',
+              label: 'Speed schedule',
+              type: 'number',
+              placeholder: '60',
+              unit: 'seconds',
+            },
+            {
+              key: 'onCompleteCheckIntervalSeconds',
+              label: 'Finished downloads, for the hook',
+              type: 'number',
+              placeholder: '60',
+              unit: 'seconds',
+            },
+            {
+              key: 'sourceCheckIntervalHours',
+              label: 'Scheduled sources, when one names no schedule',
+              type: 'number',
+              placeholder: '6',
+              unit: 'hours',
+            },
+          ],
+        },
+        {
+          group: 'Security',
+          title: 'Who may reach this node',
+          fields: [
+            {
+              key: 'allowUnauthenticated',
+              label: 'Allow a reachable address with no authentication',
+              type: 'boolean',
+              restart: true,
+              help:
+                'The node refuses to start otherwise, because every /api/ route ' +
+                'can create torrents, move files and rewrite this ' +
+                'configuration — and that failure would be silent.',
+            },
+            {
+              key: 'allowHooksFromApi',
+              label: 'Let the console edit the hook commands',
+              type: 'boolean',
+              fileOnly: true,
+              help:
+                'A hook runs a command as the service user, so handing that ' +
+                'power to a token is a decision that has to be made in the ' +
+                'file — this switch itself cannot be set through the API.',
+            },
+            {
+              key: 'offline',
+              label: 'Drain traffic away from this node',
+              type: 'boolean',
+              help:
+                '/health answers 503 while this is set, which is what a load ' +
+                'balancer reads to stop sending traffic here. Nothing else ' +
+                'changes: it keeps seeding, keeps answering the console, and ' +
+                'keeps its library.',
+            },
+          ],
+        },
+        {
+          group: 'Network',
+          title: 'The traffic chart',
+          fields: [
+            {
+              key: 'traffic.sampleSeconds',
+              label: 'Sample every',
+              type: 'number',
+              placeholder: '15',
+              unit: 'seconds',
+            },
+            {
+              key: 'traffic.keepHours',
+              label: 'Keep samples for',
+              type: 'number',
+              placeholder: '168',
+              unit: 'hours',
+              help: 'A week by default. Both are read when the sampler is built, so changing either rebuilds it.',
+            },
+          ],
+        },
+        {
+          group: 'Engine',
+          title: 'WebTorrent',
+          blurb:
+            'Its save path is not here: one path is folded out of the node’s ' +
+            'own at load, because two engines seeding one archive have to be ' +
+            'looking at the same file.',
+          fields: [
+            {
+              key: 'webtorrent.clientOptions.torrentPort',
+              label: 'Listening port',
+              type: 'number',
+              placeholder: 'an ephemeral one',
+              restart: true,
+              help:
+                'Give it one of its own where libtorrent is also running: two ' +
+                'sockets cannot hold one port.',
+            },
+          ],
+        },
+        {
+          group: 'Publishing',
+          title: 'Announcing the current build over the DHT',
+          blurb:
+            'BEP 46, so a subscriber follows a key rather than an infohash and ' +
+            'keeps working across rebuilds. Only the node that builds needs ' +
+            'this, and exactly one node may publish under a given key.',
+          fields: [
+            {
+              key: 'mutable.publish',
+              label: 'Publish records',
+              type: 'boolean',
+              help: 'Off unless a key is configured as well as this.',
+            },
+            {
+              key: 'mutable.keyPath',
+              label: 'Signing key',
+              type: 'text',
+              placeholder: 'a PEM holding the ed25519 keypair',
+              help:
+                'It signs what subscribers believe is the current build, so ' +
+                'it never leaves the publisher. `pmtiles-swarm publisher-key` ' +
+                'writes one.',
+            },
+            {
+              key: 'mutable.republishSeconds',
+              label: 'Republish every',
+              type: 'number',
+              placeholder: '1800',
+              unit: 'seconds',
+              help: 'Records expire from the DHT, so this is what keeps one alive.',
+            },
+            {
+              key: 'mutable.dhtPort',
+              label: 'DHT port',
+              type: 'number',
+              placeholder: '0 — an ephemeral one',
+              help:
+                'Not the libtorrent engine’s port: two sockets cannot hold one ' +
+                'port, and this is a socket of its own.',
+            },
+          ],
+        },
+        {
+          group: 'Publishing',
+          title: 'Rebuilding a torrent when its source changes',
+          fields: [
+            { key: 'autoRebuild.enabled', label: 'Rebuild automatically', type: 'boolean' },
+            {
+              key: 'autoRebuild.sources',
+              label: 'Only for these source types',
+              type: 'list',
+              placeholder: 'one per line — file, http',
+              help:
+                'http means re-downloading the whole archive to rebuild it, ' +
+                'which is why file is the only one on by default.',
+            },
+            {
+              key: 'autoRebuild.maxBytes',
+              label: 'Skip anything larger than',
+              type: 'number',
+              placeholder: '53687091200',
+              unit: 'bytes',
+              help: 'Zero removes the cap.',
+            },
+            {
+              key: 'autoRebuild.stabilitySeconds',
+              label: 'Source must be unchanged for',
+              type: 'number',
+              placeholder: '300',
+              unit: 'seconds',
+              help: 'Or a rebuild would start while the file is still being written.',
+            },
+          ],
+        },
+        {
+          group: 'Security',
+          title: 'The console login',
+          blurb:
+            'The password and the API key are never sent back to this page — ' +
+            'they are redacted on the way out — so the two boxes below are ' +
+            'write-only. Leave one blank and it keeps what it has; type in it ' +
+            'and that becomes the new one. Tokens are minted in the table ' +
+            'below.',
+          fields: [
+            { key: 'auth.username', label: 'Username', type: 'text', placeholder: 'admin' },
+            {
+              key: 'auth.password',
+              label: 'Set a new console password',
+              type: 'secret',
+              help:
+                'Hashed before it is written, so the file never holds what was ' +
+                'typed. Blank leaves the current one alone.',
+            },
+            {
+              key: 'auth.apiKey',
+              label: 'Set a new API key',
+              type: 'secret',
+              help:
+                'What a script or a sibling node presents instead of logging ' +
+                'in. Replacing it stops every caller still using the old one.',
+            },
+            {
+              key: 'auth.sessionTtlSeconds',
+              label: 'A session lasts',
+              type: 'number',
+              placeholder: '43200',
+              unit: 'seconds',
+              help:
+                'What a password buys: it is sent once and answered with a ' +
+                'session, rather than travelling with every request.',
+            },
+          ],
+        },
       ];
 
       /** Reads `a.b` out of a config object. */
@@ -4862,9 +5650,14 @@ Every piece is hashed against the ` +
           .map((field) => {
             const value = settingValue(config, field.key);
             const shown = value === undefined || value === null ? '' : value;
-            const badge = field.restart
-              ? ' <span class="badge">restart</span>'
-              : '';
+            const badge =
+              (field.restart ? ' <span class="badge">restart</span>' : '') +
+              (field.fileOnly
+                ? ' <span class="badge">config file</span>'
+                : '');
+            // Disabled rather than merely labelled: saveConfig refuses these,
+            // so an enabled control is an invitation to an error.
+            const locked = field.fileOnly ? ' disabled' : '';
             // What it started as, so the reader can send only what changed.
             // Without it every save would carry the whole group, and a group
             // that carries `null` where the config has `undefined` compares
@@ -4873,16 +5666,22 @@ Every piece is hashed against the ` +
             // press of Save.
             const initial = ` data-initial="${escapeHtml(JSON.stringify(value ?? null))}"`;
             const control =
-              field.type === 'boolean'
-                ? `<label class="choice"><input type="checkbox" data-setting="${field.key}" data-type="boolean"${initial} ${value ? 'checked' : ''} /><span>enabled</span></label>`
+              field.type === 'secret'
+                ? `<input type="password" autocomplete="new-password" data-setting="${field.key}"${locked} data-type="secret" data-initial="&quot;&quot;" value="" placeholder="${escapeHtml(field.placeholder ?? 'unchanged')}" />`
+                : field.type === 'addresses'
+                ? `<textarea data-setting="${field.key}"${locked} data-type="addresses"${initial} rows="3" placeholder="${escapeHtml(field.placeholder ?? '')}">${escapeHtml(Array.isArray(value) ? value.join('\n') : value === undefined || value === null ? '' : String(value))}</textarea>`
+                : field.type === 'list'
+                ? `<textarea data-setting="${field.key}"${locked} data-type="list"${initial} rows="${Math.min(8, Math.max(3, (Array.isArray(value) ? value.length : 0) + 1))}" placeholder="${escapeHtml(field.placeholder ?? '')}">${escapeHtml((Array.isArray(value) ? value : []).join('\n'))}</textarea>`
+                : field.type === 'boolean'
+                ? `<label class="choice"><input type="checkbox" data-setting="${field.key}"${locked} data-type="boolean"${initial} ${value ? 'checked' : ''} /><span>enabled</span></label>`
                 : field.type === 'choice'
-                  ? `<select data-setting="${field.key}" data-type="choice"${initial}>${field.options
+                  ? `<select data-setting="${field.key}"${locked} data-type="choice"${initial}>${field.options
                       .map(
                         ([option, label]) =>
                           `<option value="${escapeHtml(option)}"${String(shown) === option ? ' selected' : ''}>${escapeHtml(label)}</option>`,
                       )
                       .join('')}</select>`
-                  : `<input data-setting="${field.key}" data-type="${field.type}"${initial} value="${escapeHtml(String(shown))}" placeholder="${escapeHtml(field.placeholder ?? '')}" />`;
+                  : `<input data-setting="${field.key}"${locked} data-type="${field.type}"${initial} value="${escapeHtml(String(shown))}" placeholder="${escapeHtml(field.placeholder ?? '')}" />`;
 
             return `
               <div class="field">
@@ -4910,22 +5709,73 @@ Every piece is hashed against the ` +
       function readSchemaEditors() {
         const updates = {};
         for (const element of document.querySelectorAll('[data-setting]')) {
+          // A file-only setting is disabled above; skipping it here means a
+          // stray enabled attribute cannot turn into a rejected save.
+          if (element.disabled) continue;
           const [top, ...rest] = element.dataset.setting.split('.');
           const type = element.dataset.type;
           let value;
+          if (type === 'secret') {
+            const typed = String(element.value).trim();
+            // Blank is "leave it as it is", not "clear it". A field that is
+            // rendered empty every time cannot use emptiness to mean removal,
+            // or opening the tab and saving would drop the credential.
+            if (!typed) continue;
+            const [top, ...rest] = element.dataset.setting.split('.');
+            let cursor = (updates[top] = updates[top] ?? {});
+            for (const part of rest.slice(0, -1)) {
+              cursor = cursor[part] = cursor[part] ?? {};
+            }
+            cursor[rest[rest.length - 1]] = typed;
+            continue;
+          }
           if (type === 'boolean') value = element.checked;
-          else {
+          else if (type === 'addresses') {
+            // Express takes four things here and means something different by
+            // each: `true` trusts any caller, a number is a hop count, and a
+            // string or an array of them names the proxies. One per line, and
+            // what was typed decides which of the four it is.
+            const lines = String(element.value)
+              .split('\n')
+              .map((line) => line.trim())
+              .filter(Boolean);
+            if (!lines.length) value = null;
+            else if (lines.length === 1 && (lines[0] === 'true' || lines[0] === 'false')) {
+              value = lines[0] === 'true';
+            } else if (lines.length === 1 && !Number.isNaN(Number(lines[0]))) {
+              value = Number(lines[0]);
+            } else value = lines;
+          } else if (type === 'list') {
+            // One per line, which is how a person reads a list of trackers —
+            // and empty means an empty list rather than "unset", because a
+            // node with no trackers is a real thing to want and JSON would
+            // have made it a debate about `[]` against `null`.
+            value = String(element.value)
+              .split('\n')
+              .map((line) => line.trim())
+              .filter(Boolean);
+          } else {
             const raw = String(element.value).trim();
             if (raw === '') value = null;
             else if (type === 'number') value = Number(raw);
             else if (raw === 'true' || raw === 'false') value = raw === 'true';
-            else value = raw;
+            // A setting that genuinely accepts more than one type, and where
+            // which type it is changes the meaning. Express reads `trustProxy`
+            // as a hop count when it is a number and as an address list when
+            // it is a string, so sending "1" for 1 would quietly ask it to
+            // trust a proxy at the address 1.
+            else if (type === 'scalar' && !Number.isNaN(Number(raw))) {
+              value = Number(raw);
+            } else value = raw;
             if (type === 'number' && Number.isNaN(value)) continue;
           }
           // Only what actually moved. A minimal update is also what keeps the
           // restart notice honest: the server decides that by comparing what
           // it was sent against what it holds.
           if (JSON.stringify(value) === (element.dataset.initial ?? '')) continue;
+          if (type === 'list' && element.dataset.initial === 'null' && !value.length) {
+            continue;
+          }
           if (!rest.length) updates[top] = value;
           else {
             updates[top] = updates[top] ?? {};
@@ -4961,7 +5811,11 @@ Every piece is hashed against the ` +
         schemaHost.innerHTML = '';
         tabs.innerHTML = '';
 
-        const groups = [...new Set(SETTINGS_SCHEMA.map((s) => s.group))];
+        // Named rather than derived from the schema, because a tab is not only
+        // schema fields: the tables below are hand-built editors and they
+        // belong beside the settings they go with, not in a heap underneath
+        // them. A group with no schema fields is a perfectly good tab.
+        const groups = [...new Set([...SETTINGS_GROUPS, ...SETTINGS_SCHEMA.map((s) => s.group)])];
         const panes = new Map();
         for (const group of groups) {
           const pane = document.createElement('div');
@@ -4972,6 +5826,11 @@ Every piece is hashed against the ` +
           schemaHost.append(pane);
           panes.set(group, pane);
         }
+        // Named `name` rather than `group`: there is a `const group` further
+        // down for the downloading panel, and a parameter shadowing it reads
+        // like a bug even when it is not one.
+        /** Where a hand-built editor should render itself. */
+        const paneFor = (name) => panes.get(name) ?? body;
 
         const showGroup = (name) => {
           settingsGroup = name;
@@ -5026,9 +5885,12 @@ Every piece is hashed against the ` +
             different disk, and a completed download never has to move between
             the two. <span class="badge">restart</span>
           </div>`;
-        body.append(group);
-        body.append(seedingPanel(config));
-        body.append(speedPanel(config));
+        // Beside the settings they belong with. What is left in the last tab
+        // is then genuinely the remainder, rather than everything that was
+        // written before the tabs existed.
+        paneFor('Transfers').append(group);
+        paneFor('Transfers').append(seedingPanel(config));
+        paneFor('Transfers').append(speedPanel(config));
         group.querySelector('#cfg-cache-split').onchange = (event) => {
           const field = group.querySelector('#cfg-cache-path');
           field.disabled = !event.target.checked;
@@ -5041,8 +5903,11 @@ Every piece is hashed against the ` +
         rowEditorColumns = {};
         rowEditorTargets = {};
         rowEditorRows = {};
-        await renderTokenEditor(body);
-        renderHookEditor(body, config, restartKeys);
+        // Tokens are credentials, so they sit with the rest of who may reach
+        // this node. Hooks run a command when a download finishes, which is
+        // what the Transfers tab is about.
+        await renderTokenEditor(paneFor('Security'));
+        renderHookEditor(paneFor('Transfers'), config, restartKeys, true);
 
         // One control for three settings, because as an import default they
         // are almost always decided together and three dropdowns per row cost
@@ -5128,12 +5993,18 @@ Every piece is hashed against the ` +
         ];
 
         renderRowEditor({
-          into: body,
+          // With the feeds rather than the engine: a location is where an
+          // arriving archive lands, and the watch folders and RSS feeds beside
+          // it are what choose one. Not Publishing — a web seed URL is built
+          // from the published location, never from the save path.
+          into: paneFor('Feeds'),
+          first: true,
           key: 'locations',
           title: 'Save locations',
           blurb:
             'Named places for archive data to land, so a path like ' +
-            'M:\\_NZB_Finished_Unsorted is typed once rather than every time. ' +
+            'M:\\archives\\finished-unsorted is typed once rather ' +
+            'than every time. ' +
             'Offered wherever something is added, alongside the default and a ' +
             'path given outright.',
           columns: [
@@ -5151,7 +6022,7 @@ Every piece is hashed against the ` +
         });
 
         renderRowEditor({
-          into: body,
+          into: paneFor('Feeds'),
           key: 'watch',
           title: 'Monitored folders',
           blurb:
@@ -5250,7 +6121,7 @@ Every piece is hashed against the ` +
         });
 
         renderRowEditor({
-          into: body,
+          into: paneFor('Feeds'),
           key: 'sources',
           title: 'Watched web locations',
           blurb:
@@ -5370,19 +6241,22 @@ Every piece is hashed against the ` +
         feedGlobals.className = 'panel';
         feedGlobals.style.marginBottom = '1rem';
         feedGlobals.innerHTML = `
-          <h2 style="margin-top:0">Feeds</h2>
+          <h2 style="margin-top:0">Subscriptions</h2>
           <div class="sub" style="margin-bottom:0.7rem">
-            Applies to every feed below.
+            Both tables below are subscriptions — an RSS feed and a remote node
+            differ in what is asked and not in how often, so these two settings
+            cover them together. Neither is only about feeds, which is why they
+            are not inside one of the tables.
           </div>
           <div class="field">
-            <label for="cfg-subscriptionsEnabled">Follow feeds</label>
+            <label for="cfg-subscriptionsEnabled">Follow subscriptions</label>
             <select id="cfg-subscriptionsEnabled" data-key="subscriptionsEnabled" data-scalar="1">
               <option value="true"${config.subscriptionsEnabled === false ? '' : ' selected'}>on</option>
               <option value="false"${config.subscriptionsEnabled === false ? ' selected' : ''}>off</option>
             </select>
             <div class="sub">
-              Off stops all of them without editing any, for when a disk is
-              filling or a build has gone wrong.
+              Off stops every feed and every remote node without editing any
+              of them, for when a disk is filling or a build has gone wrong.
             </div>
           </div>
           <div class="field">
@@ -5391,11 +6265,16 @@ Every piece is hashed against the ` +
                    data-scalar="1" style="width:9rem"
                    value="${escapeHtml(config.subscriptionIntervalSeconds ?? 900)}" />
             <div class="sub">
-              A poll is one request per feed. Publishers post on their own
+              One request per subscription. Publishers post on their own
               schedule, so checking faster than they publish finds nothing.
             </div>
           </div>`;
-        body.append(feedGlobals);
+        // Into the tab it governs. Left on `body` it sat in the last tab with
+        // the words "applies to every feed below" and nothing below it, which
+        // is what happens when the tables move and the panel above them does
+        // not. Appended here it lands directly before the two tables it
+        // covers, which is what makes "below" true again.
+        paneFor('Feeds').append(feedGlobals);
 
         // Which table a subscription belongs in — the same question the
         // subscription manager asks itself: an explicit protocol decides it, and
@@ -5406,7 +6285,7 @@ Every piece is hashed against the ` +
         const following = config.subscriptions ?? [];
 
         renderRowEditor({
-          into: body,
+          into: paneFor('Feeds'),
           key: 'feeds',
           configKey: 'subscriptions',
           // A row here is RSS because of the table it is in, which is the
@@ -5475,7 +6354,7 @@ Every piece is hashed against the ` +
         });
 
         renderRowEditor({
-          into: body,
+          into: paneFor('Feeds'),
           key: 'peers',
           configKey: 'subscriptions',
           stamp: { protocol: 'api' },
@@ -5598,10 +6477,21 @@ Every piece is hashed against the ` +
         // Last, because the panes it hides have to exist first. A save
         // re-renders the whole pane, so remembering the open tab is what stops
         // it throwing the reader back to the beginning each time.
+        // The last tab earns its place or loses it. Once every setting is
+        // described it holds nothing, and an empty tab is worse than no tab —
+        // it reads as something that failed to load. It comes back on its own
+        // the moment a setting exists that the schema does not describe, which
+        // is exactly when somebody needs it.
+        const leftovers = body.childElementCount > 0;
+        if (!leftovers) {
+          tabs.querySelector(`[data-group="${EVERYTHING_ELSE}"]`)?.remove();
+        }
+
+        const reachable = [...groups, ...(leftovers ? [EVERYTHING_ELSE] : [])];
         showGroup(
-          settingsGroup && [...groups, EVERYTHING_ELSE].includes(settingsGroup)
+          settingsGroup && reachable.includes(settingsGroup)
             ? settingsGroup
-            : groups[0] ?? EVERYTHING_ELSE,
+            : (reachable[0] ?? EVERYTHING_ELSE),
         );
       }
 

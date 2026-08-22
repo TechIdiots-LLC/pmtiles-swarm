@@ -237,7 +237,7 @@ each monitored folder and each watched web location:
 
 ```json
 "locations": [
-  { "name": "bulk storage", "path": "M:\_NZB_Finished_Unsorted" },
+  { "name": "bulk storage", "path": "M:\\archives\\finished-unsorted" },
   { "name": "fast", "path": "/mnt/nvme/tiles" }
 ]
 ```
@@ -262,7 +262,18 @@ one at the same path is refused with a 409 naming the first. Where that comes up
 data/torrents-data/7fae2931a9269684a7d4ed6e5fdd7d0014e6bcd1/planet.pmtiles
 ```
 
-It works from a bare magnet, since the infohash is the one thing a magnet always carries. Flat
+It works from a bare magnet, since the infohash is the one thing a magnet always carries.
+`"savePathLayout": "name"` gives the same separation in a directory you can find without knowing
+the infohash:
+
+```
+data/torrents-data/planet.pmtiles/planet.pmtiles
+```
+
+The name comes from the metainfo, or from a magnet's `dn=` — every magnet this node hands out
+carries one — and is sanitised down to a single path segment before it is used. A second archive
+of the same name takes `planet.pmtiles-7fae2931`, and one joined by a bare magnet, which carries
+no name at all, takes its infohash. Flat
 stays the default: it is what makes dropping a finished archive into the save path before adding
 its torrent work, and it keeps a served filename readable. Archives _created_ from a local file
 are unaffected either way — they keep the file they were made from — and web seed URLs are built

@@ -1107,18 +1107,24 @@ def report_imports(config, results):
     # the data is actually at the recorded path — which every archive above was
     # already checked for — so this is reported and not warned about.
     layout = config.get("savePathLayout", "flat")
-    if layout == "infohash":
-        elsewhere = [
-            r
-            for r in results
-            if r["source"] not in local
-            and os.path.basename(r["savePath"].rstrip("/\\")) != r["infoHash"]
-        ]
+    if layout != "flat":
+        root = os.path.abspath(config["savePath"])
+        # Under 'infohash' the directory name is known exactly. Under 'name' it
+        # is whatever the archive is called, sanitised, so the shape that can be
+        # checked from here is the weaker one: a directory of its own under the
+        # save root.
+        if layout == "infohash":
+            placed = lambda r: (
+                os.path.basename(r["savePath"].rstrip("/\\")) == r["infoHash"]
+            )
+        else:
+            placed = lambda r: os.path.dirname(os.path.abspath(r["savePath"])) == root
+        elsewhere = [r for r in results if r["source"] not in local and not placed(r)]
         lost = [r for r in elsewhere if r["verdict"] in ("full re-check", "UNREADABLE")]
         if lost:
             note(
                 BAD,
-                f"{len(lost)} joined archives are outside the infohash layout "
+                f"{len(lost)} joined archives are outside the {layout} layout "
                 "and their data was not found",
                 "Shape alone is fine — an archive adopted from a file already "
                 "on this disk keeps it. These are the ones where the recorded "
@@ -1129,7 +1135,7 @@ def report_imports(config, results):
         elif elsewhere:
             note(
                 INFO,
-                f"{len(elsewhere)} joined archives sit outside the infohash "
+                f"{len(elsewhere)} joined archives sit outside the {layout} "
                 "layout, and their data is where they say",
                 "Which is an ordinary arrangement, not a fault: an archive "
                 "adopted from a file this node already holds keeps that file "

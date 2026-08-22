@@ -2,9 +2,81 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **`savePathLayout: "name"`**, giving each joined archive `<savePath>/<archive name>/`. The
+  infohash layout already separated two builds of the same map, but nothing in
+  `<savePath>/7fae2931a9269684a7d4ed6e5fdd7d0014e6bcd1/` tells you which map is in it. This is
+  the same separation in a directory you can find.
+
+  The name comes from the metainfo, or from a magnet's `dn=` — every magnet this node hands out
+  carries one — and there are three tiers so a placement can never fail to produce a directory.
+  A name already held by another archive takes the first eight characters of the infohash as a
+  suffix, which is the rebuild case: same name, new infohash. An archive with no usable name
+  takes its infohash, which is a bare magnet from somewhere else.
+
+  The name is written by whoever built the torrent, so it is sanitised down to one path segment
+  before it is joined to anything: separators, control characters and the characters Windows
+  refuses become `-`, leading and trailing dots go, the Windows device names get out of the way,
+  and it is cut to 120 characters. A name that survives none of that falls back to the infohash.
+
+  The directory is settled when the archive is added and never revised. A name learned later
+  over BEP 9 leaves the data where it is rather than moving hundreds of gigabytes to match a
+  tidier directory. Changing the setting places new arrivals only — everything already held
+  keeps the save path recorded for it, so nothing moves and nothing is re-checked.
+
+- **The settings pane has tabs, and the settings in them have names and reasons.** Seven
+  groups — Serving tiles, Network, Publishing, Feeds, Engine, Transfers, Security — describing
+  67 settings as labelled fields with help text, beside one tab holding what is not described
+  yet. Nested keys are described one at a time, so `libtorrent.resumeDir` is a field with a
+  reason rather than a line inside a JSON blob.
+
+  The tables moved with them. Monitored folders, watched web locations, RSS feeds and remote
+  nodes are four ways of answering one question — where archives arrive from — and they now
+  sit together under **Feeds** rather than stacked underneath everything else. Tokens went to
+  Security, hooks and the speed and seeding limits to Transfers. Save locations went with the
+  feeds: a location is where an arriving archive lands, and the four tables above it are what
+  choose one. A
+  tab is therefore not only schema fields: `Feeds` is four tables and nothing else, which is
+  why the tabs are declared rather than derived from the schema.
+
+  What the node's own RSS says moved the other way, into Publishing. One tab called Feeds
+  holding both what this node emits and what it subscribes to was the muddle that made the
+  grouping worth doing.
+
+  Every setting the configuration declares is now described. The six that were left — the
+  WebTorrent client, the console login, DHT publishing, tile statistics, the traffic chart and
+  automatic rebuilds — were objects rendered as unlabelled JSON, so changing `traffic.keepHours`
+  meant editing JSON in a browser. The last tab now removes itself when it holds nothing, and
+  comes back on its own the moment a setting exists that the schema does not describe.
+
+  They come from a schema rather than from hand-written markup, which is what makes the rest
+  of it possible. Adding a setting used to be three edits in three places: the control, a
+  branch in the save handler, and a line in the skip-list of the generic renderer — where
+  forgetting the third showed the field twice and forgetting the second saved nothing. It is
+  now one row.
+
+  Two things fall out of that. A list-valued setting like `trackers` is edited one per line
+  instead of as JSON in a textarea. And the restart badge is per setting rather than per
+  top-level key, which is the thing the server cannot express: `tiles.maxOpenArchives` is read
+  live while `tiles.directoryCacheEntries` is not, and `RESTART_REQUIRED` has to mark the
+  whole object because the console used to edit it as one blob.
+
+  A save sends only what changed. Sending a whole group back would have reported that a
+  restart was needed on every press of Save — `JSON.stringify` keeps `null` and drops
+  `undefined`, so a group carrying either where the config has the other compares unequal
+  against a configuration nobody touched.
 
 ### 🐞 Bug fixes
+- **A settings control that could only ever fail.** Describing every setting as a field gave
+  `allowHooksFromApi` a checkbox, and that one is refused by `saveConfig` whether it is on or
+  off — it decides whether an API token may choose what code the service runs, so it is the
+  config file's alone. Toggling it returned an error, and because everything in a save is
+  checked before anything is applied, it took the rest of that tab's settings down with it.
+
+  Fields the config file owns now render disabled with a `config file` badge, and the reader
+  skips disabled controls outright, so a stray enabled attribute cannot turn into a rejected
+  save. The hooks themselves were never affected: their editor has always disabled itself and
+  said why.
+
 - **Two settings reported success and changed nothing.** `tiles` and `resumeSaveIntervalSeconds`
   are read while the process starts — the tile reader's directory cache when the store is
   built, the resume timer when it is created — and neither is consulted again. Both were

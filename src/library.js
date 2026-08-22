@@ -15,6 +15,7 @@ import { publishingBase, publishingFor, reachability } from './catalog.js';
 import { linkLatest } from './latest-link.js';
 import { checkOrigin, fingerprintOrigin } from './origin.js';
 import { probePMTiles } from './pmtiles-probe.js';
+import { archiveDirName } from './savepath.js';
 import {
   createTorrentFromFile,
   createTorrentFromUrl,
@@ -392,9 +393,11 @@ export class Library {
    * separates them. See docs/internals.md — "Where archive data goes".
    * @param {string} mode - 'mirror' or 'cache'.
    * @param {string} [explicit] - An explicit override.
+   * @param {string} [infoHash] - The archive's infohash, once it is known.
+   * @param {string} [name] - The archive's name, where the metainfo carries one.
    * @returns {string} - The save path.
    */
-  #savePathFor(mode, explicit, infoHash) {
+  #savePathFor(mode, explicit, infoHash, name) {
     const root =
       explicit ??
       (mode === 'cache' && this.#config.cacheSavePath
@@ -405,10 +408,41 @@ export class Library {
     // archives get one: an archive created here keeps the file it was made
     // from, and web seed URLs are built from the published location rather
     // than from the save path, so neither changes shape because of this.
-    if (infoHash && this.#config.savePathLayout === 'infohash') {
-      return path.join(root, infoHash);
-    }
-    return root;
+    if (!infoHash) return root;
+
+    const layout = this.#config.savePathLayout;
+    if (layout === 'infohash') return path.join(root, infoHash);
+    if (layout !== 'name') return root;
+
+    // Named for the archive, so the directory can be found without knowing the
+    // infohash. Fixed at the moment it is chosen: an archive joined by a bare
+    // magnet has no name yet and gets its infohash, and learning the name later
+    // does not move hundreds of gigabytes of data to match.
+    return path.join(
+      root,
+      archiveDirName({ infoHash, name }, (candidate) =>
+        this.#directoryTaken(root, candidate, infoHash),
+      ),
+    );
+  }
+
+  /**
+   * Whether another archive already keeps its data in a directory.
+   * @param {string} root - The save root the directory sits under.
+   * @param {string} candidate - The directory name being considered.
+   * @param {string} infoHash - The archive asking, which does not count.
+   * @returns {boolean} - True when someone else holds it.
+   */
+  #directoryTaken(root, candidate, infoHash) {
+    const target = path.resolve(root, candidate);
+    return this.#catalog
+      .list()
+      .some(
+        (held) =>
+          held.infoHash !== infoHash &&
+          held.savePath &&
+          path.resolve(held.savePath) === target,
+      );
   }
 
   /**
@@ -1073,6 +1107,7 @@ export class Library {
       retain ? 'mirror' : 'cache',
       options.savePath,
       created.infoHash,
+      created.name,
     );
     if (staging) {
       created.retainedAt = await settleFromStaging({
@@ -1158,7 +1193,12 @@ export class Library {
     // to a full copy of something that may be hundreds of gigabytes. Mirroring
     // is opt-in.
     const mode = options.mode ?? 'cache';
-    const savePath = this.#savePathFor(mode, options.savePath, parsed.infoHash);
+    const savePath = this.#savePathFor(
+      mode,
+      options.savePath,
+      parsed.infoHash,
+      parsed.name,
+    );
 
     // Re-joining something already held is normal — you seeded it before, or
     // built it and are adding it back — and in that case it is whole from the
@@ -1625,6 +1665,7 @@ export class Library {
       mode,
       options.savePath,
       torrent.infoHash,
+      torrent.name,
     );
 
     // Ask the client we are adopting from for the real thing first. It has the

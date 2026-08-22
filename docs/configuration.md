@@ -95,7 +95,7 @@ the question entirely. See [haproxy.md](haproxy.md).
 | `dataDir`                        | `'./data'`      | catalog, generated `.torrent` files and keys      |
 | `savePath`                       | unset           | where archive data lives                          |
 | `cacheSavePath`                  | unset           | separate path for cache-mode pieces               |
-| `savePathLayout`                 | `'flat'`        | `'flat'` or `'infohash'`                          |
+| `savePathLayout`                 | `'flat'`        | `'flat'`, `'infohash'` or `'name'`                |
 | `locations`                      | `[]`            | named places for data to land: `[{ name, path }]` |
 | `incompleteSuffix`               | `'.incomplete'` | marker on an archive that is not whole yet        |
 | `completionCheckIntervalSeconds` | `15`            | how often to look for finished downloads          |
@@ -133,6 +133,8 @@ measurable and clearable as a directory.
 - `'infohash'` — each archive under `<savePath>/<infohash>/`. Two builds of the
   same map are both `planet.pmtiles`, and this is the only arrangement in which
   that can never matter.
+- `'name'` — each archive under `<savePath>/<archive name>/`. The same
+  separation, in a directory you can find without knowing the infohash.
 
 Flat by default, because the collision it avoids is now refused outright when the
 second archive is added — so the cost of flat is an error message at the moment
@@ -142,6 +144,24 @@ one file.
 Only joined archives are placed. One created here keeps the file it was made
 from, and web seed URLs are built from the published location rather than from
 the save path.
+
+Changing this places new arrivals only. Everything already held keeps the save
+path recorded for it, so nothing moves on disk and nothing has to be re-checked.
+
+Under `'name'` the directory is settled when the archive is added, from whatever
+name is known then, and never revised afterwards:
+
+- The name is taken from the metainfo, or from a magnet's `dn=`. Every magnet
+  this node hands out carries one.
+- A **bare magnet** carries no name, so that archive gets its infohash instead.
+  The name learned later over BEP 9 does not move it — the data is already
+  there, and a rename to tidy the directory is not worth a re-check of it.
+- A name already held by another archive gets the first eight characters of the
+  infohash appended, which is the rebuild case: same name, new infohash.
+- The name is written by whoever built the torrent, so it is sanitised down to
+  one path segment before it is used. Separators, control characters and the
+  ones Windows refuses become `-`; a name that survives none of that falls back
+  to the infohash.
 
 ### `incompleteSuffix`
 

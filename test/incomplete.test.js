@@ -341,7 +341,7 @@ describe('two files for one archive', () => {
 describe('a directory per archive', () => {
   /**
    * A library with a chosen layout.
-   * @param {string} savePathLayout - 'flat' or 'infohash'.
+   * @param {string} savePathLayout - 'flat', 'infohash' or 'name'.
    * @returns {Promise<object>} - Library and the root save path.
    */
   async function withLayout(savePathLayout) {
@@ -400,6 +400,50 @@ describe('a directory per archive', () => {
     const node = await withLayout('infohash');
     await join(node.library, 'a');
     await assert.doesNotReject(() => join(node.library, 'b'));
+  });
+
+  it('names the directory after the archive when asked', async () => {
+    // The point of the layout: the infohash one works, but nothing in
+    // `<savePath>/1f0e3dad…/` tells you which map is in it.
+    const node = await withLayout('name');
+    const entry = await join(node.library, 'a');
+    assert.equal(entry.savePath, path.join(node.dir, 'planet.pmtiles'));
+  });
+
+  it('falls back to the infohash when the magnet carries no name', async () => {
+    // A bare magnet has nothing to name a directory after. Every magnet this
+    // node hands out carries `dn`, so this is someone else's.
+    const node = await withLayout('name');
+    const entry = await node.library.addExistingTorrent(
+      { magnet: `magnet:?xt=urn:btih:${'d'.repeat(40)}` },
+      { mode: 'mirror' },
+    );
+    assert.equal(entry.savePath, path.join(node.dir, 'd'.repeat(40)));
+  });
+
+  it('suffixes the second archive of the same name', async () => {
+    // Two builds of the same map, which is the ordinary case rather than a
+    // strange one: a rebuild mints a new infohash and keeps the name.
+    const node = await withLayout('name');
+    const first = await join(node.library, 'a');
+    const second = await join(node.library, 'b');
+
+    assert.equal(first.savePath, path.join(node.dir, 'planet.pmtiles'));
+    assert.equal(
+      second.savePath,
+      path.join(node.dir, `planet.pmtiles-${'b'.repeat(8)}`),
+    );
+  });
+
+  it('refuses to let a name climb out of the save path', async () => {
+    const node = await withLayout('name');
+    const entry = await node.library.addExistingTorrent(
+      {
+        magnet: `magnet:?xt=urn:btih:${'e'.repeat(40)}&dn=${encodeURIComponent('../../escaped')}`,
+      },
+      { mode: 'mirror' },
+    );
+    assert.equal(path.dirname(entry.savePath), node.dir);
   });
 
   it('still honours an explicit save path', async () => {

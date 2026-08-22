@@ -103,6 +103,13 @@ writing pieces into one file, and neither ends up with the archive it thinks it
 has. This is caught when the second archive is added, where it can still be
 answered by choosing somewhere else to put it.
 
+`savePathLayout` is the standing answer rather than the per-archive one. Under
+`'infohash'` the collision cannot arise. Under `'name'` it still can — the names
+are what collide — so the second archive takes `<name>-<first eight of the
+infohash>`, and an archive with no usable name at all takes its infohash. Both
+are decided once, when the archive is added; a name learned later over BEP 9
+leaves the directory alone rather than moving the data to match it.
+
 ### Staging, for an archive fetched from a URL
 
 An archive fetched over HTTP has no infohash while it is being fetched — the
@@ -868,7 +875,7 @@ carry several categories on purpose — a planet build is both `basemaps` and
 answer.
 
 So the location is chosen rather than derived, and naming them is what makes that
-bearable: `M:\_NZB_Finished_Unsorted` is not something anyone should retype, and a
+bearable: `M:\archives\finished-unsorted` is not something anyone should retype, and a
 name survives the path changing underneath it.
 
 Only new data is placed. An archive records where it was put and keeps it, so
