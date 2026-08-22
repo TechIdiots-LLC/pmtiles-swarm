@@ -857,8 +857,38 @@ coordinates inlined in one is neither. A rectangle is small enough to sit in the
 recipe itself, so `bounds` does.
 
 WGS84 on purpose. Web Mercator is arithmetic from there — no projection library,
-no dependency, no CRS handling beyond refusing what is not WGS84. Anything else
-converts once with the `ogr2ogr` that produced the shapefile in the first place.
+no dependency, no CRS handling beyond refusing what is not WGS84.
+
+### Getting a shapefile in
+
+A cutline usually starts life as a shapefile in a projected CRS, because that is
+what `gdalwarp -cutline` wants. One `ogr2ogr` converts it, and it is the same
+tool that produced the shapefile in the first place:
+
+```sh
+ogr2ogr -t_srs EPSG:4326 \
+  data/cutlines/germany.geojson \
+  datasets/OpenDTM_DE/cutline/germany_cutline_25832.shp
+```
+
+The name of the file is the name the recipe uses, so that one becomes
+`"cutline": "germany"`. Nothing has to restart: cutlines are read when the node
+starts and the console lists whatever is there.
+
+**Simplify it.** A national boundary drawn for surveying carries far more detail
+than a tile can show — Germany's is ninety-three rings and sixty-five thousand
+points in its first record alone — and every one of them is a segment to index
+and to test. What matters is being right to about a pixel at the deepest zoom
+served, which at z14 is roughly five metres:
+
+```sh
+ogr2ogr -t_srs EPSG:4326 -simplify 0.0001 out.geojson in.shp
+```
+
+Holes and islands are kept, and want to be: a country is islands and enclaves
+and lakes. Under the even-odd rule an interior ring needs no special handling
+and gets none — a ray to a point inside one crosses the outer ring and then the
+inner ring, which is two crossings, which is outside.
 
 Edges are treated as straight lines in Mercator after their endpoints are
 projected. That is what every rasteriser does, GDAL's included, and the error

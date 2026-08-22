@@ -48,9 +48,13 @@ export function worldY(lat) {
 /**
  * Reads the rings out of GeoJSON, whatever shape it arrived in.
  *
- * Only the outer rings are kept. A hole is a real thing and this does not
- * pretend to handle one -- the even-odd rule below would treat it as solid --
- * so a cutline with holes is refused rather than silently filled in.
+ * Every ring, interior ones included. Under the even-odd rule a hole needs no
+ * special handling and gets none: a ray to a point inside one crosses the outer
+ * ring and then the inner ring, which is two crossings, which is outside. An
+ * earlier version of this refused shapes with holes on the assumption that they
+ * would be filled in. They are not, and refusing them would have turned away
+ * almost every real boundary -- a country is islands and enclaves and lakes,
+ * and Germany's is ninety-three rings.
  * @param {object} geojson - A Feature, FeatureCollection, or bare geometry.
  * @returns {number[][][]} - Rings of `[lon, lat]`.
  */
@@ -58,13 +62,9 @@ export function ringsOf(geojson) {
   const rings = [];
 
   const fromPolygon = (coordinates) => {
-    if (coordinates.length > 1) {
-      throw new Error(
-        'this cutline has interior rings, and clipping to a shape with holes ' +
-          'is not something this does',
-      );
+    for (const ring of coordinates) {
+      if (ring?.length >= 4) rings.push(ring);
     }
-    if (coordinates[0]?.length >= 4) rings.push(coordinates[0]);
   };
 
   const walk = (node) => {

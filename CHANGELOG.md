@@ -7,6 +7,28 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.68.1
+### ✨ Features and improvements
+- **A cutline may have holes in it, which is to say it may be a real boundary.** 0.68.0 refused
+  any shape with interior rings, on the reasoning that the even-odd fill would treat a hole as
+  solid. It does not — a ray to a point inside a hole crosses the outer ring and then the inner
+  one, which is two crossings, which is outside — so the refusal protected against nothing and
+  turned away almost every boundary worth clipping to. A country is islands and enclaves and
+  lakes; the German cutline this was written for is ninety-three rings.
+
+  Tested rather than reasoned about, because getting it wrong fills in exactly the ground somebody
+  cut out.
+
+  The documentation now also says how a shapefile becomes a cutline, since that is where every
+  real one starts: one `ogr2ogr -t_srs EPSG:4326`, and the filename is the name the recipe uses.
+  With a note to simplify — a boundary drawn for surveying carries far more detail than a tile can
+  show, and every point of it is a segment to index and test.
+
+
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
 ## 0.68.0
 ### ✨ Features and improvements
 - **A source can be clipped to a shape.** `cutline` names a polygon kept under `data/cutlines/`;

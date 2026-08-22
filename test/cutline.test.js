@@ -82,9 +82,9 @@ describe('reading a shape out of GeoJSON', () => {
     );
   });
 
-  it('refuses a shape with holes rather than filling them in', () => {
-    // The even-odd fill would treat a hole as solid, which is the opposite of
-    // what somebody drawing one asked for.
+  it('takes interior rings too, which is what a hole is', () => {
+    // Refusing these would turn away almost every real boundary: a country is
+    // islands and enclaves and lakes. Germany's cutline is ninety-three rings.
     const holed = {
       type: 'Polygon',
       coordinates: [
@@ -92,7 +92,7 @@ describe('reading a shape out of GeoJSON', () => {
         square(2, 2, 4, 4).coordinates[0],
       ],
     };
-    assert.throws(() => ringsOf(holed), /holes/);
+    assert.equal(ringsOf(holed).length, 2);
   });
 
   it('says so when there is nothing to clip to', () => {
@@ -152,6 +152,47 @@ describe('deciding what a tile is', () => {
         assert.ok(
           mask.every((covered) => covered === 0),
           `claimed outside at 3/${x}/${y} but the mask covers something`,
+        );
+      }
+    }
+  });
+});
+
+describe('a shape with a hole in it', () => {
+  // Under the even-odd rule a hole needs no special handling and gets none: a
+  // ray to a point inside one crosses the outer ring and then the inner ring,
+  // which is two crossings, which is outside. Worth asserting rather than
+  // reasoning about, because getting it wrong fills in exactly the ground
+  // somebody cut out.
+  const holed = fromGeoJSON({
+    type: 'Polygon',
+    coordinates: [
+      square(-40, -40, 40, 40).coordinates[0],
+      square(-10, -10, 10, 10).coordinates[0],
+    ],
+  });
+
+  it('leaves the hole out of the mask', () => {
+    const mask = rasterizeTile(holed, 0, 0, 0, 32);
+    const at = (lon, lat) => {
+      const column = Math.floor(worldX(lon) * 32);
+      const row = Math.floor(worldY(lat) * 32);
+      return mask[row * 32 + column];
+    };
+
+    assert.equal(at(0, 0), 0, 'the hole was filled in');
+    assert.equal(at(25, 25), 1, 'the ring around the hole was dropped');
+    assert.equal(at(80, 80), 0, 'somewhere outside the shape was covered');
+  });
+
+  it('never calls a tile inside the hole inside the shape', () => {
+    // z5 tiles around the middle, which is where the hole is.
+    for (let x = 15; x <= 16; x += 1) {
+      for (let y = 15; y <= 16; y += 1) {
+        assert.notEqual(
+          classifyTile(holed, 5, x, y),
+          INSIDE,
+          `5/${x}/${y} is in the hole`,
         );
       }
     }
