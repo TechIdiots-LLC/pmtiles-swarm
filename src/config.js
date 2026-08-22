@@ -364,6 +364,17 @@ const DEFAULTS = {
      * be thrown away, and a backup should be able to tell the difference.
      */
     cacheDir: undefined,
+    /**
+     * Milliseconds a bake waits between tiles. Zero is as fast as it can go.
+     *
+     * The pixel maths a merge does is synchronous, so a bake holds the main
+     * thread for a few milliseconds per tile -- and on a node that is also
+     * serving tiles, that is every request waiting behind it. This is the knob
+     * that trades how long the bake takes for how much of the machine it takes
+     * while it runs. Off by default: a node baking nothing pays for this and
+     * gets nothing.
+     */
+    bakePauseMs: 0,
   },
   /**
    * Folders scanned for new archives. Each entry is `{ path, categories,

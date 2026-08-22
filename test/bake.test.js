@@ -7,6 +7,7 @@ import { after, before, describe, it } from 'node:test';
 import { PMTiles, tileIdToZxy, zxyToTileId } from 'pmtiles';
 import {
   bakeStack,
+  writeCheckpoint,
   bakedMetadata,
   checkpointPaths,
   readCheckpoint,
@@ -375,6 +376,106 @@ describe('stopping a bake and picking it up again', () => {
         `${path.basename(file)} was left behind`,
       );
     }
+  });
+
+  it('appends to the entries it already wrote', async () => {
+    // The reason a checkpoint stays cheap: everything but the last record is
+    // settled, so a checkpoint costs the work since the last one rather than
+    // the work of the whole job. Re-encoding all of it every time is what made
+    // the first version of this quadratic.
+    const workDir = await scratch();
+    await fs.writeFile(checkpointPaths(workDir).tiles, Buffer.alloc(64));
+
+    const entries = [
+      { tileId: 1, offset: 0, length: 10, runLength: 1 },
+      { tileId: 5, offset: 10, length: 20, runLength: 1 },
+    ];
+    let persisted = await writeCheckpoint(
+      workDir,
+      { revision: 'r1', dataBytes: 30 },
+      entries,
+      0,
+    );
+    assert.equal(persisted, 2);
+
+    // The last entry grows a longer run, which is exactly what a run of
+    // identical ocean tiles does -- and it was already on disk.
+    entries[1].runLength = 4;
+    entries.push({ tileId: 40, offset: 30, length: 7, runLength: 1 });
+    persisted = await writeCheckpoint(
+      workDir,
+      { revision: 'r1', dataBytes: 37 },
+      entries,
+      persisted,
+    );
+    assert.equal(persisted, 3);
+
+    const read = await readCheckpoint(workDir, 'r1');
+    assert.deepEqual(
+      read.entries,
+      entries,
+      'the extended run was not written back',
+    );
+  });
+
+  it('survives a resume across a run that grew', async () => {
+    // The same case end to end: a run of identical tiles spanning the moment
+    // the job stopped.
+    const ocean = Buffer.alloc(64, 9);
+    const a = await sourceOf([10, 11, 12, 13, 14, 15]);
+    const workDir = await scratch();
+    const destination = path.join(workDir, 'run.pmtiles');
+    const controller = new AbortController();
+
+    await assert.rejects(() =>
+      bakeStack({
+        sources: [a],
+        workDir,
+        destination,
+        revision: 'r1',
+        signal: controller.signal,
+        checkpointEvery: 1,
+        mergeTile: async (z, x, y) => {
+          if (zxyToTileId(z, x, y) === 12) controller.abort();
+          return ocean;
+        },
+      }),
+    );
+
+    const result = await bakeStack({
+      sources: [a],
+      workDir,
+      destination,
+      revision: 'r1',
+      checkpointEvery: 1,
+      mergeTile: async () => ocean,
+      header: { format: 'png' },
+    });
+
+    assert.equal(result.written, 6);
+    const tiles = await tilesOf(destination, [10, 11, 12, 13, 14, 15]);
+    assert.equal(tiles.size, 6);
+  });
+
+  it('waits between tiles when it is told to', async () => {
+    // The knob that trades how long a bake takes for how much of the machine
+    // it takes while it runs.
+    const a = await sourceOf([1, 2, 3, 4]);
+    const workDir = await scratch();
+    const started = Date.now();
+    await bakeStack({
+      sources: [a],
+      workDir,
+      destination: path.join(workDir, 'slow.pmtiles'),
+      revision: 'r1',
+      mergeTile: async () => Buffer.from('x'),
+      header: { format: 'png' },
+      pauseMs: 15,
+    });
+    assert.ok(
+      Date.now() - started >= 45,
+      'it did not pause between tiles at all',
+    );
   });
 
   it('ignores a checkpoint whose tile buffer went missing', async () => {

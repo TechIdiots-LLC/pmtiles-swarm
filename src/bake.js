@@ -1,18 +1,12 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import zlib from 'node:zlib';
 import { tileIdToZxy } from 'pmtiles';
-import { deserializeDirectory, unionOfTileIds } from './pmtiles-scan.js';
+import { unionOfTileIds } from './pmtiles-scan.js';
 import crypto from 'node:crypto';
 import { safeSegment } from './savepath.js';
 import { answerStackTile, outputFormat, outputSize } from './stack-tile.js';
 import { needsCodec, stackRevision } from './stacks.js';
-import {
-  Compression,
-  PMTilesWriter,
-  TileType,
-  serializeDirectory,
-} from './pmtiles-write.js';
+import { Compression, PMTilesWriter, TileType } from './pmtiles-write.js';
 
 /**
  * Running a stack over its sources' coverage and writing a real archive.
@@ -52,6 +46,62 @@ export function checkpointPaths(workDir) {
 }
 
 /**
+ * One entry, as a checkpoint stores it.
+ *
+ * A fixed record rather than `serializeDirectory`, which was the first thing
+ * tried here and is the wrong tool. That is a *distribution* format: compact on
+ * disk, and it costs a varint pass over every entry to produce -- 264 ms at a
+ * million entries, of which only 12 ms is the compression. Re-encoding all of
+ * them every checkpoint also makes the total work quadratic in the length of
+ * the job.
+ *
+ * A checkpoint wants none of that. It is read once, by this process, on a
+ * machine that just wrote it. Fixed-width records cost nothing to produce and
+ * can be appended, which is what turns the checkpoint from a stall that grows
+ * into one that does not.
+ */
+const RECORD_BYTES = 24;
+
+/**
+ * Packs entries into fixed records.
+ * @param {object[]} entries - The entries to pack.
+ * @returns {Buffer} - `RECORD_BYTES` per entry.
+ */
+function packEntries(entries) {
+  const buffer = Buffer.alloc(entries.length * RECORD_BYTES);
+  for (const [index, entry] of entries.entries()) {
+    const at = index * RECORD_BYTES;
+    // Doubles for the two that can be large: a tile id past z26 and an offset
+    // past 4 GiB both exceed what 32 bits hold, and both are safe integers.
+    buffer.writeDoubleLE(entry.tileId, at);
+    buffer.writeDoubleLE(entry.offset, at + 8);
+    buffer.writeUInt32LE(entry.length, at + 16);
+    buffer.writeUInt32LE(entry.runLength, at + 20);
+  }
+  return buffer;
+}
+
+/**
+ * Reads packed records back into entries.
+ * @param {Buffer} buffer - What `packEntries` wrote.
+ * @returns {object[]} - The entries.
+ */
+function unpackEntries(buffer) {
+  const count = Math.floor(buffer.length / RECORD_BYTES);
+  const entries = new Array(count);
+  for (let index = 0; index < count; index += 1) {
+    const at = index * RECORD_BYTES;
+    entries[index] = {
+      tileId: buffer.readDoubleLE(at),
+      offset: buffer.readDoubleLE(at + 8),
+      length: buffer.readUInt32LE(at + 16),
+      runLength: buffer.readUInt32LE(at + 20),
+    };
+  }
+  return entries;
+}
+
+/**
  * Reads a checkpoint, if there is one worth resuming from.
  *
  * A checkpoint belongs to one revision of one recipe over one set of sources.
@@ -83,10 +133,10 @@ export async function readCheckpoint(workDir, revision) {
   // shorter than the entries say, some of what they point at is not there.
   if (buffered.size < state.dataBytes) return null;
 
-  let entries;
-  try {
-    entries = deserializeDirectory(zlib.gunzipSync(stored));
-  } catch {
+  const entries = unpackEntries(stored);
+  // A record file shorter than the state claims means the two disagree about
+  // what was written, and the entries are the half that can be believed.
+  if (state.entryCount !== undefined && entries.length !== state.entryCount) {
     return null;
   }
 
@@ -94,25 +144,41 @@ export async function readCheckpoint(workDir, revision) {
 }
 
 /**
- * Writes a checkpoint, replacing whatever was there.
+ * Writes a checkpoint, appending what is new rather than rewriting it all.
  *
- * Entries go through `serializeDirectory`, which is the compact form this
- * project already writes and reads. Nothing here invents a second encoding for
- * the same array.
+ * Only the last entry can change once written -- a run of identical tiles
+ * extends it -- so everything before that is already on disk and correct. The
+ * write is therefore the size of the work since the last checkpoint, not the
+ * size of the job so far.
  * @param {string} workDir - The working directory.
- * @param {object} state - Scalars worth keeping.
+ * @param {object} state - Scalars worth keeping, including `entryCount`.
  * @param {object[]} entries - The entries as they stand.
- * @returns {Promise<void>} - Resolves once both files are on disk.
+ * @param {number} [persisted] - How many are already on disk.
+ * @returns {Promise<number>} - How many are on disk now.
  */
-export async function writeCheckpoint(workDir, state, entries) {
+export async function writeCheckpoint(workDir, state, entries, persisted = 0) {
   const paths = checkpointPaths(workDir);
+
+  // Back up one, because the last record written may have grown a longer run
+  // since. Everything before it is settled.
+  const from = Math.max(0, Math.min(persisted, entries.length) - 1);
+  const handle = await fs.open(paths.entries, persisted > 0 ? 'r+' : 'w');
+  try {
+    const tail = packEntries(entries.slice(from));
+    if (tail.length > 0)
+      await handle.write(tail, 0, tail.length, from * RECORD_BYTES);
+    await handle.truncate(entries.length * RECORD_BYTES);
+  } finally {
+    await handle.close();
+  }
+
   // Entries first. A state file naming more progress than the entries hold
   // would resume into an archive missing tiles it believes it wrote.
   await fs.writeFile(
-    paths.entries,
-    entries.length > 0 ? serializeDirectory(entries) : Buffer.alloc(0),
+    paths.state,
+    JSON.stringify({ ...state, entryCount: entries.length }),
   );
-  await fs.writeFile(paths.state, JSON.stringify(state));
+  return entries.length;
 }
 
 /**
@@ -297,7 +363,7 @@ export function tileTypeFor(format) {
  * @returns {Function} - `(z, x, y) => Promise<Buffer|null>`.
  */
 export function mergeTileFor(options) {
-  const { resolved, tiles, codec, signal } = options;
+  const { resolved, tiles, codec, signal, pixels } = options;
   const format = options.format ?? outputFormat(resolved);
   const size = options.size ?? outputSize(resolved.stack);
 
@@ -313,6 +379,7 @@ export function mergeTileFor(options) {
       signal,
       size,
       format,
+      pixels,
     });
 
     // A required source that cannot be read stops the job. Baking around it
@@ -357,6 +424,7 @@ export async function bakeStack(options) {
     header = {},
     deduplicate = true,
     checkpointEvery = DEFAULT_CHECKPOINT_EVERY,
+    pauseMs = 0,
   } = options;
 
   if (!sources?.length) throw new Error('a bake needs at least one source');
@@ -386,13 +454,14 @@ export async function bakeStack(options) {
   let skipped = found?.skipped ?? 0;
   let lastTileId = found?.lastTileId ?? -1;
   let sinceCheckpoint = 0;
+  let persisted = found?.entries.length ?? 0;
 
   /**
    * Writes down where the job has got to.
    * @returns {Promise<void>} - Resolves once it is durable.
    */
   const checkpoint = async () => {
-    await writeCheckpoint(
+    persisted = await writeCheckpoint(
       workDir,
       {
         revision,
@@ -404,6 +473,7 @@ export async function bakeStack(options) {
         clustered: writer.clustered,
       },
       writer.entries,
+      persisted,
     );
     sinceCheckpoint = 0;
   };
@@ -429,6 +499,16 @@ export async function bakeStack(options) {
       sinceCheckpoint += 1;
       onProgress?.({ written, skipped, tileId, z, x, y });
       if (sinceCheckpoint >= checkpointEvery) await checkpoint();
+
+      // Handing time back, where the operator asked for that. A bake on a node
+      // that is also serving tiles holds the main thread for a few milliseconds
+      // per tile -- the pixel maths is synchronous -- and this is the knob that
+      // trades how long the bake takes for how much of the machine it takes
+      // while it runs. Off by default, because a node baking nothing else pays
+      // for this and gets nothing.
+      if (pauseMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, pauseMs));
+      }
     }
   } catch (error) {
     // A cancelled bake keeps its work. Deleting it would make stopping and

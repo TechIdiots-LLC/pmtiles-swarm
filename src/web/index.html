@@ -5150,6 +5150,18 @@ Every piece is hashed against the ` +
                 'beside the first. Evicted least-recently-used.',
             },
             {
+              key: 'stacks.bakePauseMs',
+              label: 'Pause between tiles while exporting',
+              type: 'number',
+              placeholder: '0',
+              unit: 'ms',
+              help:
+                'Zero is as fast as it can go. A merge does its pixel maths ' +
+                'on the main thread, so an export holds it for a few ' +
+                'milliseconds per tile and every request waits behind that. ' +
+                'Set this on a node that is also serving maps.',
+            },
+            {
               key: 'stacks.cacheDir',
               label: 'Where they go',
               type: 'text',

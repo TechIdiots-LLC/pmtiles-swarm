@@ -7,6 +7,37 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.65.0
+### ✨ Features and improvements
+- **A bake stays out of the way of the node it runs on.** It runs in the main process — unlike
+  hashing, there is no sidecar to send it to — and the merge's pixel maths is entirely
+  synchronous, so every millisecond of it is a millisecond the node is not answering requests.
+  Three changes, all of them from measuring rather than assuming.
+
+  **The pixel maths moved to a worker.** `src/pixels.js` runs `elevation.js` and `rgba.js`
+  unchanged on another thread. Against a request arriving every 5 ms while a bake runs, the delay
+  that request sees at the 99th percentile falls from 10.9 ms to 6.5 ms with two sources, and from
+  18.6 ms to 10.6 ms with four. The bake is 2–17% slower for it. Rasters are handed over rather
+  than copied — a decoded tile is most of a megabyte per source — so a merge takes ownership of
+  what it is given, which is safe because nothing reads a contribution afterwards and is asserted
+  rather than assumed. Serving does not use it: one tile is a few milliseconds nobody notices.
+
+  **The checkpoint appends instead of rewriting.** It went through `serializeDirectory`, which was
+  elegant reuse and the wrong tool — that is a distribution format, and producing it costs a varint
+  pass over every entry. Re-encoding all of them every time also made the total work quadratic in
+  the length of the job. Fixed 24-byte records can be appended, and only the last one can change
+  once written, so a checkpoint costs the work since the last one: **446 ms at four million entries
+  becomes 11 ms, and stays 11 ms**.
+
+  **And `stacks.bakePauseMs`**, how long a bake waits between tiles. Zero by default, which is
+  right for a node baking and doing nothing else. On a node that is also serving maps it is the
+  direct trade between how long the bake takes and how much of the machine it takes while running.
+
+
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
 ## 0.64.0
 ### ✨ Features and improvements
 - **Export a stack to an archive, from the console.** **Export to archive** sits beside Edit and

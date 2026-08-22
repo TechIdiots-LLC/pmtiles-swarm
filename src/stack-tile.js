@@ -294,6 +294,7 @@ async function merge({
   rgba,
   format,
   gathered,
+  pixels,
 }) {
   const { contributors, contributions } = gathered;
   const first = contributions.find(Boolean);
@@ -305,6 +306,34 @@ async function merge({
     size ??
     Math.max(...contributions.filter(Boolean).map((c) => c.raster.width));
   const output = resolved.stack.output ?? {};
+
+  const merging = {
+    z,
+    x,
+    y,
+    size: grid,
+    resampling: resolved.stack.resampling,
+    gaussianBlurSigma: resolved.stack.gaussianBlurSigma,
+  };
+
+  // Off this thread, where somebody has provided somewhere to put it. The same
+  // functions either way -- a worker runs `elevation.js` and `rgba.js`
+  // unchanged -- so this is about where the work happens and not what it is.
+  if (pixels) {
+    const off = await pixels.merge({
+      space: rgba ? 'rgba' : 'elevation',
+      contributions,
+      options: merging,
+      output,
+      encoding: output.encoding ?? first.source?.encoding,
+    });
+    if (!off) return { contributors, format, empty: true };
+    const body = await codec.encode(off, {
+      format,
+      lossless: rgba ? output.lossless === true : true,
+    });
+    return { contributors, format, body };
+  }
 
   // The two spaces differ only here. Everything around this -- reading, the
   // parent fallback, the cache, the headers -- is the same either way, which is
@@ -370,7 +399,8 @@ async function merge({
  * @returns {Promise<StackAnswer>} - What to serve, or why there is nothing.
  */
 export async function answerStackTile(options) {
-  const { resolved, z, x, y, tiles, codec, stackCache, signal, size } = options;
+  const { resolved, z, x, y, tiles, codec, stackCache, signal, size, pixels } =
+    options;
   const format = options.format ?? outputFormat(resolved);
   const rgba = resolved.stack.space === 'rgba';
 
@@ -426,6 +456,7 @@ export async function answerStackTile(options) {
       rgba,
       format,
       gathered,
+      pixels,
     });
 
     // Awaited, though it is tempting not to be. The write is a local disk write

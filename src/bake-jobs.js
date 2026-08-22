@@ -6,6 +6,7 @@ import {
   bakedName,
   mergeTileFor,
 } from './bake.js';
+import { PixelWorker } from './pixels.js';
 import { outputFormat } from './stack-tile.js';
 
 /**
@@ -158,6 +159,53 @@ export class BakeManager {
     const destination = path.join(workDir, job.name);
     const format = outputFormat(resolved);
 
+    // Only where there is pixel work to move. A passthrough bake hands bytes
+    // straight through and would pay for a thread it never uses.
+    const pixels = codec ? new PixelWorker() : null;
+    try {
+      await this.#merge(
+        job,
+        resolved,
+        codec,
+        pixels,
+        workDir,
+        destination,
+        format,
+      );
+    } finally {
+      await pixels?.close().catch(() => {});
+    }
+
+    // The second half. `addLocalArchive` registers the add in the library's own
+    // in-progress list, which is what the archives view already draws -- so the
+    // hashing shows up there without this having to report it twice.
+    job.phase = 'importing';
+    const entry = await this.#library.addLocalArchive(destination, {
+      categories: options.categories ?? resolved.stack.categories,
+      // Moved out of the working directory as it is taken on, so a finished
+      // archive does not live among the checkpoint files of the job that made
+      // it.
+      publishDir: options.publishDir ?? (await this.#savePath(options)),
+      mode: 'mirror',
+    });
+
+    job.infoHash = entry.infoHash;
+    job.phase = 'done';
+    job.finishedAt = new Date().toISOString();
+  }
+
+  /**
+   * The merging half, which is where the time goes.
+   * @param {object} job - The job to update as it goes.
+   * @param {object} resolved - The resolved stack.
+   * @param {object|null} codec - The codec, where the recipe needs one.
+   * @param {object|null} pixels - Somewhere to do the pixel maths.
+   * @param {string} workDir - Where the unfinished work lives.
+   * @param {string} destination - Where the archive goes.
+   * @param {string} format - The output format.
+   * @returns {Promise<void>} - Resolves when the file is written.
+   */
+  async #merge(job, resolved, codec, pixels, workDir, destination, format) {
     // Read through the tile store rather than off the disk, so a cache-mode
     // source is scanned the same way it is served: its directories come out of
     // the swarm, and the store holds them to its own byte budget.
@@ -194,10 +242,12 @@ export class BakeManager {
         resolved,
         tiles: this.#tiles,
         codec,
+        pixels,
         signal: job.controller.signal,
         format,
       }),
       header: { format },
+      pauseMs: this.#config.stacks?.bakePauseMs ?? 0,
       metadata: {
         name: resolved.stack.title ?? job.stackId,
         description: resolved.stack.description,
@@ -215,23 +265,6 @@ export class BakeManager {
     });
 
     job.tiles = result.written;
-
-    // The second half. `addLocalArchive` registers the add in the library's own
-    // in-progress list, which is what the archives view already draws -- so the
-    // hashing shows up there without this having to report it twice.
-    job.phase = 'importing';
-    const entry = await this.#library.addLocalArchive(destination, {
-      categories: options.categories ?? resolved.stack.categories,
-      // Moved out of the working directory as it is taken on, so a finished
-      // archive does not live among the checkpoint files of the job that made
-      // it.
-      publishDir: options.publishDir ?? (await this.#savePath(options)),
-      mode: 'mirror',
-    });
-
-    job.infoHash = entry.infoHash;
-    job.phase = 'done';
-    job.finishedAt = new Date().toISOString();
   }
 
   /**

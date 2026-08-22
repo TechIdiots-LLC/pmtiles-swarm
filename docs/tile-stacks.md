@@ -45,6 +45,7 @@ of its parts.
   - [What to iterate](#what-to-iterate)
   - [Running it](#running-it)
   - [What a baked archive says about itself](#what-a-baked-archive-says-about-itself)
+  - [Staying out of the way of the node it runs on](#staying-out-of-the-way-of-the-node-it-runs-on)
   - [What identifies a bake](#what-identifies-a-bake)
   - [Starting one, and watching it](#starting-one-and-watching-it)
   - [What exists now](#what-exists-now)
@@ -635,6 +636,59 @@ reason the live stack answers 404.
   rather than discovering it.
 - **Cancellable**, and stopping keeps the work: realising it is the wrong recipe
   should not mean waiting it out, and it should not mean starting over either.
+
+### Staying out of the way of the node it runs on
+
+A bake runs in the main process, and unlike hashing there is no sidecar to send
+it to. That matters because `elevation.js` and `rgba.js` are entirely
+synchronous — decoding heights, masking, resampling and painting are loops over
+typed arrays — so every millisecond of it is a millisecond the node is not
+answering requests. Three things follow from having measured that rather than
+assumed it.
+
+**The pixel maths goes to a worker.** `src/pixels.js` and `src/pixel-worker.js`
+run the same functions, unchanged, on another thread. Measured against a request
+arriving every 5 ms while a bake runs, the delay that request sees at the 99th
+percentile:
+
+| workload                  | on the main thread | in a worker |
+| ------------------------- | ------------------ | ----------- |
+| 2 sources, 512px          | 10.9 ms            | 6.5 ms      |
+| 4 sources, 512px          | 18.6 ms            | 10.6 ms     |
+| 8 sources, 512px, blurred | 22.3 ms            | 17.1 ms     |
+
+The bake itself is 2–17% slower for it, which is the trade. Rasters are handed
+to the worker rather than copied — a decoded tile is most of a megabyte per
+source, and copying each one is work on the very thread this exists to keep
+free. The cost of that is the caller gives them up, which is safe because
+nothing reads a contribution after its merge, and is asserted rather than left
+as a comment.
+
+Serving does not use it. One tile's merge is a few milliseconds nobody notices,
+and a thread per request would cost more than it saved.
+
+**The checkpoint appends instead of rewriting.** The first version wrote entries
+through `serializeDirectory`, which was elegant reuse and the wrong tool: that
+is a _distribution_ format, and producing it costs a varint pass over every
+entry — 264 ms at a million entries, of which only 12 ms is the compression.
+Re-encoding all of them every checkpoint also made the total work quadratic in
+the length of the job.
+
+A checkpoint is read once, by this process, on the machine that wrote it. Fixed
+24-byte records cost nothing to produce and can be appended, and only the last
+one can change after it is written — a run of identical tiles extends it. So a
+checkpoint now costs the work since the last one:
+
+| entries   | rewriting everything | appending |
+| --------- | -------------------- | --------- |
+| 100,000   | 36 ms                | 11 ms     |
+| 1,000,000 | 191 ms               | 11 ms     |
+| 4,000,000 | 446 ms               | 11 ms     |
+
+**And there is a knob.** `stacks.bakePauseMs` is how long a bake waits between
+tiles. Zero is as fast as it can go, which is right for a node baking and doing
+nothing else. On a node that is also serving maps it is the direct trade: how
+long the bake takes against how much of the machine it takes while it runs.
 
 ### What identifies a bake
 
