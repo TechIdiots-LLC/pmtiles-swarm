@@ -768,10 +768,34 @@ handling whatsoever.
   already distributes documents. Publishing recipes so a subscriber gets the
   stack along with its sources is attractive, and raises an obvious question
   about executing a recipe that arrived from somebody else.
-- **`tileSize` mismatch between sources.** The offline merge takes the first
-  source's size and hopes. Stacking a 256px source under a 512px one needs
-  either a declared output size that everything is resampled to, or a refusal at
-  validation time. The second is probably right.
+- **`tileSize` mismatch between sources.** Not a refusal, which is what an
+  earlier draft of this said. A tile size difference _is_ a zoom difference, and
+  MapLibre already treats it as one — `coveringZoomLevel` asks a source for
+
+  ```
+  z = floor(zoom + log2(transformTileSize / sourceTileSize))
+  ```
+
+  so a 256px source is requested one level deeper than a 512px one covering the
+  same ground. A 512px tile at _z_ is the same extent as four 256px tiles at
+  _z+1_.
+
+  So the sizes reconcile rather than conflict, and a 256px source can
+  contribute to a 512px stack at full detail instead of being turned away. The
+  offset is `log2(outputSize / sourceSize)`, and the two directions are not
+  equally new work:
+
+  - **Source larger than the output** (512px source, 256px stack) is the parent
+    case already implemented. The offset is negative, the source tile is one
+    level up, and `resampleFromParent` crops the right sub-square.
+  - **Source smaller than the output** (256px source, 512px stack) needs the
+    other direction: fetch the four children at `z+1` and assemble them into
+    one grid before merging. That is the piece that does not exist yet.
+
+  Until it does, the merge takes the first contributing source's size and the
+  others are resampled to it by the parent path — which is right whenever the
+  first source is the smallest, and loses detail when it is not.
+
 - **The cache and the retention sweep.** `data/stack-cache/` is where merged
   tiles live, which makes stacks the first thing in the project that writes
   tiles to disk on its own. The sweep does not know about it yet. Nothing is
