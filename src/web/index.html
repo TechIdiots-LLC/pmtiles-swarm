@@ -518,7 +518,6 @@
       <section id="view-stacks" hidden>
         <div class="bar">
           <button id="stacks-add">Add stack…</button>
-          <button id="stacks-refresh">Refresh</button>
           <span class="bar-gap"></span>
           <span class="muted" id="stacks-where"></span>
         </div>
@@ -5886,8 +5885,17 @@ Every piece is hashed against the ` +
       // hand, and two orders for one list costs a mental flip on every switch
       // between the file and this screen — a flip that fails silently, because
       // the map simply renders the coarse source over the detailed one.
+      let stacksLastDrawn = null;
+
       const loadStacks = async () => {
-        const { stacks, codec } = await api('/api/stacks');
+        const body = await api('/api/stacks');
+        const { stacks, codec } = body;
+        // A category resolving to a new build changes this, which is the
+        // reason to poll at all -- but most polls change nothing, and
+        // repainting a list somebody is about to click is worse than not.
+        const signature = JSON.stringify(body);
+        if (signature === stacksLastDrawn) return;
+        stacksLastDrawn = signature;
         const list = $('stacks-list');
         $('stacks-where').textContent = stacks.length
           ? `${stacks.length} stack${stacks.length === 1 ? '' : 's'} in data/stacks.json`
@@ -6043,8 +6051,6 @@ Every piece is hashed against the ` +
           </tr>`;
       };
 
-      $('stacks-refresh').onclick = () =>
-        loadStacks().catch((e) => toast(e.message));
 
       // ── Building a stack ──────────────────────────────────────────────────
       //
@@ -6774,6 +6780,20 @@ Every piece is hashed against the ` +
       setInterval(() => {
         if (!$('view-archives').hidden && $('login').hidden) refresh();
       }, 3000);
+
+      // Slower than the archive list, because what moves here moves slowly: a
+      // recipe edited on disk, or a category resolving to a rebuilt archive.
+      // Paused while the editor is open -- nothing it shows would change, and
+      // repainting behind a dialog is work nobody sees.
+      setInterval(() => {
+        if (
+          !$('view-stacks').hidden &&
+          $('login').hidden &&
+          !$('stack-dialog').open
+        ) {
+          loadStacks().catch(() => {});
+        }
+      }, 5000);
     </script>
   </body>
 </html>
