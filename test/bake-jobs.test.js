@@ -9,6 +9,7 @@ import { BakeManager } from '../src/bake-jobs.js';
 import {
   assertBakeable,
   bakeRevision,
+  bakedArchiveName,
   bakedMetadata,
   bakedName,
 } from '../src/bake.js';
@@ -155,6 +156,68 @@ describe('what a bake calls the file and the archive', () => {
     assert.equal(name, 'Terrain-20260822.pmtiles');
   });
 
+  it('dates the archive name too, separately from the file', async () => {
+    // Nothing here looks an archive up by name -- `/latest/<category>/` follows
+    // a category and takes the newest by date -- so a dated name costs nothing
+    // and answers the question somebody holding two builds actually has.
+    const archive = await sourceArchive('dated', [[1, 0, 0]]);
+    assert.equal(
+      bakedArchiveName(stackOver(archive), {
+        when: new Date('2026-08-22T10:00:00Z'),
+      }),
+      'Terrain 20260822',
+    );
+  });
+
+  it('takes a filename outright when it is given one', async () => {
+    const archive = await sourceArchive('chosen-file', [[1, 0, 0]]);
+    assert.equal(
+      bakedName(stackOver(archive), { filename: 'planet-merged' }),
+      'planet-merged.pmtiles',
+    );
+    // The extension is not doubled up when it is already there.
+    assert.equal(
+      bakedName(stackOver(archive), { filename: 'planet-merged.pmtiles' }),
+      'planet-merged.pmtiles',
+    );
+  });
+
+  it('will not let a chosen filename leave the directory', async () => {
+    // A filename is exactly the kind of field somebody puts a slash in, and
+    // this one is joined to a save path.
+    const archive = await sourceArchive('escape', [[1, 0, 0]]);
+    for (const attempt of ['../../etc/passwd', '/etc/passwd', 'a/b.pmtiles']) {
+      const chosen = bakedName(stackOver(archive), { filename: attempt });
+      assert.ok(!chosen.includes('/'), attempt);
+      assert.ok(!chosen.includes(String.fromCharCode(92)), attempt);
+      assert.ok(chosen.endsWith('.pmtiles'), chosen);
+    }
+  });
+
+  it('falls back to the dated default when a filename sanitises away', async () => {
+    const archive = await sourceArchive('empty-file', [[1, 0, 0]]);
+    assert.match(
+      bakedName(stackOver(archive), { filename: '...' }),
+      /^Terrain-\d{8}\.pmtiles$/,
+    );
+  });
+
+  it('lets the two be changed independently', async () => {
+    // The archive's name is what a map client shows; the filename is what
+    // somebody finds on disk. Tying them together means one of the two is
+    // wrong whenever they should differ.
+    const archive = await sourceArchive('independent', [[1, 0, 0]]);
+    const resolved = stackOver(archive);
+    assert.equal(
+      bakedArchiveName(resolved, { name: 'Whatever I like' }),
+      'Whatever I like',
+    );
+    assert.equal(
+      bakedName(resolved, { filename: 'something-else' }),
+      'something-else.pmtiles',
+    );
+  });
+
   it('sanitises a title that would not survive as a filename', async () => {
     const archive = await sourceArchive('slug', [[1, 0, 0]]);
     const name = bakedName(stackOver(archive, { title: '../../etc/passwd' }), {
@@ -164,14 +227,12 @@ describe('what a bake calls the file and the archive', () => {
     assert.ok(!name.includes('..'), name);
   });
 
-  it('leaves the archive name undated, the way a rebuild does', () => {
-    // A rebuild keeps its name and mints a new infohash. Dating the name would
-    // make every build a different map, and `/latest/` would never follow one.
+  it('keeps the name it was handed', () => {
     const metadata = bakedMetadata({
-      name: 'Terrain',
+      name: 'Terrain 20260822',
       bakedAt: '2026-08-22T10:00:00Z',
     });
-    assert.equal(metadata.name, 'Terrain');
+    assert.equal(metadata.name, 'Terrain 20260822');
     assert.match(metadata.description, /Baked 2026-08-22/);
   });
 
@@ -290,20 +351,33 @@ describe('choosing where an export goes and what it is called', () => {
       name: 'Bathymetry and terrain',
     });
     assert.equal(job.archiveName, 'Bathymetry and terrain');
-    // A name is not a filename, and the two not agreeing costs an afternoon
-    // the first time somebody goes looking on disk.
-    assert.match(job.name, /^Bathymetry-and-terrain-\d{8}\.pmtiles$/);
+    // The file is named after the stack unless a filename was asked for, which
+    // this did not do.
+    assert.match(job.name, /^Terrain-\d{8}\.pmtiles$/);
     await settled(manager, 'terrain');
   });
 
-  it('falls back to the stack when no name was typed', async () => {
+  it('falls back to the stack and the date when no name was typed', async () => {
     const archive = await sourceArchive('unnamed-export', [[1, 0, 0]]);
     const { manager } = managerWith(archive);
     const job = await manager.start({
       resolved: stackOver(archive),
       name: '   ',
     });
-    assert.equal(job.archiveName, 'Terrain');
+    assert.match(job.archiveName, /^Terrain \d{8}$/);
+    await settled(manager, 'terrain');
+  });
+
+  it('takes a filename from the caller without touching the name', async () => {
+    const archive = await sourceArchive('both-export', [[1, 0, 0]]);
+    const { manager } = managerWith(archive);
+    const job = await manager.start({
+      resolved: stackOver(archive),
+      name: 'Bathymetry and terrain',
+      filename: 'bathy-terrain-v2',
+    });
+    assert.equal(job.archiveName, 'Bathymetry and terrain');
+    assert.equal(job.name, 'bathy-terrain-v2.pmtiles');
     await settled(manager, 'terrain');
   });
 });

@@ -244,18 +244,26 @@ describe('the filename an export preview promises', () => {
   // worse than no preview.
   const script = page.split('<script type="module">')[1].split('</script>')[0];
 
-  /** The preview's slug logic, lifted out and made callable. */
-  const preview = (typed) => {
-    const at = script.indexOf('function showBakeFilename');
-    assert.ok(at > 0, 'the filename preview moved');
-    const from = script.indexOf('const slug =', at);
-    const to = script.indexOf("|| 'stack';", from);
-    assert.ok(to > from, 'the slug rule moved');
-    const body = script.slice(from, to) + "|| 'stack'; return slug;";
-    return new Function('typed', body.replace('const slug =', 'const slug ='))(
-      typed,
-    );
-  };
+  /** The console's own slug rule, lifted out and made callable. */
+  const preview = (() => {
+    const at = script.indexOf('function bakeSlug(typed) {');
+    assert.ok(at > 0, 'the filename rule moved');
+    // Brace-matched, so the whole function comes out whatever is inside it.
+    let depth = 0;
+    let end = at;
+    for (let i = script.indexOf('{', at); i < script.length; i += 1) {
+      if (script[i] === '{') depth += 1;
+      else if (script[i] === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    assert.ok(end > at, 'could not read bakeSlug out of the page');
+    return new Function(`${script.slice(at, end)}; return bakeSlug;`)();
+  })();
 
   for (const typed of [
     'Terrain',

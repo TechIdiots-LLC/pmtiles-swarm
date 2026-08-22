@@ -698,14 +698,26 @@ resolves to whichever build is current, so the same recipe over a rebuilt source
 is a different bake — and a checkpoint that could not tell would resume across
 the change and produce an archive that is half one map and half another.
 
-The file is dated: `Terrain-20260822.pmtiles`. The archive's **name** is not.
-A rebuild here keeps its name and mints a new infohash, which is what lets
-`/latest/<category>/` follow it; dating the name would make every build a
-different map. The date goes in `description` instead, so an archive read out of
-context still says what produced it and when.
+Both the file and the archive's name are dated, and both can be changed —
+separately, because they answer different questions. `Terrain-20260822.pmtiles`
+is what somebody finds on disk; `Terrain 20260822` is what a map client shows.
+Tying one to the other only guarantees that one of them is wrong whenever they
+should differ.
+
+An earlier version of this document said the name had to stay undated so
+`/latest/<category>/` could follow a rebuild. That was wrong. `/latest/`
+resolves a category and takes the newest by date; nothing in this project looks
+an archive up by name at all, and the only name comparison there is refuses two
+archives the same _file_ path. A dated name is free, and it answers the question
+somebody holding two builds actually has.
 
 `name` is always written, because these archives get converted to mbtiles by
-other tools and a nameless metadata block is not valid there.
+other tools and a nameless metadata block is not valid there. The date also goes
+in `description`, so an archive read out of context says what produced it.
+
+A chosen filename is reduced to one path segment before it is used. That is not
+politeness — the name is joined to a save path, and a filename is exactly the
+kind of field somebody puts a slash in.
 
 ### What a baked archive says about itself
 
@@ -739,10 +751,11 @@ a name this node does not know, or a path it cannot write, is the caller's
 mistake and they can fix it, but only if they are told now rather than an hour
 later.
 
-**What it is called** defaults to the stack's title and can be changed, as can
-the description. The dialog shows the filename as the name is typed, because a
-name is not a filename — the same sanitising the server does, and a preview that
-promised something else would be worse than no preview.
+**What it is called** is two fields, both dated by default and both editable:
+the archive's name, and the filename. The dialog says what a filename will
+actually become where sanitising would change it, using the same rule the server
+applies — a field that shows one filename while the server writes another is
+worse than a field that shows nothing.
 
 A bake has two halves and they are watched in two places, deliberately. Merging
 is about a stack, so it is reported on the stack — tiles written, tiles skipped,

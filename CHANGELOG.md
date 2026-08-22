@@ -7,6 +7,37 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.67.0
+### ✨ Features and improvements
+- **An exported archive is dated, and the filename is its own field.** Both the archive's name and
+  the file it lands in now carry the date by default, and both can be changed — separately. They
+  answer different questions: `Terrain-20260822.pmtiles` is what somebody finds on disk,
+  `Terrain 20260822` is what a map client shows, and tying one to the other only guarantees that
+  one of them is wrong whenever they should differ.
+
+  A filename given by hand is reduced to a single path segment before it is used, because it is
+  joined to a save path and a filename is exactly the kind of field somebody puts a slash in.
+  `../../etc/passwd` is tested.
+
+  The description starts empty and stays empty unless something is typed. It used to be
+  prefilled from the recipe, which is a different thing — a recipe describes how tiles are
+  combined, an archive describes what it is, and only the person exporting it knows that. The
+  server no longer falls back to the recipe either: filling in a field the dialog showed as
+  blank is a worse surprise than having no description. The date is recorded there regardless,
+  because a name can be changed to anything and then nothing else says when the archive was
+  made.
+
+  This corrects something 0.64.0 asserted and this project does not do. The name was left undated
+  on the reasoning that `/latest/<category>/` follows a rebuild by name. It does not: it resolves a
+  category and takes the newest by date, and nothing here looks an archive up by name at all — the
+  only name comparison in the codebase refuses two archives the same *file* path. The
+  documentation said so as well, and now says what is true.
+
+
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
 ## 0.66.0
 ### ✨ Features and improvements
 - **An export asks where it should go, and what to call it.** **Export to archive** now opens a

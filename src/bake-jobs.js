@@ -3,6 +3,7 @@ import {
   assertBakeable,
   bakeRevision,
   bakeStack,
+  bakedArchiveName,
   bakedName,
   mergeTileFor,
 } from './bake.js';
@@ -120,9 +121,15 @@ export class BakeManager {
     const publishDir =
       options.publishDir ?? (await this.#savePath(options)) ?? undefined;
 
-    // What the archive will be called, which the caller may have chosen. The
-    // file follows it; the date is what keeps successive builds apart.
-    const archiveName = options.name?.trim() || resolved.stack.title || stackId;
+    // Both dated by default and both overridable, separately: the archive's
+    // name is what a map client shows, and the filename is what somebody finds
+    // on disk. Tying them together only means one of the two is wrong whenever
+    // they should differ.
+    const when = new Date();
+    const archiveName = bakedArchiveName(resolved, {
+      name: options.name,
+      when,
+    });
 
     const job = {
       stackId,
@@ -138,7 +145,7 @@ export class BakeManager {
       finishedAt: null,
       error: null,
       infoHash: null,
-      name: bakedName(resolved, { when: new Date(), name: archiveName }),
+      name: bakedName(resolved, { filename: options.filename, when }),
       publishDir,
     };
     this.#jobs.set(stackId, job);
@@ -273,7 +280,10 @@ export class BakeManager {
       pauseMs: this.#config.stacks?.bakePauseMs ?? 0,
       metadata: {
         name: job.archiveName,
-        description: options.description ?? resolved.stack.description,
+        // Only what was asked for. Falling back to the recipe's own
+        // description would fill in a field the dialog showed as empty, which
+        // is a worse surprise than having no description at all.
+        description: options.description,
         attribution: resolved.stack.attribution,
         encoding: resolved.stack.output?.encoding,
         encodingFactors: resolved.stack.output,

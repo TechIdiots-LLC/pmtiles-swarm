@@ -228,23 +228,45 @@ function stamp(when = new Date()) {
 /**
  * What to call the file a bake writes.
  *
- * Dated, because successive bakes of one stack are successive builds of one
- * map and two files cannot share a path. The archive's *name* is not dated --
- * see `bakedMetadata` -- so a rebuild keeps its identity the way every other
- * rebuild here does.
+ * Dated by default, because successive bakes of one stack are successive builds
+ * of one map and two files cannot share a path.
  *
- * Follows the name it is given, so renaming an export in the dialog renames the
- * file too. A name and a filename that disagree is a small thing that costs an
- * afternoon the first time somebody goes looking on disk.
+ * A caller may name it instead, and what they ask for is reduced to a single
+ * path segment before it is used. That is not politeness: this name is joined
+ * to a directory, and a filename is exactly the kind of field somebody puts a
+ * slash in.
  * @param {object} resolved - The resolved stack.
- * @param {object} [options] - `name` to override the stack's, `when`, `suffix`.
- * @returns {string} - A filename.
+ * @param {object} [options] - `filename` to choose one outright, and `when`.
+ * @returns {string} - A filename, always ending `.pmtiles`.
  */
 export function bakedName(resolved, options = {}) {
-  const title = options.name ?? resolved.stack.title ?? resolved.stack.id;
+  const requested = String(options.filename ?? '').trim();
+  if (requested) {
+    const stem = safeSegment(requested.replace(/\.pmtiles$/i, ''));
+    if (stem) return `${stem}.pmtiles`;
+  }
+
+  const title = resolved.stack.title ?? resolved.stack.id;
   const slug = safeSegment(title) || 'stack';
-  const tail = options.suffix ? `-${options.suffix}` : '';
-  return `${slug}-${stamp(options.when)}${tail}.pmtiles`;
+  return `${slug}-${stamp(options.when)}.pmtiles`;
+}
+
+/**
+ * What to call the archive itself.
+ *
+ * Dated too, and separately from the file. Nothing in this project looks an
+ * archive up by name -- `/latest/<category>/` follows a category and takes the
+ * newest by date -- so a dated name costs nothing and says which build you are
+ * looking at, which is the question somebody holding two of them has.
+ * @param {object} resolved - The resolved stack.
+ * @param {object} [options] - `name` to choose one outright, and `when`.
+ * @returns {string} - The name.
+ */
+export function bakedArchiveName(resolved, options = {}) {
+  const explicit = String(options.name ?? '').trim();
+  if (explicit) return explicit;
+  const title = resolved.stack.title ?? resolved.stack.id;
+  return `${title} ${stamp(options.when)}`;
 }
 
 /**

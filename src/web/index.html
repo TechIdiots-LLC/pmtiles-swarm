@@ -661,19 +661,28 @@
 
         <div class="field">
           <label for="bake-name">Name</label>
-          <input id="bake-name" placeholder="Terrain" />
+          <input id="bake-name" placeholder="Terrain 20260101" />
           <div class="sub">
-            What the archive is called, and what a rebuild of it keeps — so
-            leave the date out of it. The file gets one:
-            <code id="bake-filename"></code>
+            What the archive calls itself, and what a map client shows. Dated by
+            default, because two builds of one map are easier to tell apart that
+            way — nothing here looks an archive up by name, so it is free to say
+            whatever is useful.
           </div>
         </div>
 
         <div class="field">
+          <label for="bake-file">Filename</label>
+          <input id="bake-file" placeholder="Terrain-20260101.pmtiles" />
+          <div class="sub" id="bake-filename"></div>
+        </div>
+
+        <div class="field">
           <label for="bake-description">Description</label>
-          <input id="bake-description" placeholder="Bathymetry under terrain" />
+          <input id="bake-description" placeholder="" />
           <div class="sub">
-            Optional. The date this was baked is added to whatever is here.
+            Optional, and empty by default — what a stack merges is the
+            operator's business and not something to guess at. The date this was
+            baked is recorded here whether or not anything else is.
           </div>
         </div>
 
@@ -7742,10 +7751,17 @@ Every piece is hashed against the ` +
        * @returns {Promise<void>} - Resolves once it is asked for or dismissed.
        */
       async function openBakeDialog(id, stack) {
+        const title = stack?.title ?? id;
+        const day = new Date().toISOString().slice(0, 10).replaceAll('-', '');
+
         $('bake-stack').textContent = id;
         $('bake-error').textContent = '';
-        $('bake-name').value = stack?.title ?? id;
-        $('bake-description').value = stack?.description ?? '';
+        $('bake-name').value = `${title} ${day}`;
+        $('bake-file').value = `${bakeSlug(title)}-${day}.pmtiles`;
+        // Blank rather than the stack's own description. A recipe describes
+        // how tiles are combined; an archive describes what it is, and only
+        // the person exporting it knows that.
+        $('bake-description').value = '';
         $('bake-categories').value = (stack?.categories ?? []).join(', ');
         showBakeFilename();
         $('bake-location').innerHTML = locationPicker('bake-loc');
@@ -7754,28 +7770,46 @@ Every piece is hashed against the ` +
       }
 
       /**
-       * Shows what the file will be called, as the name is typed.
+       * A name reduced to something usable as one path segment.
        *
-       * The same rules the server applies, because a name is not a filename:
-       * separators and the characters Windows refuses become dashes, and the
-       * date is appended so successive builds do not collide. Seeing that
-       * before pressing the button beats finding it on disk afterwards.
+       * The same rules `safeSegment` applies on the server, and a test holds
+       * the two together — a field that shows one filename while the server
+       * writes another is worse than a field that shows nothing.
+       * @param {string} typed - What somebody entered.
+       * @returns {string} - A safe segment, never empty.
+       */
+      function bakeSlug(typed) {
+        const slug = typed
+          .replace(/[/\\<>:"|?*\u0000-\u001f\u007f -]/g, '-')
+          .replace(/-{2,}/g, '-')
+          .replace(/^[.\s-]+/, '')
+          .replace(/[.\s-]+$/, '')
+          .slice(0, 120)
+          .replace(/[.\s-]+$/, '');
+        return slug || 'stack';
+      }
+
+      /**
+       * Says what the file will actually be called, where that differs.
+       *
+       * A filename is exactly the kind of field somebody puts a slash in, and
+       * the server reduces it to one path segment before joining it to a
+       * directory. Saying so here means it is not a surprise.
        * @returns {void}
        */
       function showBakeFilename() {
-        const typed = $('bake-name').value.trim() || $('bake-stack').textContent;
-        const slug =
-          typed
-            .replace(/[/\\<>:"|?*\u0000-\u001f\u007f -]/g, '-')
-            .replace(/-{2,}/g, '-')
-            .replace(/^[.\s-]+/, '')
-            .replace(/[.\s-]+$/, '')
-            .slice(0, 120) || 'stack';
-        const day = new Date().toISOString().slice(0, 10).replaceAll('-', '');
-        $('bake-filename').textContent = `${slug}-${day}.pmtiles`;
+        const typed = $('bake-file').value.trim();
+        const note = $('bake-filename');
+        if (!typed) {
+          note.textContent = 'Left empty, it is named after the stack and dated.';
+          return;
+        }
+        const settled = `${bakeSlug(typed.replace(/\.pmtiles$/i, ''))}.pmtiles`;
+        note.textContent =
+          settled === typed ? '' : `Saved as ${settled}`;
       }
 
-      $('bake-name').addEventListener('input', showBakeFilename);
+      $('bake-file').addEventListener('input', showBakeFilename);
 
       $('bake-form').addEventListener('submit', async (event) => {
         if (event.submitter?.value === 'cancel') return;
@@ -7787,6 +7821,7 @@ Every piece is hashed against the ` +
           .map((one) => one.trim())
           .filter(Boolean);
         const name = $('bake-name').value.trim();
+        const filename = $('bake-file').value.trim();
         const description = $('bake-description').value.trim();
 
         try {
@@ -7796,6 +7831,7 @@ Every piece is hashed against the ` +
               ...chosenLocation('bake-loc'),
               ...(categories.length > 0 ? { categories } : {}),
               ...(name ? { name } : {}),
+              ...(filename ? { filename } : {}),
               ...(description ? { description } : {}),
             },
           });
