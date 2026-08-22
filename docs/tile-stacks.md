@@ -201,22 +201,22 @@ it differs from the snake_case rio-rgbify-merge uses.
 
 ### Stack fields
 
-| Field                 | Meaning                                                                   |
-| --------------------- | ------------------------------------------------------------------------- |
-| `id`                  | URL segment. `/stacks/<id>/…`                                             |
-| `title`               | Shown in the console and in TileJSON `name`.                              |
-| `space`               | `elevation` or `rgba`. Decides the combining maths.                       |
-| `sources`             | **Bottom first.** The last entry paints over the others.                  |
-| `output.encoding`     | `mapbox` or `terrarium`. Elevation space only.                            |
-| `output.format`       | `webp` or `png`.                                                          |
-| `output.nodata`       | Height an uncovered pixel encodes as. Elevation space only.               |
-| `output.tileSize`     | Pixels. Every source is resampled to it.                                  |
-| `resampling`          | `nearest`, `bilinear`, `cubic` or `lanczos`.                              |
-| `gaussianBlurSigma`   | Multiplied by the zoom distance of an upscaled parent. `0` disables.      |
-| `boundsSource`        | Index into `sources` whose bounds become the stack's. Omit for the union. |
-| `bounds`              | Explicit `[w, s, e, n]`. Wins over `boundsSource`.                        |
-| `minzoom` / `maxzoom` | Clamps. Default to the min and **max** over the sources.                  |
-| `attribution`         | Falls back to every source's, concatenated.                               |
+| Field                 | Meaning                                                                                                    |
+| --------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `id`                  | URL segment. `/stacks/<id>/…`                                                                              |
+| `title`               | Shown in the console and in TileJSON `name`.                                                               |
+| `space`               | `elevation` or `rgba`. Decides the combining maths.                                                        |
+| `sources`             | **Bottom first.** The last entry paints over the others.                                                   |
+| `output.encoding`     | `mapbox` or `terrarium`. Elevation space only.                                                             |
+| `output.format`       | `webp` or `png`.                                                                                           |
+| `output.nodata`       | Height an uncovered pixel encodes as. Elevation space only.                                                |
+| `output.tileSize`     | 256 or 512, the stack's default. A URL overrides it per request; with neither, the largest source decides. |
+| `resampling`          | `nearest`, `bilinear`, `cubic` or `lanczos`.                                                               |
+| `gaussianBlurSigma`   | Multiplied by the zoom distance of an upscaled parent. `0` disables.                                       |
+| `boundsSource`        | Index into `sources` whose bounds become the stack's. Omit for the union.                                  |
+| `bounds`              | Explicit `[w, s, e, n]`. Wins over `boundsSource`.                                                         |
+| `minzoom` / `maxzoom` | Clamps. Default to the min and **max** over the sources.                                                   |
+| `attribution`         | Falls back to every source's, concatenated.                                                                |
 
 ### Source fields
 
@@ -704,8 +704,7 @@ yet, so this is the first, and the buttons are what make it safe to add.
 
 Refuses, because the stack cannot work:
 
-- Two sources with different `tileSize` and no `output.tileSize` to resample to.
-  See [Open questions](#open-questions).
+- A recipe naming an `output.tileSize` that is not 256 or 512.
 - A source that resolves to nothing — an empty category, or an archive that
   retention has removed.
 - No pixel codec installed, for any stack that is not pure passthrough. The

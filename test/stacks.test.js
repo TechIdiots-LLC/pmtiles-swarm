@@ -212,6 +212,30 @@ describe('the numbers an encoding needs', () => {
     assert.match(problems.join(' '), /output uses encoding "custom"/);
   });
 
+  it('refuses an output tile size it does not serve', () => {
+    assert.match(
+      validateStack({
+        id: 'a',
+        sources: [{ category: 'x' }],
+        output: { tileSize: 1024 },
+      }).join(' '),
+      /output.tileSize must be 256 or 512/,
+    );
+  });
+
+  it('accepts the two it does', () => {
+    for (const tileSize of [256, 512]) {
+      assert.deepEqual(
+        validateStack({
+          id: 'a',
+          sources: [{ category: 'x' }],
+          output: { tileSize },
+        }),
+        [],
+      );
+    }
+  });
+
   it('accepts a mapbox source that states its own base and interval', () => {
     // A DEM at half-metre steps from a different floor is still mapbox, not a
     // custom encoding -- the interval scales all three channels and baseVal is
@@ -1201,6 +1225,31 @@ describe('sources whose tiles are a different size', { skip: !codec }, () => {
     // A tile's coordinates are an extent, not a pixel count, so the same
     // ground comes back on a finer grid.
     assert.equal(await at('/stacks/sized/512/1/0/0.webp'), 512);
+  });
+
+  it('uses the size the recipe sets when the URL says nothing', async () => {
+    // The recipe's default, below a URL and above the sources.
+    const one = archive('c7'.repeat(20), 'one.pmtiles', ['one']);
+    const node = await serve(
+      [one],
+      [
+        {
+          id: 'defaulted',
+          sources: [{ category: 'one', heightAdjustment: 1 }],
+          output: { format: 'webp', tileSize: 512 },
+        },
+      ],
+      { [one.infoHash]: { '1/0/0': await tileOf(100, 256) } },
+    );
+    after(() => node.close());
+
+    const raster = await codec.decode(
+      Buffer.from(
+        await (await node.get('/stacks/defaulted/1/0/0.webp')).arrayBuffer(),
+      ),
+      { channels: 3 },
+    );
+    assert.equal(raster.width, 512);
   });
 
   it('refuses a size it does not serve', async () => {

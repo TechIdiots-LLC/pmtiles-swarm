@@ -45,7 +45,8 @@ import { BLEND_MODES, isBlendMode } from './rgba.js';
  * @property {string} [title] - Shown in the console and in TileJSON.
  * @property {string} [space] - 'elevation' (default) or 'rgba'.
  * @property {StackSource[]} sources - Bottom first; the last paints over.
- * @property {object} [output] - encoding, format, nodata, tileSize.
+ * @property {object} [output] - encoding, format, nodata, tileSize (256 or
+ *   512), and the four factors when encoding is 'custom'.
  * @property {number} [minzoom] - Floor. Defaults to the minimum over sources.
  * @property {number} [maxzoom] - Ceiling. Defaults to the maximum over sources.
  * @property {number[]} [bounds] - Explicit [w, s, e, n]. Wins over boundsSource.
@@ -141,6 +142,15 @@ export function validateStack(stack) {
       'output uses encoding "custom" and needs all of redFactor, ' +
         'greenFactor, blueFactor, baseShift',
     );
+  }
+  if (
+    stack.output?.tileSize !== undefined &&
+    ![256, 512].includes(Number(stack.output.tileSize))
+  ) {
+    // Refused rather than clamped, and refused here rather than at the first
+    // tile: a recipe naming a size nothing serves is one somebody should be
+    // told about while they are still looking at it.
+    problems.push('output.tileSize must be 256 or 512');
   }
   if (stack.resampling !== undefined && !isResampling(stack.resampling)) {
     problems.push(`resampling must be one of ${RESAMPLING.join(', ')}`);

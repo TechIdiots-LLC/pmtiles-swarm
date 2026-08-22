@@ -848,23 +848,35 @@
               <option value="lanczos">lanczos</option>
             </select>
             <span class="sub">Used where a source has no tile at this zoom and
-              one is taken from its parent. <code>cubic</code> is what GDAL and
-              rasterio mean by that name, so it matches an offline merge
-              configured the same way.</span>
+              one is taken from its parent.</span>
           </div>
         </div>
 
         <div class="field">
-          <label>Tile format</label>
+          <label>Tile format and size</label>
           <div class="bar">
             <label class="choice">
               <select id="stack-out-format">
-                <option value="">same as the sources</option>
+                <option value="">format: same as the sources</option>
                 <option value="webp">webp</option>
                 <option value="png">png</option>
               </select>
             </label>
+            <label class="choice">
+              <select id="stack-out-tilesize">
+                <option value="">size: follow the sources</option>
+                <option value="256">256 px</option>
+                <option value="512">512 px</option>
+              </select>
+            </label>
             <span class="sub" id="stack-format-note"></span>
+          </div>
+          <div class="sub">
+            A tile's coordinates are an extent rather than a pixel count, so a
+            size is not a crop: it is the same ground on a finer or coarser
+            grid. Left to follow the sources, the largest one decides — which
+            keeps the finest data the stack has. A request can override this
+            with <code>/stacks/&lt;id&gt;/512/{z}/{x}/{y}</code>.
           </div>
         </div>
 
@@ -6191,6 +6203,7 @@ Every piece is hashed against the ` +
         }
         $('stack-out-format').value = stackDraft.output.format ?? '';
         $('stack-resampling').value = stackDraft.resampling ?? '';
+        $('stack-out-tilesize').value = stackDraft.output.tileSize ?? '';
         $('stack-error').textContent = '';
 
         await fillStackSourceChoices();
@@ -6590,6 +6603,9 @@ Every piece is hashed against the ` +
         }
         if ($('stack-resampling').value) {
           body.resampling = $('stack-resampling').value;
+        }
+        if ($('stack-out-tilesize').value) {
+          body.output.tileSize = Number($('stack-out-tilesize').value);
         }
         if (!draftIsRgba()) {
           const encoding = $('stack-out-encoding').value;
