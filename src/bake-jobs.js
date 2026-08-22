@@ -181,9 +181,13 @@ export class BakeManager {
     const destination = path.join(workDir, job.name);
     const format = outputFormat(resolved);
 
-    // Only where there is pixel work to move. A passthrough bake hands bytes
-    // straight through and would pay for a thread it never uses.
-    const pixels = codec ? new PixelWorker() : null;
+    // Sized with the batch, so every merge in flight has a thread to do its
+    // arithmetic on rather than queueing behind one. Only where there is pixel
+    // work to move: a passthrough bake hands bytes straight through and would
+    // pay for threads it never uses.
+    const pixels = codec
+      ? new PixelWorker({ size: this.#concurrency() })
+      : null;
     try {
       await this.#merge(
         job,
@@ -281,6 +285,7 @@ export class BakeManager {
       }),
       header: { format },
       pauseMs: this.#config.stacks?.bakePauseMs ?? 0,
+      concurrency: this.#concurrency(),
       metadata: {
         name: job.archiveName,
         // Only what was asked for. Falling back to the recipe's own
@@ -301,6 +306,18 @@ export class BakeManager {
     });
 
     job.tiles = result.written;
+  }
+
+  /**
+   * How many tiles to merge at once, and how many threads to do it on.
+   *
+   * One place decides it, so the batch and the pool behind it cannot end up
+   * different sizes -- which would mean either idle threads or merges queueing
+   * behind one.
+   * @returns {number} - At least one.
+   */
+  #concurrency() {
+    return Math.max(1, Math.floor(this.#config.stacks?.bakeConcurrency ?? 4));
   }
 
   /**

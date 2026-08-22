@@ -7,8 +7,44 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.69.0
+### ✨ Features and improvements
+- **An export merges several tiles at once.** It did one at a time, start to finish, before
+  beginning the next — and every tile is several reads, a decode each and an encode, none of which
+  overlapped with anything. On a twelve-core machine that was two cores busy and ten idle.
+
+  `stacks.bakeConcurrency` (four by default) is both how many merges are in flight and how many
+  threads do their pixel maths: the worker was a single thread, so making the loop concurrent
+  without a pool behind it would only have moved the queue. Measured on two 512px sources per
+  tile, 9.8 ms a tile becomes 4.9 at four; past that the gain tapers, so four is where the default
+  sits.
+
+  **Merged in any order, written in ascending order.** That is not a nicety — an archive whose
+  tiles arrive out of order is not clustered, which is the one property that makes a range read
+  cheap and the reason this project serves PMTiles at all. The run-length encoding that saves most
+  of a terrain archive also only collapses neighbours that arrive as neighbours. So a batch is
+  merged however the machine likes and written in the order it was taken.
+
+  Batches rather than a sliding window, because the checkpoint has to name a tile everything
+  before which is done: at a batch boundary that is simply the last id of the batch, where with
+  tiles finishing out of order it would be the highest contiguous one — a second thing to get
+  right for no more speed. The cost is that a cancelled batch is not recorded and its tiles are
+  merged again, bounded by the batch.
+
+  `stacks.bakePauseMs` now waits after each batch rather than each tile. Same trade, coarser
+  grain.
+
+### 🐞 Bug fixes
+- **A bake cancelled during its last batch finished anyway.** The abort signal was checked when a
+  tile id was pulled from the sources, and a batch can be the last one — so a cancel arriving
+  while it ran was never looked at again, and the export completed as though nobody had asked it
+  to stop. Checked around each batch as well now.
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
 ## 0.68.3
-### 🐞 Bug fixes
+### 🐞 Bug fixes
 - **Exporting a stack failed on its first merged tile.** "Cannot transfer object of unsupported
   type", and the export stopped — reported on the stack, with its checkpoint kept, but stopped.
 
@@ -27,7 +63,7 @@
   codec first, and it fails against the old code.
 
 ## 0.68.2
-### 🐞 Bug fixes
+### 🐞 Bug fixes
 - **Archives were listed under a heading that said Stacks.** The catalogue page's Archives
   heading was appended to the end of the categories block rather than to the archives themselves.
   That was invisible while the two sections were adjacent and wrong the moment anything was

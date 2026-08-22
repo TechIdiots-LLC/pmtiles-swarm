@@ -18,33 +18,39 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const REPLY_TIMEOUT_MS = 120000;
 
 export class PixelWorker {
-  #worker;
+  #workers = [];
   #pending = new Map();
   #next = 1;
   #closed = false;
 
   /**
-   * Starts a worker.
-   * @param {object} [options] - `timeoutMs` for a reply.
+   * Starts a pool of them.
+   *
+   * More than one because a merge is mostly arithmetic and a bake has a whole
+   * machine to do it on. One thread was the entire ceiling on how fast an
+   * export could go, whatever else was made concurrent above it.
+   * @param {object} [options] - `size`, and `timeoutMs` for a reply.
    */
   constructor(options = {}) {
-    this.#worker = new Worker(path.join(here, 'pixel-worker.js'));
     this.timeoutMs = options.timeoutMs ?? REPLY_TIMEOUT_MS;
-    // The thread does not hold the process open. A bake keeps it busy; nothing
-    // else should keep it alive.
-    this.#worker.unref();
+    const size = Math.max(1, Math.floor(options.size ?? 1));
 
-    this.#worker.on('message', (message) => {
+    // A request id is unique across the pool, so a reply carries everything
+    // needed to find who was waiting for it and no routing table is required.
+    const settle = (message) => {
       const waiting = this.#pending.get(message.id);
       if (!waiting) return;
       this.#pending.delete(message.id);
       clearTimeout(waiting.timer);
+      waiting.slot.inFlight -= 1;
       if (message.error) waiting.reject(new Error(message.error));
       else waiting.resolve(message.raster);
-    });
+    };
 
     // A worker that dies takes every request in flight with it, and saying so
-    // is better than leaving them pending for ever.
+    // is better than leaving them pending for ever. One death closes the pool:
+    // a merge that lost its thread has no answer, and the others are running
+    // the same code on the same kind of input.
     const fail = (error) => {
       this.#closed = true;
       for (const waiting of this.#pending.values()) {
@@ -53,11 +59,25 @@ export class PixelWorker {
       }
       this.#pending.clear();
     };
-    this.#worker.on('error', fail);
-    this.#worker.on('exit', (code) => {
-      if (!this.#closed)
-        fail(new Error(`the pixel worker exited with ${code}`));
-    });
+
+    for (let index = 0; index < size; index += 1) {
+      const worker = new Worker(path.join(here, 'pixel-worker.js'));
+      // The threads do not hold the process open. A bake keeps them busy;
+      // nothing else should keep them alive.
+      worker.unref();
+      worker.on('message', settle);
+      worker.on('error', fail);
+      worker.on('exit', (code) => {
+        if (!this.#closed)
+          fail(new Error(`a pixel worker exited with ${code}`));
+      });
+      this.#workers.push({ worker, inFlight: 0 });
+    }
+  }
+
+  /** How many threads this pool holds. @returns {number} - The count. */
+  get size() {
+    return this.#workers.length;
   }
 
   /**
@@ -101,14 +121,24 @@ export class PixelWorker {
       };
     });
 
+    // The least busy one, rather than the next one round. With tiles that take
+    // unequal time -- and they do, since a tile the short-circuit takes never
+    // arrives here at all -- round-robin queues work behind a thread that is
+    // still going while another sits idle.
+    const slot = this.#workers.reduce((fewest, one) =>
+      one.inFlight < fewest.inFlight ? one : fewest,
+    );
+    slot.inFlight += 1;
+
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
+        slot.inFlight -= 1;
         reject(new Error('the pixel worker did not answer'));
       }, this.timeoutMs);
       timer.unref?.();
-      this.#pending.set(id, { resolve, reject, timer });
-      this.#worker.postMessage(
+      this.#pending.set(id, { resolve, reject, timer, slot });
+      slot.worker.postMessage(
         { id, job: { ...job, contributions } },
         transfers,
       );
@@ -121,6 +151,6 @@ export class PixelWorker {
    */
   async close() {
     this.#closed = true;
-    await this.#worker.terminate();
+    await Promise.all(this.#workers.map((one) => one.worker.terminate()));
   }
 }

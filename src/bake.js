@@ -25,6 +25,9 @@ import { Compression, PMTilesWriter, TileType } from './pmtiles-write.js';
 /** Tiles merged between checkpoints. */
 const DEFAULT_CHECKPOINT_EVERY = 5000;
 
+/** Tiles merged at once. */
+const DEFAULT_CONCURRENCY = 4;
+
 /** What the working directory holds while a bake is in progress. */
 const FILES = Object.freeze({
   state: 'bake-state.json',
@@ -452,7 +455,9 @@ export async function bakeStack(options) {
     deduplicate = true,
     checkpointEvery = DEFAULT_CHECKPOINT_EVERY,
     pauseMs = 0,
+    concurrency = DEFAULT_CONCURRENCY,
   } = options;
+  const batchSize = Math.max(1, Math.floor(concurrency));
 
   if (!sources?.length) throw new Error('a bake needs at least one source');
   await fs.mkdir(workDir, { recursive: true });
@@ -506,6 +511,72 @@ export async function bakeStack(options) {
   };
 
   try {
+    // Merged in batches, written in order.
+    //
+    // Merging one tile at a time was the whole ceiling on how fast an export
+    // could go: every tile is several reads, a decode each and an encode, and
+    // none of it overlapped with the next tile's. A batch runs them together.
+    //
+    // The writing does not overlap, and must not. Tiles have to reach the
+    // archive in ascending id order or it is not clustered, which is the one
+    // property that makes a range read cheap -- and run-length encoding, which
+    // is most of the saving on terrain, only collapses neighbours that arrive
+    // as neighbours. So a batch is merged in any order the machine likes and
+    // then written in the order it was taken.
+    //
+    // Batches rather than a sliding window because the checkpoint has to name
+    // a tile everything before which is done. At a batch boundary that is
+    // simply the last id of the batch; with tiles finishing out of order it
+    // would be the highest contiguous one, which is a second thing to get
+    // right for no more speed.
+    let batch = [];
+
+    /**
+     * Merges a batch together, then writes it in order.
+     * @returns {Promise<void>} - Resolves once the batch is in the archive.
+     */
+    const flush = async () => {
+      if (batch.length === 0) return;
+      // Checked here as well as when an id is pulled. A cancel arriving during
+      // a batch would otherwise not be noticed until the next id -- and where
+      // the batch was the last one there is no next id, so the bake would
+      // finish as though nobody had asked it to stop.
+      signal?.throwIfAborted();
+
+      const merged = await Promise.all(
+        batch.map(async (tileId) => {
+          const [z, x, y] = tileIdToZxy(tileId);
+          return { tileId, z, x, y, data: await mergeTile(z, x, y) };
+        }),
+      );
+
+      for (const tile of merged) {
+        if (tile.data) {
+          await writer.writeTile(tile.tileId, tile.data);
+          written += 1;
+        } else {
+          skipped += 1;
+        }
+        lastTileId = tile.tileId;
+        sinceCheckpoint += 1;
+        onProgress?.({ written, skipped, ...tile, data: undefined });
+      }
+
+      batch = [];
+      if (sinceCheckpoint >= checkpointEvery) await checkpoint();
+      signal?.throwIfAborted();
+
+      // Handing time back, where the operator asked for that. A bake on a node
+      // that is also serving tiles holds the main thread for a few
+      // milliseconds per tile -- the pixel maths is synchronous -- and this is
+      // the knob that trades how long the bake takes for how much of the
+      // machine it takes while it runs. Off by default, because a node baking
+      // nothing else pays for this and gets nothing.
+      if (pauseMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, pauseMs));
+      }
+    };
+
     for await (const tileId of unionOfTileIds(sources, { signal })) {
       // Everything up to and including the checkpoint has been dealt with.
       // Skipped rather than sought, because the union is a stream and seeking
@@ -513,30 +584,10 @@ export async function bakeStack(options) {
       if (tileId <= lastTileId) continue;
       signal?.throwIfAborted();
 
-      const [z, x, y] = tileIdToZxy(tileId);
-      const data = await mergeTile(z, x, y);
-      if (data) {
-        await writer.writeTile(tileId, data);
-        written += 1;
-      } else {
-        skipped += 1;
-      }
-
-      lastTileId = tileId;
-      sinceCheckpoint += 1;
-      onProgress?.({ written, skipped, tileId, z, x, y });
-      if (sinceCheckpoint >= checkpointEvery) await checkpoint();
-
-      // Handing time back, where the operator asked for that. A bake on a node
-      // that is also serving tiles holds the main thread for a few milliseconds
-      // per tile -- the pixel maths is synchronous -- and this is the knob that
-      // trades how long the bake takes for how much of the machine it takes
-      // while it runs. Off by default, because a node baking nothing else pays
-      // for this and gets nothing.
-      if (pauseMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, pauseMs));
-      }
+      batch.push(tileId);
+      if (batch.length >= batchSize) await flush();
     }
+    await flush();
   } catch (error) {
     // A cancelled bake keeps its work. Deleting it would make stopping and
     // failing the same thing, and this is a job somebody may have been running

@@ -5212,16 +5212,28 @@ Every piece is hashed against the ` +
                 'beside the first. Evicted least-recently-used.',
             },
             {
+              key: 'stacks.bakeConcurrency',
+              label: 'Tiles exported at once',
+              type: 'number',
+              placeholder: '4',
+              help:
+                'Each tile is several reads, a decode each and an encode, and ' +
+                'one at a time none of it overlaps. This is both how many are ' +
+                'in flight and how many threads do the pixel maths. One ' +
+                'restores the old behaviour. They are written in order ' +
+                'whatever it is set to.',
+            },
+            {
               key: 'stacks.bakePauseMs',
               label: 'Pause between tiles while exporting',
               type: 'number',
               placeholder: '0',
               unit: 'ms',
               help:
-                'Zero is as fast as it can go. A merge does its pixel maths ' +
-                'on the main thread, so an export holds it for a few ' +
-                'milliseconds per tile and every request waits behind that. ' +
-                'Set this on a node that is also serving maps.',
+                'Zero is as fast as it can go. Waited after each batch, so ' +
+                'with the setting above at four it is one pause per four ' +
+                'tiles. Worth setting on a node that is also serving maps; a ' +
+                'node doing nothing else pays for it and gets nothing.',
             },
             {
               key: 'stacks.cacheDir',

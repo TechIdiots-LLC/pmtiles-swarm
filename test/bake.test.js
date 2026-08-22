@@ -273,6 +273,9 @@ describe('stopping a bake and picking it up again', () => {
       return Buffer.from(`m-${id}`);
     };
 
+    // One at a time, so the tile it stops on is exactly the tile it resumes
+    // after. Batched, a cancel costs the whole batch -- which is correct and
+    // is what the test below covers.
     await assert.rejects(() =>
       bakeStack({
         sources: [a],
@@ -281,6 +284,7 @@ describe('stopping a bake and picking it up again', () => {
         revision: 'r1',
         signal: controller.signal,
         checkpointEvery: 1,
+        concurrency: 1,
         mergeTile: async (z, x, y) => {
           if (zxyToTileId(z, x, y) === 3) controller.abort();
           return merge(z, x, y);
@@ -295,6 +299,7 @@ describe('stopping a bake and picking it up again', () => {
       destination,
       revision: 'r1',
       checkpointEvery: 1,
+      concurrency: 1,
       mergeTile: async (z, x, y) => {
         second.push(zxyToTileId(z, x, y));
         return merge(z, x, y);
@@ -457,9 +462,11 @@ describe('stopping a bake and picking it up again', () => {
     assert.equal(tiles.size, 6);
   });
 
-  it('waits between tiles when it is told to', async () => {
+  it('waits between batches when it is told to', async () => {
     // The knob that trades how long a bake takes for how much of the machine
-    // it takes while it runs.
+    // it takes while it runs. One tile at a time here, so four tiles are four
+    // batches and four pauses -- with concurrency they are fewer and longer,
+    // which is the same trade at a coarser grain.
     const a = await sourceOf([1, 2, 3, 4]);
     const workDir = await scratch();
     const started = Date.now();
@@ -468,6 +475,7 @@ describe('stopping a bake and picking it up again', () => {
       workDir,
       destination: path.join(workDir, 'slow.pmtiles'),
       revision: 'r1',
+      concurrency: 1,
       mergeTile: async () => Buffer.from('x'),
       header: { format: 'png' },
       pauseMs: 15,
@@ -476,6 +484,132 @@ describe('stopping a bake and picking it up again', () => {
       Date.now() - started >= 45,
       'it did not pause between tiles at all',
     );
+  });
+
+  it('merges several at once but writes them in order', async () => {
+    // Order is not a nicety. Tiles have to reach the archive ascending or it
+    // is not clustered, which is the one property that makes a range read
+    // cheap -- and the run-length encoding that saves most of a terrain
+    // archive only collapses neighbours that arrive as neighbours.
+    const ids = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+    const a = await sourceOf(ids);
+    const workDir = await scratch();
+    const destination = path.join(workDir, 'ordered.pmtiles');
+
+    let inFlight = 0;
+    let mostAtOnce = 0;
+    const written = [];
+
+    const result = await bakeStack({
+      sources: [a],
+      workDir,
+      destination,
+      revision: 'r1',
+      concurrency: 4,
+      mergeTile: async (z, x, y) => {
+        inFlight += 1;
+        mostAtOnce = Math.max(mostAtOnce, inFlight);
+        // Finishing out of order on purpose: the later the tile, the sooner
+        // it is done, so anything relying on completion order breaks here.
+        await new Promise((resolve) =>
+          setTimeout(resolve, 10 - (zxyToTileId(z, x, y) % 5)),
+        );
+        inFlight -= 1;
+        written.push(zxyToTileId(z, x, y));
+        return Buffer.from(`m-${zxyToTileId(z, x, y)}`);
+      },
+      header: { format: 'png' },
+    });
+
+    assert.ok(mostAtOnce > 1, 'nothing ran concurrently');
+    assert.ok(mostAtOnce <= 4, `${mostAtOnce} at once, over the limit`);
+    // The merges finished out of order...
+    assert.notDeepEqual(written, ids, 'the merges did not overlap at all');
+    // ...and the archive still holds every one of them.
+    assert.equal(result.written, ids.length);
+    const tiles = await tilesOf(destination, ids);
+    for (const id of ids) assert.equal(tiles.get(id), `m-${id}`, `tile ${id}`);
+  });
+
+  it('says it is clustered, having written in order', async () => {
+    const a = await sourceOf([10, 11, 12, 13, 14, 15, 16, 17]);
+    const workDir = await scratch();
+    const result = await bakeStack({
+      sources: [a],
+      workDir,
+      destination: path.join(workDir, 'clustered.pmtiles'),
+      revision: 'r1',
+      concurrency: 4,
+      mergeTile: async (z, x, y) => Buffer.from(`t-${zxyToTileId(z, x, y)}`),
+      header: { format: 'png' },
+    });
+    assert.equal(result.header.clustered, true);
+  });
+
+  it('stops when cancelled during its last batch', async () => {
+    // The signal is checked when an id is pulled, and a batch can be the last
+    // one -- so it is checked around the batch too, or a cancelled bake would
+    // finish as though nobody had asked.
+    const a = await sourceOf([1, 2, 3]);
+    const workDir = await scratch();
+    const controller = new AbortController();
+
+    await assert.rejects(() =>
+      bakeStack({
+        sources: [a],
+        workDir,
+        destination: path.join(workDir, 'stopped-late.pmtiles'),
+        revision: 'r1',
+        signal: controller.signal,
+        concurrency: 4,
+        mergeTile: async (z, x, y) => {
+          if (zxyToTileId(z, x, y) === 2) controller.abort();
+          return Buffer.from('x');
+        },
+      }),
+    );
+  });
+
+  it('resumes after a batch boundary rather than mid-batch', async () => {
+    // A cancelled batch is not recorded, so its tiles are merged again. That
+    // is the cost of doing several at once, and it is bounded by the batch.
+    const ids = [1, 2, 3, 4, 5, 6, 7, 8];
+    const a = await sourceOf(ids);
+    const workDir = await scratch();
+    const destination = path.join(workDir, 'batched-resume.pmtiles');
+    const controller = new AbortController();
+
+    await assert.rejects(() =>
+      bakeStack({
+        sources: [a],
+        workDir,
+        destination,
+        revision: 'r1',
+        signal: controller.signal,
+        concurrency: 2,
+        checkpointEvery: 1,
+        mergeTile: async (z, x, y) => {
+          if (zxyToTileId(z, x, y) === 5) controller.abort();
+          return Buffer.from(`m-${zxyToTileId(z, x, y)}`);
+        },
+      }),
+    );
+
+    const result = await bakeStack({
+      sources: [a],
+      workDir,
+      destination,
+      revision: 'r1',
+      concurrency: 2,
+      checkpointEvery: 1,
+      mergeTile: async (z, x, y) => Buffer.from(`m-${zxyToTileId(z, x, y)}`),
+      header: { format: 'png' },
+    });
+
+    assert.equal(result.resumed, true);
+    assert.equal(result.written, ids.length);
+    const tiles = await tilesOf(destination, ids);
+    for (const id of ids) assert.equal(tiles.get(id), `m-${id}`, `tile ${id}`);
   });
 
   it('ignores a checkpoint whose tile buffer went missing', async () => {

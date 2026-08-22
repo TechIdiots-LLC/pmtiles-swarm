@@ -375,6 +375,19 @@ const DEFAULTS = {
      * gets nothing.
      */
     bakePauseMs: 0,
+    /**
+     * How many tiles an export merges at once.
+     *
+     * Every tile is several reads, a decode each and an encode, and one at a
+     * time none of it overlaps with the next tile's -- which was the whole
+     * ceiling on how fast an export could go, on a machine with cores to spare.
+     * Sized with the pixel workers, so this is both how many merges are in
+     * flight and how many threads do their arithmetic.
+     *
+     * They are written in order whatever this is, because an archive that is
+     * not clustered is bad at the one thing PMTiles is for.
+     */
+    bakeConcurrency: 4,
   },
   /**
    * Folders scanned for new archives. Each entry is `{ path, categories,
