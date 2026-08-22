@@ -3616,7 +3616,12 @@ export function createApp({
         // way, which is why they are one route rather than two.
         let raster;
         if (rgba) {
-          const composited = compositeRgba(contributions, { z, x, y });
+          const composited = compositeRgba(contributions, {
+            z,
+            x,
+            y,
+            resampling: resolved.stack.resampling,
+          });
           if (!composited) return { said, empty: true };
           // Alpha is kept unless the recipe asks for a flat tile. A stack
           // whose top layer is masked has transparency by construction, and
@@ -3629,6 +3634,7 @@ export function createApp({
             y,
             size,
             gaussianBlurSigma: resolved.stack.gaussianBlurSigma,
+            resampling: resolved.stack.resampling,
           });
           // Nothing covered this tile, so there is none worth sending. The
           // client overzooms a lower one, which is cheaper and better looking

@@ -1,7 +1,9 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
 import {
+  RESAMPLING,
   blurHeights,
+  isResampling,
   encodingFactors,
   hasUsableEncoding,
   maskColors,
@@ -380,6 +382,119 @@ describe('taking a tile from its parent', () => {
       parentZ: 5,
     });
     assert.equal(same, heights);
+  });
+});
+
+describe('the resampling kernels', () => {
+  /**
+   * A parent with a hard step in it.
+   *
+   * A quarter of the way across rather than down the middle, because these
+   * sample the top-left quadrant: a step at the midpoint falls exactly on the
+   * quadrant boundary, so the child sees only the flat side and every kernel
+   * rightly agrees there is nothing to interpolate.
+   * @param {number} size - Pixels per side.
+   * @returns {Float32Array} - The parent's heights.
+   */
+  const stepped = (size) => {
+    const heights = new Float32Array(size * size);
+    for (let i = 0; i < heights.length; i += 1) {
+      heights[i] = i % size < size / 4 ? 0 : 100;
+    }
+    return heights;
+  };
+
+  it('offers the four a recipe may name', () => {
+    assert.deepEqual([...RESAMPLING].sort(), [
+      'bilinear',
+      'cubic',
+      'lanczos',
+      'nearest',
+    ]);
+    assert.ok(isResampling('cubic'));
+    assert.ok(!isResampling('bicubic'));
+  });
+
+  it('keeps every value one of the originals with nearest', () => {
+    // The property that makes nearest the right choice for categorical data:
+    // it never invents a height that was not in the source.
+    const size = 8;
+    const child = resampleFromParent(
+      stepped(size),
+      size,
+      { z: 1, x: 0, y: 0, parentZ: 0 },
+      'nearest',
+    );
+    for (const value of child) assert.ok(value === 0 || value === 100);
+  });
+
+  it('smooths the step with the wider kernels', () => {
+    const size = 8;
+    const parent = stepped(size);
+    const tile = { z: 1, x: 0, y: 0, parentZ: 0 };
+    const distinct = (kernel) =>
+      new Set(
+        [...resampleFromParent(parent, size, tile, kernel)].map((v) =>
+          v.toFixed(3),
+        ),
+      ).size;
+
+    // nearest reproduces two values; anything interpolating produces more.
+    assert.equal(distinct('nearest'), 2);
+    assert.ok(distinct('bilinear') > 2, 'bilinear should interpolate');
+    assert.ok(distinct('cubic') > 2, 'cubic should interpolate');
+    assert.ok(distinct('lanczos') > 2, 'lanczos should interpolate');
+  });
+
+  it('overshoots with cubic and lanczos, as those kernels do', () => {
+    // Their negative lobes ring past the input range. Not clamped, because
+    // GDAL does not clamp either and a stack configured for cubic should
+    // resample the way the offline merge configured for cubic does.
+    const size = 16;
+    const parent = stepped(size);
+    const tile = { z: 1, x: 0, y: 0, parentZ: 0 };
+    const range = (kernel) => {
+      const out = resampleFromParent(parent, size, tile, kernel);
+      return [Math.min(...out), Math.max(...out)];
+    };
+    const [lowBilinear] = range('bilinear');
+    const [lowCubic] = range('cubic');
+    assert.ok(lowBilinear >= -0.001, 'bilinear stays inside the range');
+    assert.ok(lowCubic < lowBilinear, 'cubic rings below it');
+  });
+
+  it('does not spread no-data, whichever kernel is used', () => {
+    // A wider kernel reaches further, so a mask would eat more of a coastline
+    // if the weights were not renormalised over the samples that have data.
+    const size = 8;
+    const parent = new Float32Array(size * size).fill(100);
+    parent[0] = Number.NaN;
+    for (const kernel of RESAMPLING) {
+      const child = resampleFromParent(
+        parent,
+        size,
+        { z: 1, x: 0, y: 0, parentZ: 0 },
+        kernel,
+      );
+      const covered = [...child].filter((v) => !Number.isNaN(v));
+      assert.ok(covered.length > 0, `${kernel} lost the whole tile`);
+      for (const value of covered) {
+        assert.ok(
+          Math.abs(value - 100) < 0.001,
+          `${kernel} let no-data pull a value to ${value}`,
+        );
+      }
+    }
+  });
+
+  it('falls back to bilinear for a name it does not know', () => {
+    const size = 4;
+    const parent = stepped(size);
+    const tile = { z: 1, x: 0, y: 0, parentZ: 0 };
+    assert.deepEqual(
+      [...resampleFromParent(parent, size, tile, 'nonsense')],
+      [...resampleFromParent(parent, size, tile, 'bilinear')],
+    );
   });
 });
 

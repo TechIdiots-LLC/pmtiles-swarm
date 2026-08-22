@@ -317,6 +317,24 @@ yOffset = y % 2^d
 in tile space — a plain crop-and-scale. There is no reprojection to do, and the
 implementation should not pretend otherwise.
 
+The kernel is the recipe's to choose. `nearest` never invents a height that was
+not in the source, which is what categorical data wants; `bilinear` is the
+default; `cubic` is the cubic convolution GDAL and rasterio mean by that name,
+so a stack set to it resamples the way an offline merge set to it does; and
+`lanczos` is lanczos3.
+
+None of them comes from sharp. sharp resizes images, and a terrain tile is not
+an image — see [The two pixel spaces](#the-two-pixel-spaces) — so the kernels
+are applied to heights here instead. They are only weight functions, which is
+why that costs a few lines rather than a dependency.
+
+All four renormalise over the samples that have data rather than dividing by the
+kernel's nominal total. Without that a wider kernel would eat more coastline
+than a narrow one, since lanczos reaches three pixels where bilinear reaches
+one. `cubic` and `lanczos` ring past the input range, as those kernels do, and
+are not clamped — GDAL does not clamp either, and a stack asking for cubic
+should get cubic.
+
 The blur is worth keeping. The offline merge applies a gaussian with
 `sigma = gaussianBlurSigma * d`, which hides the blockiness of an upscaled
 parent and grows as the upscale gets more aggressive. In elevation space it is

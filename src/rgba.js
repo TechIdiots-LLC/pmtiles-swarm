@@ -16,7 +16,7 @@
  * the output.
  */
 
-import { parseColor } from './elevation.js';
+import { kernelFor, parseColor } from './elevation.js';
 
 /**
  * Separable blend functions, on channels in 0..1.
@@ -137,9 +137,10 @@ export function maskLayerColors(layer, maskColors) {
  * dark halo that appears around anything composited over a scaled-up sprite.
  * @param {object} layer - Channels.
  * @param {object} tile - z, x, y and parentZ.
+ * @param {string} [kernel] - nearest, bilinear, cubic or lanczos.
  * @returns {object} - Channels at the target zoom.
  */
-export function resampleLayer(layer, tile) {
+export function resampleLayer(layer, tile, kernel = 'bilinear') {
   const d = tile.z - tile.parentZ;
   if (d <= 0) return layer;
 
@@ -149,6 +150,8 @@ export function resampleLayer(layer, tile) {
   const originX = (tile.x % span) * sub;
   const originY = (tile.y % span) * sub;
 
+  const { radius, weight } = kernelFor(kernel);
+  const reach = Math.ceil(radius);
   const out = {
     r: new Float32Array(size * size),
     g: new Float32Array(size * size),
@@ -161,29 +164,39 @@ export function resampleLayer(layer, tile) {
   for (let ty = 0; ty < size; ty += 1) {
     const sy = originY + ((ty + 0.5) * sub) / size - 0.5;
     const y0 = Math.floor(sy);
-    const fy = sy - y0;
     for (let tx = 0; tx < size; tx += 1) {
       const sx = originX + ((tx + 0.5) * sub) / size - 0.5;
       const x0 = Math.floor(sx);
-      const fx = sx - x0;
 
       let pr = 0;
       let pg = 0;
       let pb = 0;
       let pa = 0;
-      for (let dy = 0; dy <= 1; dy += 1) {
+      let sum = 0;
+      for (let dy = 1 - reach; dy <= reach; dy += 1) {
         const py = Math.min(size - 1, Math.max(0, y0 + dy));
-        const wy = dy ? fy : 1 - fy;
-        for (let dx = 0; dx <= 1; dx += 1) {
+        const wy = weight(sy - (y0 + dy));
+        if (wy === 0) continue;
+        for (let dx = 1 - reach; dx <= reach; dx += 1) {
           const px = Math.min(size - 1, Math.max(0, x0 + dx));
-          const w = wy * (dx ? fx : 1 - fx);
+          const w = wy * weight(sx - (x0 + dx));
+          if (w === 0) continue;
           const at = py * size + px;
           const alpha = layer.a[at];
           pr += layer.r[at] * alpha * w;
           pg += layer.g[at] * alpha * w;
           pb += layer.b[at] * alpha * w;
           pa += alpha * w;
+          sum += w;
         }
+      }
+      // Renormalised, so an edge does not darken -- the same reason the
+      // elevation path does it, with transparency in place of NaN.
+      if (sum !== 0) {
+        pr /= sum;
+        pg /= sum;
+        pb /= sum;
+        pa /= sum;
       }
       const at = ty * size + tx;
       out.a[at] = pa;
@@ -264,12 +277,11 @@ export function compositeRgba(contributions, options) {
 
     const parentZ = contribution.parentZ ?? options.z;
     if (parentZ < options.z) {
-      layer = resampleLayer(layer, {
-        z: options.z,
-        x: options.x,
-        y: options.y,
-        parentZ,
-      });
+      layer = resampleLayer(
+        layer,
+        { z: options.z, x: options.x, y: options.y, parentZ },
+        options.resampling,
+      );
     }
 
     if (!result) {

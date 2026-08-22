@@ -1,7 +1,12 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { hasUsableEncoding, parseColor } from './elevation.js';
+import {
+  RESAMPLING,
+  hasUsableEncoding,
+  isResampling,
+  parseColor,
+} from './elevation.js';
 import { normalizeCategories } from './catalog.js';
 import { BLEND_MODES, isBlendMode } from './rgba.js';
 
@@ -136,6 +141,9 @@ export function validateStack(stack) {
       'output uses encoding "custom" and needs all of redFactor, ' +
         'greenFactor, blueFactor, baseShift',
     );
+  }
+  if (stack.resampling !== undefined && !isResampling(stack.resampling)) {
+    problems.push(`resampling must be one of ${RESAMPLING.join(', ')}`);
   }
   if (stack.boundsSource !== undefined) {
     const index = Number(stack.boundsSource);

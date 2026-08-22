@@ -838,6 +838,23 @@
         </div>
 
         <div class="field">
+          <label>Resampling</label>
+          <div class="bar">
+            <select id="stack-resampling">
+              <option value="">bilinear (default)</option>
+              <option value="nearest">nearest</option>
+              <option value="bilinear">bilinear</option>
+              <option value="cubic">cubic</option>
+              <option value="lanczos">lanczos</option>
+            </select>
+            <span class="sub">Used where a source has no tile at this zoom and
+              one is taken from its parent. <code>cubic</code> is what GDAL and
+              rasterio mean by that name, so it matches an offline merge
+              configured the same way.</span>
+          </div>
+        </div>
+
+        <div class="field">
           <label>Tile format</label>
           <div class="bar">
             <label class="choice">
@@ -6173,6 +6190,7 @@ Every piece is hashed against the ` +
           $(`stack-out-${name}`).value = stackDraft.output[name] ?? '';
         }
         $('stack-out-format').value = stackDraft.output.format ?? '';
+        $('stack-resampling').value = stackDraft.resampling ?? '';
         $('stack-error').textContent = '';
 
         await fillStackSourceChoices();
@@ -6569,6 +6587,9 @@ Every piece is hashed against the ` +
         };
         if ($('stack-out-format').value) {
           body.output.format = $('stack-out-format').value;
+        }
+        if ($('stack-resampling').value) {
+          body.resampling = $('stack-resampling').value;
         }
         if (!draftIsRgba()) {
           const encoding = $('stack-out-encoding').value;

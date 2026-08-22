@@ -217,6 +217,68 @@ export function maskColors(heights, raster, maskColors) {
 }
 
 /**
+ * How much a sample `t` away contributes, per kernel.
+ *
+ * Not sharp's. sharp resizes images, and a terrain tile is not an image: its
+ * three channels are one number, so resizing it as pixels interpolates across
+ * byte boundaries and grows a cliff wherever the encoding carries. Everything
+ * here works on heights instead, which means the kernels have to live here too
+ * -- and they are only weight functions, so that costs a few lines each.
+ *
+ * `cubic` is the cubic convolution GDAL and rasterio mean by that name, with
+ * a = -0.5, so a stack resamples the way an offline merge configured with
+ * `"resampling": "cubic"` does. `lanczos` is lanczos3.
+ */
+const KERNELS = {
+  nearest: { radius: 0.5, weight: (t) => (Math.abs(t) <= 0.5 ? 1 : 0) },
+  bilinear: { radius: 1, weight: (t) => Math.max(0, 1 - Math.abs(t)) },
+  cubic: {
+    radius: 2,
+    weight: (t) => {
+      const x = Math.abs(t);
+      const a = -0.5;
+      if (x < 1) return (a + 2) * x ** 3 - (a + 3) * x ** 2 + 1;
+      if (x < 2) return a * (x ** 3 - 5 * x ** 2 + 8 * x - 4);
+      return 0;
+    },
+  },
+  lanczos: {
+    radius: 3,
+    weight: (t) => {
+      const x = Math.abs(t);
+      if (x < 1e-8) return 1;
+      if (x >= 3) return 0;
+      const pix = Math.PI * x;
+      return (3 * Math.sin(pix) * Math.sin(pix / 3)) / (pix * pix);
+    },
+  },
+};
+
+/**
+ * One kernel by name, falling back to bilinear.
+ *
+ * Shared with the RGBA path rather than restated there: two copies of lanczos
+ * is two chances to get one of them subtly wrong.
+ * @param {string} name - The kernel.
+ * @returns {object} - `{ radius, weight }`.
+ */
+export function kernelFor(name) {
+  return KERNELS[name] ?? KERNELS.bilinear;
+}
+
+/** The kernels a recipe may name. */
+export const RESAMPLING = Object.freeze(Object.keys(KERNELS));
+
+/**
+ * Whether a name is one of them.
+ * @param {string} name - The kernel.
+ * @returns {boolean} - True when it exists.
+ */
+export function isResampling(name) {
+  return Object.hasOwn(KERNELS, name);
+}
+
+/**
  * Samples a parent tile's heights into a child tile's grid.
  *
  * Both tiles are web mercator squares, so despite what rio-rgbify-merge's
@@ -225,50 +287,56 @@ export function maskColors(heights, raster, maskColors) {
  * sub-square is at `(x, y) mod 2^d` in tile space, which is the whole of the
  * geometry.
  *
- * Bilinear, and NaN-aware: a sample with no data contributes nothing rather
- * than poisoning its three neighbours. Without that, one masked pixel in a
- * parent would erase a four-pixel block in every child, and a coastline would
- * grow by a pixel at every zoom level it was upscaled through.
+ * NaN-aware whichever kernel is chosen: a sample with no data contributes
+ * nothing and the remaining weights are renormalised, rather than poisoning
+ * its neighbours. Without that, one masked pixel in a parent would erase a
+ * block in every child and a coastline would grow at every zoom it was
+ * upscaled through -- by more with a wider kernel, since lanczos reaches three
+ * pixels where bilinear reaches one.
  * @param {Float32Array} heights - The parent's heights.
  * @param {number} size - Pixels per side, both tiles.
  * @param {object} tile - z, x, y of the target, and parentZ.
+ * @param {string} [kernel] - nearest, bilinear, cubic or lanczos.
  * @returns {Float32Array} - The target's heights.
  */
-export function resampleFromParent(heights, size, tile) {
+export function resampleFromParent(heights, size, tile, kernel = 'bilinear') {
   const d = tile.z - tile.parentZ;
   if (d <= 0) return heights;
 
+  const { radius, weight } = KERNELS[kernel] ?? KERNELS.bilinear;
   const span = 2 ** d;
   const sub = size / span;
   const originX = (tile.x % span) * sub;
   const originY = (tile.y % span) * sub;
   const out = new Float32Array(size * size);
+  const reach = Math.ceil(radius);
 
   for (let ty = 0; ty < size; ty += 1) {
-    // The centre of the target pixel, expressed in the parent's grid.
     const sy = originY + ((ty + 0.5) * sub) / size - 0.5;
     const y0 = Math.floor(sy);
-    const fy = sy - y0;
     for (let tx = 0; tx < size; tx += 1) {
       const sx = originX + ((tx + 0.5) * sub) / size - 0.5;
       const x0 = Math.floor(sx);
-      const fx = sx - x0;
 
       let total = 0;
-      let weight = 0;
-      for (let dy = 0; dy <= 1; dy += 1) {
+      let sum = 0;
+      for (let dy = 1 - reach; dy <= reach; dy += 1) {
         const py = Math.min(size - 1, Math.max(0, y0 + dy));
-        const wy = dy ? fy : 1 - fy;
-        for (let dx = 0; dx <= 1; dx += 1) {
+        const wy = weight(sy - (y0 + dy));
+        if (wy === 0) continue;
+        for (let dx = 1 - reach; dx <= reach; dx += 1) {
           const px = Math.min(size - 1, Math.max(0, x0 + dx));
+          const w = wy * weight(sx - (x0 + dx));
+          if (w === 0) continue;
           const value = heights[py * size + px];
           if (Number.isNaN(value)) continue;
-          const w = wy * (dx ? fx : 1 - fx);
           total += value * w;
-          weight += w;
+          sum += w;
         }
       }
-      out[ty * size + tx] = weight > 0 ? total / weight : Number.NaN;
+      // Renormalised rather than divided by the kernel's nominal total, so an
+      // edge or a masked neighbour shifts nothing.
+      out[ty * size + tx] = sum !== 0 ? total / sum : Number.NaN;
     }
   }
   return out;
@@ -395,12 +463,12 @@ export function mergeElevation(contributions, options) {
 
     const parentZ = contribution.parentZ ?? options.z;
     if (parentZ < options.z) {
-      heights = resampleFromParent(heights, size, {
-        z: options.z,
-        x: options.x,
-        y: options.y,
-        parentZ,
-      });
+      heights = resampleFromParent(
+        heights,
+        size,
+        { z: options.z, x: options.x, y: options.y, parentZ },
+        options.resampling,
+      );
       const sigma = (options.gaussianBlurSigma ?? 0) * (options.z - parentZ);
       heights = blurHeights(heights, size, sigma);
     }
