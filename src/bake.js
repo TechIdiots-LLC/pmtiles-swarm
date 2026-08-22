@@ -1,0 +1,466 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import zlib from 'node:zlib';
+import { tileIdToZxy } from 'pmtiles';
+import { deserializeDirectory, unionOfTileIds } from './pmtiles-scan.js';
+import crypto from 'node:crypto';
+import { safeSegment } from './savepath.js';
+import { answerStackTile, outputFormat, outputSize } from './stack-tile.js';
+import { needsCodec, stackRevision } from './stacks.js';
+import {
+  Compression,
+  PMTilesWriter,
+  TileType,
+  serializeDirectory,
+} from './pmtiles-write.js';
+
+/**
+ * Running a stack over its sources' coverage and writing a real archive.
+ *
+ * Stage 8 of docs/tile-stacks.md. The merge itself is not here: it is handed in,
+ * because the same per-tile answer serves a request and fills a bake, and the
+ * design says so — "a different driver over the same core rather than a second
+ * implementation".
+ *
+ * Three things make this bearable to run for hours. It iterates what the
+ * sources actually hold rather than a zoom range, so the pyramid nobody covers
+ * costs nothing. It checkpoints, because a job this long will be interrupted.
+ * And it stops when told, leaving the work in a state the next run picks up.
+ */
+
+/** Tiles merged between checkpoints. */
+const DEFAULT_CHECKPOINT_EVERY = 5000;
+
+/** What the working directory holds while a bake is in progress. */
+const FILES = Object.freeze({
+  state: 'bake-state.json',
+  entries: 'bake-entries.bin',
+  tiles: 'bake-tiles.bin',
+});
+
+/**
+ * Where a bake keeps its unfinished work.
+ * @param {string} workDir - The working directory.
+ * @returns {object} - Absolute paths to the three files.
+ */
+export function checkpointPaths(workDir) {
+  return {
+    state: path.join(workDir, FILES.state),
+    entries: path.join(workDir, FILES.entries),
+    tiles: path.join(workDir, FILES.tiles),
+  };
+}
+
+/**
+ * Reads a checkpoint, if there is one worth resuming from.
+ *
+ * A checkpoint belongs to one revision of one recipe over one set of sources.
+ * Anything else and it is discarded rather than continued: resuming a changed
+ * recipe would produce an archive that is half one map and half another, and
+ * nothing downstream could tell.
+ * @param {string} workDir - The working directory.
+ * @param {string} revision - What identifies this job.
+ * @returns {Promise<object|null>} - The state and entries, or null.
+ */
+export async function readCheckpoint(workDir, revision) {
+  const paths = checkpointPaths(workDir);
+  const raw = await fs.readFile(paths.state, 'utf8').catch(() => null);
+  if (!raw) return null;
+
+  let state;
+  try {
+    state = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!state || state.revision !== revision) return null;
+
+  const stored = await fs.readFile(paths.entries).catch(() => null);
+  const buffered = await fs.stat(paths.tiles).catch(() => null);
+  if (!stored || !buffered) return null;
+
+  // The tile buffer is the one thing a checkpoint cannot describe: if it is
+  // shorter than the entries say, some of what they point at is not there.
+  if (buffered.size < state.dataBytes) return null;
+
+  let entries;
+  try {
+    entries = deserializeDirectory(zlib.gunzipSync(stored));
+  } catch {
+    return null;
+  }
+
+  return { ...state, entries };
+}
+
+/**
+ * Writes a checkpoint, replacing whatever was there.
+ *
+ * Entries go through `serializeDirectory`, which is the compact form this
+ * project already writes and reads. Nothing here invents a second encoding for
+ * the same array.
+ * @param {string} workDir - The working directory.
+ * @param {object} state - Scalars worth keeping.
+ * @param {object[]} entries - The entries as they stand.
+ * @returns {Promise<void>} - Resolves once both files are on disk.
+ */
+export async function writeCheckpoint(workDir, state, entries) {
+  const paths = checkpointPaths(workDir);
+  // Entries first. A state file naming more progress than the entries hold
+  // would resume into an archive missing tiles it believes it wrote.
+  await fs.writeFile(
+    paths.entries,
+    entries.length > 0 ? serializeDirectory(entries) : Buffer.alloc(0),
+  );
+  await fs.writeFile(paths.state, JSON.stringify(state));
+}
+
+/**
+ * Removes a finished bake's working files.
+ * @param {string} workDir - The working directory.
+ * @returns {Promise<void>} - Resolves once they are gone.
+ */
+export async function clearCheckpoint(workDir) {
+  const paths = checkpointPaths(workDir);
+  await Promise.all(
+    Object.values(paths).map((file) =>
+      fs.rm(file, { force: true }).catch(() => {}),
+    ),
+  );
+}
+
+/**
+ * What identifies a bake, for a checkpoint to be sure it is the same job.
+ *
+ * The recipe alone is not enough. A stack naming a category resolves to
+ * whichever build is current, so the same recipe over a rebuilt source is a
+ * different bake -- and resuming across that produces an archive that is half
+ * one map and half another, which nothing downstream could tell.
+ * @param {object} resolved - The resolved stack.
+ * @returns {string} - A short, stable identifier.
+ */
+export function bakeRevision(resolved) {
+  const sources = resolved.sources
+    .map((source) => source.entry?.infoHash ?? 'unresolved')
+    .join(',');
+  return crypto
+    .createHash('sha256')
+    .update(`${stackRevision(resolved.stack)}|${sources}`)
+    .digest('hex')
+    .slice(0, 16);
+}
+
+/**
+ * The date part of a bake's filename and description.
+ * @param {Date} [when] - When the bake started.
+ * @returns {string} - `YYYYMMDD`.
+ */
+function stamp(when = new Date()) {
+  return when.toISOString().slice(0, 10).replaceAll('-', '');
+}
+
+/**
+ * What to call the file a bake writes.
+ *
+ * Dated, because successive bakes of one stack are successive builds of one
+ * map and two files cannot share a path. The archive's *name* is not dated --
+ * see `bakedMetadata` -- so a rebuild keeps its identity the way every other
+ * rebuild here does.
+ * @param {object} resolved - The resolved stack.
+ * @param {object} [options] - `when`, and `suffix` to break a tie.
+ * @returns {string} - A filename.
+ */
+export function bakedName(resolved, options = {}) {
+  const title = resolved.stack.title ?? resolved.stack.id;
+  const slug = safeSegment(title) || 'stack';
+  const tail = options.suffix ? `-${options.suffix}` : '';
+  return `${slug}-${stamp(options.when)}${tail}.pmtiles`;
+}
+
+/**
+ * Refuses a bake that cannot produce what the recipe asks for.
+ *
+ * Only the codec. A cache-mode source is deliberately allowed: reading one
+ * pulls pieces through the swarm, and the tile store already holds those to a
+ * byte budget and drops what it stops using -- so a long bake against a cached
+ * archive is slow, not unbounded, and slow is the operator's call to make.
+ * @param {object} resolved - The resolved stack.
+ * @param {object|null} codec - The loaded codec, if there is one.
+ * @returns {void}
+ * @throws {Error} With `status` 501 when the recipe needs pixels and there are none.
+ */
+export function assertBakeable(resolved, codec) {
+  const wants = needsCodec(resolved.stack);
+  if (!wants || codec) return;
+  const error = new Error(
+    `baking this stack means decoding pixels: ${wants} asks for the tile to ` +
+      'be changed, not passed through, and this node has no codec',
+  );
+  error.status = 501;
+  error.hint = 'npm install sharp';
+  throw error;
+}
+
+/**
+ * The metadata a baked archive carries.
+ *
+ * Two keys earn their place beyond the name. `sparse` says a missing tile means
+ * missing rather than empty, which is what makes a client overzoom the parent
+ * instead of drawing nothing — and a baked stack is sparse by construction,
+ * since a tile no source covered is never written. `encoding` says how to read
+ * the pixels, and without it a terrain archive is an image of nothing in
+ * particular.
+ *
+ * Both are the keys tileserver-gl reads, and the keys this project's own prober
+ * reads, so an archive baked here is understood wherever it lands.
+ * @param {object} options - `name`, `encoding`, `encodingFactors`, `sparse`, `extra`.
+ * @returns {object} - The metadata block.
+ */
+export function bakedMetadata(options = {}) {
+  const metadata = { ...(options.extra ?? {}) };
+
+  // Required, not optional: mbtiles wants a name, and this project's archives
+  // are converted to mbtiles by other tools. Undated on purpose -- a rebuild of
+  // a map keeps its name and mints a new infohash, and dating the name would
+  // make every build a different map.
+  metadata.name = options.name ?? 'stack';
+
+  // Where the date goes instead. A reader looking at an archive out of context
+  // can still tell what produced it and when.
+  const baked = options.bakedAt
+    ? `Baked ${new Date(options.bakedAt).toISOString().slice(0, 10)}`
+    : null;
+  const described = [options.description, baked].filter(Boolean).join(' — ');
+  if (described) metadata.description = described;
+
+  if (options.attribution) metadata.attribution = options.attribution;
+  // Named as well as implied by the header's tile type, because a converter
+  // reading the metadata block on its own has nothing else to go on.
+  if (options.format) metadata.format = options.format;
+
+  // Sparse unless the recipe insists otherwise, which is the same default the
+  // live endpoint answers with.
+  metadata.sparse = options.sparse ?? true;
+
+  if (options.encoding) {
+    metadata.encoding = options.encoding;
+    // `custom` is unreadable without its four numbers, so they travel with the
+    // word or the word is not worth writing.
+    if (options.encoding === 'custom') {
+      for (const name of [
+        'redFactor',
+        'greenFactor',
+        'blueFactor',
+        'baseShift',
+      ]) {
+        const value = Number(options.encodingFactors?.[name]);
+        if (Number.isFinite(value)) metadata[name] = value;
+      }
+    }
+  }
+
+  return metadata;
+}
+
+/** Tile types by the extension a stack would name. */
+const TILE_TYPES = Object.freeze({
+  png: TileType.Png,
+  jpg: TileType.Jpeg,
+  jpeg: TileType.Jpeg,
+  webp: TileType.Webp,
+  avif: TileType.Avif,
+  pbf: TileType.Mvt,
+  mvt: TileType.Mvt,
+});
+
+/**
+ * The header's tile type for a format name.
+ * @param {string} [format] - `webp`, `png` and so on.
+ * @returns {number} - A TileType.
+ */
+export function tileTypeFor(format) {
+  return TILE_TYPES[String(format ?? '').toLowerCase()] ?? TileType.Unknown;
+}
+
+/**
+ * The per-tile merge, as a bake wants it.
+ *
+ * The same call the tile route makes, which is the whole point: a baked tile
+ * and a served one come out of one implementation, so they cannot drift. What
+ * differs is only what the answers mean here — a tile nothing covered is a hole
+ * to leave rather than a 404 to send.
+ *
+ * The merged-tile cache is deliberately not used. It is sized for tiles people
+ * ask for twice, and a whole-pyramid run would evict all of those in favour of
+ * tiles nobody will ask for again.
+ * @param {object} options - The resolved stack and what to read it with.
+ * @returns {Function} - `(z, x, y) => Promise<Buffer|null>`.
+ */
+export function mergeTileFor(options) {
+  const { resolved, tiles, codec, signal } = options;
+  const format = options.format ?? outputFormat(resolved);
+  const size = options.size ?? outputSize(resolved.stack);
+
+  return async (z, x, y) => {
+    const answer = await answerStackTile({
+      resolved,
+      z,
+      x,
+      y,
+      tiles,
+      codec,
+      stackCache: null,
+      signal,
+      size,
+      format,
+    });
+
+    // A required source that cannot be read stops the job. Baking around it
+    // would write an archive quietly missing a layer, and flat ocean looks
+    // like a plausible map rather than like a failure.
+    if (answer.error) {
+      const error = new Error(answer.error.message);
+      error.status = answer.error.status;
+      throw error;
+    }
+    if (answer.empty) return null;
+    return answer.passthrough
+      ? Buffer.from(answer.passthrough.data)
+      : answer.body;
+  };
+}
+
+/**
+ * Runs a stack over its sources and writes the result as an archive.
+ *
+ * `mergeTile` answers one tile or nothing. Nothing is not a failure: it is a
+ * tile no source covered once the recipe had its say, and not writing it is
+ * what makes the archive sparse.
+ * @param {object} options - The job.
+ * @param {string[]} options.sources - Paths to the source archives.
+ * @param {Function} options.mergeTile - `(z, x, y) => Promise<Buffer|null>`.
+ * @param {string} options.destination - Where the `.pmtiles` goes.
+ * @param {string} options.workDir - Where the unfinished work lives.
+ * @param {string} options.revision - What identifies this job for a resume.
+ * @returns {Promise<object>} - `{header, written, skipped, resumed}`.
+ */
+export async function bakeStack(options) {
+  const {
+    sources,
+    mergeTile,
+    destination,
+    workDir,
+    revision,
+    signal,
+    onProgress,
+    metadata = {},
+    header = {},
+    deduplicate = true,
+    checkpointEvery = DEFAULT_CHECKPOINT_EVERY,
+  } = options;
+
+  if (!sources?.length) throw new Error('a bake needs at least one source');
+  await fs.mkdir(workDir, { recursive: true });
+  const paths = checkpointPaths(workDir);
+
+  const found = await readCheckpoint(workDir, revision);
+  // A checkpoint that does not match is not an error and not a thing to keep.
+  if (!found) await clearCheckpoint(workDir);
+
+  const writer = found
+    ? await PMTilesWriter.reopen({
+        tempPath: paths.tiles,
+        entries: found.entries,
+        dataBytes: found.dataBytes,
+        addressedTiles: found.addressed,
+        clustered: found.clustered,
+        deduplicate,
+      })
+    : await PMTilesWriter.open({
+        directory: workDir,
+        tempPath: paths.tiles,
+        deduplicate,
+      });
+
+  let written = found?.written ?? 0;
+  let skipped = found?.skipped ?? 0;
+  let lastTileId = found?.lastTileId ?? -1;
+  let sinceCheckpoint = 0;
+
+  /**
+   * Writes down where the job has got to.
+   * @returns {Promise<void>} - Resolves once it is durable.
+   */
+  const checkpoint = async () => {
+    await writeCheckpoint(
+      workDir,
+      {
+        revision,
+        lastTileId,
+        written,
+        skipped,
+        dataBytes: writer.dataBytes,
+        addressed: writer.addressedTiles,
+        clustered: writer.clustered,
+      },
+      writer.entries,
+    );
+    sinceCheckpoint = 0;
+  };
+
+  try {
+    for await (const tileId of unionOfTileIds(sources, { signal })) {
+      // Everything up to and including the checkpoint has been dealt with.
+      // Skipped rather than sought, because the union is a stream and seeking
+      // it would mean holding an index of every source.
+      if (tileId <= lastTileId) continue;
+      signal?.throwIfAborted();
+
+      const [z, x, y] = tileIdToZxy(tileId);
+      const data = await mergeTile(z, x, y);
+      if (data) {
+        await writer.writeTile(tileId, data);
+        written += 1;
+      } else {
+        skipped += 1;
+      }
+
+      lastTileId = tileId;
+      sinceCheckpoint += 1;
+      onProgress?.({ written, skipped, tileId, z, x, y });
+      if (sinceCheckpoint >= checkpointEvery) await checkpoint();
+    }
+  } catch (error) {
+    // A cancelled bake keeps its work. Deleting it would make stopping and
+    // failing the same thing, and this is a job somebody may have been running
+    // since yesterday.
+    await checkpoint().catch(() => {});
+    await writer.suspend();
+    throw error;
+  }
+
+  if (written === 0) {
+    await writer.suspend();
+    await clearCheckpoint(workDir);
+    throw new Error(
+      'no source covered any tile the recipe could answer for, so there is ' +
+        'nothing to write',
+    );
+  }
+
+  const finished = await writer.finalize(
+    destination,
+    {
+      tileType: header.tileType ?? tileTypeFor(header.format),
+      tileCompression: header.tileCompression ?? Compression.None,
+      ...header,
+    },
+    bakedMetadata({
+      format: header.format ?? metadata.format,
+      ...metadata,
+    }),
+  );
+
+  await clearCheckpoint(workDir);
+  return { header: finished, written, skipped, resumed: Boolean(found) };
+}

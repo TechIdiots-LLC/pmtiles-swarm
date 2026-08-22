@@ -7,6 +7,165 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.64.0
+### ✨ Features and improvements
+- **Export a stack to an archive, from the console.** **Export to archive** sits beside Edit and
+  Delete on a stack. It runs the recipe over its sources, writes a real `.pmtiles`, and hands the
+  file to the library — which hashes it, makes a torrent and puts it in the catalog, so what comes
+  out has an infohash and is seeded like anything else here. That is what makes the live endpoint
+  the preview of something rather than an endpoint on its own.
+
+  **Two halves, watched in two places.** Merging is about a stack, so tiles written, tiles skipped
+  and the zoom it is working through are reported on the stack. What follows is an archive being
+  added, which this node already reports on the archives view through the library's in-progress
+  list — so the second half is handed over rather than drawn twice, and the line on the stack says
+  where to look.
+
+  Stopping keeps the work. The checkpoint is the hours already spent, so **Stop export** leaves it
+  where the next run picks it up rather than throwing it away. One bake per stack at a time: two
+  runs of one recipe write the same checkpoint files over each other, and the second would resume
+  the first's work believing it were its own.
+
+  A bake is identified by the recipe's revision **and what each source resolved to**. The recipe
+  alone cannot see the difference: a stack naming a category resolves to whichever build is
+  current, so the same recipe over a rebuilt source is a different bake, and a checkpoint that
+  could not tell would resume across the change and produce an archive half of one map and half of
+  another.
+
+  The file is dated — `Terrain-20260822.pmtiles` — and the archive's **name** is not. A rebuild
+  here keeps its name and mints a new infohash, which is what lets `/latest/<category>/` follow it;
+  dating the name would make every build a different map. The date goes in `description`. `name` is
+  always written, because these get converted to mbtiles by other tools and a nameless metadata
+  block is not valid there.
+
+  The codec is required for a recipe that asks for pixel work, and refused when the button is
+  pressed rather than an hour in. **A cache-mode source is allowed**, which reverses what the
+  design first said: reading one pulls pieces through the swarm, and the tile store already holds
+  those to a byte budget and drops what it stops using. Slow is the operator's call to make. The
+  sources are scanned through the store for the same reason, so a cache-mode archive's directories
+  come out of the swarm the way its tiles do.
+
+- **The per-tile merge is one function, shared by the route and the bake.** `src/stack-tile.js`.
+  The tile route was 380 lines of Express with the whole merge inline — reading each source,
+  climbing to a parent, stitching children where tile sizes differ, both pixel spaces, the cache —
+  and none of it callable from anywhere else. A bake had to produce exactly what a request would,
+  and two implementations of that disagree eventually.
+
+  What is left in the route is what is genuinely about HTTP: parsing, status codes, the
+  abort-on-close wiring, the stats hook. Behaviour is unchanged and the existing stack suites say
+  so.
+
+- **The bake driver, with checkpointing and cancellation.** `src/bake.js` runs a stack over its
+  sources and writes the result as a real archive: union the sources' coverage, merge in tile-id
+  order, write, checkpoint, stop when told. `src/pmtiles-scan.js` is the other new piece — it
+  reads back *which* tiles an archive holds, which the `pmtiles` package does not offer because
+  a tile server never needs to ask.
+
+  It iterates coverage rather than a zoom range, and that is what decides whether the job is
+  possible: a planet at z16 is 5.7 billion coordinates, and asking each one whether a source
+  covers it does not finish. The union of what the sources actually hold skips most of the
+  pyramid without a single decode.
+
+  **Sparseness is a consequence rather than a setting.** A tile no source covered is never
+  written, so the archive is sparse by construction — and the baked metadata says so, under the
+  key tileserver-gl reads and this project's prober reads. `encoding` travels the same way, with
+  its four factors when it is `custom`, because a terrain archive that does not say how to read
+  its pixels is an image of nothing in particular.
+
+  **A cancelled bake keeps its work.** Deleting it would make stopping and failing the same
+  thing, and this is a job somebody may have been running since yesterday. The checkpoint is the
+  buffered tile data, the entries as `serializeDirectory` writes them, and a small JSON state —
+  the entries reuse the archive's own serialization rather than inventing a second format for
+  the same array. A checkpoint belongs to one revision of one recipe; a checkpoint for anything
+  else is discarded rather than continued, because resuming a changed recipe produces an archive
+  that is half one map and half another and nothing downstream could tell.
+
+  The merge is handed in rather than reached for. That keeps the design's own constraint honest
+  — one per-tile answer serves both a request and a bake — and it is also what is left to do:
+  the orchestration still lives inline in the stack tile route, and extracting it is the next
+  step.
+
+- **This node can write a PMTiles file.** `src/pmtiles-write.js`: varints, directories, the
+  fixed header and a writer that takes tiles one at a time and finalises an archive. The
+  `pmtiles` package everything here reads with is read-only, so this is the other half of it,
+  ported from the reference implementation in protomaps/PMTiles.
+
+  It exists for stage 8 of [tile stacks](docs/tile-stacks.md) — baking a stack into a real
+  archive with a real infohash — but it is a module on its own and tested as one. Every test
+  reads the result back through the same `pmtiles` library that answers served tiles, and one
+  reads it through this project's own prober, so an archive written here is one the node can
+  take into its catalog.
+
+  Three deliberate departures from the reference, all of them written down in
+  [docs/tile-stacks.md](docs/tile-stacks.md#writing-a-pmtiles-file):
+
+  Deduplication hashes with a full-length digest rather than the reference's 64 bits. A
+  collision does not raise anything — it points one tile at another tile's bytes, in a file
+  that is then hashed, torrented and served to other people. At a billion distinct tiles a
+  64-bit hash collides about 2.7% of the time, and at five billion about half the time.
+
+  Varints are built by division rather than by shifting. JavaScript's bitwise operators are
+  32-bit, so `value >>= 7` mangles any offset past 4 GiB — which in an archive worth baking
+  arrives early. There is a test at 6 GiB.
+
+  Deduplication can be turned off. It is the one part whose memory grows with the archive, one
+  entry per distinct tile, and go-pmtiles makes it a flag for the same reason. Run-length
+  encoding still applies without it, and for terrain — long runs of identical ocean and
+  identical nodata — that is most of the saving.
+
+  `clustered` is reported honestly rather than assumed. Tiles written out of tile-id order
+  still produce a valid archive, and the header says it is unclustered, because an unclustered
+  archive cannot answer a range read in one seek — which is the reason this project serves
+  PMTiles rather than MBTiles at all.
+
+- **The bake and the sync are designed.** [docs/tile-stacks.md](docs/tile-stacks.md) gained
+  three sections: what a bake iterates and why it is the sources' own coverage rather than the
+  zoom range (a planet at z16 is 5.7 billion tiles, and asking each one whether a source covers
+  it is the difference between a job that finishes and one that does not), what running one
+  requires, and what syncing a stack between nodes would have to answer.
+
+  The sync section is the useful half. A stack is a mutable document whose sources are named by
+  category or infohash, so the same recipe means different things on different nodes — sent
+  somewhere missing a source it either breaks outright or silently resolves to a different map.
+  A feed is the wrong shape for that. Baking sidesteps it: a baked stack is an ordinary archive
+  with an infohash, and archives already sync.
+
+  The stage list also said the console reads stacks but does not edit them, which stopped being
+  true when the editor shipped.
+
+- **A terrain archive says so before you open it.** The console detail, the stacks list and
+  the public catalogue now offer two preview buttons where the encoding is one the preview can
+  draw as a DEM: the raster keeps its name, and **Terrain** sits beside it. Before this the
+  terrain view existed but nothing pointed at it — you had to open the preview and notice a
+  link in the header — and nothing on a listing said which archives were terrain at all.
+
+  The raster stays first and keeps the plain name deliberately. It is the view that shows a
+  hole, because a missing DEM tile hillshades as flat ground rather than as missing.
+
+  `/api/stacks` and the categories payload now carry `encoding` for the same reason, so a page
+  can decide without fetching a TileJSON per row.
+
+### 🐞 Bug fixes
+- **A catalogue helper declared in the wrong scope.** The public page renders archives and
+  categories from two separate functions, and the terrain check went inside the first — a
+  `ReferenceError` the moment a terrain category was drawn. `node --check` accepts it and so
+  does a scope check, because the name exists; it is only wrong from the other function.
+
+  The scope checks that exist for exactly this were only ever run against the console. They now
+  run against the catalogue and the preview too, and the helper both renderers share is
+  asserted to be declared where both can reach it.
+
+- **Three copies of one rule, none of them checked against each other.** The preview decides
+  what to draw as terrain, and the console and the catalogue decide whether to offer the
+  button. A button offered on something that does not render as terrain is worse than no
+  button, so the three are now lifted out of their pages and asserted to agree across eight
+  cases — `mlt`, an unknown encoding, and `custom` with none, half and all four of its factors
+  among them.
+
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
 ## 0.63.0
 ### ✨ Features and improvements
 - **A terrain archive previews as terrain.** An archive whose `encoding` is `terrarium`,

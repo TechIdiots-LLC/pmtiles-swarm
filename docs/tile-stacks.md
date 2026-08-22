@@ -1,11 +1,11 @@
 # Tile stacks
 
-**Status: stages 1 to 6 are implemented, and 7 in part.** Elevation stacks work: a recipe is
+**Status: all eight stages are implemented.** Elevation stacks work: a recipe is
 defined, resolved and served, and a source is masked, shifted, resampled from a
 parent and painted in order. Merged tiles are cached on disk against a
 byte budget, and image stacks composite with opacity and blend modes. The
-console lists stacks and diagnoses them; editing them there is still design. A node with no codec installed
-still serves the passthrough case and answers 501 for the rest.
+console lists stacks, diagnoses them and edits them. A node with no codec
+installed still serves the passthrough case and answers 501 for the rest.
 
 A stack is a recipe for combining several archives into one tile endpoint,
 evaluated per request rather than baked into a file. Where
@@ -15,7 +15,9 @@ regional lidar patch over a global DEM.
 
 This is the on-the-fly counterpart to the offline merge in
 [rio-rgbify-merge](https://github.com/TechIdiots-LLC/rio-rgbify-merge)
-(`pip install rio-rgbify-merge`). The pixel maths is the same and is
+(`pip install rio-rgbify-merge`), a fork of
+[mapbox/rio-rgbify](https://github.com/mapbox/rio-rgbify) which added the merge
+the encoder never had. The pixel maths is the same and is
 deliberately kept the same, so a stack can be previewed live and then baked into
 a real archive without the two disagreeing. What the swarm adds is that a source is named by
 _category_ rather than by path, so a stack keeps working across a rebuild of any
@@ -39,6 +41,14 @@ of its parts.
 - [TileJSON for a stack](#tilejson-for-a-stack)
 - [When a source will not answer](#when-a-source-will-not-answer)
 - [Baking a stack into an archive](#baking-a-stack-into-an-archive)
+  - [Writing a PMTiles file](#writing-a-pmtiles-file)
+  - [What to iterate](#what-to-iterate)
+  - [Running it](#running-it)
+  - [What a baked archive says about itself](#what-a-baked-archive-says-about-itself)
+  - [What identifies a bake](#what-identifies-a-bake)
+  - [Starting one, and watching it](#starting-one-and-watching-it)
+  - [What exists now](#what-exists-now)
+- [Syncing a stack to another node](#syncing-a-stack-to-another-node)
 - [What the offline merge got wrong](#what-the-offline-merge-got-wrong)
 - [The stack editor](#the-stack-editor)
 - [Staging](#staging)
@@ -523,9 +533,227 @@ and the merge code is shared. It also inverts the cost argument completely: the
 swarm-read latency that makes on-the-fly stacking painful is irrelevant to a
 batch job that runs overnight.
 
-Not in scope for the first version, but the merge implementation should be a
-pure function of (tile coordinate, source tiles) → tile bytes, so the bake is a
-different driver over the same core rather than a second implementation.
+That constraint was honoured: `mergeElevation` and the RGBA equivalent are pure
+functions of their contributions, so the bake is a different driver over the
+same core rather than a second implementation of it.
+
+Most of what a bake needs is already here. `stackCoverage` says what zooms and
+bounds a stack reaches. The merge path answers a tile. `#running` in the library
+already registers a long job with an `AbortController`, a name, a start time and
+a received/total pair, and the console already draws that list, so a bake is
+another entry in it rather than new machinery. `settleFromStaging` exists for
+precisely this shape: work into a staging directory, hash, then move into place
+once the infohash exists, because an infohash cannot be known before the bytes
+do. The last step is `createTorrentFromFile`, which is what every other archive
+built here goes through.
+
+One piece is genuinely missing: nothing in this project writes a PMTiles file.
+
+### Writing a PMTiles file
+
+The `pmtiles` npm package is read-only. It exports `bytesToHeader`, `findTile`,
+`readVarint` and `zxyToTileId`, and nothing that serialises. So
+`src/pmtiles-write.js` is new, but it is a port of a small, well-understood
+reference rather than a design problem. The Python implementation in
+protomaps/PMTiles is 124 lines for the writer, plus about 70 for
+`serialize_directory` and `serialize_header`; the Hilbert maths does not need
+porting at all, because `zxyToTileId` already ships.
+
+The reader shipping in the same package is what makes this cheap to trust: a
+round trip is write it, read it back with `bytesToHeader` and `findTile`, and
+probe it with `pmtiles-probe.js` - the same prober every other archive here goes
+through.
+
+Three things the Python reference does that a port must not copy.
+
+**It deduplicates on a 64-bit hash.** go-pmtiles uses FNV-128a for the same job,
+and at the scale a bake works at that is not a stylistic difference. A collision
+does not raise anything: it points one tile at another tile's bytes, in a file
+that is then hashed, torrented and served to other people.
+
+| distinct tiles | 64-bit   | 128-bit |
+| -------------- | -------- | ------- |
+| 10^7           | 3e-06    | ~0      |
+| 10^8           | 3e-04    | ~0      |
+| 10^9           | **2.7%** | ~0      |
+| 5 x 10^9       | **49%**  | ~0      |
+
+Use a 128-bit digest, and compare the bytes on a hit rather than trusting the
+digest alone. The cost is a comparison against a tile already in hand; the
+failure it prevents is silent and permanent.
+
+**It buffers tile data in a temporary file and copies it in at the end**,
+because `tile_data_offset` is not known until the directories have been sized.
+Peak disk is then twice the tile bytes, which for a planet bake is a terabyte of
+transient space. The format does not require it: `tile_data_offset` may be
+anything, so tile data can be written straight into the output at a generous
+fixed offset, leaving a small hole rather than making a second copy.
+
+**It detects `clustered` rather than requiring it.** Writing tiles in ascending
+tile-id order is what makes an archive answer a range read in one seek, and
+range reads over HTTP are the reason this project serves PMTiles rather than
+MBTiles at all. An unclustered bake is valid and bad at the only thing it exists
+for, so ordering is a requirement of the bake here, not an outcome to be
+reported.
+
+The run-length encoding in `write_tile` is worth keeping exactly as it is:
+consecutive tile ids sharing an offset collapse into one entry, and for terrain,
+with its long runs of identical ocean and identical nodata, that is most of the
+saving.
+
+### What to iterate
+
+Not the zoom range. A planet at z0-z14 is around 350 million tiles and at z16
+around 5.7 billion, and enumerating that to ask each one whether any source
+covers it is the difference between a job that finishes and one that does not.
+
+Iterate the sources' own coverage instead. Every source is a PMTiles archive
+whose directories already say which tiles it has; the union of those, in tile-id
+order, is exactly the set a stack can answer for. For terrain over ocean that
+skips most of the pyramid without a single decode.
+
+`sparse` follows from the same fact and needs no separate decision: a tile no
+source covered is not written, and the baked archive is sparse for the same
+reason the live stack answers 404.
+
+### Running it
+
+- **The codec is required**, and refused up front. A bake that is not pure
+  passthrough decodes and re-encodes every tile, so `sharp` stops being optional
+  for it — and a node without one should find out when it presses the button,
+  not an hour in.
+- **A cache-mode source is allowed.** An earlier draft here said to refuse one.
+  That was wrong: reading a cache-mode archive pulls pieces through the swarm,
+  and the tile store already holds those to a byte budget and drops what it
+  stops using. A long bake against a cached source is therefore slow, not
+  unbounded — and slow is the operator's call to make, not this document's. The
+  sources are scanned through the store for the same reason, so a cache-mode
+  archive's directories come out of the swarm the way its tiles do.
+- **Checkpointing.** Hours to days means the process will be interrupted, and
+  resume state is the part of this project that has already gone subtly wrong
+  once - see `tools/resume-doctor.py` and what it exists to diagnose. Design it
+  rather than discovering it.
+- **Cancellable**, and stopping keeps the work: realising it is the wrong recipe
+  should not mean waiting it out, and it should not mean starting over either.
+
+### What identifies a bake
+
+`bakeRevision` is the recipe's revision and what each source resolved to,
+hashed together. The recipe alone is not enough. A stack naming a category
+resolves to whichever build is current, so the same recipe over a rebuilt source
+is a different bake — and a checkpoint that could not tell would resume across
+the change and produce an archive that is half one map and half another.
+
+The file is dated: `Terrain-20260822.pmtiles`. The archive's **name** is not.
+A rebuild here keeps its name and mints a new infohash, which is what lets
+`/latest/<category>/` follow it; dating the name would make every build a
+different map. The date goes in `description` instead, so an archive read out of
+context still says what produced it and when.
+
+`name` is always written, because these archives get converted to mbtiles by
+other tools and a nameless metadata block is not valid there.
+
+### What a baked archive says about itself
+
+Two metadata keys beyond the name, and both are the keys tileserver-gl reads and
+this project's own prober reads, so a baked archive is understood wherever it
+lands.
+
+`sparse` is true unless the recipe says otherwise. For a bake this is not a
+claim, it is a description: a tile no source covered is never written, so the
+archive is sparse by construction. The flag is what makes a client overzoom the
+parent rather than draw nothing, and without it a terrain map is full of holes
+that render as sea.
+
+`encoding` says how to read the pixels. A terrain-RGB archive without it is an
+image of nothing in particular, and `custom` carries its four factors or is not
+worth writing at all.
+
+### Starting one, and watching it
+
+**Export to archive**, on the stack, beside Edit and Delete. `POST
+/api/stacks/<id>/bake` starts it and answers as soon as the job is running: a
+planet bake is hours, and a request that waited for the archive is a request
+nothing could hold open. `DELETE` on the same address stops it.
+
+A bake has two halves and they are watched in two places, deliberately. Merging
+is about a stack, so it is reported on the stack — tiles written, tiles skipped,
+the zoom it is working through. What happens afterwards is an archive being
+added, and this node already reports that on the archives view through the
+library's own in-progress list, so the second half is handed over rather than
+drawn twice. The line on the stack says where to look.
+
+One bake per stack at a time. Two runs of one recipe write the same checkpoint
+files over each other, and the second would resume the first's work believing it
+were its own.
+
+### What exists now
+
+`src/pmtiles-write.js` writes archives, `src/pmtiles-scan.js` reads back what one
+holds, and `src/bake.js` is the driver: union the sources' coverage, merge in
+tile-id order, write, checkpoint, stop when told.
+
+The merge itself is handed in as a function, and `mergeTileFor` is what supplies
+it: the same `answerStackTile` the tile route calls, so a baked tile and a served
+one come out of one implementation and cannot drift. The cache is bypassed there
+— it is sized for tiles people ask for twice, and a whole-pyramid run would evict
+all of those in favour of tiles nobody will ask for again.
+
+The checkpoint is three files in a working directory: the buffered tile data,
+the entries as `serializeDirectory` writes them, and a small JSON state. Entries
+go through the same serialization the archive itself uses rather than inventing
+a second format for the same array. A checkpoint belongs to one revision of one
+recipe; anything else is discarded rather than continued, because resuming a
+changed recipe produces an archive that is half one map and half another and
+nothing downstream could tell.
+
+The deduplication map is deliberately not part of a checkpoint. Rebuilding it
+means re-hashing everything already buffered, and the cost of starting it empty
+is that a tile identical to one from before the interruption is stored twice.
+The archive is correct either way; it is a little larger.
+
+## Syncing a stack to another node
+
+The question is whether a stack can travel between nodes the way an archive
+does, and the answer is that it is a different kind of thing.
+
+An archive is immutable and content-addressed: an infohash either matches or it
+does not, and two nodes converge because they are fetching the same bytes. A
+stack is a mutable document that gets edited, so syncing it is a question about
+conflicts and clobbering rather than about missing pieces. A feed is the wrong
+shape for it.
+
+There is a sharper problem underneath. A recipe names its sources by category or
+by infohash, so **the same recipe means different things on different nodes**.
+Sent to a node missing one source, an infohash-pinned stack is permanently
+broken; a category-named one silently resolves to that node's newest build of
+that category, which may be a different map entirely. Either way the recipe
+travels and the meaning does not.
+
+Three shapes, in the order they are worth considering:
+
+**Pull into a namespace the receiver owns.** `/api/stacks/<id>/raw` already
+returns the recipe as written. A subscribing node polls a peer's stack list the
+way it already polls for archives, and adopts what it finds under `<peer>:<id>`,
+so an adopted stack can never overwrite a local one and it is obvious on the
+screen which node a recipe came from. This reuses the remote-node machinery
+rather than adding a feed to it. A source that does not resolve locally is
+reported through `problems`, which the console already separates from an invalid
+recipe and from one needing a codec; an adopted stack with a missing source is a
+normal thing to look at, not an error to refuse.
+
+**Export a bundle.** The recipe plus the resolved infohashes of its sources, as
+one file. Unambiguous and reproducible, and the right answer when what is wanted
+is _this exact map_. It pins, so it does not follow a rebuild, which is either
+the point or the problem depending on why it was sent.
+
+**Nothing automatic.** Copy the recipe and let the operator resolve the sources.
+Honest, and possibly right for as long as stacks are few.
+
+Baking sidesteps the question rather than answering it. A baked stack is an
+ordinary archive with an infohash, and archives already sync, so where what is
+wanted is the _output_ on another node rather than the _recipe_, that is the
+mechanism, and it carries no ambiguity about what the sources resolved to.
 
 ## What the offline merge got wrong
 
@@ -743,10 +971,15 @@ still requested and still composited.
    with a byte budget, LRU eviction and single-flight.
 6. ~~**RGBA space.**~~ Done. `src/rgba.js`: opacity, the separable blend
    modes, colour masking and alpha-correct resampling.
-7. **Console.** A Stacks view exists, listing every stack with what each source
-   resolved to and why one cannot be served. It reads rather than edits; the
-   editor in [The stack editor](#the-stack-editor) is still design.
-8. **Bake.** Whole-pyramid run to a new `.pmtiles`, published like any other.
+7. ~~**Console.**~~ Done. A Stacks view listing every stack with what each
+   source resolved to and why one cannot be served, and an editor that adds,
+   changes and removes them.
+8. ~~**Bake.**~~ Done. A coverage-driven run to a new `.pmtiles`, hashed and
+   registered like any other archive. `src/pmtiles-write.js` writes archives,
+   `src/pmtiles-scan.js` says what one holds, `src/stack-tile.js` is the
+   per-tile merge shared with the tile route, `src/bake.js` drives the run with
+   checkpointing and cancellation, and `src/bake-jobs.js` is the job the console
+   starts and watches.
 
 Stages 1 and 2 are worth doing on their own even if the rest waits: a
 category-resolved passthrough endpoint that picks whichever source has the tile

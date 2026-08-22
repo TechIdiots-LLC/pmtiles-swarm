@@ -2403,9 +2403,11 @@
             ${servable ? `<button id="copy-tilejson">Copy TileJSON URL</button>
             <button id="copy-tilejson-swarm" title="The same URL with the .torrent and the magnet in the fragment. A fragment is never sent to the server, so ordinary clients fetch the TileJSON exactly as before; a torrent-aware client reads them from it, and a browser can fetch the metainfo over HTTP instead of waiting on a peer for it.">Copy TileJSON URL + swarm</button>
             <a href="${tileJson}" target="_blank" rel="noreferrer"><button type="button">Open TileJSON</button></a>
-            <a href="${base}/archives/${entry.infoHash}/preview" target="_blank" rel="noreferrer"><button type="button">${
-              summary.format === 'pbf' ? 'Inspect' : 'Preview'
-            }</button></a>` : ''}
+            ${previewButtons(
+              `${base}/archives/${entry.infoHash}/preview`,
+              summary,
+              summary.format === 'pbf' ? 'Inspect' : 'Preview',
+            )}` : ''}
           </div>
           ${
             servable
@@ -4890,6 +4892,47 @@ Every piece is hashed against the ` +
        * order is a decision rather than whichever section happened to be
        * written first.
        */
+      /**
+       * Whether a summary describes tiles the preview will render as terrain.
+       *
+       * Same rule the preview itself applies, so a terrain button is offered on
+       * exactly what opens as terrain: `custom` is all four factors or none,
+       * because pixels whose meaning is not stated are not heights.
+       * @param {object} summary - A PMTiles summary, or a stack's output.
+       * @returns {boolean} - True when a terrain preview is worth offering.
+       */
+      function drawsAsTerrain(summary) {
+        const encoding = summary?.encoding;
+        // `mlt` rides in the same field and is a vector format, so the three
+        // are named rather than tested for "an encoding is set".
+        if (!['terrarium', 'mapbox', 'custom'].includes(encoding)) return false;
+        if (encoding !== 'custom') return true;
+        return ['redFactor', 'greenFactor', 'blueFactor', 'baseShift'].every(
+          (name) => Number.isFinite(summary?.encodingFactors?.[name]),
+        );
+      }
+
+      /**
+       * The preview buttons for something, which is two when it is terrain.
+       *
+       * The raster stays first and keeps its name: it is the one that shows a
+       * hole, since a missing DEM tile hillshades as flat ground rather than as
+       * missing. Terrain is the addition.
+       * @param {string} base - The preview URL, without a query.
+       * @param {object} summary - What decides whether terrain is offered.
+       * @param {string} [label] - What to call the plain one.
+       * @returns {string} - The markup.
+       */
+      function previewButtons(base, summary, label = 'Preview') {
+        const open = (href, text) =>
+          `<a href="${href}" target="_blank" rel="noreferrer"><button type="button">${text}</button></a>`;
+        if (!drawsAsTerrain(summary)) return open(base, label);
+        return (
+          open(`${base}?raw=1`, label) +
+          open(base, 'Terrain')
+        );
+      }
+
       const SETTINGS_GROUPS = [
         'Serving tiles',
         'Feeds',
@@ -6985,14 +7028,55 @@ Every piece is hashed against the ` +
             ? ''
             : `z${stack.minzoom}–z${stack.maxzoom}`;
 
+        // Merging is reported here because it is about the stack. What happens
+        // afterwards is an archive being added, and this node already reports
+        // that on the archives view -- so the line says where to look rather
+        // than drawing a second progress bar for it.
+        const bake = stack.bake;
+        const baking =
+          bake && (bake.phase === 'merging' || bake.phase === 'importing');
+        const bakeLine = !bake
+          ? ''
+          : bake.phase === 'merging'
+            ? `<p class="muted">Exporting: <b>${bake.written.toLocaleString()}</b>
+               tiles written${bake.skipped ? `, ${bake.skipped.toLocaleString()} skipped` : ''}${
+                 bake.zoom === null || bake.zoom === undefined
+                   ? ''
+                   : ` &middot; z${bake.zoom}`
+               } &middot; <code>${escapeHtml(bake.name)}</code></p>`
+            : bake.phase === 'importing'
+              ? `<p class="muted">Merged ${bake.written.toLocaleString()} tiles.
+                 Hashing <code>${escapeHtml(bake.name)}</code> — it appears under
+                 Archives while that runs.</p>`
+              : bake.phase === 'done'
+                ? `<p class="good">Exported ${bake.written.toLocaleString()} tiles to
+                   <code>${escapeHtml(bake.name)}</code>${
+                     bake.infoHash
+                       ? ` &middot; <code>${escapeHtml(bake.infoHash.slice(0, 12))}…</code>`
+                       : ''
+                   }</p>`
+                : `<p class="bad">Export ${escapeHtml(bake.phase)}${
+                    bake.error ? `: ${escapeHtml(bake.error)}` : ''
+                  }. What it had merged is kept, so starting again carries on
+                  from there.</p>`;
+
         const links = `
           ${
             broken
               ? ''
-              : `<a href="/stacks/${encodeURIComponent(stack.id)}/preview" target="_blank" rel="noreferrer">
-                   <button type="button">Preview</button></a>
+              : `${previewButtons(
+                   `/stacks/${encodeURIComponent(stack.id)}/preview`,
+                   stack,
+                 )}
                  <a href="/stacks/${encodeURIComponent(stack.id)}/tiles.json" target="_blank" rel="noreferrer">
                    <button type="button">TileJSON</button></a>`
+          }
+          ${
+            broken
+              ? ''
+              : baking
+                ? `<button type="button" data-stack-bake-stop="${escapeHtml(stack.id)}">Stop export</button>`
+                : `<button type="button" data-stack-bake="${escapeHtml(stack.id)}" title="Run this stack over its sources and write the result as a real archive, with its own infohash, seeded like any other.">Export to archive</button>`
           }
           <button type="button" data-stack-edit="${escapeHtml(stack.id)}">Edit</button>
           <button type="button" data-stack-delete="${escapeHtml(stack.id)}">Delete</button>`;
@@ -7015,6 +7099,7 @@ Every piece is hashed against the ` +
                     .join('')}</ul>`
                 : ''
             }
+            ${bakeLine}
             ${
               stack.needsCodec
                 ? `<p class="muted">Serving this means decoding pixels
@@ -7586,7 +7671,41 @@ Every piece is hashed against the ` +
       $('stacks-list').addEventListener('click', async (event) => {
         const edit = event.target.dataset.stackEdit;
         const drop = event.target.dataset.stackDelete;
-        if (edit !== undefined) {
+        const bake = event.target.dataset.stackBake;
+        const stopBake = event.target.dataset.stackBakeStop;
+        if (bake !== undefined) {
+          // Confirmed, because it is not a small thing: it reads every tile
+          // every source holds, writes a whole archive, and then hashes it.
+          if (
+            !confirm(
+              `Run "${bake}" over its sources and write the result as a new ` +
+                'archive?\n\nThis reads every tile the sources hold and can ' +
+                'take hours. It can be stopped, and stopping keeps the work.',
+            )
+          ) {
+            return;
+          }
+          try {
+            await api(`/api/stacks/${encodeURIComponent(bake)}/bake`, {
+              method: 'POST',
+              body: {},
+            });
+            toast(`Exporting ${bake}`);
+          } catch (error) {
+            toast(error.message);
+          }
+          loadStacks().catch((e) => toast(e.message));
+        } else if (stopBake !== undefined) {
+          try {
+            await api(`/api/stacks/${encodeURIComponent(stopBake)}/bake`, {
+              method: 'DELETE',
+            });
+            toast(`Stopping ${stopBake}`);
+          } catch (error) {
+            toast(error.message);
+          }
+          loadStacks().catch((e) => toast(e.message));
+        } else if (edit !== undefined) {
           const { stacks } = await api('/api/stacks');
           const found = stacks.find((s) => s.id === edit);
           if (found) {

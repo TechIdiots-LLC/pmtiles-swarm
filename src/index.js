@@ -7,6 +7,8 @@ import { assertSafeToListen, createAuth } from './auth.js';
 import { Catalog } from './catalog.js';
 import { StackStore } from './stacks.js';
 import { StackCache } from './stack-cache.js';
+import { BakeManager } from './bake-jobs.js';
+import { loadCodec } from './codec.js';
 import { loadConfig } from './config.js';
 import { CompositeEngine } from './engines/composite.js';
 import { LibtorrentEngine } from './engines/libtorrent.js';
@@ -454,6 +456,12 @@ PMTILES_SWARM_PUBLIC_URL
   library.attachTiles(tiles);
   const warm = new WarmRunner(tiles);
 
+  // Bakes need all three: the store to read sources through -- including a
+  // cache-mode one, whose directories come out of the swarm -- and the library
+  // to hand the finished file to, which is what turns it from a file into an
+  // archive with an infohash.
+  const bakes = new BakeManager({ library, tiles, config, loadCodec });
+
   // Reads the head of anything joined but not yet understood — the header,
   // then the root directory and metadata it points at. Without this an archive
   // being mirrored is unservable until the download happens to reach byte
@@ -511,6 +519,7 @@ PMTILES_SWARM_PUBLIC_URL
     tiles,
     stacks,
     stackCache,
+    bakes,
     warm,
     config,
     speed,

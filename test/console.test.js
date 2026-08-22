@@ -4,7 +4,11 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
-import { declarationDepths, useBeforeDeclaration } from './helpers/js-scope.js';
+import {
+  declarationDepths,
+  stripLiterals,
+  useBeforeDeclaration,
+} from './helpers/js-scope.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const page = await fs.readFile(
@@ -229,6 +233,130 @@ describe('the terrain preview', () => {
       preview,
       /location\.pathname \+ \(terrain \? '\?raw=1' : ''\) \+ location\.hash/,
     );
+  });
+});
+
+describe('the three pages that decide what terrain is', () => {
+  // The rule lives in three files: the preview applies it to decide what to
+  // draw, and the console and the catalogue apply it to decide whether to
+  // offer the button. A button offered on something that does not render as
+  // terrain is worse than no button, so what is asserted here is that they
+  // agree -- not that each is separately correct.
+  const fileOf = (name) =>
+    fsSync.readFileSync(path.join(here, '..', 'src', 'web', name), 'utf8');
+
+  /** The preview's own detection, which reads a TileJSON. */
+  const fromPreview = (tilejson) => {
+    const file = fileOf('preview.html');
+    const from = file.indexOf('const TERRAIN =');
+    const to = file.indexOf('const terrain = terrainReady && !raw;');
+    // `location` because the lifted block reads the query for ?raw=1.
+    return new Function(
+      'tilejson',
+      'vector',
+      'location',
+      `${file.slice(from, to)}; return terrainReady;`,
+    )(tilejson, false, { search: '' });
+  };
+
+  /** A page's `drawsAsTerrain`, lifted out and made callable. */
+  const fromPage = (name) => {
+    const file = fileOf(name);
+    const at = file.search(/(const|function) drawsAsTerrain/);
+    assert.ok(at > 0, `no drawsAsTerrain in ${name}`);
+    // Brace-matched rather than sliced to a fixed closing line: the console
+    // declares it as a function and the catalogue as a const arrow, so the
+    // two do not end the same way.
+    let depth = 0;
+    let end = at;
+    for (let i = file.indexOf('{', at); i < file.length; i += 1) {
+      if (file[i] === '{') depth += 1;
+      else if (file[i] === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    assert.ok(end > at, `could not read drawsAsTerrain out of ${name}`);
+    const body = file.slice(at, end);
+    return new Function(`${body}; return drawsAsTerrain;`)();
+  };
+
+  const cases = [
+    ['terrarium', { encoding: 'terrarium' }, {}, true],
+    ['mapbox', { encoding: 'mapbox' }, {}, true],
+    ['mlt', { encoding: 'mlt' }, {}, false],
+    ['nothing', {}, {}, false],
+    ['unknown', { encoding: 'jpeg' }, {}, false],
+    ['bare custom', { encoding: 'custom' }, {}, false],
+    [
+      'half a custom',
+      { encoding: 'custom' },
+      { redFactor: 256, greenFactor: 1 },
+      false,
+    ],
+    [
+      'a whole custom',
+      { encoding: 'custom' },
+      {
+        redFactor: 256,
+        greenFactor: 1,
+        blueFactor: 1 / 256,
+        baseShift: -32768,
+      },
+      true,
+    ],
+  ];
+
+  for (const [label, base, factors, expected] of cases) {
+    it(`agrees about ${label}`, () => {
+      // The TileJSON carries the four factors flattened beside `encoding`; a
+      // summary keeps them in `encodingFactors`. Same facts, two shapes.
+      assert.equal(fromPreview({ ...base, ...factors }), expected, 'preview');
+      const summary = { ...base, encodingFactors: factors };
+      assert.equal(fromPage('index.html')(summary), expected, 'console');
+      assert.equal(fromPage('public.html')(summary), expected, 'catalogue');
+    });
+  }
+});
+
+describe('the other two pages have script structure too', () => {
+  // The scope checks were written for the console and only ever run against
+  // it. The catalogue and the preview are the same shape -- one file with a
+  // module inlined, nothing to import and nothing to lint -- and a helper
+  // declared inside one renderer and called from another is a ReferenceError
+  // there exactly as it is here. Caught in review rather than by a test, once,
+  // which is the argument for this.
+  const scriptOf = (name) => {
+    const file = fsSync.readFileSync(
+      path.join(here, '..', 'src', 'web', name),
+      'utf8',
+    );
+    return file.split('<script type="module">')[1].split('</script>')[0];
+  };
+
+  for (const name of ['public.html', 'preview.html']) {
+    it(`calls nothing at the top level of ${name} before declaring it`, () => {
+      assert.deepEqual(useBeforeDeclaration(scriptOf(name)), []);
+    });
+  }
+
+  it('declares the catalogue helper both renderers use at the top level', () => {
+    // Archives and categories are rendered by two separate functions, so a
+    // helper serving both cannot live inside either. Declared inside `render`
+    // it passed `node --check`, passed a scope check, and threw the moment a
+    // terrain category was drawn.
+    const script = scriptOf('public.html');
+    const declaration = script.indexOf('const drawsAsTerrain');
+    assert.ok(declaration > 0, 'the catalogue terrain check moved');
+    // Counted on the stripped source: this page is mostly template literals,
+    // and the braces inside them are not scope.
+    const before = stripLiterals(script).slice(0, declaration);
+    const depth =
+      (before.match(/\{/g) ?? []).length - (before.match(/\}/g) ?? []).length;
+    assert.equal(depth, 0, 'drawsAsTerrain is nested inside something');
   });
 });
 

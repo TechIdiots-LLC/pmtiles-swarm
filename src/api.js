@@ -36,14 +36,7 @@ import { buildTileJson, extensionMatches, tileExtension } from './tilejson.js';
 import { SUMMARY_VERSION } from './pmtiles-probe.js';
 import { TileReadError } from './tiles.js';
 import { loadCodec } from './codec.js';
-import { StackCache } from './stack-cache.js';
-import {
-  assembleChildren,
-  encodeHeights,
-  fillNodata,
-  mergeElevation,
-} from './elevation.js';
-import { compositeRgba, toRaster } from './rgba.js';
+import { answerStackTile, outputSize } from './stack-tile.js';
 import {
   isPinned,
   needsCodec,
@@ -222,6 +215,7 @@ export function createApp({
   tiles,
   stacks,
   stackCache,
+  bakes,
   warm,
   config,
   speed,
@@ -2178,6 +2172,10 @@ export function createApp({
             size: newest.size,
             createdAt: newest.createdAt,
             kind: newest.kind ?? 'pmtiles',
+            // So a catalogue page can offer the terrain preview without
+            // fetching a TileJSON per category to find out.
+            encoding: newest.pmtiles?.encoding ?? null,
+            encodingFactors: newest.pmtiles?.encodingFactors ?? null,
           },
           servable,
           endpoints: {
@@ -3116,6 +3114,24 @@ export function createApp({
           // be served yet. See docs/tile-stacks.md — "The codec problem".
           needsCodec: needsCodec(stack),
           pinned: isPinned(resolved),
+          // The same answer the stack's TileJSON gives, so the console can
+          // offer a terrain preview on exactly the stacks that will render as
+          // one. Reading it from the recipe rather than fetching the document
+          // keeps the list one request.
+          // Beside the stack rather than on a list of its own: the console
+          // draws progress on the row, and one poll is what keeps that
+          // honest while a bake is running.
+          bake: bakes?.get(stack.id) ?? null,
+          encoding: stack.output?.encoding ?? null,
+          encodingFactors:
+            stack.output?.encoding === 'custom'
+              ? {
+                  redFactor: Number(stack.output.redFactor),
+                  greenFactor: Number(stack.output.greenFactor),
+                  blueFactor: Number(stack.output.blueFactor),
+                  baseShift: Number(stack.output.baseShift),
+                }
+              : null,
           ...coverage,
           // The order the recipe lists them: lowest priority first, last
           // wins. The console shows this order as it stands rather than
@@ -3139,6 +3155,57 @@ export function createApp({
       // tile. Null is a fact about this node, not about the recipes.
       const codec = await loadCodec();
       res.json({ stacks: list, codec: codec?.name ?? null });
+    }),
+  );
+
+  /**
+   * Starts a bake: the stack, run over its sources, written as an archive.
+   *
+   * Answers as soon as the job is running. A planet bake is hours, so a
+   * request that waited for the archive is a request nothing could hold open
+   * -- what comes back is where to watch it, which is the stack itself.
+   */
+  app.post(
+    '/api/stacks/:id/bake',
+    route(async (req, res) => {
+      await stacks?.refresh();
+      const resolved = stackOr404(req, res);
+      if (!resolved) return;
+      if (!bakes) {
+        return res.status(501).json({ error: 'baking is not enabled here' });
+      }
+
+      try {
+        const job = await bakes.start({
+          resolved,
+          categories: req.body?.categories,
+          location: req.body?.location,
+          savePath: req.body?.savePath,
+        });
+        return res.status(202).json({ bake: job });
+      } catch (error) {
+        return res
+          .status(error.status ?? 500)
+          .json({ error: error.message, hint: error.hint });
+      }
+    }),
+  );
+
+  /**
+   * Stops a bake, leaving its work for the next run to pick up.
+   *
+   * Not a delete of the archive: nothing has been added yet, and the
+   * checkpoint is the hours already spent.
+   */
+  app.delete(
+    '/api/stacks/:id/bake',
+    route(async (req, res) => {
+      if (!bakes?.cancel(req.params.id)) {
+        return res
+          .status(404)
+          .json({ error: 'no bake is running for that stack' });
+      }
+      return res.json({ cancelled: true });
     }),
   );
 
@@ -3337,20 +3404,12 @@ export function createApp({
   );
 
   /**
-   * Serves one tile of a stack, by handing back the bytes of whichever source
-   * has it.
+   * How a stack tile is produced lives in src/stack-tile.js, not here.
    *
-   * This is the passthrough path, and it is the whole of the merge that can be
-   * done without decoding a pixel: ask the sources from the top down, and the
-   * first one holding a tile at this zoom answers. No parent fallback, no
-   * blending, no re-encoding.
-   *
-   * That is less than the design describes and is still useful on its own — a
-   * regional archive over a global one is exactly this, and it is the common
-   * shape of a stack. What it cannot do it refuses rather than approximates: a
-   * recipe asking for masking, height shifts, opacity or a different output
-   * encoding gets a 501 naming the field, instead of tiles that quietly ignore
-   * half the recipe.
+   * A bake has to produce exactly what a request would, and two implementations
+   * of that would disagree eventually. What is left in this file is the part
+   * that is genuinely about HTTP: parsing the request, deciding a status, and
+   * writing the answer out.
    */
   /**
    * The headers every stack tile carries, whichever path produced it.
@@ -3430,6 +3489,17 @@ export function createApp({
         .json({ error: `this stack serves ${coverage.format} tiles` });
     }
 
+    // Only the merging path resizes, so only it can be handed a size it cannot
+    // use. Passthrough never looks at one.
+    let size = null;
+    if (wants) {
+      try {
+        size = outputSize(resolved.stack, req.params.size);
+      } catch (error) {
+        return res.status(error.status ?? 400).json({ error: error.message });
+      }
+    }
+
     const controller = new AbortController();
     // A panning map abandons requests constantly, and a stack multiplies
     // that: one abandoned request here is one per source underneath it.
@@ -3437,11 +3507,6 @@ export function createApp({
       if (!res.writableEnded) controller.abort();
     });
 
-    // Counted the same way an archive's tiles are, and for the same reason:
-    // this handler ends in several places and one hook catches all of them.
-    // Recorded against the stack rather than whichever source answered --
-    // the traffic view is asking what this node serves, and what it serves
-    // here is the stack.
     if (stats) {
       const startedAt = process.hrtime.bigint();
       res.on('finish', () => {
@@ -3459,320 +3524,51 @@ export function createApp({
       });
     }
 
-    /**
-     * Reads one source's tile, walking up to a parent when it has none.
-     *
-     * Only the merging path climbs. Passthrough hands back bytes, and a
-     * parent's bytes are the wrong tile — the client would get its
-     * neighbourhood rather than its own square. Once the pixels are being
-     * decoded anyway the parent can be cropped to the right sub-square, and
-     * that is what lets a z8 global source keep contributing at z14.
-     *
-     * Bounded: six levels is already a 64x upscale, and past that the
-     * contribution is a smear that costs a swarm read to fetch.
-     * @param {object} source - The resolved source.
-     * @param {boolean} climb - Whether to fall back to a parent.
-     * @returns {Promise<object|null>} - The tile and the zoom it came from.
-     */
-    const readFrom = async (source, climb) => {
-      const floor = climb ? Math.max(0, z - 6) : z;
-      for (let at = z; at >= floor; at -= 1) {
-        const shift = z - at;
-        const tile = await tiles.getTile(
-          source.entry.infoHash,
-          at,
-          x >> shift,
-          y >> shift,
-          { signal: controller.signal },
-        );
-        if (tile?.data) return { tile, parentZ: at };
-      }
-      return null;
-    };
-
-    const contributors = [];
-
-    // ---- Passthrough: no pixel is decoded, so no codec is involved. -----
-    if (!wants) {
-      let answered = null;
-      // Top down, because the last source in the recipe covers the ones
-      // before it -- so the first one holding this tile is the answer, and
-      // every source below it would have been covered anyway.
-      for (const source of [...resolved.sources].reverse()) {
-        if (!source.entry) continue;
-        let found;
-        try {
-          found = await readFrom(source, false);
-        } catch (error) {
-          if (error.name === 'AbortError') return;
-          if (source.required) {
-            const status = error instanceof TileReadError ? error.status : 503;
-            return res.status(status).json({
-              error: `${source.name} is required and could not be read: ${error.message}`,
-            });
-          }
-          contributors.push(`${source.name}=error`);
-          continue;
-        }
-        if (found) {
-          answered = { source, tile: found.tile };
-          contributors.push(`${source.name}=${source.entry.infoHash}`);
-          break;
-        }
-        contributors.push(`${source.name}=absent`);
-      }
-
-      stackHeaders(res, resolved, contributors, z, x, y);
-      if (!answered) {
-        return res.status(resolved.stack.sparse === false ? 204 : 404).end();
-      }
-      res.type(
-        answered.source.entry.pmtiles?.contentType ??
-          'application/octet-stream',
-      );
-      if (answered.tile.encoding) {
-        res.setHeader('content-encoding', answered.tile.encoding);
-      }
-      return res.send(answered.tile.data);
-    }
-
-    // Cached only on this path. Passthrough already costs one read of one
-    // archive, and keeping its answer here would put a second copy of the
-    // archive's own bytes on the same disk for nothing.
-    //
-    // Keyed by the ETag, which already covers the recipe's revision and what
-    // its sources resolved to -- so an edited stack or a rebuilt source
-    // produces a different key rather than needing anything to remember to
-    // invalidate the old one.
-    const rgba = resolved.stack.space === 'rgba';
-    // A URL segment wins, then the recipe. With neither, the largest
-    // contributing source decides -- which is 512 for anything
-    // rio-rgbify-merge wrote, keeps the finer source's detail where sizes
-    // are mixed, and does not upscale a stack of small tiles into something
-    // bigger than the data it came from.
-    const requested = req.params.size ?? resolved.stack.output?.tileSize;
-    const explicitSize = requested === undefined ? null : Number(requested);
-    // 256 and 512 only. Those are what raster sources are written at and what
-    // renderers ask for; a size nothing renders is a size worth not serving.
-    if (explicitSize !== null && ![256, 512].includes(explicitSize)) {
-      return res.status(400).json({ error: 'tile size must be 256 or 512' });
-    }
     const format = resolved.stack.output?.format ?? coverage.format ?? 'webp';
-    const cacheKey = stackCache?.enabled
-      ? StackCache.key(
-          `${stackEtag(resolved, z, x, y)}:${explicitSize ?? 'auto'}`,
-          format,
-        )
-      : null;
-    if (cacheKey) {
-      const hit = await stackCache.get(cacheKey);
-      if (hit) {
-        stackHeaders(res, resolved, ['cache=hit'], z, x, y);
-        res.type(format === 'png' ? 'image/png' : 'image/webp');
-        return res.send(hit);
-      }
-    }
 
-    // ---- Merging: every source contributes, in the recipe's order. ------
-    //
-    // Produced through a function rather than written straight to the
-    // response, so the whole of it can be run once for however many requests
-    // arrive for the same tile at the same moment. A panning map does that
-    // routinely, and a merge is expensive enough per tile -- a read of every
-    // source, a decode each, then an encode -- that doing it four times over
-    // is worth the indirection.
-    const produce = async () => {
-      const said = [];
-
-      // Bottom first, because that is the order they are painted in, and all
-      // of them are read rather than stopping at the first hit: a source
-      // masked over the ocean has to let the one beneath it show through,
-      // which cannot be known without looking at both.
-      const reads = await Promise.all(
-        resolved.sources.map(async (source) => {
-          if (!source.entry) return { source, found: null };
-          try {
-            return { source, found: await readFrom(source, true) };
-          } catch (error) {
-            if (error.name === 'AbortError') throw error;
-            return { source, error };
-          }
-        }),
-      );
-
-      const contributions = [];
-      for (const read of reads) {
-        if (read.error) {
-          if (read.source.required) {
-            const status =
-              read.error instanceof TileReadError ? read.error.status : 503;
-            return {
-              said,
-              status,
-              error: `${read.source.name} is required and could not be read: ${read.error.message}`,
-            };
-          }
-          said.push(`${read.source.name}=error`);
-          contributions.push(null);
-          continue;
-        }
-        if (!read.found) {
-          said.push(`${read.source.name}=absent`);
-          contributions.push(null);
-          continue;
-        }
-        said.push(
-          read.found.parentZ === z
-            ? `${read.source.name}=${read.source.entry.infoHash}`
-            : `${read.source.name}=z${read.found.parentZ}`,
-        );
-        let raster = await codec.decode(Buffer.from(read.found.tile.data), {
-          channels: rgba ? 4 : 3,
-        });
-
-        // A tile's coordinates are an extent, not a pixel count, so a source
-        // with smaller tiles is not misaligned -- it simply keeps its detail
-        // one zoom further down. Reading that square of children and
-        // stitching them is how the detail survives; scaling the one tile up
-        // instead would land on the right ground with none of it.
-        //
-        // This is MapLibre's own arithmetic, moved to the server:
-        // coveringZoomLevel offsets a source's zoom by
-        // log2(transformSize / sourceSize) for exactly this reason.
-        const offset =
-          explicitSize && read.found.parentZ === z
-            ? Math.round(Math.log2(explicitSize / raster.width))
-            : 0;
-        if (offset > 0 && z + offset <= 26) {
-          const span = 2 ** offset;
-          const children = await Promise.all(
-            Array.from({ length: span * span }, async (_unused, i) => {
-              const child = await tiles.getTile(
-                read.source.entry.infoHash,
-                z + offset,
-                x * span + (i % span),
-                y * span + Math.floor(i / span),
-                { signal: controller.signal },
-              );
-              if (!child?.data) return null;
-              return codec.decode(Buffer.from(child.data), {
-                channels: rgba ? 4 : 3,
-              });
-            }),
-          );
-          // All present or none: a partial square would stitch real detail
-          // beside holes that the scaled-up tile would have covered, which
-          // is worse than either on its own.
-          if (children.every(Boolean)) {
-            raster = assembleChildren(children, span, {
-              width: raster.width,
-              channels: raster.channels,
-            });
-            said[said.length - 1] += `+z${z + offset}`;
-          }
-        }
-
-        contributions.push({
-          source: read.source.source,
-          parentZ: read.found.parentZ,
-          raster,
-        });
-      }
-
-      const first = contributions.find(Boolean);
-      if (!first) return { said, empty: true };
-      // Every contribution is put on this grid. Unasked, it is the largest
-      // any source brought, so the finest one is not thrown away.
-      const size =
-        explicitSize ??
-        Math.max(...contributions.filter(Boolean).map((c) => c.raster.width));
-      const output = resolved.stack.output ?? {};
-
-      // The two spaces differ only here. Everything around this -- reading,
-      // the parent fallback, the cache, the headers -- is the same either
-      // way, which is why they are one route rather than two.
-      let raster;
-      if (rgba) {
-        const composited = compositeRgba(contributions, {
-          z,
-          x,
-          y,
-          size,
-          resampling: resolved.stack.resampling,
-        });
-        if (!composited) return { said, empty: true };
-        // Alpha is kept unless the recipe asks for a flat tile. A stack
-        // whose top layer is masked has transparency by construction, and
-        // dropping it would paint the mask black.
-        raster = toRaster(composited, output.alpha !== false);
-      } else {
-        const merged = mergeElevation(contributions, {
-          z,
-          x,
-          y,
-          size,
-          gaussianBlurSigma: resolved.stack.gaussianBlurSigma,
-          resampling: resolved.stack.resampling,
-        });
-        // Nothing covered this tile, so there is none worth sending. The
-        // client overzooms a lower one, which is cheaper and better looking
-        // than a slab of nodata.
-        if (!merged) return { said, empty: true };
-        fillNodata(merged, output.nodata);
-        // The whole output block is passed, not three fields of it: a
-        // custom output needs its four factors, and naming them one at a
-        // time is how the next encoding's parameters get forgotten.
-        raster = encodeHeights(merged, {
-          ...output,
-          width: size,
-          height: size,
-          encoding: output.encoding ?? first.source?.encoding,
-        });
-      }
-      // Terrain is lossless or it is nothing: the three channels are the
-      // three bytes of one height, so a codec that shifts red by one moves
-      // the ground by 65 kilometres. Imagery is a picture and may be
-      // compressed as one, which is the only place the two spaces disagree
-      // about encoding.
-      const body = await codec.encode(raster, {
-        format,
-        lossless: rgba ? output.lossless === true : true,
-      });
-
-      // Awaited, though it is tempting not to be. The write is a local disk
-      // write of a few tens of kilobytes against a merge that just read
-      // every source and decoded each one -- and leaving it in flight means
-      // the next request for this tile, arriving a millisecond later, finds
-      // nothing and merges it all over again.
-      if (cacheKey) await stackCache.put(cacheKey, body).catch(() => {});
-      return { said, body };
-    };
-
-    let result;
+    let answer;
     try {
-      result = cacheKey
-        ? await stackCache.once(cacheKey, produce)
-        : await produce();
+      answer = await answerStackTile({
+        resolved,
+        z,
+        x,
+        y,
+        tiles,
+        codec,
+        stackCache,
+        signal: controller.signal,
+        size,
+        format,
+      });
     } catch (error) {
-      // The client went away mid-merge. Nothing to answer and nobody to
-      // answer it to.
+      // The client went away mid-merge. Nothing to answer and nobody to answer
+      // it to.
       if (error?.name === 'AbortError') return;
       throw error;
     }
 
-    stackHeaders(res, resolved, [...contributors, ...result.said], z, x, y);
-    if (result.error) {
-      return res.status(result.status).json({ error: result.error });
+    stackHeaders(res, resolved, answer.contributors, z, x, y);
+    if (answer.error) {
+      return res
+        .status(answer.error.status)
+        .json({ error: answer.error.message });
     }
     // The flag the document advertises, honoured rather than restated: 404
     // lets a client overzoom the parent, 204 tells it the tile is genuinely
     // empty and to draw nothing. Same rule and same name tileserver-gl uses.
-    if (result.empty) {
+    if (answer.empty) {
       return res.status(resolved.stack.sparse === false ? 204 : 404).end();
+    }
+    if (answer.passthrough) {
+      res.type(answer.passthrough.contentType);
+      if (answer.passthrough.encoding) {
+        res.setHeader('content-encoding', answer.passthrough.encoding);
+      }
+      return res.send(answer.passthrough.data);
     }
 
     res.type(format === 'png' ? 'image/png' : 'image/webp');
-    return res.send(result.body);
+    return res.send(answer.body);
   });
 
   app.get('/stacks/:id/:size/:z/:x/:y.:ext', (req, res, next) => {

@@ -340,6 +340,18 @@
         return row;
       };
 
+      // Same rule the preview applies, so a terrain link is offered on exactly
+      // what opens as terrain. `mlt` rides in the same field and is a vector
+      // format; `custom` is all four factors or none.
+      const drawsAsTerrain = (summary) => {
+        const encoding = summary?.encoding;
+        if (!['terrarium', 'mapbox', 'custom'].includes(encoding)) return false;
+        if (encoding !== 'custom') return true;
+        return ['redFactor', 'greenFactor', 'blueFactor', 'baseShift'].every(
+          (name) => Number.isFinite(summary?.encodingFactors?.[name]),
+        );
+      };
+
       const render = (archives) => {
         const host = document.getElementById('archives');
         host.textContent = '';
@@ -386,7 +398,14 @@
           const servable = !archive.kind || archive.kind !== 'unknown';
           if (servable) {
             add(`${root}/tiles.json`, 'TileJSON');
-            add(`${root}/preview`, 'preview');
+            if (drawsAsTerrain(archive.pmtiles)) {
+              // The raster keeps the plain name: it is the one that shows a
+              // hole, since a missing DEM tile hillshades as flat ground.
+              add(`${root}/preview?raw=1`, 'preview');
+              add(`${root}/preview`, 'terrain');
+            } else {
+              add(`${root}/preview`, 'preview');
+            }
           }
           add(`${root}/archive.torrent`, '.torrent');
           if (archive.magnet) add(archive.magnet, 'magnet');
@@ -521,7 +540,14 @@
           if (ends.xyz) copy(ends.xyz, 'XYZ');
           // The newest build's preview, which is what "show me this
           // category" means.
-          if (ends.preview) add(ends.preview, 'preview');
+          if (ends.preview) {
+            if (drawsAsTerrain(entry.newest)) {
+              add(`${ends.preview}?raw=1`, 'preview');
+              add(ends.preview, 'terrain');
+            } else {
+              add(ends.preview, 'preview');
+            }
+          }
           // A file, so a link the browser saves rather than renders.
           if (ends.torrent) {
             const a = el('a', null, '.torrent');

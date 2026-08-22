@@ -1,0 +1,332 @@
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { after, before, describe, it } from 'node:test';
+import { zxyToTileId } from 'pmtiles';
+import { BakeManager } from '../src/bake-jobs.js';
+import {
+  assertBakeable,
+  bakeRevision,
+  bakedMetadata,
+  bakedName,
+} from '../src/bake.js';
+import { PMTilesWriter, TileType } from '../src/pmtiles-write.js';
+import { resolveStack } from '../src/stacks.js';
+
+let workspace;
+
+before(async () => {
+  workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'bake-jobs-'));
+});
+
+after(async () => {
+  await fs.rm(workspace, { recursive: true, force: true });
+});
+
+/**
+ * A source archive on disk, and the entry describing it.
+ * @param {string} name - What to call it.
+ * @param {Array<number[]>} coordinates - The z/x/y it holds.
+ * @returns {Promise<object>} - `{file, entry}`.
+ */
+async function sourceArchive(name, coordinates) {
+  const writer = await PMTilesWriter.open({ directory: workspace });
+  const ids = coordinates
+    .map((zxy) => zxyToTileId(...zxy))
+    .sort((one, two) => one - two);
+  for (const id of ids)
+    await writer.writeTile(id, Buffer.from(`${name}:${id}`));
+  const file = path.join(workspace, `${name}.pmtiles`);
+  await writer.finalize(file, { tileType: TileType.Png }, { name });
+  return {
+    file,
+    entry: {
+      infoHash: crypto.createHash('sha1').update(name).digest('hex'),
+      name: `${name}.pmtiles`,
+      categories: ['base'],
+      pmtiles: { format: 'png', contentType: 'image/png' },
+    },
+  };
+}
+
+/**
+ * A resolved stack over one source.
+ * @param {object} archive - What `sourceArchive` returned.
+ * @param {object} [recipe] - Extra recipe fields.
+ * @returns {object} - The resolution.
+ */
+function stackOver(archive, recipe = {}) {
+  return resolveStack(
+    {
+      id: 'terrain',
+      title: 'Terrain',
+      sources: [{ category: 'base' }],
+      ...recipe,
+    },
+    { archive: () => archive.entry, category: () => archive.entry },
+  );
+}
+
+/**
+ * A tile store reading straight out of the file on disk.
+ * @param {object} archive - What `sourceArchive` returned.
+ * @returns {object} - Something with `readRange` and `getTile`.
+ */
+function storeOver(archive) {
+  return {
+    async readRange(infoHash, offset, length) {
+      const handle = await fs.open(archive.file, 'r');
+      try {
+        const buffer = Buffer.alloc(length);
+        const { bytesRead } = await handle.read(buffer, 0, length, offset);
+        return buffer.subarray(0, bytesRead);
+      } finally {
+        await handle.close();
+      }
+    },
+    async getTile(infoHash, z, x, y) {
+      const { PMTiles } = await import('pmtiles');
+      const { NodeFileSource } = await import('../src/file-source.js');
+      const source = new NodeFileSource(archive.file);
+      try {
+        const tile = await new PMTiles(source).getZxy(z, x, y);
+        return tile ? { data: tile.data } : null;
+      } finally {
+        source.close?.();
+      }
+    },
+  };
+}
+
+/**
+ * Waits for a job to stop moving.
+ * @param {BakeManager} manager - The manager.
+ * @param {string} id - Which stack.
+ * @returns {Promise<object>} - The finished job.
+ */
+async function settled(manager, id) {
+  for (let tries = 0; tries < 200; tries += 1) {
+    const job = manager.get(id);
+    if (job?.finishedAt) return job;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('the bake never finished');
+}
+
+describe('what identifies a bake', () => {
+  it('changes when the recipe changes', async () => {
+    const archive = await sourceArchive('rev', [[1, 0, 0]]);
+    const before = bakeRevision(stackOver(archive));
+    const after = bakeRevision(stackOver(archive, { maxzoom: 9 }));
+    assert.notEqual(before, after);
+  });
+
+  it('changes when a source resolves to a different build', async () => {
+    // The case the recipe alone cannot see: a category is still the same
+    // word, and it now means a different archive. Resuming across that
+    // produces an archive half of one map and half of another.
+    const archive = await sourceArchive('rev2', [[1, 0, 0]]);
+    const before = bakeRevision(stackOver(archive));
+
+    const rebuilt = {
+      ...archive,
+      entry: { ...archive.entry, infoHash: 'f'.repeat(40) },
+    };
+    assert.notEqual(before, bakeRevision(stackOver(rebuilt)));
+  });
+
+  it('is the same for the same recipe over the same sources', async () => {
+    const archive = await sourceArchive('rev3', [[1, 0, 0]]);
+    assert.equal(
+      bakeRevision(stackOver(archive)),
+      bakeRevision(stackOver(archive)),
+    );
+  });
+});
+
+describe('what a bake calls the file and the archive', () => {
+  it('dates the filename, so successive builds do not collide', async () => {
+    const archive = await sourceArchive('named', [[1, 0, 0]]);
+    const name = bakedName(stackOver(archive), {
+      when: new Date('2026-08-22T10:00:00Z'),
+    });
+    assert.equal(name, 'Terrain-20260822.pmtiles');
+  });
+
+  it('sanitises a title that would not survive as a filename', async () => {
+    const archive = await sourceArchive('slug', [[1, 0, 0]]);
+    const name = bakedName(stackOver(archive, { title: '../../etc/passwd' }), {
+      when: new Date('2026-08-22T10:00:00Z'),
+    });
+    assert.ok(!name.includes('/'), name);
+    assert.ok(!name.includes('..'), name);
+  });
+
+  it('leaves the archive name undated, the way a rebuild does', () => {
+    // A rebuild keeps its name and mints a new infohash. Dating the name would
+    // make every build a different map, and `/latest/` would never follow one.
+    const metadata = bakedMetadata({
+      name: 'Terrain',
+      bakedAt: '2026-08-22T10:00:00Z',
+    });
+    assert.equal(metadata.name, 'Terrain');
+    assert.match(metadata.description, /Baked 2026-08-22/);
+  });
+
+  it('always names the archive, because mbtiles needs one', () => {
+    // These get converted to mbtiles by other tools, and a nameless metadata
+    // block is not valid there.
+    assert.ok(bakedMetadata().name);
+  });
+
+  it('keeps a description the recipe already had', () => {
+    const metadata = bakedMetadata({
+      description: 'Bathymetry under terrain',
+      bakedAt: '2026-08-22T10:00:00Z',
+    });
+    assert.match(metadata.description, /Bathymetry under terrain/);
+    assert.match(metadata.description, /Baked 2026-08-22/);
+  });
+});
+
+describe('refusing a bake that cannot produce what was asked for', () => {
+  it('needs a codec where the recipe asks for pixel work', () => {
+    const resolved = {
+      stack: { id: 's', sources: [{ category: 'a', maskValues: [-1] }] },
+      sources: [],
+    };
+    assert.throws(() => assertBakeable(resolved, null), /no codec/);
+  });
+
+  it('allows it once there is one', () => {
+    const resolved = {
+      stack: { id: 's', sources: [{ category: 'a', maskValues: [-1] }] },
+      sources: [],
+    };
+    assert.doesNotThrow(() => assertBakeable(resolved, { name: 'sharp' }));
+  });
+
+  it('does not stand in the way of a passthrough stack', () => {
+    const resolved = {
+      stack: { id: 's', sources: [{ category: 'a' }] },
+      sources: [],
+    };
+    assert.doesNotThrow(() => assertBakeable(resolved, null));
+  });
+});
+
+describe('running a bake as a job', () => {
+  /**
+   * A manager over one source, with a library that records what it was given.
+   * @param {object} archive - What `sourceArchive` returned.
+   * @returns {object} - `{manager, imported}`.
+   */
+  const managerOver = (archive) => {
+    const imported = [];
+    const manager = new BakeManager({
+      tiles: storeOver(archive),
+      config: { dataDir: path.join(workspace, 'data') },
+      loadCodec: async () => null,
+      library: {
+        addLocalArchive: async (file, options) => {
+          imported.push({ file, options });
+          return { infoHash: 'a'.repeat(40) };
+        },
+        resolveSavePath: async () => undefined,
+      },
+    });
+    return { manager, imported };
+  };
+
+  it('merges, then hands the file to the library', async () => {
+    const archive = await sourceArchive('job', [
+      [1, 0, 0],
+      [2, 1, 1],
+    ]);
+    const { manager, imported } = managerOver(archive);
+
+    const started = await manager.start({ resolved: stackOver(archive) });
+    assert.equal(started.phase, 'merging');
+
+    const job = await settled(manager, 'terrain');
+    assert.equal(job.phase, 'done', job.error);
+    assert.equal(job.written, 2);
+    assert.equal(job.infoHash, 'a'.repeat(40));
+
+    // The second half is an archive being added, which the library reports on
+    // its own in-progress list -- this only has to hand it over.
+    assert.equal(imported.length, 1);
+    assert.match(imported[0].file, /Terrain-\d{8}\.pmtiles$/);
+    assert.equal(imported[0].options.mode, 'mirror');
+  });
+
+  it('refuses a second bake of the same stack', async () => {
+    // Two runs of one recipe write the same checkpoint files over each other,
+    // and the second resumes the first's work believing it is its own.
+    const archive = await sourceArchive('busy', [[1, 0, 0]]);
+    let release;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    const manager = new BakeManager({
+      tiles: storeOver(archive),
+      config: { dataDir: path.join(workspace, 'data-busy') },
+      loadCodec: async () => null,
+      library: {
+        // Never answers until this test says so, so the first job stays put.
+        addLocalArchive: async () => {
+          await held;
+          return { infoHash: 'b'.repeat(40) };
+        },
+        resolveSavePath: async () => undefined,
+      },
+    });
+
+    const resolved = stackOver(archive);
+    await manager.start({ resolved });
+    await assert.rejects(
+      () => manager.start({ resolved }),
+      /already being baked/,
+    );
+
+    release();
+    await settled(manager, 'terrain');
+  });
+
+  it('reports a failure on the job rather than throwing into nowhere', async () => {
+    const archive = await sourceArchive('fail', [[1, 0, 0]]);
+    const resolved = stackOver(archive);
+
+    const broken = new BakeManager({
+      tiles: storeOver(archive),
+      config: { dataDir: path.join(workspace, 'data-fail') },
+      loadCodec: async () => null,
+      library: {
+        addLocalArchive: async () => {
+          throw new Error('the disk is full');
+        },
+        resolveSavePath: async () => undefined,
+      },
+    });
+
+    await broken.start({ resolved });
+    const job = await settled(broken, 'terrain');
+    assert.equal(job.phase, 'failed');
+    assert.match(job.error, /the disk is full/);
+  });
+
+  it('says nothing about a stack that has never been baked', async () => {
+    const archive = await sourceArchive('never', [[1, 0, 0]]);
+    const { manager } = managerOver(archive);
+    assert.equal(manager.get('nobody'), null);
+    assert.deepEqual(manager.list(), []);
+  });
+
+  it('has nothing to cancel when nothing is running', async () => {
+    const archive = await sourceArchive('idle', [[1, 0, 0]]);
+    const { manager } = managerOver(archive);
+    assert.equal(manager.cancel('terrain'), false);
+  });
+});

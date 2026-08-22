@@ -57,6 +57,29 @@ The prebuilt `@img/sharp-*` packages it resolves carry libvips (LGPL-3.0-or-late
 dependencies, each under their own terms; sharp links to libvips dynamically and ships it
 unmodified.
 
+## rio-rgbify — MIT
+
+> Copyright (c) 2016 Mapbox
+> https://github.com/mapbox/rio-rgbify
+
+The original terrain-RGB encoder: it is what established the `base` and `interval` packing that
+`src/elevation.js` decodes and encodes, and the defaults there — base `-10000`, interval `0.1` —
+are Mapbox's Terrain-RGB format rather than a choice made here.
+
+[rio-rgbify-merge](https://github.com/TechIdiots-LLC/rio-rgbify-merge) is a fork of it by
+TechIdiots LLC, under the same MIT license and carrying the same copyright line. Tile stacks are
+the on-the-fly counterpart to that fork's offline merge, and the pixel maths is deliberately kept
+the same so a stack previewed live and a stack baked to a file do not disagree — see
+[docs/tile-stacks.md](docs/tile-stacks.md).
+
+Which half is whose is worth stating, because the two are credited differently. The encoder traces
+to Mapbox in 2016. The **merge** behaviour this project follows — layer priority, masking by height
+and by colour, sparse tiles — was added in the fork in 2026 and is TechIdiots LLC's own work, not
+Mapbox's.
+
+No code is copied either way. `src/elevation.js` and `src/rgba.js` are JavaScript written against
+the same rules, and `docs/tile-stacks.md` records where those rules differ from the fork's and why.
+
 ## qBittorrent — GPL-2.0-or-later
 
 > https://github.com/qbittorrent/qBittorrent
