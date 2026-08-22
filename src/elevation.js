@@ -576,6 +576,15 @@ export function mergeElevation(contributions, options) {
       const sigma = (options.gaussianBlurSigma ?? 0) * (options.z - parentZ);
       heights = blurHeights(heights, size, sigma);
     }
+
+    // Clipped last, and to the tile that was asked for rather than the one
+    // that answered: a source falling back to a parent still covers the square
+    // being served. See docs/tile-stacks.md — "Clipping a source to a shape".
+    if (contribution.coverage) {
+      for (let i = 0; i < heights.length; i += 1) {
+        if (!contribution.coverage[i]) heights[i] = Number.NaN;
+      }
+    }
     return heights;
   });
 

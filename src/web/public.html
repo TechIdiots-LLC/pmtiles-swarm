@@ -245,6 +245,7 @@
       </div>
 
       <div id="categories"></div>
+      <div id="stacks"></div>
       <div id="archives"><p class="empty">Loading…</p></div>
 
       <footer>
@@ -352,6 +353,45 @@
         );
       };
 
+      /**
+       * A button that copies an address rather than following it.
+       *
+       * An endpoint belongs somewhere else — a style, a torrent client, a feed
+       * reader — and clicking one here achieves nothing. The URL goes in the
+       * tooltip either way: a browser on plain HTTP has no clipboard, and
+       * something somebody can select beats a button that does nothing.
+       * @param {HTMLElement} links - Where to put it.
+       * @param {string} href - The address.
+       * @param {string} text - What the button says.
+       * @param {boolean} [fetched] - Copy what the address answers, not the address.
+       * @returns {void}
+       */
+      const copyButton = (links, href, text, fetched) => {
+        const button = el('button', 'copy', text);
+        button.type = 'button';
+        const absolute = new URL(href, location.href).href;
+        button.title = absolute;
+        button.onclick = async () => {
+          try {
+            const value = fetched
+              ? (await (await fetch(absolute)).text()).trim()
+              : absolute;
+            const landed = await toClipboard(value);
+            button.classList.toggle('done', landed);
+            button.textContent = landed
+              ? 'copied'
+              : 'copy failed — it is in the tooltip';
+            setTimeout(() => {
+              button.classList.remove('done');
+              button.textContent = text;
+            }, 1200);
+          } catch {
+            button.textContent = 'copy failed — it is in the tooltip';
+          }
+        };
+        links.append(button);
+      };
+
       const render = (archives) => {
         const host = document.getElementById('archives');
         host.textContent = '';
@@ -439,6 +479,75 @@
         }
       };
 
+      /**
+       * Stacks, which are several archives answering as one endpoint.
+       *
+       * Listed because a visitor cannot discover one otherwise: a stack has no
+       * infohash and appears in no feed, so without this the only way to know a
+       * node serves one is to be told its id. What the console shows is a
+       * different document — what each source resolved to, what is missing,
+       * what cannot be served — and that is the operator's business.
+       * @param {object[]} stacks - What `/stacks/` answered with.
+       * @returns {void}
+       */
+      const renderStacks = (stacks) => {
+        const host = document.getElementById('stacks');
+        host.textContent = '';
+        if (stacks.length === 0) return;
+
+        host.append(el('h2', null, 'Stacks'));
+        host.append(
+          el(
+            'p',
+            'facts',
+            'Several archives served as one endpoint — terrain over ' +
+              'bathymetry, or a regional patch over a global base. A stack ' +
+              'follows its sources, so it moves when they are rebuilt.',
+          ),
+        );
+
+        for (const stack of stacks) {
+          const card = el('div', 'archive');
+          const head = el('header');
+          head.append(el('span', 'name', stack.title));
+          head.append(el('span', 'tag', stack.space));
+          if (stack.encoding) head.append(el('span', 'tag', stack.encoding));
+          card.append(head);
+
+          const facts = [];
+          if (Number.isFinite(stack.minzoom) && Number.isFinite(stack.maxzoom)) {
+            facts.push(`z${stack.minzoom}–z${stack.maxzoom}`);
+          }
+          facts.push(
+            `${stack.sources} source${stack.sources === 1 ? '' : 's'}`,
+          );
+          if (stack.format) facts.push(stack.format);
+          card.append(el('p', 'facts', facts.join(' · ')));
+
+          const links = el('div', 'links');
+          const add = (href, text) => {
+            const a = el('a', null, text);
+            a.href = href;
+            links.append(a);
+          };
+          const ends = stack.endpoints ?? {};
+          // Same rule as the categories above: an address that belongs in a
+          // style is copied, and a page is followed.
+          if (ends.tileJson) copyButton(links, ends.tileJson, 'TileJSON');
+          if (ends.xyz) copyButton(links, ends.xyz, 'XYZ');
+          if (ends.preview) {
+            if (drawsAsTerrain(stack)) {
+              add(`${ends.preview}?raw=1`, 'preview');
+              add(ends.preview, 'terrain');
+            } else {
+              add(ends.preview, 'preview');
+            }
+          }
+          card.append(links);
+          host.append(card);
+        }
+      };
+
       // Categories are the handle that survives a rebuild, so they go first —
       // a style should point at one of these rather than at an infohash.
       // Categories first, and given the same weight as an archive, because
@@ -502,34 +611,8 @@
           // having rather than its address. /magnet serves a magnet URI as
           // text/plain, and copying the URL of that handed somebody a link to
           // a magnet instead of a magnet — which a torrent client cannot open.
-          const copy = (href, text, fetched) => {
-            const button = el('button', 'copy', text);
-            button.type = 'button';
-            const absolute = new URL(href, location.href).href;
-            // The URL either way: a browser on plain HTTP has no clipboard,
-            // and a tooltip somebody can select beats a button that does
-            // nothing.
-            button.title = absolute;
-            button.onclick = async () => {
-              try {
-                const value = fetched
-                  ? (await (await fetch(absolute)).text()).trim()
-                  : absolute;
-                const landed = await toClipboard(value);
-                button.classList.toggle('done', landed);
-                button.textContent = landed
-                  ? 'copied'
-                  : 'copy failed — it is in the tooltip';
-                setTimeout(() => {
-                  button.classList.remove('done');
-                  button.textContent = text;
-                }, 1200);
-              } catch {
-                button.textContent = 'copy failed — it is in the tooltip';
-              }
-            };
-            links.append(button);
-          };
+          const copy = (href, text, fetched) =>
+            copyButton(links, href, text, fetched);
 
           const ends = entry.endpoints;
           if (ends.tileJson) copy(ends.tileJson, 'TileJSON');
@@ -618,6 +701,7 @@
       // asking the node again on every keystroke.
       let loadedArchives = [];
       let loadedCategories = [];
+      let loadedStacks = [];
 
       const matches = (text, needle) =>
         String(text ?? '')
@@ -675,6 +759,7 @@
           .sort(categorySorters[order] ?? categorySorters.name);
 
         renderCategories(categories);
+        renderStacks(loadedStacks);
         render(archives);
 
         const count = document.getElementById('count');
@@ -736,6 +821,20 @@
           }
         } catch {
           // Nothing to say. The archives above are the substance.
+        }
+
+        // A stack has no infohash and appears in no feed, so this is the only
+        // way a visitor finds out one is served at all.
+        try {
+          const response = await fetch('/stacks/');
+          if (response.ok) {
+            const body = await response.json();
+            loadedStacks = body.stacks ?? [];
+            apply();
+          }
+        } catch {
+          // A node with no stacks answers this too, so a failure here means
+          // something else and the page is still useful without it.
         }
       };
 

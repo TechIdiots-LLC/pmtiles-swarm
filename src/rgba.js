@@ -284,6 +284,15 @@ export function compositeRgba(contributions, options) {
       );
     }
 
+    // Clipped last, and to the tile that was asked for. Alpha rather than NaN,
+    // which is what "nothing here" means in this space -- and it is the same
+    // thing `maskColors` does above.
+    if (contribution.coverage) {
+      for (let i = 0; i < layer.a.length; i += 1) {
+        if (!contribution.coverage[i]) layer.a[i] = 0;
+      }
+    }
+
     if (!result) {
       // The bottom layer has nothing to composite against, but its own
       // opacity still applies -- a base at 50% over nothing is half

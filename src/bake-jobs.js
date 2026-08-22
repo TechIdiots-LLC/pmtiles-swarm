@@ -35,16 +35,18 @@ export class BakeManager {
   #tiles;
   #config;
   #loadCodec;
+  #cutlines;
   #jobs = new Map();
 
   /**
    * @param {object} deps - The library, the tile store, the config and the codec probe.
    */
-  constructor({ library, tiles, config, loadCodec }) {
+  constructor({ library, tiles, config, loadCodec, cutlines }) {
     this.#library = library;
     this.#tiles = tiles;
     this.#config = config;
     this.#loadCodec = loadCodec;
+    this.#cutlines = cutlines;
   }
 
   /**
@@ -273,6 +275,7 @@ export class BakeManager {
         tiles: this.#tiles,
         codec,
         pixels,
+        cutlines: this.#cutlines,
         signal: job.controller.signal,
         format,
       }),

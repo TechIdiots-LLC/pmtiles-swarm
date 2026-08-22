@@ -7,6 +7,77 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.68.0
+### ✨ Features and improvements
+- **A source can be clipped to a shape.** `cutline` names a polygon kept under `data/cutlines/`;
+  `bounds` is a rectangle written straight into the recipe. Both are chosen in the stack editor,
+  which offers the shapes this node actually has rather than asking anybody to remember a
+  filename.
+
+  Most of the time this is already solved a step earlier, and the design says so: a build running
+  `gdalwarp -cutline … -dstnodata` writes the boundary into the archive, and `maskValues` removes
+  exactly those pixels. What that cannot reach is a source **this node did not build** — an
+  archive is content-addressed, so re-clipping one means republishing it. That is the case this is
+  for, and it is the federated case this project exists for.
+
+  **A rectangle is a cutline with four corners**, built through the same code rather than beside
+  it, so there is no second implementation to disagree with the first. A test asserts a `bounds`
+  and the same shape drawn as GeoJSON classify identically across a whole zoom level.
+
+  The cost is avoided rather than paid. Every tile is first classified **outside**, **inside** or
+  **partial**: outside skips the read entirely — no swarm round trip, no decode, no merge — inside
+  skips the mask entirely, and only a tile the edge actually crosses is rasterised, by scanline,
+  over segments found through a grid index built once when the cutline loads. For a country
+  boundary that is a band one tile wide; everything else is settled without touching a pixel.
+
+  It composes with the per-tile short-circuit: a clipped source still hands its bytes through
+  untouched where the tile is wholly inside, because there the clip provably changes nothing.
+
+  **A cutline a recipe names and this node has not got refuses the source.** Not "serve it
+  unclipped" — that would put back exactly the data somebody asked to remove, which is the one
+  failure a clip must not have. The stack reports it beside its other problems and the editor says
+  so on the row.
+
+  Also fixed while building it: horizontal edges were being dropped when a shape was prepared, on
+  the grounds that they contribute nothing to the even-odd rule. True, and they are still edges —
+  dropping them meant nothing noticed a rectangle's north and south sides crossing a tile, which
+  read as `inside` for a tile half of which was outside, and the mask was then never applied.
+
+
+- **A stack that merges somewhere no longer merges everywhere.** Passthrough was decided per
+  recipe: one source with a mask made the whole stack a merging one, and every tile was decoded
+  and re-encoded — including the great majority where a single untouched source covers the ground
+  and its stored bytes were already the answer. `passThroughRead` now decides that per tile,
+  before anything is decoded, which is the point: checked afterwards it would save the encode and
+  not the decode.
+
+  Its own function with seventeen tests, one per condition, because a short-circuit that fires
+  when it should not does not fail — it serves the wrong pixels quietly, and an archive baked from
+  them is wrong the same way.
+
+  Masks are the subtle half, and the reason it refuses any source carrying one. A tile having a
+  single contributor does not make that contributor cover the tile: a mask turns pixels into
+  nodata, the merge fills those, and handing the stored bytes over instead would show the ground
+  the mask was there to remove. With masks refused, nodata has nowhere else to come from —
+  `decodeHeights` is arithmetic over bytes, and the only other sources of it are the parent
+  resample and a resize, both refused as well.
+
+- **The catalogue page lists stacks.** A stack has no infohash and appears in no feed, so nothing
+  about it was discoverable: the only way to know a node served one was to be told its id.
+  `GET /stacks/` answers the list on the public listener, beside the tiles and TileJSON it
+  describes, and the page renders each with its TileJSON, XYZ template and preview — terrain
+  first where the stack is terrain.
+
+  Not the console's list. That one names what each source resolved to and what is missing, which
+  is the operator's view and names infohashes a visitor was never offered. The public one also
+  leaves out any stack it cannot serve — a recipe with a problem, or one wanting a codec this node
+  has not got — because a link that answers 501 is worse than no link.
+
+
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
 ## 0.67.0
 ### ✨ Features and improvements
 - **An exported archive is dated, and the filename is its own field.** Both the archive's name and

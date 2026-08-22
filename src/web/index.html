@@ -7027,10 +7027,14 @@ Every piece is hashed against the ` +
       // between the file and this screen — a flip that fails silently, because
       // the map simply renders the coarse source over the detailed one.
       let stacksLastDrawn = null;
+      // The shapes this node has, so a source can be clipped to one by name
+      // rather than by remembering a filename.
+      let stackCutlines = [];
 
       const loadStacks = async () => {
         const body = await api('/api/stacks');
         const { stacks, codec } = body;
+        stackCutlines = body.cutlines ?? [];
         // A category resolving to a new build changes this, which is the
         // reason to poll at all -- but most polls change nothing, and
         // repainting a list somebody is about to click is worse than not.
@@ -7569,6 +7573,38 @@ Every piece is hashed against the ` +
                        value="${escapeHtml((source.maskColors ?? []).join(', '))}" />
               </label>
               <label class="choice"
+                     title="Clip this source to a shape, so only what is inside it contributes. Most archives are already clipped when they are built — this is for one you did not build and cannot rebuild.">
+                Clip to
+                <select data-stack-field="cutline" data-stack-index="${index}">
+                  <option value=""${source.cutline ? '' : ' selected'}>everywhere</option>
+                  ${(stackCutlines ?? [])
+                    .map(
+                      (name) =>
+                        `<option value="${escapeHtml(name)}"${
+                          source.cutline === name ? ' selected' : ''
+                        }>${escapeHtml(name)}</option>`,
+                    )
+                    .join('')}
+                  <option value="__bounds"${source.bounds ? ' selected' : ''}>a box…</option>
+                </select>
+              </label>
+              ${
+                source.bounds
+                  ? `<label class="choice">Box
+                       <input style="width:16rem" placeholder="west, south, east, north"
+                              data-stack-field="bounds" data-stack-index="${index}"
+                              value="${escapeHtml((source.bounds ?? []).join(', '))}" />
+                     </label>`
+                  : ''
+              }
+              ${
+                source.cutline && !(stackCutlines ?? []).includes(source.cutline)
+                  ? `<span class="bad">no cutline called
+                     <code>${escapeHtml(source.cutline)}</code> here — this
+                     source will contribute nothing until there is</span>`
+                  : ''
+              }
+              <label class="choice"
                      title="If this source cannot be read — a swarm timeout, an unreadable archive — the whole tile answers 503 rather than being served without it. Unchecked, it is skipped and the tile is built from the rest. This is about read failures, not about whether the source has a tile here: a source with no tile at these coordinates is simply absent, which is normal.">
                 <input type="checkbox" data-stack-field="required" data-stack-index="${index}"
                        ${source.required ?? index === 0 ? 'checked' : ''} />
@@ -7591,7 +7627,15 @@ Every piece is hashed against the ` +
         const source = stackDraft.sources[Number(event.target.dataset.stackIndex)];
         if (!source) return;
 
-        if (field === 'maskValues') {
+        if (field === 'bounds') {
+          const numbers = event.target.value
+            .split(',')
+            .map((part) => Number(part.trim()))
+            .filter((value) => Number.isFinite(value));
+          // Kept as typed until all four are there, so the box does not empty
+          // itself halfway through being entered.
+          if (numbers.length === 4) source.bounds = numbers;
+        } else if (field === 'maskValues') {
           source.maskValues = event.target.value
             .split(',')
             .map((part) => Number(part.trim()))
@@ -7623,6 +7667,23 @@ Every piece is hashed against the ` +
       });
 
       $('stack-sources').addEventListener('change', (event) => {
+        // A clip is a choice between a named shape, a box, and neither, so
+        // the row is redrawn to show the box's fields only when it is one.
+        if (event.target.dataset.stackField === 'cutline') {
+          const source =
+            stackDraft.sources[Number(event.target.dataset.stackIndex)];
+          if (source) {
+            delete source.cutline;
+            delete source.bounds;
+            if (event.target.value === '__bounds') {
+              source.bounds = [-180, -85, 180, 85];
+            } else if (event.target.value) {
+              source.cutline = event.target.value;
+            }
+          }
+          renderStackDraft();
+          return;
+        }
         if (event.target.dataset.stackField !== 'encoding') return;
         // Redrawn so the four custom fields appear or disappear with the
         // choice, rather than sitting there meaning nothing.

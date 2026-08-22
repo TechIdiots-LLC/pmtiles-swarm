@@ -49,6 +49,8 @@ of its parts.
   - [What identifies a bake](#what-identifies-a-bake)
   - [Starting one, and watching it](#starting-one-and-watching-it)
   - [What exists now](#what-exists-now)
+- [Clipping a source to a shape](#clipping-a-source-to-a-shape)
+- [Finding a stack](#finding-a-stack)
 - [Syncing a stack to another node](#syncing-a-stack-to-another-node)
 - [What the offline merge got wrong](#what-the-offline-merge-got-wrong)
 - [The stack editor](#the-stack-editor)
@@ -297,6 +299,25 @@ For a request `GET /stacks/<id>/{z}/{x}/{y}.webp`:
    its bytes through untouched. No decode, no encode. This is what a stack
    degenerates to over most of the world when the top layer is dense, and it
    costs a comparison to detect.
+
+   `passThroughRead` in `src/stack-tile.js`, checked _before_ anything is
+   decoded — checked afterwards it would save the encode and not the decode.
+   Its own function with its own tests, because a short-circuit that fires when
+   it should not does not fail: it serves the wrong pixels quietly, and an
+   archive baked from them is wrong the same way.
+
+   The masks are the subtle half. A tile having one contributor does not make
+   that contributor cover the tile: a mask turns pixels into nodata, the merge
+   fills those, and passing the stored bytes through instead would show the
+   ground the mask was there to remove. Refusing any source carrying a mask is
+   what makes the rest safe — nodata has nowhere else to come from, since
+   `decodeHeights` is arithmetic over bytes and the only other sources of it
+   are the parent resample and a resize, both refused as well.
+
+   An explicit output size is refused for a different reason: the source's
+   pixel width is not known until it is decoded, so a resize cannot be ruled
+   out from here.
+
 6. **Decode** each contributing tile in a worker.
 7. **Mask** to a coverage mask, then apply `heightAdjustment` (elevation) or
    `opacity` (rgba). Masking comes first — the mask values are exact decoded
@@ -793,6 +814,124 @@ means re-hashing everything already buffered, and the cost of starting it empty
 is that a tile identical to one from before the interruption is stored twice.
 The archive is correct either way; it is a little larger.
 
+## Clipping a source to a shape
+
+A source is often only meant to apply inside a boundary — a national DEM inside
+its country, a survey inside its extent — and everywhere else the layer beneath
+it should show through.
+
+**Most of the time this is already solved, one step earlier.** A build that runs
+`gdalwarp -cutline … -dstnodata` writes the boundary into the archive: outside
+it, every pixel is the nodata value. `maskValues` then removes exactly those,
+which is what the offline merge configs do and what a stack recipe does with the
+same field. Nothing more is needed, and a cutline that duplicated it would be
+slower and no more correct.
+
+What that cannot reach is a source **this node did not build**. An archive is
+content-addressed, so re-clipping one means republishing it — impossible for
+somebody else's, and expensive for a large one whose boundary has changed. That
+is the case this is for, and it is squarely the federated case this project
+exists for.
+
+Two shapes, and one of them is nearly free:
+
+```json
+{ "category": "opendtm-de", "cutline": "germany" }
+{ "category": "massgis", "bounds": [-73.6, 41.1, -69.8, 42.9] }
+```
+
+`bounds` is a rectangle in WGS84, written the way every other bounds in this
+project is. `cutline` names a polygon. They are the same question asked of
+different shapes, so they are the same code: a rectangle is a cutline with four
+corners, and treating it as one means there is no second implementation to
+disagree with the first. What differs is only that a rectangle needs no file, no
+index and no rasterising worth the name — which is why it is worth having even
+though the polygon subsumes it.
+
+### Geometry by reference
+
+A recipe names a cutline rather than carrying it. `"cutline": "germany"`
+resolves to `data/cutlines/germany.geojson`, in WGS84. A recipe stays a small
+document that a person can read and a peer could one day be sent; a megabyte of
+coordinates inlined in one is neither. A rectangle is small enough to sit in the
+recipe itself, so `bounds` does.
+
+WGS84 on purpose. Web Mercator is arithmetic from there — no projection library,
+no dependency, no CRS handling beyond refusing what is not WGS84. Anything else
+converts once with the `ogr2ogr` that produced the shapefile in the first place.
+
+Edges are treated as straight lines in Mercator after their endpoints are
+projected. That is what every rasteriser does, GDAL's included, and the error
+over a tile's span is far below a pixel except at zooms where a tile spans a
+continent — where a cutline is not the thing deciding the answer anyway.
+
+### Three answers, and only one of them costs anything
+
+The cost of a clip is per pixel, and paying it per tile would make a continental
+boundary unusable. It is avoided by asking a cheaper question first:
+
+- **Outside.** No part of the tile is within the shape. The source contributes
+  nothing — and this is decided _before the tile is read_, so it costs no swarm
+  read, no decode and no merge.
+- **Inside.** The tile is wholly within the shape. The clip cannot change any
+  pixel, so it is not applied at all.
+- **Partial.** Only here is a mask rasterised, and only for the tile in hand.
+
+For a country boundary at any useful zoom, almost every tile is one of the first
+two. The third is a band one tile wide along the border.
+
+Classification is a bounding-box test, then a look at whichever edges could
+reach the tile. "Whichever" is the important word: a national boundary is tens
+of thousands of segments, and testing all of them per tile would cost more than
+the rasterising it is meant to avoid. The segments are indexed into a coarse
+grid once, when the cutline is loaded, and a tile only ever looks at the buckets
+it overlaps.
+
+With no edge near the tile, one point decides it: a tile that no boundary
+crosses is entirely on one side of it.
+
+### Where it applies
+
+As a coverage mask on the decoded heights, in the same place and for the same
+reason as `maskValues` — before any height adjustment, because an adjustment
+would shift values out from under a comparison, and because the answer is the
+same either way: nothing here.
+
+It applies at the geometry of the tile that was **asked for**, not of the tile
+that answered. A source falling back to a parent still gets clipped to the
+square being served, which is the ground the pixels will end up covering.
+
+### What it costs the short-circuit
+
+A clipped source cannot take the passthrough in
+[Evaluating one tile](#evaluating-one-tile) — with one exception that is worth
+having, because it is the common one. Where the tile is classified **inside**,
+the clip provably changes nothing, and the bytes may go through untouched
+exactly as if none were named. Outside, there is no contribution at all, so the
+question does not arise. Only a partial tile is genuinely disqualified.
+
+### Refusing what cannot be honoured
+
+A cutline named by a recipe and not present on disk is a stack problem, reported
+the way an unresolvable source is: the stack is listed, and it says what is
+missing. Serving a source unclipped because its cutline could not be found would
+put back exactly the data somebody asked to remove, which is the one failure a
+clip must not have.
+
+## Finding a stack
+
+A stack has no infohash and appears in no feed, so nothing about it is
+discoverable the way an archive is. `GET /stacks/` answers the list, on the
+public listener beside the tiles and the TileJSON it describes, and the
+catalogue page renders it.
+
+Not the console's list. That one reports what each source resolved to, what is
+missing and what cannot be served — the operator's view, naming infohashes a
+visitor was never offered. The public one says what a visitor can point a map
+at, and says nothing at all about a stack they cannot: a recipe with a problem,
+or one asking for pixel work this node has no codec for, is left out rather than
+advertised as a link that answers 501.
+
 ## Syncing a stack to another node
 
 The question is whether a stack can travel between nodes the way an archive
@@ -903,7 +1042,9 @@ state says what a stack is and how to add one instead. It is not conditioned on
 having a codec either — a passthrough stack needs none, and a node without
 `sharp` can still build and serve one.
 
-What follows is the editing half, which does not exist yet.
+What follows is the editing half, which the console now does: a stack can be
+added, changed and removed there, and the source rows are edited in the order
+the file holds them.
 
 ### The list is shown in the file's order
 
@@ -1103,7 +1244,7 @@ handling whatsoever.
     level up, and `resampleFromParent` crops the right sub-square.
   - **Source smaller than the output** (256px source, 512px stack) needs the
     other direction: fetch the four children at `z+1` and assemble them into
-    one grid before merging. That is the piece that does not exist yet.
+    one grid before merging.
 
   **Both are implemented.** A size may be asked for in the URL —
   `/stacks/<id>/512/{z}/{x}/{y}.webp`, the way tileserver-gl takes one — or set

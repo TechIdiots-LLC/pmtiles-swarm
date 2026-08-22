@@ -36,7 +36,7 @@ import { buildTileJson, extensionMatches, tileExtension } from './tilejson.js';
 import { SUMMARY_VERSION } from './pmtiles-probe.js';
 import { TileReadError } from './tiles.js';
 import { loadCodec } from './codec.js';
-import { answerStackTile, outputSize } from './stack-tile.js';
+import { answerStackTile, outputFormat, outputSize } from './stack-tile.js';
 import {
   isPinned,
   needsCodec,
@@ -215,6 +215,7 @@ export function createApp({
   tiles,
   stacks,
   stackCache,
+  cutlines,
   bakes,
   warm,
   config,
@@ -2264,6 +2265,66 @@ export function createApp({
     }),
   );
 
+  // The same idea one prefix over. Everything under /stacks/ is already public
+  // -- the TileJSON, the tiles, the preview -- so the index of what is on
+  // offer belongs beside them rather than behind the console's door.
+  //
+  // Not the console's list. That one reports what each source resolved to,
+  // what is missing and what cannot be served, which is the operator's
+  // business and names infohashes a visitor was not offered. This says what a
+  // visitor can point a map at, and says nothing about a stack they cannot.
+  app.get(
+    '/stacks/',
+    route(async (req, res) => {
+      await stacks?.refresh();
+      res.setHeader('access-control-allow-origin', '*');
+
+      const base = baseUrl(req);
+      const listed = [];
+      for (const stack of stacks?.list() ?? []) {
+        const resolved = resolveFor(stack, req);
+        // A recipe with a problem, or one asking for pixel work this node
+        // cannot do, is not something to advertise: a link that answers 501 is
+        // worse than no link.
+        if (stacks.problems(stack.id).length > 0) continue;
+        if (needsCodec(stack) && !(await loadCodec())) continue;
+        if (!resolved.sources.some((source) => source.entry)) continue;
+
+        const coverage = stackCoverage(resolved);
+        const format = outputFormat(resolved);
+        const id = encodeURIComponent(stack.id);
+        listed.push({
+          id: stack.id,
+          title: stack.title ?? stack.id,
+          space: stack.space ?? 'elevation',
+          minzoom: coverage.minzoom,
+          maxzoom: coverage.maxzoom,
+          bounds: coverage.bounds,
+          format,
+          encoding: stack.output?.encoding ?? null,
+          sparse: stack.sparse ?? true,
+          sources: resolved.sources.length,
+          endpoints: {
+            tileJson: `${base}/stacks/${id}/tiles.json`,
+            xyz: `${base}/stacks/${id}/{z}/{x}/{y}.${tileExtension(format)}`,
+            preview: `${base}/stacks/${id}/preview`,
+          },
+        });
+      }
+
+      res.setHeader(
+        'etag',
+        `"${crypto.createHash('sha1').update(JSON.stringify(listed)).digest('hex')}"`,
+      );
+      res.setHeader('cache-control', 'public, max-age=60, must-revalidate');
+      res.json({
+        format: 'pmtiles-swarm-stacks/1',
+        generatedAt: new Date().toISOString(),
+        stacks: listed,
+      });
+    }),
+  );
+
   // A stable handle for "the current one". Every archive is addressed by
   // infohash, which is right — it is what makes a tile immutable — but it
   // leaves nothing for a style to point at that survives a rebuild. A category
@@ -3083,6 +3144,22 @@ export function createApp({
    * @param {import('express').Request} req - The request, for its credential.
    * @returns {object} - The resolution.
    */
+  /**
+   * Cutlines a recipe names that this node does not have.
+   *
+   * Serving a source unclipped because its shape could not be found would put
+   * back exactly the data somebody asked to remove, so the stack says so and
+   * the tile path refuses the source.
+   * @param {object} stack - The recipe.
+   * @returns {string[]} - One line per missing cutline.
+   */
+  const cutlineProblems = (stack) =>
+    (stack.sources ?? []).flatMap((source, index) => {
+      if (!source?.cutline) return [];
+      const why = cutlines?.problem(source.cutline);
+      return why ? [`sources[${index}].cutline: ${why}`] : [];
+    });
+
   const resolveFor = (stack, req) =>
     resolveStack(stack, {
       archive: (hash) => catalog.get(hash) ?? null,
@@ -3108,7 +3185,11 @@ export function createApp({
           id: stack.id,
           title: stack.title ?? stack.id,
           space: stack.space ?? 'elevation',
-          problems: stacks.problems(stack.id),
+          // The store's own problems, plus any cutline a source names that
+          // this node has not got. Both stop the stack being servable and
+          // both belong in the same list -- a stack listed as fine that
+          // refuses every tile is worse than one that says why.
+          problems: [...stacks.problems(stack.id), ...cutlineProblems(stack)],
           // Named separately from `problems` because it is not a mistake: a
           // recipe asking for pixel work is perfectly valid and simply cannot
           // be served yet. See docs/tile-stacks.md — "The codec problem".
@@ -3154,7 +3235,13 @@ export function createApp({
       // that need it, rather than leaving a 501 to be discovered at the first
       // tile. Null is a fact about this node, not about the recipes.
       const codec = await loadCodec();
-      res.json({ stacks: list, codec: codec?.name ?? null });
+      res.json({
+        stacks: list,
+        codec: codec?.name ?? null,
+        // So the editor can offer the shapes this node actually has rather
+        // than asking somebody to remember a filename.
+        cutlines: cutlines?.list() ?? [],
+      });
     }),
   );
 
@@ -3541,6 +3628,7 @@ export function createApp({
         signal: controller.signal,
         size,
         format,
+        cutlines,
       });
     } catch (error) {
       // The client went away mid-merge. Nothing to answer and nobody to answer

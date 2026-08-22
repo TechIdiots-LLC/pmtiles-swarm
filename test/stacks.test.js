@@ -1344,3 +1344,96 @@ describe('sources whose tiles are a different size', { skip: !codec }, () => {
     assert.ok(Math.abs(heights[0] - 50) < 1, `got ${heights[0]}`);
   });
 });
+
+describe('the public list of stacks', () => {
+  // A stack has no infohash and appears in no feed, so without this a visitor
+  // cannot discover one at all. What the console shows is a different document
+  // -- what each source resolved to, what is missing, what cannot be served --
+  // and that is the operator's business, not a visitor's.
+
+  it('says what a visitor can point a map at', async () => {
+    const node = await serve(
+      [archive('a'.repeat(40), 'globe.pmtiles', ['base'])],
+      [{ id: 'terrain', title: 'Terrain', sources: [{ category: 'base' }] }],
+    );
+    try {
+      const response = await node.get('/stacks/');
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.format, 'pmtiles-swarm-stacks/1');
+      assert.equal(body.stacks.length, 1);
+
+      const [stack] = body.stacks;
+      assert.equal(stack.id, 'terrain');
+      assert.equal(stack.title, 'Terrain');
+      assert.equal(stack.sources, 1);
+      assert.match(stack.endpoints.tileJson, /\/stacks\/terrain\/tiles\.json$/);
+      assert.match(stack.endpoints.xyz, /\{z\}\/\{x\}\/\{y\}/);
+      assert.match(stack.endpoints.preview, /\/stacks\/terrain\/preview$/);
+    } finally {
+      await node.close();
+    }
+  });
+
+  it("names no infohash, which the console's list does", async () => {
+    // The visitor was offered a stack, not the archives behind it. Which
+    // builds it resolved to is the operator's view of the same thing.
+    const node = await serve(
+      [archive('b'.repeat(40), 'globe.pmtiles', ['base'])],
+      [{ id: 'terrain', sources: [{ category: 'base' }] }],
+    );
+    try {
+      const body = await (await node.get('/stacks/')).json();
+      assert.doesNotMatch(JSON.stringify(body), /b{40}/);
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('leaves out a stack whose sources do not resolve', async () => {
+    // A link that answers 409 is worse than no link.
+    const node = await serve(
+      [],
+      [{ id: 'broken', sources: [{ category: 'nothing-here' }] }],
+    );
+    try {
+      const body = await (await node.get('/stacks/')).json();
+      assert.deepEqual(body.stacks, []);
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('leaves out a stack this node has no codec for', async () => {
+    // Same reasoning: it would answer 501, and advertising that is worse than
+    // saying nothing.
+    const node = await serve(
+      [archive('c'.repeat(40), 'globe.pmtiles', ['base'])],
+      [
+        {
+          id: 'masked',
+          sources: [{ category: 'base', maskValues: [-9999] }],
+        },
+      ],
+    );
+    try {
+      const listed = (await (await node.get('/stacks/')).json()).stacks;
+      const codecInstalled = await import('../src/codec.js').then((m) =>
+        m.loadCodec(),
+      );
+      assert.equal(listed.length, codecInstalled ? 1 : 0);
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('answers an empty list on a node with no stacks', async () => {
+    const node = await serve([], []);
+    try {
+      const body = await (await node.get('/stacks/')).json();
+      assert.deepEqual(body.stacks, []);
+    } finally {
+      await node.close();
+    }
+  });
+});

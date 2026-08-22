@@ -4,6 +4,8 @@ import {
   fillNodata,
   mergeElevation,
 } from './elevation.js';
+import { INSIDE, OUTSIDE, classifyTile, rasterizeTile } from './cutline.js';
+import { shapeFor } from './cutlines.js';
 import { compositeRgba, toRaster } from './rgba.js';
 import { StackCache } from './stack-cache.js';
 import { stackCoverage, stackEtag } from './stacks.js';
@@ -77,6 +79,34 @@ export function outputFormat(resolved) {
 }
 
 /**
+ * What each source's clip says about this tile, if it has one.
+ *
+ * Worked out once per tile and used three times: to skip a read entirely, to
+ * decide whether the passthrough is still safe, and to build the mask where it
+ * is not. See docs/tile-stacks.md — "Clipping a source to a shape".
+ * @param {object} resolved - The resolved stack.
+ * @param {object} cutlines - Where named shapes come from.
+ * @param {number} z - Zoom.
+ * @param {number} x - Column.
+ * @param {number} y - Row.
+ * @returns {Array<object|null>} - Per source, `{shape, where}` or null.
+ */
+export function clipsFor(resolved, cutlines, z, x, y) {
+  return resolved.sources.map((source) => {
+    const recipe = source.source ?? {};
+    if (!recipe.cutline && !recipe.bounds) return null;
+
+    const shape = shapeFor(recipe, cutlines);
+    // A cutline the recipe names and this node has not got. Refusing the source
+    // is the only safe answer: serving it unclipped puts back exactly the data
+    // somebody asked to remove, and the stack's problems say why.
+    if (!shape) return { shape: null, where: OUTSIDE, missing: true };
+
+    return { shape, where: classifyTile(shape, z, x, y) };
+  });
+}
+
+/**
  * Reads one source's tile, walking up to a parent when it has none.
  *
  * Only the merging path climbs. Passthrough hands back bytes, and a parent's
@@ -115,7 +145,16 @@ async function readFrom({ source, z, x, y, tiles, climb, signal }) {
  * @param {object} options - The stack, coordinates and the tile store.
  * @returns {Promise<StackAnswer>} - The bytes, or why there are none.
  */
-async function passthrough({ resolved, z, x, y, tiles, signal, format }) {
+async function passthrough({
+  resolved,
+  z,
+  x,
+  y,
+  tiles,
+  signal,
+  format,
+  clips,
+}) {
   const contributors = [];
 
   // Top down, because the last source in the recipe covers the ones before it
@@ -123,6 +162,13 @@ async function passthrough({ resolved, z, x, y, tiles, signal, format }) {
   // it would have been covered anyway.
   for (const source of [...resolved.sources].reverse()) {
     if (!source.entry) continue;
+    // A clip this node cannot honour, or one that excludes the tile outright.
+    // An unclipped answer here would be the data somebody asked to remove.
+    const clip = clips?.[resolved.sources.indexOf(source)];
+    if (clip && clip.where !== INSIDE) {
+      contributors.push(`${source.name}=clipped`);
+      continue;
+    }
     let found;
     try {
       found = await readFrom({ source, z, x, y, tiles, climb: false, signal });
@@ -161,6 +207,90 @@ async function passthrough({ resolved, z, x, y, tiles, signal, format }) {
 }
 
 /**
+ * Whether one source's stored bytes are already the answer to this tile.
+ *
+ * Step 5 of docs/tile-stacks.md — "Evaluating one tile". A stack that asks for
+ * pixel work somewhere asks for it everywhere: a regional layer with a mask
+ * makes the whole recipe a merging one, and every tile is then decoded and
+ * re-encoded even where that layer has nothing and a single untouched source
+ * covers the ground. Over most of the world that is the common case.
+ *
+ * Every condition here is checked *before* anything is decoded, which is the
+ * point — checked afterwards it would save the encode and not the decode. That
+ * is also why an explicit output size disqualifies: the source's pixel width is
+ * not known until it is decoded, so a size that might mean a resize cannot be
+ * ruled out from here.
+ *
+ * The masks are the subtle half. A tile having one contributor does not make
+ * that contributor cover the tile: a mask turns pixels into nodata, the merge
+ * fills those with `output.nodata` or the encoding's base value, and passing
+ * the stored bytes through instead would show the ground the mask was meant to
+ * remove. Refusing any source that carries a mask is what makes the rest safe,
+ * because nodata has nowhere else to come from — `decodeHeights` is arithmetic
+ * over bytes and cannot produce it, and the only other sources of it are the
+ * resample from a parent and a resize, both already refused above. With none of
+ * those, `fillNodata` has nothing to fill.
+ *
+ * Deliberately its own function with its own tests. A short-circuit that fires
+ * when it should not does not fail: it serves the wrong pixels, quietly, and
+ * the archive that gets baked from them is wrong the same way.
+ * @param {object} options - The reads, the recipe and what the output must be.
+ * @returns {object|null} - The read whose bytes may be sent, or null.
+ */
+export function passThroughRead({
+  reads,
+  resolved,
+  z,
+  size,
+  format,
+  rgba,
+  clips,
+}) {
+  // An explicit size may mean a resize, and nothing here can tell without
+  // decoding the tile to find out how wide it is.
+  if (size) return null;
+
+  const answered = reads.filter((read) => read.found);
+  // More than one and they have to be painted; none and there is nothing to
+  // send. An error on any source is a decision this must not take, because the
+  // merge reports it and this would swallow it.
+  if (answered.length !== 1) return null;
+  if (reads.some((read) => read.error)) return null;
+
+  const only = answered[0];
+  // A parent's bytes are the wrong tile: they cover the neighbourhood rather
+  // than this square, and only decoding can crop them.
+  if (only.found.parentZ !== z) return null;
+
+  // A clipped source may still pass through, but only where the tile is wholly
+  // inside the shape -- there the clip provably changes nothing. A partial tile
+  // is the one case that genuinely needs the pixels.
+  const clip = clips?.[reads.indexOf(only)];
+  if (clip && clip.where !== INSIDE) return null;
+
+  const recipe = only.source.source ?? {};
+  // Anything the recipe asks of *this* source changes its pixels.
+  if (recipe.maskValues?.length) return null;
+  if (recipe.maskColors?.length) return null;
+  if (recipe.heightAdjustment) return null;
+  if (recipe.opacity !== undefined && Number(recipe.opacity) !== 1) return null;
+  if (recipe.blend && recipe.blend !== 'normal') return null;
+
+  const output = resolved.stack.output ?? {};
+  // And anything the output asks for that is not what is already stored.
+  if (output.encoding && output.encoding !== recipe.encoding) return null;
+  if (output.nodata !== undefined && output.nodata !== null) return null;
+  if (resolved.stack.gaussianBlurSigma) return null;
+  // Flattening alpha is pixel work, and only the composite does it.
+  if (rgba && output.alpha === false) return null;
+
+  // Last, the bytes have to be the format the endpoint promises.
+  if ((only.source.entry?.pmtiles?.format ?? null) !== format) return null;
+
+  return only;
+}
+
+/**
  * Reads every source and decodes what each one gave.
  *
  * Bottom first, because that is the order they are painted in, and all of them
@@ -170,11 +300,14 @@ async function passthrough({ resolved, z, x, y, tiles, signal, format }) {
  * @param {object} options - Everything the read needs.
  * @returns {Promise<object>} - `{contributors, contributions}` or `{error}`.
  */
-async function gather({ resolved, z, x, y, tiles, codec, signal, size, rgba }) {
-  const contributors = [];
-  const reads = await Promise.all(
-    resolved.sources.map(async (source) => {
+async function readAll({ resolved, z, x, y, tiles, signal, clips }) {
+  return Promise.all(
+    resolved.sources.map(async (source, index) => {
       if (!source.entry) return { source, found: null };
+      // Nothing of this source is in the shape, so there is nothing to fetch.
+      // Decided before the read, which is where the saving is: no swarm round
+      // trip, no decode, no merge.
+      if (clips?.[index]?.where === OUTSIDE) return { source, found: null };
       try {
         return {
           source,
@@ -194,7 +327,15 @@ async function gather({ resolved, z, x, y, tiles, codec, signal, size, rgba }) {
       }
     }),
   );
+}
 
+/**
+ * Decodes what the sources gave, into contributions the merge can paint.
+ * @param {object} options - The reads and what to decode them with.
+ * @returns {Promise<object>} - `{contributors, contributions}` or `{error}`.
+ */
+async function gather({ reads, z, x, y, tiles, codec, signal, size, rgba }) {
+  const contributors = [];
   const contributions = [];
   for (const read of reads) {
     if (read.error) {
@@ -295,6 +436,7 @@ async function merge({
   format,
   gathered,
   pixels,
+  clips,
 }) {
   const { contributors, contributions } = gathered;
   const first = contributions.find(Boolean);
@@ -306,6 +448,15 @@ async function merge({
     size ??
     Math.max(...contributions.filter(Boolean).map((c) => c.raster.width));
   const output = resolved.stack.output ?? {};
+
+  // Rasterised at the grid the layers are painted on, and only for the tiles
+  // the edge actually crosses. Everything else was settled by `classifyTile`
+  // without touching a pixel.
+  for (const [index, contribution] of contributions.entries()) {
+    const clip = clips?.[index];
+    if (!contribution || !clip || clip.where !== 'partial') continue;
+    contribution.coverage = rasterizeTile(clip.shape, z, x, y, grid);
+  }
 
   const merging = {
     z,
@@ -399,12 +550,26 @@ async function merge({
  * @returns {Promise<StackAnswer>} - What to serve, or why there is nothing.
  */
 export async function answerStackTile(options) {
-  const { resolved, z, x, y, tiles, codec, stackCache, signal, size, pixels } =
-    options;
+  const {
+    resolved,
+    z,
+    x,
+    y,
+    tiles,
+    codec,
+    stackCache,
+    signal,
+    size,
+    pixels,
+    cutlines,
+  } = options;
+  const clips = clipsFor(resolved, cutlines, z, x, y);
   const format = options.format ?? outputFormat(resolved);
   const rgba = resolved.stack.space === 'rgba';
 
-  if (!codec) return passthrough({ resolved, z, x, y, tiles, signal, format });
+  if (!codec) {
+    return passthrough({ resolved, z, x, y, tiles, signal, format, clips });
+  }
 
   // Keyed by the ETag, which already covers the recipe's revision and what its
   // sources resolved to -- so an edited stack or a rebuilt source produces a
@@ -427,8 +592,45 @@ export async function answerStackTile(options) {
   // per tile -- a read of every source, a decode each, then an encode -- that
   // doing it four times over is worth the indirection.
   const produce = async () => {
-    const gathered = await gather({
+    const reads = await readAll({
       resolved,
+      z,
+      x,
+      y,
+      tiles,
+      signal,
+      clips,
+    });
+
+    // Before anything is decoded, which is the whole point of it.
+    const straight = passThroughRead({
+      reads,
+      resolved,
+      z,
+      size,
+      format,
+      rgba,
+      clips,
+    });
+    if (straight) {
+      return {
+        contributors: [
+          `${straight.source.name}=${straight.source.entry.infoHash}`,
+          'merge=skipped',
+        ],
+        format,
+        passthrough: {
+          data: straight.found.tile.data,
+          encoding: straight.found.tile.encoding,
+          contentType:
+            straight.source.entry.pmtiles?.contentType ??
+            'application/octet-stream',
+        },
+      };
+    }
+
+    const gathered = await gather({
+      reads,
       z,
       x,
       y,
@@ -457,6 +659,7 @@ export async function answerStackTile(options) {
       format,
       gathered,
       pixels,
+      clips,
     });
 
     // Awaited, though it is tempting not to be. The write is a local disk write

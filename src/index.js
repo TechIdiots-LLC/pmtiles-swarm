@@ -7,6 +7,7 @@ import { assertSafeToListen, createAuth } from './auth.js';
 import { Catalog } from './catalog.js';
 import { StackStore } from './stacks.js';
 import { StackCache } from './stack-cache.js';
+import { CutlineStore } from './cutlines.js';
 import { BakeManager } from './bake-jobs.js';
 import { loadCodec } from './codec.js';
 import { loadConfig } from './config.js';
@@ -250,6 +251,11 @@ PMTILES_SWARM_PUBLIC_URL
   await stacks.load();
   // Merged tiles only -- see the route. Indexed from disk at startup so a
   // restart does not throw away work the node has already paid for.
+  // Shapes a recipe can clip a source to. A missing one is a problem reported
+  // on the stack that names it, not a reason for this to fail.
+  const cutlines = new CutlineStore(config.dataDir);
+  await cutlines.load();
+
   const stackCache = new StackCache({
     dir: config.stacks?.cacheDir ?? path.join(config.dataDir, 'stack-cache'),
     maxBytes: config.stacks?.cacheBytes,
@@ -460,7 +466,13 @@ PMTILES_SWARM_PUBLIC_URL
   // cache-mode one, whose directories come out of the swarm -- and the library
   // to hand the finished file to, which is what turns it from a file into an
   // archive with an infohash.
-  const bakes = new BakeManager({ library, tiles, config, loadCodec });
+  const bakes = new BakeManager({
+    library,
+    tiles,
+    config,
+    loadCodec,
+    cutlines,
+  });
 
   // Reads the head of anything joined but not yet understood — the header,
   // then the root directory and metadata it points at. Without this an archive
@@ -519,6 +531,7 @@ PMTILES_SWARM_PUBLIC_URL
     tiles,
     stacks,
     stackCache,
+    cutlines,
     bakes,
     warm,
     config,

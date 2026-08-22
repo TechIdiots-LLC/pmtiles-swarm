@@ -389,7 +389,7 @@ export function tileTypeFor(format) {
  * @returns {Function} - `(z, x, y) => Promise<Buffer|null>`.
  */
 export function mergeTileFor(options) {
-  const { resolved, tiles, codec, signal, pixels } = options;
+  const { resolved, tiles, codec, signal, pixels, cutlines } = options;
   const format = options.format ?? outputFormat(resolved);
   const size = options.size ?? outputSize(resolved.stack);
 
@@ -406,6 +406,7 @@ export function mergeTileFor(options) {
       size,
       format,
       pixels,
+      cutlines,
     });
 
     // A required source that cannot be read stops the job. Baking around it

@@ -237,6 +237,45 @@ describe('the terrain preview', () => {
   });
 });
 
+describe('clipping a source in the stack editor', () => {
+  const script = page.split('<script type="module">')[1].split('</script>')[0];
+
+  it('offers the shapes this node actually has', () => {
+    // Rather than asking somebody to remember a filename. The list comes back
+    // with the stacks, so it costs no extra request.
+    assert.match(script, /stackCutlines = body\.cutlines \?\? \[\]/);
+    assert.match(script, /data-stack-field="cutline"/);
+  });
+
+  it('offers a box as well as a named shape', () => {
+    // A rectangle is the same question asked of a simpler shape, and it needs
+    // no file to exist first.
+    assert.match(script, /value="__bounds"/);
+    assert.match(script, /data-stack-field="bounds"/);
+  });
+
+  it('keeps a half-typed box rather than emptying it', () => {
+    // Four numbers arrive one keystroke at a time, and a box that cleared
+    // itself after the first comma could never be typed at all.
+    assert.match(
+      script,
+      /if \(numbers\.length === 4\) source\.bounds = numbers/,
+    );
+  });
+
+  it('says when a source names a cutline this node has not got', () => {
+    // The source contributes nothing until there is one, and silently serving
+    // no tiles is the worst way to find that out.
+    assert.match(script, /no cutline called/);
+  });
+
+  it('lets a source be clipped to one shape, not two', () => {
+    // Choosing a named shape clears a box and the other way round, which is
+    // what the recipe validation insists on.
+    assert.match(script, /delete source\.cutline;[\s]*delete source\.bounds;/);
+  });
+});
+
 describe('the filename an export preview promises', () => {
   // The console shows what the file will be called as the name is typed, which
   // means the naming rule now exists in the browser as well as on the server.
@@ -386,20 +425,23 @@ describe('the other two pages have script structure too', () => {
     });
   }
 
-  it('declares the catalogue helper both renderers use at the top level', () => {
+  it('declares the catalogue helpers every renderer uses at the top level', () => {
     // Archives and categories are rendered by two separate functions, so a
     // helper serving both cannot live inside either. Declared inside `render`
     // it passed `node --check`, passed a scope check, and threw the moment a
     // terrain category was drawn.
     const script = scriptOf('public.html');
-    const declaration = script.indexOf('const drawsAsTerrain');
-    assert.ok(declaration > 0, 'the catalogue terrain check moved');
     // Counted on the stripped source: this page is mostly template literals,
     // and the braces inside them are not scope.
-    const before = stripLiterals(script).slice(0, declaration);
-    const depth =
-      (before.match(/\{/g) ?? []).length - (before.match(/\}/g) ?? []).length;
-    assert.equal(depth, 0, 'drawsAsTerrain is nested inside something');
+    const stripped = stripLiterals(script);
+    for (const name of ['const drawsAsTerrain', 'const copyButton']) {
+      const declaration = script.indexOf(name);
+      assert.ok(declaration > 0, `${name} moved`);
+      const before = stripped.slice(0, declaration);
+      const depth =
+        (before.match(/\{/g) ?? []).length - (before.match(/\}/g) ?? []).length;
+      assert.equal(depth, 0, `${name} is nested inside something`);
+    }
   });
 });
 

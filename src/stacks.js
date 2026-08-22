@@ -99,6 +99,27 @@ export function validateStack(stack) {
         problems.push(`sources[${index}].opacity must be between 0 and 1`);
       }
     }
+    if (source?.cutline !== undefined && typeof source.cutline !== 'string') {
+      problems.push(`sources[${index}].cutline must be the name of a cutline`);
+    }
+    if (source?.cutline && source?.bounds) {
+      problems.push(
+        `sources[${index}] has both cutline and bounds; a source is clipped ` +
+          'to one shape',
+      );
+    }
+    if (source?.bounds !== undefined) {
+      const box = source.bounds;
+      if (!Array.isArray(box) || box.length !== 4 || !box.every(isFinite)) {
+        problems.push(
+          `sources[${index}].bounds must be [west, south, east, north]`,
+        );
+      } else if (Number(box[2]) <= Number(box[0])) {
+        problems.push(`sources[${index}].bounds needs west < east`);
+      } else if (Number(box[3]) <= Number(box[1])) {
+        problems.push(`sources[${index}].bounds needs south < north`);
+      }
+    }
     if (source?.maskValues !== undefined && !Array.isArray(source.maskValues)) {
       problems.push(`sources[${index}].maskValues must be a list`);
     }
@@ -196,6 +217,11 @@ export function needsCodec(stack) {
     if (source.blend && source.blend !== 'normal') {
       return `sources[${index}].blend`;
     }
+    // A clip is pixel work on the tiles its edge crosses. Wholly inside and
+    // wholly outside need none, and the per-tile short-circuit takes those --
+    // but the recipe cannot know which tiles those are, so it has to say yes.
+    if (source.cutline) return `sources[${index}].cutline`;
+    if (source.bounds) return `sources[${index}].bounds`;
   }
   // Re-encoding is pixel work even when nothing else is: the output encoding
   // names how heights are packed into channels, so changing it means unpacking
