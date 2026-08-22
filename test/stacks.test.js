@@ -1203,7 +1203,7 @@ describe('sources whose tiles are a different size', { skip: !codec }, () => {
     assert.equal(await at('/stacks/sized/512/1/0/0.webp'), 512);
   });
 
-  it('refuses a size that is not one of the three', async () => {
+  it('refuses a size it does not serve', async () => {
     const one = archive('a8'.repeat(20), 'one.pmtiles', ['one']);
     const node = await serve(
       [one],
@@ -1211,7 +1211,11 @@ describe('sources whose tiles are a different size', { skip: !codec }, () => {
       { [one.infoHash]: { '1/0/0': await tileOf(100, 256) } },
     );
     after(() => node.close());
+    // 400 rather than falling through to the shorter route shape, where 300
+    // would be read as a zoom and answered.
     assert.equal((await node.get('/stacks/sized/300/1/0/0.webp')).status, 400);
+    // 1024 is a size nothing here renders, so it is not one this serves.
+    assert.equal((await node.get('/stacks/sized/1024/1/0/0.webp')).status, 400);
   });
 
   it('takes a smaller source from its children rather than stretching it', async () => {

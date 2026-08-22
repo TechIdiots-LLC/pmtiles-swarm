@@ -3552,10 +3552,10 @@ export function createApp({
     // bigger than the data it came from.
     const requested = req.params.size ?? resolved.stack.output?.tileSize;
     const explicitSize = requested === undefined ? null : Number(requested);
-    if (explicitSize !== null && ![256, 512, 1024].includes(explicitSize)) {
-      return res
-        .status(400)
-        .json({ error: 'tile size must be 256, 512 or 1024' });
+    // 256 and 512 only. Those are what raster sources are written at and what
+    // renderers ask for; a size nothing renders is a size worth not serving.
+    if (explicitSize !== null && ![256, 512].includes(explicitSize)) {
+      return res.status(400).json({ error: 'tile size must be 256 or 512' });
     }
     const format = resolved.stack.output?.format ?? coverage.format ?? 'webp';
     const cacheKey = stackCache?.enabled
@@ -3779,10 +3779,8 @@ export function createApp({
     // Anything that is not a size this serves is not a size at all -- and
     // must not fall through to the shorter shape, where it would be read as a
     // zoom and answered.
-    if (!['256', '512', '1024'].includes(req.params.size)) {
-      return res
-        .status(400)
-        .json({ error: 'tile size must be 256, 512 or 1024' });
+    if (!['256', '512'].includes(req.params.size)) {
+      return res.status(400).json({ error: 'tile size must be 256 or 512' });
     }
     return serveStackTile(req, res, next);
   });
