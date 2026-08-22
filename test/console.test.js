@@ -237,6 +237,50 @@ describe('the terrain preview', () => {
   });
 });
 
+describe("the catalogue page's sections", () => {
+  const catalogue = fsSync.readFileSync(
+    path.join(here, '..', 'src', 'web', 'public.html'),
+    'utf8',
+  );
+
+  it('gives each section its own heading, in its own container', () => {
+    // The Archives heading used to be appended to the end of the categories
+    // block, which was invisible while the two were adjacent and wrong the
+    // moment anything was inserted between them -- Stacks landed underneath a
+    // heading that said Archives.
+    const archivesRenderer = catalogue.slice(
+      catalogue.indexOf('const render = (archives) => {'),
+      catalogue.indexOf('const renderStacks'),
+    );
+    assert.match(archivesRenderer, /'Archives'/);
+
+    const categoriesRenderer = catalogue.slice(
+      catalogue.indexOf('const renderCategories'),
+      catalogue.indexOf('const PMTILES_NS'),
+    );
+    assert.doesNotMatch(
+      categoriesRenderer,
+      /'Archives'/,
+      'the categories block still emits the archives heading',
+    );
+  });
+
+  it('keeps the three containers in the order they are drawn', () => {
+    const order = ['id="categories"', 'id="stacks"', 'id="archives"'].map(
+      (one) => catalogue.indexOf(one),
+    );
+    assert.ok(
+      order.every((at) => at > 0),
+      'a section container is missing',
+    );
+    assert.deepEqual(
+      [...order].sort((a, b) => a - b),
+      order,
+      'the containers are not in the order the page reads',
+    );
+  });
+});
+
 describe('clipping a source in the stack editor', () => {
   const script = page.split('<script type="module">')[1].split('</script>')[0];
 

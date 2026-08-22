@@ -7,6 +7,18 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.68.2
+### 🐞 Bug fixes
+- **Archives were listed under a heading that said Stacks.** The catalogue page's Archives
+  heading was appended to the end of the categories block rather than to the archives themselves.
+  That was invisible while the two sections were adjacent and wrong the moment anything was
+  inserted between them, which 0.68.0 did — so the page read Categories, "Archives", "Stacks", the
+  stack, and then the archives under the wrong one of the two.
+
+  It also meant a node with no categories got no Archives heading at all, because that renderer
+  returns early when there is nothing to draw. Each section owns its own heading now, and a test
+  holds the containers in the order the page reads them.
+
 ## 0.68.1
 ### ✨ Features and improvements
 - **A cutline may have holes in it, which is to say it may be a real boundary.** 0.68.0 refused
@@ -26,8 +38,6 @@
 
 
 
-### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.68.0
 ### ✨ Features and improvements
@@ -97,8 +107,6 @@
 
 
 
-### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.67.0
 ### ✨ Features and improvements
@@ -128,8 +136,6 @@
 
 
 
-### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.66.0
 ### ✨ Features and improvements
@@ -153,8 +159,6 @@
 
 
 
-### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.65.0
 ### ✨ Features and improvements
@@ -184,8 +188,6 @@
 
 
 
-### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.64.0
 ### ✨ Features and improvements
@@ -343,8 +345,6 @@
   among them.
 
 
-### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.63.0
 ### ✨ Features and improvements
@@ -369,8 +369,6 @@
   raster with a note saying why.
 
 
-### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.62.0
 ### ✨ Features and improvements
@@ -591,8 +589,6 @@
   GIS client is usually looking at the public page. Both draw from the same builder, so the
   field was already in the public payload and only the button was missing.
 
-### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.60.0
 ### ✨ Features and improvements

@@ -395,6 +395,11 @@
       const render = (archives) => {
         const host = document.getElementById('archives');
         host.textContent = '';
+        // Its own heading, in its own section. It used to be appended to the
+        // end of the categories block, which put it above anything inserted
+        // between the two -- and left it off entirely on a node with no
+        // categories, because that renderer returns before reaching it.
+        host.append(el('h2', null, 'Archives'));
         if (archives.length === 0) {
           host.append(
             el('p', 'empty', 'This node is not publishing any archives yet.'),
@@ -649,8 +654,6 @@
 
           host.append(card);
         }
-
-        host.append(el('h2', null, 'Archives'));
       };
       const PMTILES_NS =
         'https://github.com/TechIdiots-LLC/pmtiles-swarm/ns/1.0';
