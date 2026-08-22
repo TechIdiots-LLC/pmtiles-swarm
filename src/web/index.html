@@ -66,6 +66,11 @@
       nav button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
       main { padding: 1.25rem; }
       .bar { display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+      /* The custom encoding is one formula, not four settings, so its inputs
+         sit inside it: tighter gaps and a shared baseline keep it reading as a
+         line of maths rather than as a row of fields. */
+      .bar.formula { gap: 0.35rem; align-items: baseline; margin-bottom: 0.4rem; }
+      .bar.formula .sub { white-space: nowrap; }
       input, select, button, textarea {
         font: inherit;
         padding: 0.4rem 0.6rem;
@@ -819,16 +824,16 @@
               <input id="stack-out-interval" type="number" step="any" min="0" placeholder="0.1" style="width:6rem" />
             </label>
           </div>
-          <div class="bar" id="stack-out-custom">
-            <span class="sub">height = r·red + g·green + b·blue − shift</span>
-            <label class="choice">red
-              <input id="stack-out-redFactor" type="number" step="any" style="width:6rem" /></label>
-            <label class="choice">green
-              <input id="stack-out-greenFactor" type="number" step="any" style="width:6rem" /></label>
-            <label class="choice">blue
-              <input id="stack-out-blueFactor" type="number" step="any" style="width:6rem" /></label>
-            <label class="choice">baseShift
-              <input id="stack-out-baseShift" type="number" step="any" style="width:6rem" /></label>
+          <div class="bar formula" id="stack-out-custom">
+            <span class="sub">height =</span>
+            <span class="sub">red ×</span>
+            <input id="stack-out-redFactor" type="number" step="any" style="width:6rem" title="redFactor" />
+            <span class="sub">+ green ×</span>
+            <input id="stack-out-greenFactor" type="number" step="any" style="width:6rem" title="greenFactor" />
+            <span class="sub">+ blue ×</span>
+            <input id="stack-out-blueFactor" type="number" step="any" style="width:6rem" title="blueFactor" />
+            <span class="sub">−</span>
+            <input id="stack-out-baseShift" type="number" step="any" style="width:6rem" title="baseShift" />
           </div>
         </div>
 
@@ -6281,16 +6286,30 @@ Every piece is hashed against the ` +
              }
              ${
                source.encoding === 'custom'
-                 ? `<span class="sub">height = r·red + g·green + b·blue − shift</span>
-                    ${['redFactor', 'greenFactor', 'blueFactor', 'baseShift']
-                      .map(
-                        (name) =>
-                          `<label class="choice">${name.replace('Factor', '')}
-                             <input type="number" step="any" style="width:6rem"
-                                    data-stack-field="${name}" data-stack-index="${index}"
-                                    value="${source[name] ?? ''}" /></label>`,
-                      )
-                      .join('')}`
+                 ? `<div class="bar formula">
+                      <span class="sub">height =</span>
+                      <span class="sub">red ×</span>
+                      <input type="number" step="any" style="width:6rem" title="redFactor"
+                             data-stack-field="redFactor" data-stack-index="${index}"
+                             value="${source.redFactor ?? ''}" />
+                      <span class="sub">+ green ×</span>
+                      <input type="number" step="any" style="width:6rem" title="greenFactor"
+                             data-stack-field="greenFactor" data-stack-index="${index}"
+                             value="${source.greenFactor ?? ''}" />
+                      <span class="sub">+ blue ×</span>
+                      <input type="number" step="any" style="width:6rem" title="blueFactor"
+                             data-stack-field="blueFactor" data-stack-index="${index}"
+                             value="${source.blueFactor ?? ''}" />
+                      <span class="sub">−</span>
+                      <input type="number" step="any" style="width:6rem" title="baseShift"
+                             data-stack-field="baseShift" data-stack-index="${index}"
+                             value="${source.baseShift ?? ''}" />
+                    </div>
+                    <div class="sub">Each channel is 0–255. The first three are
+                      multipliers; the last is subtracted, so a mapbox base value
+                      of −10000 is a shift of 10000. mapbox is
+                      <code>6553.6, 25.6, 0.1, 10000</code> and terrarium is
+                      <code>256, 1, 0.00390625, 32768</code>.</div>`
                  : ''
              }
              <label class="choice">Shift by
