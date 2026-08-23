@@ -37,6 +37,7 @@ import { SUMMARY_VERSION } from './pmtiles-probe.js';
 import { TileReadError } from './tiles.js';
 import { loadCodec } from './codec.js';
 import { answerStackTile, outputFormat, outputSize } from './stack-tile.js';
+import { renderStackFeed } from './stack-feed.js';
 import { clearStorage, storageReport } from './storage.js';
 import {
   isPinned,
@@ -2639,6 +2640,27 @@ export function createApp({
     });
     if (entry) tagAsLatest(res, body);
     res.type('application/rss+xml').send(body);
+  });
+
+  /**
+   * This node's own stacks, for another node to follow.
+   *
+   * Public, like the archive feeds beside it: a recipe names categories and
+   * infohashes, which the catalogue already publishes, so it gives away
+   * nothing the feed next to it does not. What it does not carry is the stacks
+   * this node adopted from somewhere else -- republishing those would put two
+   * nodes' names on one recipe, and two nodes following each other would hand
+   * it back and forth for ever.
+   */
+  app.get('/stacks.xml', (req, res) => {
+    res.type('application/rss+xml');
+    res.setHeader('cache-control', 'no-store');
+    res.send(
+      renderStackFeed(stacks?.list() ?? [], {
+        baseUrl: baseUrl(req),
+        title: `${config.nodeName ?? os.hostname()} stacks`,
+      }),
+    );
   });
 
   app.get('/feed.xml', (req, res) => {

@@ -4,6 +4,27 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+- **Stack recipes travel between nodes.** `GET /stacks.xml` is this node's own stacks as a feed;
+  **Settings → Feeds → Stack feeds** follows another node's and adopts what it carries. Archives
+  already travelled by category — a builder feeding two tile servers gave them the same archives —
+  and this is how the recipes that combine them travel with them, so a stack is written once and
+  corrected once.
+
+  This section of the docs used to argue against a feed, on the grounds that a stack is a mutable
+  document and syncing one is about conflicts. That holds where two nodes both edit a recipe and is
+  not the arrangement anybody runs: one node authors, the rest follow. What survives from the
+  objection is handled directly — **a stack made on this node is never overwritten by one arriving
+  under the same name**, which is refused and said.
+
+  A recipe is adopted under the publisher's own id, so `planet-terrain` answers at the same URL on
+  the builder and on every replica; namespacing it would have given three nodes three URLs and
+  defeated the point. A recipe naming a source this node has not got is adopted anyway and reports
+  the missing source until it arrives — refusing it would mean a replica could not be set up until
+  every archive had finished downloading, which is backwards.
+
+  What happens when a feed stops carrying a stack is the feed's own setting: keep it and say so, or
+  remove it here too.
+
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 

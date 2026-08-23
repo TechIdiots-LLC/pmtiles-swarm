@@ -30,6 +30,7 @@ import {
 } from './shutdown.js';
 import { ScheduledSourceManager } from './sources.js';
 import { StackExportScheduler } from './stack-exports.js';
+import { StackFeedSubscriber } from './stack-feed.js';
 import { SubscriptionManager } from './subscriptions.js';
 import { TileStats } from './tile-stats.js';
 import { TrafficStats, openStatsDatabase } from './traffic-stats.js';
@@ -487,6 +488,10 @@ PMTILES_SWARM_PUBLIC_URL
   //
   // Not awaited: an export is hours, and the node should be answering requests
   // while it runs rather than after it.
+  // Following other nodes' recipes. Built whether or not any are configured,
+  // so adding one through the console starts it without a restart.
+  const stackFeeds = new StackFeedSubscriber({ stacks, config });
+
   // Baking a stack on a timer, so an archive of it does not go stale the
   // moment its sources are rebuilt. Only where this node bakes at all.
   const stackExports =
@@ -576,6 +581,10 @@ PMTILES_SWARM_PUBLIC_URL
     subscriptions: () => {
       subscriptions.stop();
       subscriptions.start();
+    },
+    stackFeeds: () => {
+      stackFeeds.stop();
+      stackFeeds.start();
     },
     seeding: () => {
       seeding.stop();
@@ -669,6 +678,7 @@ PMTILES_SWARM_PUBLIC_URL
   watch.start(config.watch);
   subscriptions.start();
   sources.start();
+  stackFeeds.start();
   // After the resume above, so a bake this node was already in the middle of
   // is picked up before the schedule is asked whether to start another.
   if (stackExports) {

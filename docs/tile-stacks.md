@@ -1629,46 +1629,90 @@ advertised as a link that answers 501.
 
 ## Syncing a stack to another node
 
-The question is whether a stack can travel between nodes the way an archive
-does, and the answer is that it is a different kind of thing.
+Archives already travel. A node follows a category and the builds arrive, which
+is how a builder feeds a pair of tile servers. The recipes that combine them did
+not travel, so those two had the same archives and no way to have the same
+stacks — every recipe typed twice, and corrected twice.
 
-An archive is immutable and content-addressed: an infohash either matches or it
-does not, and two nodes converge because they are fetching the same bytes. A
-stack is a mutable document that gets edited, so syncing it is a question about
-conflicts and clobbering rather than about missing pieces. A feed is the wrong
-shape for it.
+```
+planetgen ──── category feeds ────▶ TilerServer-01
+   │           (archives)      └──▶ TilerServer-02
+   └────────── /stacks.xml ─────────▶  (recipes)
+```
 
-There is a sharper problem underneath. A recipe names its sources by category or
-by infohash, so **the same recipe means different things on different nodes**.
-Sent to a node missing one source, an infohash-pinned stack is permanently
-broken; a category-named one silently resolves to that node's newest build of
-that category, which may be a different map entirely. Either way the recipe
-travels and the meaning does not.
+`GET /stacks.xml` is this node's own stacks as a feed. A subscriber lists it
+under **Settings → Feeds → Stack feeds** with how often to check, and adopts
+what it carries.
 
-Three shapes, in the order they are worth considering:
+### Why a feed, when this section used to argue against one
 
-**Pull into a namespace the receiver owns.** `/api/stacks/<id>/raw` already
-returns the recipe as written. A subscribing node polls a peer's stack list the
-way it already polls for archives, and adopts what it finds under `<peer>:<id>`,
-so an adopted stack can never overwrite a local one and it is obvious on the
-screen which node a recipe came from. This reuses the remote-node machinery
-rather than adding a feed to it. A source that does not resolve locally is
-reported through `problems`, which the console already separates from an invalid
-recipe and from one needing a codec; an adopted stack with a missing source is a
-normal thing to look at, not an error to refuse.
+The objection was that a stack is a mutable document, so syncing it is a question
+about conflicts and clobbering rather than about missing pieces. That is true
+where two nodes both edit the same recipe, and it is not the arrangement anybody
+is actually running. One node authors and the rest follow — exactly as they
+follow a category — and in that shape there is nothing to conflict.
 
-**Export a bundle.** The recipe plus the resolved infohashes of its sources, as
-one file. Unambiguous and reproducible, and the right answer when what is wanted
-is _this exact map_. It pins, so it does not follow a rebuild, which is either
-the point or the problem depending on why it was sent.
+What survives from the objection is the clobbering, and it is handled directly:
+**a stack made on this node is never overwritten by one arriving under the same
+name.** That is refused and said, rather than resolved in either direction, and
+it is the only outcome here that could lose work.
 
-**Nothing automatic.** Copy the recipe and let the operator resolve the sources.
-Honest, and possibly right for as long as stacks are few.
+### The name is the publisher's
 
-Baking sidesteps the question rather than answering it. A baked stack is an
-ordinary archive with an infohash, and archives already sync, so where what is
-wanted is the _output_ on another node rather than the _recipe_, that is the
-mechanism, and it carries no ambiguity about what the sources resolved to.
+A recipe is adopted under the id it has on the publisher. `planet-terrain` is
+`planet-terrain` on the builder and on every replica, so one URL answers on all
+of them — which is what puts a load balancer in front of them at all. Namespacing
+it as `planetgen:planet-terrain` would have been safer against collisions and
+would have given three nodes three different URLs, which defeats the purpose.
+
+### A missing source is not a reason to refuse
+
+A recipe naming a category resolves to whatever that node's newest build of it
+is, which is the point: the two tile servers follow the same category feeds, so
+they resolve to the same archive. A recipe naming an infohash needs that exact
+build, and a replica may not have it yet.
+
+Adopted either way. The stack reports the missing source through `problems`, the
+console shows it as it shows any other unresolved source, and its tiles answer
+for what they cannot serve until the archive arrives. Refusing it instead would
+mean a replica could not be set up until every archive had finished downloading,
+which is backwards: the recipe is the small, fast half.
+
+### What a feed carries, and what it does not
+
+The recipe travels **inside** the item rather than behind a link, because it is a
+few hundred bytes: a subscriber that has read the feed has the recipe, with
+nothing else to fetch and no second request to authenticate. Each item also
+carries the recipe's revision, so a poll costs a comparison rather than a
+document when nothing has changed.
+
+A node publishes only the stacks it authored. Republishing what it adopted would
+put two nodes' names on one recipe, and two nodes following each other would hand
+it back and forth for ever.
+
+The feed is public, like the archive feeds beside it. A recipe names categories
+and infohashes, both of which the catalogue already publishes, so it gives away
+nothing that the feed next to it does not.
+
+### When the publisher stops carrying one
+
+Per feed, because it depends on what the far node is:
+
+- **keep it, and say so** — the recipe stays and goes on serving; the console
+  says the feed no longer carries it. A deletion on the author, accidental or
+  not, never takes a working endpoint down across every replica at once.
+- **remove it here too** — a replica mirrors its author. Simple and consistent,
+  and an accidental delete propagates within one poll.
+
+A stack that comes back has the mark taken off again rather than left to puzzle
+over.
+
+### Baking is still the other answer
+
+A baked stack is an ordinary archive with an infohash, and archives already sync.
+Where what is wanted on the far node is the _output_ rather than the _recipe_,
+that is the mechanism, and it carries no ambiguity at all about what the sources
+resolved to. See "Exporting on a schedule".
 
 ## What the offline merge got wrong
 

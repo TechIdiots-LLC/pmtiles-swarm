@@ -2370,6 +2370,7 @@ describe('the settings schema', () => {
       'subscriptions',
       'locations',
       'stackExports',
+      'stackFeeds',
     ]);
 
     const stranded = declared.filter(

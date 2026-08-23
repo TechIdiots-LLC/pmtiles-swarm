@@ -6601,6 +6601,52 @@ Every piece is hashed against the ` +
         });
 
         renderRowEditor({
+          into: paneFor('Feeds'),
+          key: 'stackFeeds',
+          title: 'Stack feeds',
+          blurb:
+            'Other nodes’ stack recipes, followed the way a category is. ' +
+            'Archives already travel — a pair of tile servers fed from one ' +
+            'builder has the same archives — and this is how the recipes that ' +
+            'combine them travel with them, so a stack is written once and ' +
+            'corrected once.',
+          columns: [
+            {
+              field: 'url',
+              label: 'Feed',
+              placeholder: 'http://planetgen:8090/stacks.xml',
+              wide: true,
+            },
+            { field: 'name', label: 'Called', placeholder: 'the URL' },
+            {
+              field: 'everyMinutes',
+              label: 'Check every (minutes)',
+              placeholder: '15',
+              number: true,
+            },
+            {
+              field: 'onWithdrawn',
+              label: 'When it stops carrying one',
+              options: [
+                ['', 'keep it, and say so'],
+                ['remove', 'remove it here too'],
+              ],
+            },
+            { field: 'token', label: 'Token', placeholder: 'none', secret: true },
+          ],
+          rows: config.stackFeeds ?? [],
+          footnote:
+            'A recipe is adopted under the name it has on the publisher, so ' +
+            'the same stack answers at the same URL on every node that ' +
+            'follows it — which is what puts a load balancer in front of them. ' +
+            'A stack made here is never overwritten by one arriving under the ' +
+            'same name; that is refused and said. A source the recipe names ' +
+            'and this node has not got is not a reason to refuse it either: ' +
+            'the stack is adopted and reports the missing source until it ' +
+            'arrives.',
+        });
+
+        renderRowEditor({
           // With the monitored folders and the scheduled sources, because it
           // is the same kind of thing: something that puts an archive into
           // this node on a timer. It just bakes the archive here rather than

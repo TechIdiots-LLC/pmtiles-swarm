@@ -159,6 +159,9 @@ export function isPublicSurface(path, options = {}) {
     path === '/api/catalog' ||
     path === '/api/catalog/' ||
     path === '/feed.xml' ||
+    // A recipe names categories and infohashes, which the catalogue beside it
+    // already publishes, so this gives away nothing that does not.
+    path === '/stacks.xml' ||
     path.startsWith('/feed/') ||
     path.startsWith('/archives/') ||
     path.startsWith('/latest/') ||

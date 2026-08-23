@@ -446,6 +446,20 @@ const DEFAULTS = {
    */
   subscriptions: [],
   /**
+   * Other nodes' stack feeds to follow.
+   *
+   * `[{ url, name, everyMinutes, onWithdrawn, token, enabled }]`. Archives
+   * already travel by category; this is how the recipes that combine them do.
+   * A pair of tile servers fed from one builder had the same archives and no
+   * way to have the same stacks.
+   *
+   * `onWithdrawn` says what to do about a stack the feed stops carrying:
+   * `keep` marks it and goes on serving, `remove` follows the publisher down.
+   * The choice belongs to the feed because it depends on what the far node is.
+   * See docs/tile-stacks.md -- "Syncing a stack to another node".
+   */
+  stackFeeds: [],
+  /**
    * How often to re-check whether the sources archives were built from have
    * changed, in seconds. Zero disables it.
    */
@@ -846,6 +860,7 @@ export const RELOADABLE = new Map([
   ['stackExports', 'stackExports'],
   ['sourceCheckIntervalHours', 'sources'],
   ['subscriptions', 'subscriptions'],
+  ['stackFeeds', 'stackFeeds'],
   ['subscriptionIntervalSeconds', 'subscriptions'],
   ['subscriptionsEnabled', 'subscriptions'],
   ['seeding', 'seeding'],
