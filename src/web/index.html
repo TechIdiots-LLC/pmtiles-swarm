@@ -4874,6 +4874,183 @@ Every piece is hashed against the ` +
        * @param {HTMLElement} into - The settings pane to render in.
        * @returns {Promise<void>} - Resolves once it is drawn.
        */
+      /**
+       * When each stack bakes itself into an archive.
+       *
+       * With the feeds because that is where the automations that bring a file
+       * in on a timer sit -- a monitored folder, a scheduled source, someone
+       * else's feed. This is one of those: it produces the archive here rather
+       * than fetching one, and it lands in a category and goes out over the
+       * feed exactly as a fetched one does.
+       *
+       * Only the *when* is edited here. Where it lands, what it is called and
+       * which categories it is filed under come from the export dialog, and
+       * they are written on the stack because that is where the rest of the
+       * recipe already is.
+       * @param {HTMLElement} into - The settings pane to render in.
+       * @returns {Promise<void>} - Resolves once it is drawn.
+       */
+      async function renderStackScheduleEditor(into) {
+        const panel = document.createElement('div');
+        panel.className = 'panel';
+        panel.style.marginBottom = '1rem';
+        into.append(panel);
+
+        const draw = async () => {
+          let held;
+          try {
+            held = (await api('/api/stacks')).stacks ?? [];
+          } catch (error) {
+            panel.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+            return;
+          }
+
+          const rows = held
+            .map((stack) => {
+              const block = stack.export ?? {};
+              const how =
+                block.enabled === false
+                  ? 'off'
+                  : block.at
+                    ? 'at'
+                    : block.everyHours || block.everyMinutes
+                      ? 'hours'
+                      : 'off';
+              const at = [].concat(block.at ?? '03:30')[0];
+              const every =
+                block.everyHours ??
+                (block.everyMinutes ? block.everyMinutes / 60 : 24);
+              const id = escapeHtml(stack.id);
+              return `
+                <tr>
+                  <td>
+                    <b>${escapeHtml(stack.title ?? stack.id)}</b>
+                    <div class="sub"><code>${id}</code></div>
+                  </td>
+                  <td>
+                    <select data-sched="${id}" data-sched-field="how">
+                      <option value="off"${how === 'off' ? ' selected' : ''}>never</option>
+                      <option value="at"${how === 'at' ? ' selected' : ''}>every day at</option>
+                      <option value="hours"${how === 'hours' ? ' selected' : ''}>every</option>
+                    </select>
+                    <input type="time" style="width:7rem" data-sched="${id}"
+                           data-sched-field="at" value="${escapeHtml(String(at))}"
+                           ${how === 'at' ? '' : 'hidden'} />
+                    <span class="sub" data-sched="${id}" data-sched-field="at-note"
+                          ${how === 'at' ? '' : 'hidden'}>UTC</span>
+                    <input type="number" min="1" step="1" style="width:4.5rem"
+                           data-sched="${id}" data-sched-field="every"
+                           value="${escapeHtml(String(every))}"
+                           ${how === 'hours' ? '' : 'hidden'} />
+                    <span class="sub" data-sched="${id}" data-sched-field="every-note"
+                          ${how === 'hours' ? '' : 'hidden'}>hours</span>
+                  </td>
+                  <td style="text-align:right">
+                    <button data-sched-save="${id}">Save</button>
+                  </td>
+                </tr>`;
+            })
+            .join('');
+
+          panel.innerHTML = `
+            <h2 style="margin-top:0">Scheduled exports</h2>
+            <div class="sub" style="margin-bottom:0.8rem">
+              A stack baked into an archive on a timer, so the file does not
+              fall behind the recipe it came from. Where it lands, what it is
+              called and which categories it is filed under come from
+              <b>Export to archive</b> on the stack — this is only when. A run
+              whose sources have not moved since the last one is skipped.
+            </div>
+            ${
+              held.length
+                ? `<table><tbody>${rows}</tbody></table>`
+                : '<div class="empty">No stacks yet.</div>'
+            }
+            <div class="sub" id="sched-note" style="margin-top:0.6rem"></div>`;
+
+          /**
+           * Shows the half of a row the choice actually uses.
+           * @param {string} id - Which stack's row.
+           * @returns {void}
+           */
+          const showRow = (id) => {
+            const how = panel.querySelector(
+              `[data-sched="${id}"][data-sched-field="how"]`,
+            )?.value;
+            for (const [field, when] of [
+              ['at', 'at'],
+              ['at-note', 'at'],
+              ['every', 'hours'],
+              ['every-note', 'hours'],
+            ]) {
+              const box = panel.querySelector(
+                `[data-sched="${id}"][data-sched-field="${field}"]`,
+              );
+              if (box) box.hidden = how !== when;
+            }
+          };
+
+          for (const select of panel.querySelectorAll(
+            '[data-sched-field="how"]',
+          )) {
+            select.onchange = () => showRow(select.dataset.sched);
+          }
+
+          for (const button of panel.querySelectorAll('[data-sched-save]')) {
+            button.onclick = async () => {
+              const id = button.dataset.schedSave;
+              const value = (field) =>
+                panel.querySelector(
+                  `[data-sched="${id}"][data-sched-field="${field}"]`,
+                )?.value;
+              const note = panel.querySelector('#sched-note');
+              button.disabled = true;
+              try {
+                // The recipe, not the row: the list holds what each source
+                // resolved to, and writing that back would replace the recipe
+                // with its own output.
+                const raw = await api(
+                  `/api/stacks/${encodeURIComponent(id)}/raw`,
+                );
+                const stack = { ...raw.stack };
+                const how = value('how');
+                if (how === 'off') {
+                  // Turned off rather than removed, so the rest of what the
+                  // export dialog collected survives being paused.
+                  if (stack.export) {
+                    stack.export = { ...stack.export, enabled: false };
+                  }
+                } else if (how === 'at') {
+                  stack.export = { ...stack.export, at: value('at'), enabled: true };
+                  delete stack.export.everyHours;
+                  delete stack.export.everyMinutes;
+                } else {
+                  stack.export = {
+                    ...stack.export,
+                    everyHours: Number(value('every')),
+                    enabled: true,
+                  };
+                  delete stack.export.at;
+                  delete stack.export.everyMinutes;
+                }
+                delete stack.id;
+                await api(`/api/stacks/${encodeURIComponent(id)}`, {
+                  method: 'PUT',
+                  body: stack,
+                });
+                if (note) note.textContent = `Saved ${id}.`;
+                await draw();
+              } catch (error) {
+                if (note) note.textContent = error.message;
+                button.disabled = false;
+              }
+            };
+          }
+        };
+
+        await draw();
+      }
+
       async function renderStorageEditor(into) {
         const panel = document.createElement('div');
         panel.className = 'panel';
@@ -6494,6 +6671,7 @@ Every piece is hashed against the ` +
         // this node. Hooks run a command when a download finishes, which is
         // what the Transfers tab is about.
         await renderStorageEditor(paneFor('Storage'));
+        await renderStackScheduleEditor(paneFor('Feeds'));
         await renderTokenEditor(paneFor('Security'));
         renderHookEditor(paneFor('Transfers'), config, restartKeys, true);
 

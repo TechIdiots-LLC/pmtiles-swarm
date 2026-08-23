@@ -378,6 +378,27 @@ describe('clipping a source in the stack editor', () => {
     );
   });
 
+  it('sets each stack schedule beside the other automations', () => {
+    // Not only the two global settings: this is where somebody goes to say
+    // when a thing runs, so it is where the schedules are set.
+    assert.match(script, /renderStackScheduleEditor\(paneFor\('Feeds'\)\)/);
+    assert.match(script, /Scheduled exports/);
+    assert.match(script, /data-sched-save=/);
+  });
+
+  it('pauses a schedule rather than forgetting what it was', () => {
+    // Where it lands, what it is called and its categories live in the same
+    // block; turning the timer off should not take them with it.
+    assert.match(script, /enabled: false/);
+  });
+
+  it('writes a schedule onto the recipe, not onto the report', () => {
+    // Twice over: the dialog and this table both read raw before writing.
+    const at = script.indexOf('data-sched-save');
+    assert.ok(at > 0);
+    assert.match(script.slice(at, at + 3000), /\/raw`/);
+  });
+
   it('puts the export schedule settings with the other automations', () => {
     // Feeds is where the things that bring a file in on a timer live, and a
     // scheduled export is one of those -- it produces the file here rather

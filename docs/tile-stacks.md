@@ -1524,17 +1524,28 @@ that recorded the attempt would wait a day before showing it had ever run.
 
 #### Where the settings live
 
-The schedule itself is on the stack, because it is a fact about that stack —
-which categories it is filed under, which disk it lands on, what it is called.
-The two that apply to every stack are under **Settings → Feeds**:
-`stacks.scheduledExports` and `stacks.exportIntervalHours`.
+All of it is under **Settings → Feeds**, because that tab is already where the
+automations that bring a file in on a timer sit — a monitored folder, a
+scheduled source watching an upstream directory, a subscription following
+someone else's feed. A scheduled export is the same kind of thing. It just
+produces the file here instead of fetching it from somewhere else, and it lands
+in a category and goes out over the feed exactly as a fetched one does.
 
-Feeds rather than a group of their own, because that tab is already where the
-automations that bring a file in on a timer sit — a scheduled source watching an
-upstream directory, a subscription following someone else's feed. A scheduled
-export is the same kind of thing. It just produces the file here instead of
-fetching it from somewhere else, and it lands in a category and goes out over
-the feed exactly as a fetched one does.
+**Scheduled exports** is a row per stack: never, every day at a time, or every so
+many hours. Saving one writes the schedule onto that stack's recipe. Turning a
+stack to _never_ pauses it with `enabled: false` rather than deleting the block,
+because where it lands, what it is called and which categories it is filed under
+live in the same place and should survive being paused.
+
+Beside it are the two that apply to every stack: `stacks.scheduledExports`, and
+`stacks.exportIntervalHours` for a stack scheduled by interval rather than by
+time of day.
+
+Storing the schedule on the stack rather than in this node's config is the one
+arguable part. It sits with the rest of what an export needs — the categories,
+the disk, the name — and those are unmistakably the stack's. The cost is that a
+recipe copied to another node carries its schedule with it, which is what
+`stacks.scheduledExports: false` is for.
 
 `stacks.scheduledExports: false` turns the whole thing off, which is what a
 second node serving the same stacks wants: the recipe travels, and only one of

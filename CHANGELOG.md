@@ -4,6 +4,16 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+- **Export schedules are set under Settings → Feeds.** Not only the two global settings that landed
+  there in 0.81.1 — the schedules themselves. **Scheduled exports** is a row per stack: never, every
+  day at a time, or every so many hours, saved onto that stack's recipe. Feeds is where somebody goes
+  to say when a thing runs, so it is where they are set; the export dialog's **Repeat** control still
+  writes the same schedule, for setting one while you are already there.
+
+  Turning a stack to _never_ pauses it with `enabled: false` rather than deleting the block. Where it
+  lands, what it is called and which categories it is filed under live in the same place, and those
+  should survive being paused.
+
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
