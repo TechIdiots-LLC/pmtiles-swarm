@@ -353,6 +353,14 @@ describe('clipping a source in the stack editor', () => {
     assert.match(script, /delete source\.feather;/);
   });
 
+  it('says when a fade is on the layer that has nothing underneath', () => {
+    // A weight is how much of what is underneath shows through, so the bottom
+    // source's is never read -- which makes a fade set there do nothing at
+    // all, silently. In RGBA it does something, since alpha over nothing is
+    // still transparency, so the note is for the elevation path only.
+    assert.match(script, /nothing underneath to fade into/);
+  });
+
   it('lets the fade be written in metres of ground', () => {
     // The unit is the whole point of the field: a hillshade reads slope, so a
     // fade in pixels is a different slope at every zoom and one number cannot

@@ -7737,9 +7737,11 @@ Every piece is hashed against the ` +
                   }>px</option>
                 </select>
                 <span class="sub">${
-                  featherWidth && !fadesAt
-                    ? 'nothing to fade at yet: mask something, or clip it'
-                    : ''
+                  featherWidth && index === 0 && !rgba
+                    ? 'the bottom source has nothing underneath to fade into'
+                    : featherWidth && !fadesAt
+                      ? 'nothing to fade at yet: mask something, or clip it'
+                      : ''
                 }</span>
               </label>
               ${

@@ -1299,8 +1299,16 @@ mostly diagonals.
 works out the pixels for each tile it builds:
 
 ```json
-{ "archive": "gebco", "maskRange": [-1, 0], "featherMetres": 50 }
+{ "category": "planet-bathymetry", "maskRange": [-1, 0], "featherMetres": 50 }
 ```
+
+That is the source **on top** — the one whose mask leaves the hole. A weight
+says how much of what is underneath shows through, so it goes on the layer with
+the edge and not on the one filling the hole: a fade on the bathymetry
+underneath is read by nothing, because `paintHeights` takes the first layer that
+contributes whole and only consults a weight from the second onward. See "A
+feathered layer over a hole stands alone" above, which is the same rule seen
+from the other side.
 
 Web Mercator makes that arithmetic rather than a lookup: one pixel covers
 `40075016.686 × cos(latitude) / 2^zoom / tileSize` metres, so the conversion
