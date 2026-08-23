@@ -494,6 +494,7 @@ PMTILES_SWARM_PUBLIC_URL
         return resolveStack(stack, {
           archive: (hash) => catalog.get(hash),
           category: (name) => catalog.byCategory(name)[0] ?? null,
+          stack: (id) => stacks?.get(id) ?? null,
         });
       })
       .catch((error) => console.warn(`[bake] resume failed: ${error.message}`));

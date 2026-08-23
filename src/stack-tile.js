@@ -12,6 +12,7 @@ import { paddedKnown, parentsFor } from './mask-edge.js';
 import {
   INSIDE,
   OUTSIDE,
+  PARTIAL,
   classifyTile,
   cropMask,
   featherMask,
@@ -65,7 +66,11 @@ const PARENT_LIMIT = 6;
 export function parentLimitFor(resolved) {
   const { maxzoom } = stackCoverage(resolved);
   const shallowest = resolved.sources
-    .map((source) => source.entry?.pmtiles?.maxZoom)
+    .map((source) =>
+      source.nested
+        ? stackCoverage(source.nested).maxzoom
+        : source.entry?.pmtiles?.maxZoom,
+    )
     .filter((zoom) => Number.isFinite(zoom));
   if (!shallowest.length || !Number.isFinite(maxzoom)) return PARENT_LIMIT;
 
@@ -304,6 +309,10 @@ export function passThroughRead({
   // decoding the tile to find out how wide it is.
   if (size) return null;
 
+  // A nested stack has no stored bytes at all, so there is nothing this could
+  // hand back even when it is the only thing answering.
+  if (reads.some((read) => read.nested)) return null;
+
   const answered = reads.filter((read) => read.found);
   // More than one and they have to be painted; none and there is nothing to
   // send. An error on any source is a decision this must not take, because the
@@ -362,6 +371,13 @@ async function readAll({ resolved, z, x, y, tiles, signal, clips }) {
   const limit = parentLimitFor(resolved);
   return Promise.all(
     resolved.sources.map(async (source, index) => {
+      // A stack in place of an archive. Nothing to fetch: it is evaluated
+      // rather than read, and `gather` is where that happens -- but the clip
+      // still decides whether it is worth evaluating at all.
+      if (source.nested) {
+        if (clips?.[index]?.where === OUTSIDE) return { source, found: null };
+        return { source, nested: true };
+      }
       if (!source.entry) return { source, found: null };
       // Nothing of this source is in the shape, so there is nothing to fetch.
       // Decided before the read, which is where the saving is: no swarm round
@@ -394,10 +410,63 @@ async function readAll({ resolved, z, x, y, tiles, signal, clips }) {
  * @param {object} options - The reads and what to decode them with.
  * @returns {Promise<object>} - `{contributors, contributions}` or `{error}`.
  */
-async function gather({ reads, z, x, y, tiles, codec, signal, size, rgba }) {
+async function gather({
+  reads,
+  z,
+  x,
+  y,
+  tiles,
+  codec,
+  signal,
+  size,
+  rgba,
+  cutlines,
+}) {
   const contributors = [];
   const contributions = [];
   for (const read of reads) {
+    if (read.nested) {
+      // Evaluated rather than read, and handed on as heights: encoding it here
+      // only for the merge above to decode it again would cost two conversions
+      // and lose whatever the inner encoding could not hold.
+      const inner = await stackHeights({
+        resolved: read.source.nested,
+        z,
+        x,
+        y,
+        tiles,
+        codec,
+        signal,
+        size,
+        cutlines,
+      });
+      if (inner?.error) {
+        if (read.source.required) {
+          return {
+            contributors,
+            error: {
+              status: inner.error.status,
+              message: `${read.source.name} is required: ${inner.error.message}`,
+            },
+          };
+        }
+        contributors.push(`${read.source.name}=error`);
+        contributions.push(null);
+        continue;
+      }
+      if (!inner) {
+        contributors.push(`${read.source.name}=absent`);
+        contributions.push(null);
+        continue;
+      }
+      contributors.push(`${read.source.name}=stack(${inner.contributors})`);
+      contributions.push({
+        source: read.source.source,
+        heights: inner.heights,
+        width: inner.width,
+      });
+      continue;
+    }
     if (read.error) {
       if (read.source.required) {
         return {
@@ -578,6 +647,98 @@ async function readMaskEdges({
 }
 
 /**
+ * Turns each clip into the weight its source is painted with.
+ *
+ * Rasterised at the grid the layers are painted on, and only for the tiles the
+ * edge actually crosses -- everything else was settled by `classifyTile`
+ * without touching a pixel.
+ * @param {object} options - The contributions, the clips and the grid.
+ * @returns {void}
+ */
+function applyClips({ contributions, clips, z, x, y, grid }) {
+  for (const [index, contribution] of contributions.entries()) {
+    const clip = clips?.[index];
+    if (!contribution || !clip || clip.where !== PARTIAL) continue;
+    // Rasterised with a border where the edge is feathered, because the ramp
+    // is measured from the boundary and a boundary just outside the tile still
+    // decides what the pixels inside it weigh. The shape is known in full, so
+    // this costs the extra rows and nothing else -- unlike a mask read out of
+    // a source's own pixels, which would need its neighbours.
+    //
+    // Asked again rather than taken from the clip: `clipsFor` may have been
+    // given a grid the merge did not end up using, and a fade in metres is a
+    // different number of pixels on each of them.
+    const margin = featherFor(contribution.source, { z, y, size: grid });
+    const mask = rasterizeTile(clip.shape, z, x, y, grid, margin);
+    contribution.coverage = cropMask(
+      featherMask(mask, grid + margin * 2, margin),
+      grid,
+      margin,
+    );
+  }
+}
+
+/**
+ * One tile of a stack, as heights, for a stack that is using it as a source.
+ *
+ * The same reading and merging a served tile goes through, stopping before the
+ * encode. A nested stack is handed to the merge above it as the numbers it
+ * produced: encoding here only for that merge to decode it again would cost
+ * two conversions per tile and lose whatever the inner encoding could not
+ * hold. See docs/tile-stacks.md -- "A stack as a source".
+ * @param {object} options - The resolved inner stack and what to read with.
+ * @returns {Promise<object|null>} - `{heights, width, contributors}`, `{error}`,
+ *   or null where nothing covered this tile.
+ */
+export async function stackHeights({
+  resolved,
+  z,
+  x,
+  y,
+  tiles,
+  codec,
+  signal,
+  size,
+  cutlines,
+}) {
+  const clips = clipsFor(resolved, cutlines, z, x, y, size);
+  const reads = await readAll({ resolved, z, x, y, tiles, signal, clips });
+  const gathered = await gather({
+    reads,
+    z,
+    x,
+    y,
+    tiles,
+    codec,
+    signal,
+    size,
+    rgba: false,
+    cutlines,
+  });
+  if (gathered.error) return { error: gathered.error };
+
+  const present = gathered.contributions.filter(Boolean);
+  if (present.length === 0) return null;
+
+  const grid =
+    size ?? Math.max(...present.map((c) => c.width ?? c.raster.width));
+  applyClips({ contributions: gathered.contributions, clips, z, x, y, grid });
+
+  const heights = mergeElevation(gathered.contributions, {
+    z,
+    x,
+    y,
+    size: grid,
+    gaussianBlurSigma: resolved.stack.gaussianBlurSigma,
+    resampling: resolved.stack.resampling,
+  });
+  // Nodata is deliberately not filled in. A hole is what lets the stack above
+  // show through, and a slab of -10000 is ground rather than a hole.
+  if (!heights) return null;
+  return { heights, width: grid, contributors: gathered.contributors.join() };
+}
+
+/**
  * Merges what the sources gave into one encoded tile.
  * @param {object} options - Everything the merge needs.
  * @returns {Promise<StackAnswer>} - The tile, or that there is none.
@@ -603,32 +764,12 @@ async function merge({
   // source brought, so the finest one is not thrown away.
   const grid =
     size ??
-    Math.max(...contributions.filter(Boolean).map((c) => c.raster.width));
+    Math.max(
+      ...contributions.filter(Boolean).map((c) => c.width ?? c.raster.width),
+    );
   const output = resolved.stack.output ?? {};
 
-  // Rasterised at the grid the layers are painted on, and only for the tiles
-  // the edge actually crosses. Everything else was settled by `classifyTile`
-  // without touching a pixel.
-  for (const [index, contribution] of contributions.entries()) {
-    const clip = clips?.[index];
-    if (!contribution || !clip || clip.where !== 'partial') continue;
-    // Rasterised with a border where the edge is feathered, because the ramp
-    // is measured from the boundary and a boundary just outside the tile still
-    // decides what the pixels inside it weigh. The shape is known in full, so
-    // this costs the extra rows and nothing else -- unlike a mask read out of
-    // a source's own pixels, which would need its neighbours.
-    //
-    // Asked again rather than taken from the clip: `clipsFor` may have been
-    // given a grid the merge did not end up using, and a fade in metres is a
-    // different number of pixels on each of them.
-    const margin = featherFor(contribution.source, { z, y, size: grid });
-    const mask = rasterizeTile(clip.shape, z, x, y, grid, margin);
-    contribution.coverage = cropMask(
-      featherMask(mask, grid + margin * 2, margin),
-      grid,
-      margin,
-    );
-  }
+  applyClips({ contributions, clips, z, x, y, grid });
 
   const merging = {
     z,
@@ -816,6 +957,7 @@ export async function answerStackTile(options) {
       signal,
       size,
       rgba,
+      cutlines,
     });
     if (gathered.error) {
       return {

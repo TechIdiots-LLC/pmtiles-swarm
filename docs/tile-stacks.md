@@ -52,6 +52,7 @@ of its parts.
 - [Clipping a source to a shape](#clipping-a-source-to-a-shape)
 - [What a mask has to match](#what-a-mask-has-to-match)
 - [Feathering a seam](#feathering-a-seam)
+- [A stack as a source](#a-stack-as-a-source)
 - [Finding a stack](#finding-a-stack)
 - [Syncing a stack to another node](#syncing-a-stack-to-another-node)
 - [What the offline merge got wrong](#what-the-offline-merge-got-wrong)
@@ -1354,6 +1355,85 @@ visible of the three and the cheapest to detect, since whether a neighbour exist
 is a directory lookup rather than a decode. It ramps down toward an absent
 neighbour, and nothing else has to happen.
 
+## A stack as a source
+
+A source may name a stack instead of a category or an archive:
+
+```json
+{
+  "id": "hillshade-ready",
+  "sources": [
+    { "stack": "jaxa-with-gebco" },
+    { "category": "swissalti", "featherMetres": 50 }
+  ]
+}
+```
+
+The reason to want it is that a base worked out once — terrain over bathymetry,
+masked at the coast and faded across it — is a thing to reuse rather than
+retype. A recipe that names it follows every later correction to it, exactly as
+a source over a category follows a rebuild.
+
+### It is merged as heights
+
+The inner stack is evaluated for the tile being built and its heights are handed
+straight to the merge above, with no encode and decode in between. That is not
+only a saving of two conversions per tile: an encoding is lossy about what it
+cannot represent, and a value that survived the inner merge should not be
+rounded on its way into the outer one. The inner stack's `output` block still
+applies where it is served on its own URL — it just has no part in this.
+
+So a nested source may say anything that acts on heights, and nothing that
+describes stored bytes:
+
+| Field                                               | On a nested stack                |
+| --------------------------------------------------- | -------------------------------- |
+| `maskValues`, `maskRange`, `heightAdjustment`       | Yes, on the heights it produced  |
+| `cutline`, `bounds`, `feather`, `featherMetres`     | Yes                              |
+| `opacity`, `blend`                                  | Yes                              |
+| `encoding`, `baseVal`, `interval`, the four factors | Refused — nothing was stored     |
+| `maskColors`                                        | Refused — no channels to compare |
+
+`maskColors` is the one that reads like an omission and is not. It compares the
+three channels as the archive stored them, which is what makes it exact where a
+height mask has to round; a stack that was never stored has no such channels to
+compare, and masking the heights it decoded to would be a different operation
+wearing the same name.
+
+### Nothing passes through
+
+The short-circuit that hands back a source's own bytes cannot apply: there are
+no bytes. A stack with a nested source always decodes, merges and encodes, and
+always needs a codec — `needsCodec` says so from the recipe rather than at the
+first tile.
+
+### Loops, and depth
+
+A loop is refused by name on the way down: the resolver carries the chain of ids
+it has walked, and a source naming one already in it resolves to nothing rather
+than being followed. That covers a stack naming itself and a ring of three
+equally, and it needs no depth counter to terminate.
+
+The depth limit is a separate thing, for the chain that does not loop and is
+still nobody's intention. **Four**, because every level is a full merge of
+everything under it: the cost of one tile multiplies rather than adds, and a
+five-deep chain over three sources each is a request nobody meant to make.
+
+### What the outer stack inherits
+
+Coverage folds in, one level down: a nested stack answers for the ground its own
+sources cover, with the same minzoom, maxzoom and bounds it would advertise on
+its own, and its attribution joins the outer stack's.
+
+The ETag includes the inner stack's own ETag rather than only its id. Without
+that, editing the inner recipe would leave every outer tile being served from a
+cache that still believed in it — and the whole point of naming a stack rather
+than copying it is that a correction propagates.
+
+`isPinned` asks the same question one level down. A nested stack is only as
+pinned as what is underneath it, which is what decides whether the outer stack's
+tiles are safe to cache hard.
+
 ## Finding a stack
 
 A stack has no infohash and appears in no feed, so nothing about it is
@@ -1669,10 +1749,6 @@ handling whatsoever.
 
 ## Open questions
 
-- **Should a stack be able to stack another stack?** Composable and obviously
-  tempting; also an unbounded fan-out of swarm reads behind one request. If
-  allowed, the depth needs a hard limit and the resolution hash needs to include
-  the whole tree.
 - **Vector tiles.** Merging MVT layers from two archives is a real want and a
   completely different operation — decode protobuf, merge layer by layer,
   re-encode, with feature ID collisions to settle. It should be its own feature

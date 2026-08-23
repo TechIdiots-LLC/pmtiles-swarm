@@ -702,16 +702,24 @@ export function paintHeights(layers, weights = []) {
 export function mergeElevation(contributions, options) {
   const { size } = options;
   const layers = contributions.map((contribution) => {
-    if (!contribution?.raster) return null;
+    if (!contribution?.raster && !contribution?.heights) return null;
     const source = contribution.source ?? {};
 
-    let heights = decodeHeights(contribution.raster, source);
+    // A nested stack arrives as the numbers it produced rather than as pixels
+    // somebody has to decode: it was never stored, so there is nothing to
+    // decode and no channels to compare a colour against. Copied because the
+    // rest of this works in place and the caller's array is not ours.
+    let heights = contribution.heights
+      ? Float32Array.from(contribution.heights)
+      : decodeHeights(contribution.raster, source);
     // Both masks say the same thing -- nothing here -- and both have to run
     // before the height adjustment, which would otherwise shift the values
     // out from under the comparison.
     //
     maskHeights(heights, source.maskValues);
-    maskColors(heights, contribution.raster, source.maskColors);
+    if (contribution.raster) {
+      maskColors(heights, contribution.raster, source.maskColors);
+    }
     // A band as well as, not instead of: a source may have a sentinel it names
     // exactly and a range of ground it does not want either.
     maskRanges(heights, source.maskRange);
@@ -724,13 +732,9 @@ export function mergeElevation(contributions, options) {
     // On the output's grid before anything else: a source whose tiles are a
     // different size covers the same extent, only sampled more or less
     // finely, so this is a plain scale rather than a realignment.
-    if (contribution.raster.width !== size) {
-      heights = resampleToSize(
-        heights,
-        contribution.raster.width,
-        size,
-        options.resampling,
-      );
+    const width = contribution.width ?? contribution.raster.width;
+    if (width !== size) {
+      heights = resampleToSize(heights, width, size, options.resampling);
     }
 
     const parentZ = contribution.parentZ ?? options.z;

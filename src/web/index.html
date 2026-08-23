@@ -7532,7 +7532,7 @@ Every piece is hashed against the ` +
         const select = $('stack-add-source');
         const taken = new Set(
           (stackDraft?.sources ?? []).flatMap((source) =>
-            [source.category, source.archive].filter(Boolean),
+            [source.category, source.archive, source.stack].filter(Boolean),
           ),
         );
         const groups = [];
@@ -7617,6 +7617,38 @@ Every piece is hashed against the ` +
           );
         }
 
+        try {
+          // A stack in place of an archive. The reason to want it is that a
+          // base worked out once -- terrain over bathymetry, masked and faded
+          // -- is a thing to reuse rather than retype, and a recipe that names
+          // it follows every later correction to it.
+          const { stacks: held } = await api('/api/stacks');
+          const free = (held ?? []).filter(
+            (one) =>
+              !taken.has(one.id) &&
+              one.id !== $('stack-id').value.trim() &&
+              one.space === (stackDraft?.space ?? 'elevation'),
+          );
+          if (free.length) {
+            groups.push(
+              `<optgroup label="Stacks — a recipe used as one layer">${free
+                .map((one) => {
+                  const sources = one.sources?.length ?? 0;
+                  return `<option value="stk:${escapeHtml(one.id)}">${escapeHtml(
+                    one.title ?? one.id,
+                  )} — ${sources} source${sources === 1 ? '' : 's'}</option>`;
+                })
+                .join('')}</optgroup>`,
+            );
+          }
+        } catch (error) {
+          groups.push(
+            `<optgroup label="Stacks — could not load: ${escapeHtml(
+              error.message,
+            )}"></optgroup>`,
+          );
+        }
+
         select.innerHTML = groups.length
           ? groups.join('')
           : '<option value="">nothing left to add</option>';
@@ -7696,6 +7728,11 @@ Every piece is hashed against the ` +
                 ? '<span class="pill">wins</span>'
                 : '';
 
+        // A nested stack is merged as heights: it was never stored, so there
+        // is no encoding to read it with and no channels to compare a colour
+        // against. Those fields are left out rather than shown and refused on
+        // save; everything that acts on heights stays.
+        const nested = Boolean(source.stack);
         const perSpace = rgba
           ? `<label class="choice">Opacity
                <input type="number" min="0" max="1" step="0.05" style="width:5rem"
@@ -7714,7 +7751,14 @@ Every piece is hashed against the ` +
                    .join('')}
                </select>
              </label>`
-          : `<label class="choice">Encoding
+          : `${
+               nested
+                 ? `<div class="sub" style="max-width:34rem">Merged as heights:
+                      <code>${escapeHtml(source.stack)}</code> is evaluated for
+                      this tile and handed straight to this merge, so there is
+                      no encoding to read it with. Its own output settings
+                      apply where it is served on its own.</div>`
+                 : `<label class="choice">Encoding
                <select data-stack-field="encoding" data-stack-index="${index}">
                  <option value="mapbox"${
                    (source.encoding ?? 'mapbox') === 'mapbox' ? ' selected' : ''
@@ -7768,6 +7812,7 @@ Every piece is hashed against the ` +
                       <code>6553.6, 25.6, 0.1, 10000</code> and terrarium is
                       <code>256, 1, 0.00390625, 32768</code>.</div>`
                  : ''
+             }`
              }
              <label class="choice">Shift by
                <input type="number" step="any" style="width:6rem"
@@ -7804,13 +7849,17 @@ Every piece is hashed against the ` +
             <div class="row">
               <span class="muted">${index}</span>
               <code>${escapeHtml(
-                source.category ?? shortHash(source.archive) ?? '',
+                source.stack ?? source.category ?? shortHash(source.archive) ?? '',
               )}</code>
               <span class="sub" title="${
                 source.archive
                   ? 'Pinned to this build. It will not follow a rebuild, and breaks if the archive is removed.'
-                  : 'Follows whichever build in this category is newest.'
-              }">${source.archive ? 'pinned' : 'category'}</span>
+                  : source.stack
+                    ? 'Another stack, merged as one layer. It follows every later change to that recipe, and to whatever it resolves to.'
+                    : 'Follows whichever build in this category is newest.'
+              }">${
+                source.archive ? 'pinned' : source.stack ? 'stack' : 'category'
+              }</span>
               ${role}
               <span class="bar-gap"></span>
               <button type="button" data-stack-move="${index}" data-stack-dir="-1"
@@ -7821,11 +7870,15 @@ Every piece is hashed against the ` +
             </div>
             <div class="bar">
               ${perSpace}
-              <label class="choice">Mask colours
-                <input style="width:10rem" placeholder="#000000"
-                       data-stack-field="maskColors" data-stack-index="${index}"
-                       value="${escapeHtml((source.maskColors ?? []).join(', '))}" />
-              </label>
+              ${
+                nested
+                  ? ''
+                  : `<label class="choice">Mask colours
+                       <input style="width:10rem" placeholder="#000000"
+                              data-stack-field="maskColors" data-stack-index="${index}"
+                              value="${escapeHtml((source.maskColors ?? []).join(', '))}" />
+                     </label>`
+              }
               <label class="choice"
                      title="Clip this source to a shape, so only what is inside it contributes. Most archives are already clipped when they are built — this is for one you did not build and cannot rebuild.">
                 Clip to
@@ -8032,7 +8085,11 @@ Every piece is hashed against the ` +
         // Appended, so the newest source is the one that covers the rest --
         // which is what somebody adding a more detailed layer means.
         stackDraft.sources.push(
-          kind === 'arc' ? { archive: name } : { category: name },
+          kind === 'arc'
+            ? { archive: name }
+            : kind === 'stk'
+              ? { stack: name }
+              : { category: name },
         );
         renderStackDraft();
         fillStackSourceChoices();

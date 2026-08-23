@@ -3202,6 +3202,9 @@ export function createApp({
     resolveStack(stack, {
       archive: (hash) => catalog.get(hash) ?? null,
       category: (name) => newestIn(name, req),
+      // The recipe, so the resolver can walk it. Loops and depth are its
+      // business, not this one's.
+      stack: (id) => stacks?.get(id) ?? null,
     });
 
   /**

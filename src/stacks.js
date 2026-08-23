@@ -75,6 +75,35 @@ const SPACES = new Set(['elevation', 'rgba']);
 const ID = /^[a-z0-9][a-z0-9._-]*$/i;
 
 /**
+ * How many stacks deep a recipe may reach.
+ *
+ * A loop is caught by name and refused outright; this is for the chain that
+ * does not loop but is still nobody's intention -- every level is a full merge
+ * of everything under it, so the cost of a tile multiplies rather than adds.
+ */
+const MAX_STACK_DEPTH = 4;
+
+/**
+ * Fields that describe stored bytes, which a nested stack does not have.
+ *
+ * It is merged as heights -- evaluated and handed straight to the merge above
+ * it, with no encode and decode in between -- so an encoding is a question
+ * about nothing, and `maskColors` compares channels as they were stored where
+ * nothing was ever stored. Everything else a source may say still applies:
+ * masks by height, the fade, a cutline, an adjustment, opacity and blend.
+ */
+const NOT_ON_A_NESTED_SOURCE = Object.freeze([
+  'encoding',
+  'baseVal',
+  'interval',
+  'redFactor',
+  'greenFactor',
+  'blueFactor',
+  'baseShift',
+  'maskColors',
+]);
+
+/**
  * Checks a stack definition, returning what is wrong with it.
  *
  * Returns every problem rather than the first, because these are read by
@@ -99,11 +128,37 @@ export function validateStack(stack) {
   }
 
   stack.sources.forEach((source, index) => {
-    const named = [source?.category, source?.archive].filter(Boolean).length;
+    const named = [source?.category, source?.archive, source?.stack].filter(
+      Boolean,
+    ).length;
     // Both is worse than neither: it looks deliberate, and whichever one the
     // implementation happened to prefer would be a silent choice.
     if (named !== 1) {
-      problems.push(`sources[${index}] needs exactly one of category, archive`);
+      problems.push(
+        `sources[${index}] needs exactly one of category, archive, stack`,
+      );
+    }
+    if (source?.stack) {
+      if (typeof source.stack !== 'string' || !ID.test(source.stack)) {
+        problems.push(`sources[${index}].stack must be the id of a stack`);
+      }
+      if (source.stack === stack.id) {
+        // Caught by the resolver as well, which has to handle a loop through
+        // three stacks anyway. Named here because a recipe naming itself is a
+        // mistake worth reading in the editor rather than in the tile.
+        problems.push(`sources[${index}].stack is this stack`);
+      }
+      // A nested stack is merged as heights: it never becomes bytes, so there
+      // is nothing for these to describe. Refused rather than ignored, since a
+      // field that quietly does nothing is the failure this is most prone to.
+      for (const key of NOT_ON_A_NESTED_SOURCE) {
+        if (source[key] !== undefined) {
+          problems.push(
+            `sources[${index}].${key} does not apply to a stack: it is ` +
+              'merged as heights and never stored as pixels',
+          );
+        }
+      }
     }
     if (source?.opacity !== undefined) {
       const value = Number(source.opacity);
@@ -291,6 +346,9 @@ export function validateStack(stack) {
  */
 export function needsCodec(stack) {
   for (const [index, source] of (stack.sources ?? []).entries()) {
+    // Always: a nested stack is evaluated rather than read, and evaluating it
+    // means decoding everything underneath.
+    if (source.stack) return `sources[${index}].stack`;
     if (source.maskValues?.length) return `sources[${index}].maskValues`;
     if (source.maskColors?.length) return `sources[${index}].maskColors`;
     if (source.maskRange?.length) return `sources[${index}].maskRange`;
@@ -346,27 +404,59 @@ export function stackRevision(stack) {
  * resolves depends on who is asking — the same rule `/latest/<category>/`
  * applies, which takes the request's credential into account.
  * @param {Stack} stack - The definition.
- * @param {object} resolvers - `archive(hash)` and `category(name)` lookups.
+ * @param {object} resolvers - `archive(hash)` and `category(name)` lookups,
+ *   and `stack(id)` returning a recipe for a source that names one.
+ * @param {string[]} [chain] - The stack ids already being resolved, so a
+ *   recipe naming one of them stops rather than looping.
  * @returns {object} - The stack, its sources bottom-first, and any failures.
  */
-export function resolveStack(stack, resolvers) {
+export function resolveStack(stack, resolvers, chain = []) {
+  const here = [...chain, stack.id];
   const sources = (stack.sources ?? []).map((source, index) => {
+    const common = {
+      index,
+      source,
+      // The bottom-most source is the base, and a stack without its base is
+      // holes rather than a map. Above it, absence is survivable.
+      required: source.required ?? index === 0,
+    };
+
+    if (source.stack) {
+      // A stack in place of an archive. Resolved here rather than at the tile,
+      // so a recipe that cannot work says so once instead of at every request.
+      const inner = resolvers.stack?.(source.stack) ?? null;
+      const looping = Boolean(inner) && here.includes(inner.id);
+      const deep = here.length >= MAX_STACK_DEPTH;
+      return {
+        ...common,
+        entry: null,
+        name: source.stack,
+        // A stack of categories moves when they are rebuilt, exactly as one of
+        // them would on its own.
+        pinned: false,
+        nested:
+          inner && !looping && !deep
+            ? resolveStack(inner, resolvers, here)
+            : null,
+        // Told apart, because they call for different things: a loop is a
+        // recipe to fix, a name that resolves to nothing is a stack to add.
+        looping,
+        deep,
+      };
+    }
+
     const entry = source.category
       ? resolvers.category(source.category)
       : resolvers.archive(source.archive);
     return {
-      index,
-      source,
+      ...common,
       entry: entry ?? null,
-      // The bottom-most source is the base, and a stack without its base is
-      // holes rather than a map. Above it, absence is survivable.
-      required: source.required ?? index === 0,
       name: source.category ?? source.archive,
       pinned: Boolean(source.archive),
     };
   });
 
-  const missing = sources.filter((s) => !s.entry && s.required);
+  const missing = sources.filter((s) => s.required && !s.entry && !s.nested);
   return { stack, sources, missing };
 }
 
@@ -440,7 +530,21 @@ export function stacksUsing(stacks, entry, categoryInfo) {
  */
 export function stackCoverage(resolved) {
   const present = resolved.sources.filter((s) => s.entry?.pmtiles);
-  const summaries = present.map((s) => s.entry.pmtiles);
+  // A nested stack answers for the ground its own sources cover, so it stands
+  // in for one here -- worked out the same way, one level down.
+  const nested = resolved.sources
+    .filter((s) => s.nested)
+    .map((s) => stackCoverage(s.nested));
+  const summaries = [
+    ...present.map((s) => s.entry.pmtiles),
+    ...nested.map((cover) => ({
+      minZoom: cover.minzoom,
+      maxZoom: cover.maxzoom,
+      bounds: cover.bounds,
+      format: cover.format,
+      attribution: cover.attribution,
+    })),
+  ];
 
   const minzoom =
     resolved.stack.minzoom ??
@@ -453,8 +557,12 @@ export function stackCoverage(resolved) {
 
   let bounds = resolved.stack.bounds;
   if (!bounds && resolved.stack.boundsSource !== undefined) {
-    bounds = present.find((s) => s.index === resolved.stack.boundsSource)?.entry
-      ?.pmtiles?.bounds;
+    const at = resolved.sources.find(
+      (s) => s.index === resolved.stack.boundsSource,
+    );
+    bounds =
+      at?.entry?.pmtiles?.bounds ??
+      (at?.nested ? stackCoverage(at.nested).bounds : undefined);
   }
   if (!bounds && summaries.length) {
     const boxes = summaries.map((s) => s.bounds).filter(Array.isArray);
@@ -512,7 +620,12 @@ export function stackEtag(resolved, z, x, y) {
   const parts = [
     resolved.stack.id,
     stackRevision(resolved.stack),
-    ...resolved.sources.map((s) => s.entry?.infoHash ?? '-'),
+    // A nested stack contributes its own revision and its own sources, or an
+    // edit one level down would serve from a cache the outer stack thinks is
+    // still good.
+    ...resolved.sources.map((s) =>
+      s.nested ? stackEtag(s.nested, z, x, y) : (s.entry?.infoHash ?? '-'),
+    ),
     z,
     x,
     y,
@@ -531,7 +644,9 @@ export function stackEtag(resolved, z, x, y) {
  * @returns {boolean} - True when nothing here can move.
  */
 export function isPinned(resolved) {
-  return resolved.sources.every((s) => s.pinned);
+  return resolved.sources.every((s) =>
+    s.nested ? isPinned(s.nested) : s.pinned,
+  );
 }
 
 /**

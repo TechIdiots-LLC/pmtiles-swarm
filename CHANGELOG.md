@@ -2,7 +2,27 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **A stack can be a source in another stack.** `{ "stack": "jaxa-with-gebco" }` beside `category`
+  and `archive`. A base worked out once — terrain over bathymetry, masked at the coast and faded
+  across it — is a thing to reuse rather than retype, and a recipe that names it follows every later
+  correction to it, exactly as a source over a category follows a rebuild.
+
+  It is merged as **heights**: the inner stack is evaluated for the tile and handed straight to the
+  merge above, with no encode and decode in between. That saves two conversions per tile and, more
+  to the point, does not round a value on its way from one merge into the next. So a nested source
+  may say anything that acts on heights — `maskValues`, `maskRange`, `heightAdjustment`, `cutline`,
+  `bounds`, the fade, `opacity`, `blend` — and nothing that describes stored bytes. `encoding` and
+  its parameters are refused, and so is `maskColors`, which compares channels as an archive stored
+  them and has none to compare here.
+
+  A loop is refused by name on the way down, so a stack naming itself and a ring of three are the
+  same case and neither needs a depth counter to stop. The depth limit is separate and is four:
+  every level is a full merge of everything under it, so a tile's cost multiplies rather than adds.
+
+  Coverage folds in one level down, and the ETag carries the inner stack's own ETag rather than its
+  id — without that, editing the inner recipe would leave the outer one serving from a cache that
+  still believed in it, and propagation is the whole point of naming a stack instead of copying it.
+  The console offers held stacks in the source picker, alongside categories and archives.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
