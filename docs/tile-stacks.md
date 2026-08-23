@@ -1013,6 +1013,139 @@ missing. Serving a source unclipped because its cutline could not be found would
 put back exactly the data somebody asked to remove, which is the one failure a
 clip must not have.
 
+## Feathering a seam
+
+_Designed, not built. What follows is the plan and the measurements it rests on._
+
+Smoothing hides the terracing **inside** an upscaled area. It does nothing about
+the artefact the original discussion actually named — "artefacts at tiles and
+country borders when multiple DEMs overlap and do not have the same resolution".
+That is a different thing: a step where one dataset stops and another resumes,
+and no amount of blurring one side of it will help.
+
+Today the handover is exact. `paintHeights` walks the layers in order and takes
+whatever the upper one has:
+
+```js
+if (!Number.isNaN(value)) result[i] = value;
+```
+
+A pixel is one dataset or the other. Where a high-resolution local DEM ends, the
+next pixel is a global 30 m one upscaled six levels, and the two disagree — by
+their vertical datum, by their resampling, by simply being different surveys.
+Under a hillshade that reads as a wall.
+
+### Where the seams actually are
+
+Three geometries, and they are not equally hard.
+
+**A mask hole.** `maskValues` and `maskColors` turn nodata into `NaN`, and this
+is where most seams come from — a dataset that covers part of the world carries
+a fill value everywhere else, and masking it is what lets the layer underneath
+show through. The edge is data-dependent: it is wherever masked pixels meet
+unmasked ones, discovered per tile, at whatever resolution the source is being
+read at.
+
+**A missing tile.** A sparse archive simply has no tile outside its extent, so
+the source contributes nothing and the boundary lands exactly on a tile edge —
+a 512-pixel straight line, which is the most visible seam of the three and the
+cheapest to detect. Nothing needs decoding to find it.
+
+**A cutline.** Geometric, known analytically, and already computed per pixel by
+`coverageMask`. The easiest case and, going by how these recipes are actually
+written, the rarest.
+
+### What feathering is
+
+`coverage` becomes a weight rather than a switch — `Float32Array` in 0..1 rather
+than `Uint8Array` in {0,1} — and the merge blends instead of replacing:
+
+```js
+result[i] = result[i] * (1 - w) + value * w;
+```
+
+The weight ramps from 0 to 1 over `feather` pixels inward from the edge, so a
+local DEM fades into the global one across a band instead of stepping into it.
+That also buys the thing nobody asks for by name: two DEMs on different geoids
+sit metres apart, and today the only cure is a hand-tuned `heightAdjustment`.
+Feathered, a metre or two of bias becomes a ramp nobody sees.
+
+`NaN` still has to mean "nothing here" — a weight of 0 and a height of `NaN` are
+the same statement, and only one of them can be written into a `Float32Array` of
+heights. So the weight travels beside the layer, not inside it.
+
+### The problem this shares with the blur, which is already there
+
+Any operation with a radius needs pixels beyond the tile it is filling in, and a
+tile server has one tile. `blurHeights` handles that by clamping at the edge.
+Two adjacent tiles then compute their shared boundary from different data and do
+not agree:
+
+| sigma | radius | disagreement across the shared edge |
+| ----- | ------ | ----------------------------------- |
+| 1.5   | 5 px   | 5.35 m                              |
+| 4.5   | 14 px  | 16.55 m                             |
+| 9     | 27 px  | 33.08 m                             |
+| 24    | 72 px  | 87.61 m                             |
+
+Measured on a synthetic slope of about 4.65 m per pixel, comparing the last
+column of one tile against the first column of the next. Sigma 9 is
+`gaussianBlurSigma: 1.5` at a six-level upscale, which is what these archives
+are built with — so **the smoothing already draws a faint grid at tile
+boundaries**, in proportion to sigma and to the local gradient. The offline
+merge has it too: `scipy.ndimage.gaussian_filter` defaults to `mode='reflect'`
+and is handed one tile's array.
+
+A feather built the same way would draw a worse grid, because its operand is a
+step rather than a smooth field. So the margin has to come from somewhere before
+any of this is worth building.
+
+### Where the margin comes from
+
+Cheaply, in the case that matters most.
+
+**An upscaled source already has it.** The blur only runs where `parentZ < z`,
+and `resampleFromParent` samples a sub-region of a parent tile that has been
+read in full. At a six-level upscale a 512px output tile is 8×8 parent pixels,
+so a 27-pixel output radius is **0.42 parent pixels** — the margin is already in
+the array. Resampling `size + 2r` and cropping to `size` costs a few percent of
+one resample and removes the seam. Only where the sub-region touches the parent
+tile's own edge is anything missing, and there it is a fraction of a pixel.
+
+**A missing tile costs nothing.** Whether a neighbour exists is a directory
+lookup, not a decode. A source that vanishes at a tile edge can ramp down to 0
+approaching that edge using only knowledge of which neighbours are absent.
+
+**A mask hole at native resolution is the expensive one.** There the edge is in
+the source's own pixels at full resolution, and the margin genuinely means
+reading the neighbouring tiles — up to eight reads and eight decodes for that
+source, on that tile. That is the case to bound, to make opt-in, and to measure
+before believing.
+
+### What it would take
+
+- `feather` on a source, in pixels, `0` off. Bounded like `gaussianBlurSigma`
+  is, and for the same reason: it sets a radius, and a radius is quadratic in
+  what it costs before anything else has happened.
+- `coverageMask` returns weights; `shapeFor` and the cutline path keep working
+  unchanged because 0 and 1 still mean what they meant.
+- A distance ramp from the mask, computed per contribution after masking and
+  before the merge. Separable like the blur, and the same NaN discipline.
+- `paintHeights` takes a weight per layer and blends. This is the change that
+  needs the most care: it is the function the whole feature rests on, and its
+  own comment records that getting the order wrong here is the mistake the
+  offline merge made.
+- Margin resampling in `resampleFromParent`, which fixes the existing blur seam
+  whether or not anything is feathered.
+
+### What to settle first
+
+Whether the margin work stands on its own. The blur seam is real, it is in
+every archive built with a sigma, and fixing it is a smaller and better-defined
+piece of work than feathering — with no new recipe field and no new merge
+semantics. It is plausibly worth doing first and separately, and it is the
+foundation the feather needs anyway.
+
 ## Finding a stack
 
 A stack has no infohash and appears in no feed, so nothing about it is
