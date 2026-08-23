@@ -151,7 +151,7 @@ export function clipsFor(resolved, cutlines, z, x, y, size = 256) {
     // The feather reaches inward from the edge, so a tile wholly inside but
     // near it still has a ramp across part of itself and cannot take the cheap
     // answer.
-    const feather = featherFor(recipe);
+    const feather = featherFor(recipe, { z, y, size });
     return {
       shape,
       feather,
@@ -524,10 +524,11 @@ async function readMaskEdges({
     contributions.map(async (contribution) => {
       if (!contribution) return;
       const recipe = contribution.source ?? {};
-      const feather = featherFor(recipe);
-      if (!feather || !masksAnything(recipe)) return;
-
+      // On the source's own grid rather than the output's, because that is
+      // what the ramp will be measured on.
       const grid = contribution.raster?.width ?? size;
+      const feather = featherFor(recipe, { z, y, size: grid });
+      if (!feather || !masksAnything(recipe)) return;
       const layout = parentsFor({ z, x, y }, grid, feather);
       if (!layout) return;
 
@@ -612,10 +613,14 @@ async function merge({
     // decides what the pixels inside it weigh. The shape is known in full, so
     // this costs the extra rows and nothing else -- unlike a mask read out of
     // a source's own pixels, which would need its neighbours.
-    const margin = clip.feather ?? 0;
+    //
+    // Asked again rather than taken from the clip: `clipsFor` may have been
+    // given a grid the merge did not end up using, and a fade in metres is a
+    // different number of pixels on each of them.
+    const margin = featherFor(contribution.source, { z, y, size: grid });
     const mask = rasterizeTile(clip.shape, z, x, y, grid, margin);
     contribution.coverage = cropMask(
-      featherMask(mask, grid + margin * 2, clip.feather ?? 0),
+      featherMask(mask, grid + margin * 2, margin),
       grid,
       margin,
     );
@@ -729,7 +734,8 @@ export async function answerStackTile(options) {
   // 256 where the request did not say, which is the cautious guess: the
   // margin is in pixels of the output grid, so assuming a smaller grid makes
   // it wider on the ground, and too wide only costs a rasterise that was not
-  // needed while too narrow misses a ramp.
+  // needed while too narrow misses a ramp. A fade in metres does not mind
+  // either way -- fewer pixels each covering more ground is the same ground.
   const clips = clipsFor(resolved, cutlines, z, x, y, size);
   const format = options.format ?? outputFormat(resolved);
   const rgba = resolved.stack.space === 'rgba';

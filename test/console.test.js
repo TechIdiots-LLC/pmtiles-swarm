@@ -353,6 +353,23 @@ describe('clipping a source in the stack editor', () => {
     assert.match(script, /delete source\.feather;/);
   });
 
+  it('lets the fade be written in metres of ground', () => {
+    // The unit is the whole point of the field: a hillshade reads slope, so a
+    // fade in pixels is a different slope at every zoom and one number cannot
+    // suit them all.
+    assert.match(script, /data-stack-field="featherUnit"/);
+    assert.match(script, /source\.featherMetres = width;/);
+  });
+
+  it('writes the fade in one unit, never both', () => {
+    // A source carrying a fade in pixels and one in metres would be asking
+    // the merge a question it has no answer to.
+    assert.match(
+      script,
+      /delete source\.feather;[\s]*delete source\.featherMetres;/,
+    );
+  });
+
   it('says when a source names a cutline this node has not got', () => {
     // The source contributes nothing until there is one, and silently serving
     // no tiles is the worst way to find that out.

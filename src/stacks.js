@@ -8,7 +8,11 @@ import {
   isResampling,
   parseColor,
 } from './elevation.js';
-import { MAX_FEATHER } from './cutlines.js';
+import {
+  MAX_FEATHER,
+  MAX_FEATHER_METRES,
+  featherMetresFor,
+} from './cutlines.js';
 import { normalizeCategories } from './catalog.js';
 import { BLEND_MODES, isBlendMode } from './rgba.js';
 
@@ -42,6 +46,8 @@ import { BLEND_MODES, isBlendMode } from './rgba.js';
  * @property {number} [heightAdjustment] - Metres, added after masking.
  * @property {number} [feather] - Pixels to fade in over at the edge of the
  *   source's shape. 0, the default, makes the edge a switch.
+ * @property {number} [featherMetres] - Metres of ground to fade in over
+ *   instead, worked out per tile. `featherMeters` is read as well.
  * @property {number} [opacity] - 0-1, scales source alpha. RGBA only.
  * @property {string} [blend] - Blend operator. RGBA only.
  * @typedef {object} Stack
@@ -159,6 +165,18 @@ export function validateStack(stack) {
         );
       }
     }
+    const metres = source?.featherMetres ?? source?.featherMeters;
+    if (metres !== undefined) {
+      // Loose, because the pixel cap is what actually bounds the ramp at any
+      // one zoom. This only has to catch a number nobody meant to type.
+      const width = Number(metres);
+      if (!Number.isFinite(width) || width < 0 || width > MAX_FEATHER_METRES) {
+        problems.push(
+          `sources[${index}].featherMetres must be between 0 and ` +
+            `${MAX_FEATHER_METRES}`,
+        );
+      }
+    }
     // A fade with no edge to fade at. Refused rather than ignored: it reads as
     // a source that blends into what is under it, and it does nothing at all.
     // A mask is an edge as much as a cutline is -- the hole it leaves is where
@@ -167,8 +185,9 @@ export function validateStack(stack) {
       source?.cutline ||
       source?.bounds ||
       source?.maskValues?.length ||
-      source?.maskColors?.length;
-    if (source?.feather && !fades) {
+      source?.maskColors?.length ||
+      source?.maskRange?.length;
+    if ((source?.feather || featherMetresFor(source)) && !fades) {
       problems.push(
         `sources[${index}].feather needs a cutline, bounds, or a mask to fade at`,
       );

@@ -50,6 +50,8 @@ of its parts.
   - [Starting one, and watching it](#starting-one-and-watching-it)
   - [What exists now](#what-exists-now)
 - [Clipping a source to a shape](#clipping-a-source-to-a-shape)
+- [What a mask has to match](#what-a-mask-has-to-match)
+- [Feathering a seam](#feathering-a-seam)
 - [Finding a stack](#finding-a-stack)
 - [Syncing a stack to another node](#syncing-a-stack-to-another-node)
 - [What the offline merge got wrong](#what-the-offline-merge-got-wrong)
@@ -233,19 +235,20 @@ it differs from the snake_case rio-rgbify-merge uses.
 
 ### Source fields
 
-| Field                  | Meaning                                                                                                    |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `category`             | Resolve to the newest build in this category.                                                              |
-| `archive`              | Or pin one infohash. Exactly one of the two.                                                               |
-| `required`             | A tile fails rather than being served without this source. Defaults true for the bottom-most, false above. |
-| `encoding`             | `mapbox` or `terrarium`. Elevation space only.                                                             |
-| `baseVal` / `interval` | Mapbox decode offset and step. Default `-10000` and `0.1`.                                                 |
-| `maskValues`           | Decoded heights meaning "no data here". Elevation space only.                                              |
-| `maskRange`            | `[low, high]` in metres, or a list of them. Everything inside is nodata. Elevation space only.             |
-| `heightAdjustment`     | Metres, added **after** masking. Elevation space only.                                                     |
-| `feather`              | Pixels to fade in over at the edge of the source's shape. Needs a `cutline` or `bounds`. Max 64.           |
-| `opacity`              | `0`–`1`, scales the source alpha. RGBA space only.                                                         |
-| `blend`                | `normal`, `multiply`, `screen`, `overlay`, `darken`, `lighten`. RGBA space only.                           |
+| Field                  | Meaning                                                                                                      |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `category`             | Resolve to the newest build in this category.                                                                |
+| `archive`              | Or pin one infohash. Exactly one of the two.                                                                 |
+| `required`             | A tile fails rather than being served without this source. Defaults true for the bottom-most, false above.   |
+| `encoding`             | `mapbox` or `terrarium`. Elevation space only.                                                               |
+| `baseVal` / `interval` | Mapbox decode offset and step. Default `-10000` and `0.1`.                                                   |
+| `maskValues`           | Decoded heights meaning "no data here". Elevation space only.                                                |
+| `maskRange`            | `[low, high]` in metres, or a list of them. Everything inside is nodata. Elevation space only.               |
+| `heightAdjustment`     | Metres, added **after** masking. Elevation space only.                                                       |
+| `feather`              | Pixels to fade in over wherever the source stops: a `cutline`, `bounds`, or the holes a mask leaves. Max 64. |
+| `featherMetres`        | The same fade written as metres of ground, worked out per tile. Usually the one to reach for.                |
+| `opacity`              | `0`–`1`, scales the source alpha. RGBA space only.                                                           |
+| `blend`                | `normal`, `multiply`, `screen`, `overlay`, `darken`, `lighten`. RGBA space only.                             |
 
 `attribution` is not optional in practice. A stack is a derived work of every
 source in it, and the thing that reliably gets lost when tiles are combined is
@@ -1085,8 +1088,8 @@ standing clear of their neighbours, which is the shape this makes.
 
 ## Feathering a seam
 
-_Built for a cutline and for `bounds`. A mask edge is not feathered yet, and
-the last section says what that still needs._
+_Built for a cutline, for `bounds`, and for the holes a mask leaves. A source
+that vanishes at a tile edge is still open, and the last section says why._
 
 Smoothing hides the terracing **inside** an upscaled area. It does nothing about
 the artefact the original discussion actually named — "artefacts at tiles and
@@ -1236,18 +1239,40 @@ lookup rather than a decode — and it is not done.
 
 `feather` on a source, in pixels, `0` and absent meaning the edge is a switch as
 before. It fades that source in over that many pixels measured inward from
-wherever it stops — the holes `maskValues` and `maskColors` leave, and the edge
-of a `cutline` or `bounds`:
+wherever it stops — the holes `maskValues`, `maskRange` and `maskColors` leave,
+and the edge of a `cutline` or `bounds`:
 
 ```json
 { "archive": "swissalti", "maskValues": [0], "feather": 16 }
 ```
 
-The step left at the seam is the height difference divided by the feather, which
-is what makes the number predictable: two sources 40 m apart at the border, faded
-over 16 pixels, step 2.5 m a pixel instead of 40 m at once. Sixty-four is the
-most it takes — past that the ramp does not reach full weight anywhere inside a
-256px tile, and the source is being turned down rather than blended in.
+The step left at the seam is the height difference divided by the feather: two
+sources 40 m apart at the border, faded over 16 pixels, step 2.5 m a pixel
+instead of 40 m at once. Sixty-four is the most it takes — past that the ramp
+does not reach full weight anywhere inside a 256px tile, and the source is being
+turned down rather than blended in.
+
+**A smaller step is not the same as an invisible one**, and that is the thing to
+know before picking a number. A hillshade does not read height, it reads slope:
+the drop divided by the ground underneath it. What decides whether a seam
+disappears is therefore metres per metre rather than metres per pixel — and a
+pixel is a different number of metres at every zoom. The same `feather: 8`, over
+the same 7 m disagreement, at 55°N:
+
+| zoom | m/pixel | gradient |
+| ---- | ------- | -------- |
+| z12  | 11.0    | 0.08     |
+| z13  | 5.5     | 0.16     |
+| z14  | 2.7     | 0.32     |
+| z15  | 1.4     | 0.64     |
+| z16  | 0.7     | 1.28     |
+
+Natural terrain is rarely over about 0.5 and a hillshade saturates around there,
+so a fade that vanishes at z12 is a bright band by z15 — wider than the cliff it
+replaced and no less visible. Widening it does help at any one zoom, since the
+gradient is the drop over the whole fade; the difficulty is that the number
+which works at z16 is eight times the one that works at z13, and a recipe has
+one number.
 
 Three things fall out of the implementation and are worth stating.
 
@@ -1268,22 +1293,52 @@ envelope — linear in the tile's width, and chosen over a chamfer approximation
 because a chamfer's error is largest on diagonals and a national boundary is
 mostly diagonals.
 
+### A fade in metres
+
+`featherMetres` says the same thing as a distance on the ground, and the merge
+works out the pixels for each tile it builds:
+
+```json
+{ "archive": "gebco", "maskRange": [-1, 0], "featherMetres": 50 }
+```
+
+Web Mercator makes that arithmetic rather than a lookup: one pixel covers
+`40075016.686 × cos(latitude) / 2^zoom / tileSize` metres, so the conversion
+needs a multiply and the coordinates of the tile being built. `featherMeters` is
+read as well, because a key that quietly does nothing when spelled the other way
+is the failure this feature is most prone to.
+
+Fifty metres, over the same 7 m disagreement, at 55°N on 512px tiles:
+
+| zoom | m/pixel | pixels | ground | gradient |
+| ---- | ------- | ------ | ------ | -------- |
+| z12  | 11.0    | 5      | 55 m   | 0.13     |
+| z13  | 5.5     | 9      | 49 m   | 0.14     |
+| z14  | 2.7     | 18     | 49 m   | 0.14     |
+| z15  | 1.4     | 36     | 49 m   | 0.14     |
+| z16  | 0.7     | 73     | 50 m   | 0.14     |
+
+One number, the same slope at every zoom, and 0.14 is ordinary hillside rather
+than an edge.
+
+It stops being exact at both ends, benignly. Below the zoom where the fade is a
+pixel wide it rounds to nothing — 50 m at z8 is a sixth of a pixel, and the whole
+coastline is inside one pixel there anyway. Above a quarter of the tile it is
+capped, which is 128 pixels on a 512px grid and is where the old 64 came from:
+past that the ramp reaches full weight nowhere inside the tile. At 55°N the cap
+first binds at z17.
+
+**Picking the number.** It is the disagreement being hidden that sets it, not the
+coastline being drawn across. `tools/coast-step.mjs` measures the first against a
+real tile: it reports the step where one source hands over to the other, and
+whether those steps cluster — in which case they are a datum offset and
+`heightAdjustment` is the honest fix — or scatter, in which case nothing corrects
+them and a fade is for hiding what cannot be corrected. Divide the step by the
+gradient wanted: 7 m at 0.15 is about 50 m, and the same step at 0.05 would need
+140 m, which is wide enough to start flattening ground either side of the coast
+that was never wrong.
+
 ### What it does not do yet
-
-**A mask edge.** `maskValues` and `maskColors` are where most seams actually come
-from, and they are not feathered. The reason is the margin: a cutline is known in
-full, so the ramp beside a tile can be computed by rasterising a few extra rows,
-while a mask edge lives in the source's own pixels and the ramp needs the
-neighbouring tiles to be read and decoded — up to eight of them, for that source,
-on that tile.
-
-That is the piece with a real cost attached, and the one to measure before
-building. Two things make it more tractable than it looks: in a bake the tiles
-are walked in Hilbert order, which is chosen for locality, so a cache of decoded
-source tiles would be hit far more often than missed; and the ramp is smooth by
-construction, so it can be computed from the source's _parent_ at half resolution
-and upscaled, which turns eight reads at this zoom into a handful at the one
-above, shared between four children.
 
 **A source that vanishes at a tile edge.** A sparse archive simply has no tile
 outside its extent, so the seam lands exactly on a tile boundary — the most

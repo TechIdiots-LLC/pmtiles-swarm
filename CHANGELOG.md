@@ -2,10 +2,32 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **A fade can be written in metres of ground.** `featherMetres` on a source says how far to blend
+  it in as a distance, and the merge works out the pixels for each tile it builds -
+  `40075016.686 x cos(latitude) / 2^zoom / tileSize` of them. What a fade has to hide is two sources
+  disagreeing about the height of the same ground, which is a fixed number of metres, while a fade
+  in pixels is a different distance at every zoom.
+
+  It matters because a hillshade reads slope rather than height. `feather: 8` over a 7 m
+  disagreement is a gradient of 0.08 at z12 and 1.28 at z16 - invisible at one end and a saturated
+  band at the other, wider than the cliff it replaced and no less visible. The same 50 m holds 0.14
+  at every zoom, which is ordinary hillside. Below the zoom where the fade is a pixel wide it rounds
+  to nothing, and it is capped at a quarter of the tile - 128 pixels on a 512px grid, which is where
+  the old 64 came from. `featherMeters` is read as well, and the console's fade field now takes a
+  unit rather than always meaning pixels.
+
+- **A tool that measures the step a fade has to hide.** `tools/coast-step.mjs` reports the height
+  difference where one source hands over to another, and says which kind of disagreement it is.
+  Steps that cluster are a vertical datum offset, which one `heightAdjustment` corrects. Steps that
+  scatter are a coarse source averaging land and water together in every cell that straddles a
+  coast - worst at the shore, gone offshore - which no single number corrects and a fade can only
+  hide.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A mask range was not an edge to fade at.** A source whose only mask was a `maskRange` was told
+  its `feather` had nothing to act on, and refused - while the merge had been fading exactly that
+  edge all along. The recipe validation and the console's own warning both listed `maskValues` and
+  `maskColors` and neither had been taught about the band.
 
 ## 0.76.0
 ### ✨ Features and improvements

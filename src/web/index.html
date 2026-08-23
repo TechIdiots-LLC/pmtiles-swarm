@@ -7545,6 +7545,18 @@ Every piece is hashed against the ` +
        */
       const renderDraftSource = (source, index, rgba) => {
         const last = index === stackDraft.sources.length - 1;
+        // A fade is written in one unit or the other, never both: the box
+        // shows whichever the recipe used and the choice beside it says which.
+        const featherMetres = source.featherMetres ?? source.featherMeters;
+        const featherUnit =
+          featherMetres === undefined && source.feather ? 'px' : 'm';
+        const featherWidth = featherMetres ?? source.feather ?? '';
+        const fadesAt =
+          source.cutline ||
+          source.bounds ||
+          (source.maskValues ?? []).length ||
+          (source.maskColors ?? []).length ||
+          (source.maskRange ?? []).length;
         const role =
           stackDraft.sources.length === 1
             ? ''
@@ -7710,19 +7722,23 @@ Every piece is hashed against the ` +
                   : ''
               }
               <label class="choice"
-                     title="Fade this source in over this many pixels wherever it stops — the holes a mask leaves, and the edge of a cutline or box. Where a high-resolution source meets a coarser one the two disagree, by their survey and by their vertical datum, and the step between them reads as a wall under a hillshade. The drop is divided by this: 40 m across an 8 px fade is 5 m a pixel. 0 is a hard edge.">
+                     title="Fade this source in wherever it stops — the holes a mask leaves, and the edge of a cutline or box. Where a high-resolution source meets a coarser one the two disagree, by their survey and by their vertical datum, and the step between them reads as a wall under a hillshade. Metres of ground is usually the one to pick: a hillshade reads slope, so a fade written in pixels is gentle at one zoom and a bright band at the next, while a distance on the ground holds the same slope at every zoom. 50 m suits a coastline where two sources are a few metres apart. 0 is a hard edge.">
                 Fade in
-                <input type="number" min="0" max="64" step="1" style="width:4.5rem"
+                <input type="number" min="0" step="any" style="width:4.5rem"
                        placeholder="0"
                        data-stack-field="feather" data-stack-index="${index}"
-                       value="${source.feather ?? ''}" />
-                <span class="sub">px${
-                  source.feather &&
-                  !source.cutline &&
-                  !source.bounds &&
-                  !(source.maskValues ?? []).length &&
-                  !(source.maskColors ?? []).length
-                    ? ' — nothing to fade at yet: mask something, or clip it'
+                       value="${featherWidth}" />
+                <select data-stack-field="featherUnit" data-stack-index="${index}">
+                  <option value="m"${
+                    featherUnit === 'm' ? ' selected' : ''
+                  }>m of ground</option>
+                  <option value="px"${
+                    featherUnit === 'px' ? ' selected' : ''
+                  }>px</option>
+                </select>
+                <span class="sub">${
+                  featherWidth && !fadesAt
+                    ? 'nothing to fade at yet: mask something, or clip it'
                     : ''
                 }</span>
               </label>
@@ -7792,10 +7808,24 @@ Every piece is hashed against the ` +
           } else if (low === null && high === null) {
             delete source.maskRange;
           }
-        } else if (field === 'feather') {
-          const pixels = Number(event.target.value);
-          if (event.target.value === '' || !(pixels > 0)) delete source.feather;
-          else source.feather = Math.min(64, Math.round(pixels));
+        } else if (field === 'feather' || field === 'featherUnit') {
+          // The width and its unit are read together and only one key is
+          // written, because a source carrying a fade in both would be asking
+          // the merge a question it has no answer to.
+          const row = event.target.closest('.card');
+          const box = row?.querySelector('[data-stack-field="feather"]');
+          const unit = row?.querySelector('[data-stack-field="featherUnit"]');
+          const width = Number(box?.value);
+          delete source.feather;
+          delete source.featherMetres;
+          delete source.featherMeters;
+          if (box && box.value.trim() !== '' && width > 0) {
+            if (unit?.value === 'px') {
+              source.feather = Math.min(64, Math.round(width));
+            } else {
+              source.featherMetres = width;
+            }
+          }
         } else if (field === 'baseVal' || field === 'interval') {
           // Blank means "the default", not zero -- an interval of 0 would make
           // every height the base value.
@@ -7830,6 +7860,12 @@ Every piece is hashed against the ` +
               source.cutline = event.target.value;
             }
           }
+          renderStackDraft();
+          return;
+        }
+        // Redrawn so the row's own warning about having nothing to fade at
+        // follows the unit rather than the value it was drawn with.
+        if (event.target.dataset.stackField === 'featherUnit') {
           renderStackDraft();
           return;
         }

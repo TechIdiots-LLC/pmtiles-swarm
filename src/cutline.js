@@ -45,6 +45,31 @@ export function worldY(lat) {
   );
 }
 
+/** The world across the equator, in metres: what a zoom 0 tile spans. */
+const EQUATOR = 40075016.686;
+
+/**
+ * How much ground one pixel of a tile covers, at that tile's latitude.
+ *
+ * Web Mercator holds a pixel to a fixed fraction of the world, so the ground
+ * under it shrinks toward the poles and halves at every zoom. That is why a
+ * fade written in pixels is a different width of ground everywhere it is used,
+ * and this is the conversion that lets one written in metres mean the same
+ * thing. Taken at the middle of the tile: the scale changes across it, but a
+ * tile is a small piece of the world at any zoom where a fade is more than a
+ * pixel wide.
+ * @param {number} z - Zoom.
+ * @param {number} y - Row.
+ * @param {number} size - Pixels per side of the tile.
+ * @returns {number} - Metres per pixel.
+ */
+export function metresPerPixel(z, y, size) {
+  const tiles = 2 ** z;
+  const middle = (y + 0.5) / tiles;
+  const latitude = Math.atan(Math.sinh(Math.PI * (1 - 2 * middle)));
+  return (EQUATOR * Math.cos(latitude)) / (tiles * size);
+}
+
 /**
  * Reads the rings out of GeoJSON, whatever shape it arrived in.
  *
