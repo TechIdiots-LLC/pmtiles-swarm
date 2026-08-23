@@ -293,13 +293,25 @@ export function isResampling(name) {
  * block in every child and a coastline would grow at every zoom it was
  * upscaled through -- by more with a wider kernel, since lanczos reaches three
  * pixels where bilinear reaches one.
+ *
+ * `margin` asks for a border of extra pixels beyond the tile, taken from the
+ * parent the same way the tile itself is. It exists so that something with a
+ * radius -- the blur, and later the feather -- has real neighbours to read
+ * instead of a clamped edge. See docs/tile-stacks.md -- "Feathering a seam".
  * @param {Float32Array} heights - The parent's heights.
  * @param {number} size - Pixels per side, both tiles.
  * @param {object} tile - z, x, y of the target, and parentZ.
  * @param {string} [kernel] - nearest, bilinear, cubic or lanczos.
- * @returns {Float32Array} - The target's heights.
+ * @param {number} [margin] - Extra pixels on every side.
+ * @returns {Float32Array} - The target's heights, `size + 2 * margin` a side.
  */
-export function resampleFromParent(heights, size, tile, kernel = 'bilinear') {
+export function resampleFromParent(
+  heights,
+  size,
+  tile,
+  kernel = 'bilinear',
+  margin = 0,
+) {
   const d = tile.z - tile.parentZ;
   if (d <= 0) return heights;
 
@@ -308,14 +320,15 @@ export function resampleFromParent(heights, size, tile, kernel = 'bilinear') {
   const sub = size / span;
   const originX = (tile.x % span) * sub;
   const originY = (tile.y % span) * sub;
-  const out = new Float32Array(size * size);
+  const side = size + margin * 2;
+  const out = new Float32Array(side * side);
   const reach = Math.ceil(radius);
 
-  for (let ty = 0; ty < size; ty += 1) {
-    const sy = originY + ((ty + 0.5) * sub) / size - 0.5;
+  for (let ty = 0; ty < side; ty += 1) {
+    const sy = originY + ((ty - margin + 0.5) * sub) / size - 0.5;
     const y0 = Math.floor(sy);
-    for (let tx = 0; tx < size; tx += 1) {
-      const sx = originX + ((tx + 0.5) * sub) / size - 0.5;
+    for (let tx = 0; tx < side; tx += 1) {
+      const sx = originX + ((tx - margin + 0.5) * sub) / size - 0.5;
       const x0 = Math.floor(sx);
 
       let total = 0;
@@ -336,8 +349,38 @@ export function resampleFromParent(heights, size, tile, kernel = 'bilinear') {
       }
       // Renormalised rather than divided by the kernel's nominal total, so an
       // edge or a masked neighbour shifts nothing.
-      out[ty * size + tx] = sum !== 0 ? total / sum : Number.NaN;
+      out[ty * side + tx] = sum !== 0 ? total / sum : Number.NaN;
     }
+  }
+  return out;
+}
+
+/**
+ * How far the blur reaches, in pixels.
+ *
+ * Exported because the margin resampled from the parent has to match it. Two
+ * places computing the same radius from the same sigma is two places to drift.
+ * @param {number} sigma - Standard deviation in pixels.
+ * @returns {number} - Radius in pixels, 0 when there is no blur to do.
+ */
+export function blurRadius(sigma) {
+  return sigma > 0 ? Math.max(1, Math.ceil(sigma * 3)) : 0;
+}
+
+/**
+ * Takes the tile back out of a raster that was built with a border.
+ * @param {Float32Array} padded - `size + 2 * margin` a side.
+ * @param {number} size - Pixels per side of the tile wanted.
+ * @param {number} margin - The border that was added.
+ * @returns {Float32Array} - The middle of it, `size` a side.
+ */
+export function cropMargin(padded, size, margin) {
+  if (margin <= 0) return padded;
+  const side = size + margin * 2;
+  const out = new Float32Array(size * size);
+  for (let y = 0; y < size; y += 1) {
+    const from = (y + margin) * side + margin;
+    out.set(padded.subarray(from, from + size), y * size);
   }
   return out;
 }
@@ -447,6 +490,27 @@ export function assembleChildren(children, span, shape) {
 export const MAX_BLUR_SIGMA = 8;
 
 /**
+ * As much border as it is worth resampling, as a share of the tile.
+ *
+ * The border costs `(1 + 2m/size)^2` in both the resample and the blur, and
+ * buys nothing once it covers the radius. A sigma wanting more than this is
+ * one smoothing a quarter of the tile into itself, where the tile boundary is
+ * no longer the thing wrong with the result.
+ */
+const MAX_MARGIN_SHARE = 0.25;
+
+/**
+ * The border to resample for an operation reaching `radius` pixels.
+ * @param {number} radius - How far the operation reads.
+ * @param {number} size - Pixels per side of the tile.
+ * @returns {number} - Pixels to add on every side.
+ */
+export function marginFor(radius, size) {
+  if (!(radius > 0)) return 0;
+  return Math.min(Math.ceil(radius), Math.floor(size * MAX_MARGIN_SHARE));
+}
+
+/**
  * Smooths heights, in proportion to how far they were upscaled.
  *
  * An unsmoothed 64× upscale of a DEM renders as visible terracing under a
@@ -464,7 +528,7 @@ export const MAX_BLUR_SIGMA = 8;
  */
 export function blurHeights(heights, size, sigma) {
   if (!(sigma > 0)) return heights;
-  const radius = Math.max(1, Math.ceil(sigma * 3));
+  const radius = blurRadius(sigma);
   const kernel = new Float64Array(radius * 2 + 1);
   for (let i = -radius; i <= radius; i += 1) {
     kernel[i + radius] = Math.exp(-(i * i) / (2 * sigma * sigma));
@@ -579,14 +643,25 @@ export function mergeElevation(contributions, options) {
 
     const parentZ = contribution.parentZ ?? options.z;
     if (parentZ < options.z) {
+      const sigma = (options.gaussianBlurSigma ?? 0) * (options.z - parentZ);
+      // The blur reads a neighbourhood, and a tile has no neighbours -- so it
+      // is given a border, taken from the same parent the tile itself comes
+      // from, and the border is thrown away afterwards. Without it two
+      // adjacent tiles compute their shared edge from different data and
+      // disagree by tens of metres on a steep slope, which draws a grid at
+      // tile boundaries under a hillshade. It is nearly free here: at a
+      // six-level upscale a 27-pixel border is 0.42 parent pixels, already in
+      // the array. See docs/tile-stacks.md -- "Feathering a seam".
+      const margin = marginFor(blurRadius(sigma), size);
       heights = resampleFromParent(
         heights,
         size,
         { z: options.z, x: options.x, y: options.y, parentZ },
         options.resampling,
+        margin,
       );
-      const sigma = (options.gaussianBlurSigma ?? 0) * (options.z - parentZ);
-      heights = blurHeights(heights, size, sigma);
+      heights = blurHeights(heights, size + margin * 2, sigma);
+      heights = cropMargin(heights, size, margin);
     }
 
     // Clipped last, and to the tile that was asked for rather than the one

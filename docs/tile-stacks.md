@@ -1015,7 +1015,8 @@ clip must not have.
 
 ## Feathering a seam
 
-_Designed, not built. What follows is the plan and the measurements it rests on._
+_The border underneath this is built. The feathering itself is designed and
+not built; what follows is the plan and the measurements it rests on._
 
 Smoothing hides the terracing **inside** an upscaled area. It does nothing about
 the artefact the original discussion actually named — "artefacts at tiles and
@@ -1074,53 +1075,58 @@ Feathered, a metre or two of bias becomes a ramp nobody sees.
 the same statement, and only one of them can be written into a `Float32Array` of
 heights. So the weight travels beside the layer, not inside it.
 
-### The problem this shares with the blur, which is already there
+### The border underneath it, which is built
 
 Any operation with a radius needs pixels beyond the tile it is filling in, and a
-tile server has one tile. `blurHeights` handles that by clamping at the edge.
-Two adjacent tiles then compute their shared boundary from different data and do
-not agree:
+tile server has one tile. `blurHeights` used to handle that by clamping at the
+edge, so two adjacent tiles computed their shared boundary from different data
+and did not agree.
 
-| sigma | radius | disagreement across the shared edge |
-| ----- | ------ | ----------------------------------- |
-| 1.5   | 5 px   | 5.35 m                              |
-| 4.5   | 14 px  | 16.55 m                             |
-| 9     | 27 px  | 33.08 m                             |
-| 24    | 72 px  | 87.61 m                             |
+The fix is that an upscaled source already has the pixels. The blur only runs
+where `parentZ < z`, and `resampleFromParent` is sampling a sub-region of a
+parent tile that was read in full — so it now takes a `margin` and returns
+`size + 2r` a side, the blur runs over that, and `cropMargin` throws the border
+away. At a six-level upscale a 512px output tile is 8×8 parent pixels, so a
+27-pixel output border is **0.42 parent pixels**: already in the array.
 
-Measured on a synthetic slope of about 4.65 m per pixel, comparing the last
-column of one tile against the first column of the next. Sigma 9 is
-`gaussianBlurSigma: 1.5` at a six-level upscale, which is what these archives
-are built with — so **the smoothing already draws a faint grid at tile
-boundaries**, in proportion to sigma and to the local gradient. The offline
-merge has it too: `scipy.ndimage.gaussian_filter` defaults to `mode='reflect'`
-and is handed one tile's array.
+Two adjacent children of one parent, `gaussianBlurSigma: 1.5`, measuring how far
+their shared edge steps beyond what the same two unblurred tiles step:
 
-A feather built the same way would draw a worse grid, because its operand is a
-step rather than a smooth field. So the margin has to come from somewhere before
-any of this is worth building.
+| upscale | sigma | border | clamped | bordered |
+| ------- | ----- | ------ | ------- | -------- |
+| 2       | 3     | 9 px   | 31.73 m | −0.05 m  |
+| 4       | 6     | 18 px  | 20.14 m | 0.00 m   |
+| 6       | 9     | 27 px  | 6.15 m  | 0.00 m   |
+| 8       | 12    | 36 px  | 0.43 m  | 0.00 m   |
 
-### Where the margin comes from
+Worst at a **moderate** upscale rather than an extreme one, which is not the
+intuition. At eight levels the sub-region is two parent pixels across and the
+tile is nearly flat, so there is little for a clamped edge to get wrong; at two
+levels there is real gradient at the tile edge and clamping repeats it.
 
-Cheaply, in the case that matters most.
+It costs 10–15% of the resample and the blur together. The border is capped at a
+quarter of the tile — past that it buys nothing the radius has not already used,
+and a sigma wanting more is smoothing the tile into itself, where the tile
+boundary is not what is wrong with the result.
 
-**An upscaled source already has it.** The blur only runs where `parentZ < z`,
-and `resampleFromParent` samples a sub-region of a parent tile that has been
-read in full. At a six-level upscale a 512px output tile is 8×8 parent pixels,
-so a 27-pixel output radius is **0.42 parent pixels** — the margin is already in
-the array. Resampling `size + 2r` and cropping to `size` costs a few percent of
-one resample and removes the seam. Only where the sub-region touches the parent
-tile's own edge is anything missing, and there it is a fraction of a pixel.
+The offline merge still has this. `scipy.ndimage.gaussian_filter` defaults to
+`mode='reflect'` and is handed one tile's array, so an archive built with a
+sigma carries the seam.
+
+### Where the margin comes from for the feather
+
+The border above solves the upscaled case, which is the one the blur needed.
+Feathering has two more.
 
 **A missing tile costs nothing.** Whether a neighbour exists is a directory
 lookup, not a decode. A source that vanishes at a tile edge can ramp down to 0
 approaching that edge using only knowledge of which neighbours are absent.
 
 **A mask hole at native resolution is the expensive one.** There the edge is in
-the source's own pixels at full resolution, and the margin genuinely means
-reading the neighbouring tiles — up to eight reads and eight decodes for that
-source, on that tile. That is the case to bound, to make opt-in, and to measure
-before believing.
+the source's own pixels at full resolution, with no parent to widen the window
+into, so the margin genuinely means reading the neighbouring tiles — up to eight
+reads and eight decodes for that source, on that tile. That is the case to
+bound, to make opt-in, and to measure before believing.
 
 ### What it would take
 
@@ -1135,16 +1141,11 @@ before believing.
   needs the most care: it is the function the whole feature rests on, and its
   own comment records that getting the order wrong here is the mistake the
   offline merge made.
-- Margin resampling in `resampleFromParent`, which fixes the existing blur seam
-  whether or not anything is feathered.
+- Margin reads for a native-resolution mask edge, which is the part with a real
+  cost attached and the part to measure before believing.
 
-### What to settle first
-
-Whether the margin work stands on its own. The blur seam is real, it is in
-every archive built with a sigma, and fixing it is a smaller and better-defined
-piece of work than feathering — with no new recipe field and no new merge
-semantics. It is plausibly worth doing first and separately, and it is the
-foundation the feather needs anyway.
+`resampleFromParent`, `marginFor`, `blurRadius` and `cropMargin` are done, and
+carry the blur already.
 
 ## Finding a stack
 

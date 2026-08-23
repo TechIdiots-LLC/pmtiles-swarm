@@ -3,6 +3,8 @@ import { describe, it } from 'node:test';
 import {
   RESAMPLING,
   blurHeights,
+  blurRadius,
+  cropMargin,
   isResampling,
   encodingFactors,
   hasUsableEncoding,
@@ -14,6 +16,7 @@ import {
   maskHeights,
   mergeElevation,
   paintHeights,
+  marginFor,
   resampleFromParent,
 } from '../src/elevation.js';
 
@@ -501,6 +504,113 @@ describe('the resampling kernels', () => {
     assert.deepEqual(
       [...resampleFromParent(parent, size, tile, 'nonsense')],
       [...resampleFromParent(parent, size, tile, 'bilinear')],
+    );
+  });
+});
+
+describe('the border an operation with a radius needs', () => {
+  const size = 8;
+
+  /**
+   * A parent with a gradient across it, so an edge effect has something to bite.
+   * @returns {Float32Array} - Heights.
+   */
+  const parent = () => {
+    const heights = new Float32Array(size * size);
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) heights[y * size + x] = x * 10 + y;
+    }
+    return heights;
+  };
+
+  it('hands back the tile plus the border, and the tile is where it was', () => {
+    const tile = { z: 1, x: 1, y: 0, parentZ: 0 };
+    const plain = resampleFromParent(parent(), size, tile, 'bilinear');
+    const padded = resampleFromParent(parent(), size, tile, 'bilinear', 2);
+
+    assert.equal(padded.length, (size + 4) * (size + 4));
+    assert.deepEqual(
+      [...cropMargin(padded, size, 2)],
+      [...plain],
+      'the middle of the padded raster is not the tile',
+    );
+  });
+
+  it('fills the border from the parent rather than repeating the edge', () => {
+    // The whole point. A clamped edge repeats itself; a real border keeps
+    // going, which is what makes two adjacent tiles agree.
+    const padded = resampleFromParent(
+      parent(),
+      size,
+      { z: 1, x: 1, y: 0, parentZ: 0 },
+      'bilinear',
+      2,
+    );
+    const side = size + 4;
+    const row = 6;
+    const left = padded[row * side];
+    const inward = padded[row * side + 2];
+    assert.notEqual(left, inward, 'the border repeats the edge');
+    assert.ok(left < inward, 'the border should continue the gradient left');
+  });
+
+  it('asks for no border when there is no radius to cover', () => {
+    assert.equal(marginFor(0, 512), 0);
+    assert.equal(blurRadius(0), 0);
+    assert.equal(cropMargin(parent(), size, 0).length, size * size);
+  });
+
+  it('will not resample a border bigger than the tile it surrounds', () => {
+    // It costs (1 + 2m/size)^2 and buys nothing past the radius. A sigma
+    // wanting more than a quarter of the tile is smoothing the tile into
+    // itself, where the boundary is not what is wrong with the result.
+    assert.equal(marginFor(1000, 512), 128);
+    assert.equal(marginFor(20, 512), 20);
+  });
+
+  it('makes two neighbours agree along the edge they share', () => {
+    // The regression this exists for. Blurred without a border, adjacent tiles
+    // compute their shared edge from different data and step by tens of metres
+    // on a slope -- a grid drawn at tile boundaries under a hillshade.
+    const big = 64;
+    const source = new Float32Array(big * big);
+    for (let y = 0; y < big; y += 1) {
+      for (let x = 0; x < big; x += 1) {
+        source[y * big + x] = x * 8 + 40 * Math.sin(y / 3);
+      }
+    }
+
+    const sigma = 3;
+    const child = (x, withBorder) => {
+      const margin = withBorder ? marginFor(blurRadius(sigma), big) : 0;
+      const tile = { z: 2, x, y: 1, parentZ: 0 };
+      const heights = resampleFromParent(source, big, tile, 'bilinear', margin);
+      return cropMargin(
+        blurHeights(heights, big + margin * 2, sigma),
+        big,
+        margin,
+      );
+    };
+
+    const worst = (withBorder) => {
+      const left = child(1, withBorder);
+      const right = child(2, withBorder);
+      let most = 0;
+      for (let row = 0; row < big; row += 1) {
+        most = Math.max(
+          most,
+          Math.abs(right[row * big] - left[row * big + (big - 1)]),
+        );
+      }
+      return most;
+    };
+
+    const clamped = worst(false);
+    const bordered = worst(true);
+    assert.ok(
+      bordered < clamped / 2,
+      `the border should close the seam: ${clamped.toFixed(2)} m clamped, ` +
+        `${bordered.toFixed(2)} m bordered`,
     );
   });
 });

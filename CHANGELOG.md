@@ -46,6 +46,28 @@
   misconfigured; the first version of this would have told its operator otherwise.
 
 ### 🐞 Bug fixes
+- **The smoothing was drawing a grid at tile boundaries.** `blurHeights` reads a neighbourhood and
+  a tile server has one tile, so it clamped at the edge - and two adjacent tiles then computed their
+  shared boundary from different data. On a slope they disagreed by tens of metres, which under a
+  hillshade is a faint line at every tile edge.
+
+  An upscaled source turns out to have the pixels already. The blur only runs where the tile came
+  from a parent, and that parent was read in full, so `resampleFromParent` now takes a `margin`,
+  the blur runs over the larger raster, and `cropMargin` throws the border away. At a six-level
+  upscale a 27-pixel border is 0.42 parent pixels - already in the array. Two adjacent children of
+  one parent, at `gaussianBlurSigma: 1.5`, stepping beyond what the same two unblurred tiles step:
+
+      upscale 2  (sigma 3)   31.73 m  ->  -0.05 m
+      upscale 4  (sigma 6)   20.14 m  ->   0.00 m
+      upscale 6  (sigma 9)    6.15 m  ->   0.00 m
+      upscale 8  (sigma 12)   0.43 m  ->   0.00 m
+
+  Worst at a moderate upscale rather than an extreme one, which is not the intuition: eight levels
+  up the sub-region is two parent pixels across and there is little for a clamped edge to get
+  wrong. It costs 10-15%, and the border is capped at a quarter of the tile.
+
+  Anything built with a sigma has this baked in, here and in the offline merge - `gaussian_filter`
+  defaults to `mode='reflect'` over one tile's array. Re-exporting is what removes it.
 - _...Add new stuff here..._
 
 ## 0.72.1
