@@ -4,6 +4,13 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.84.0
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
 - **Scheduled exports are rows, like every other automation beside them.** `stackExports` in the
   config, edited under Settings → Feeds with the same row editor the monitored folders and the
   scheduled sources use: add a row, choose the stack from a dropdown, say when, and fill in the rest
