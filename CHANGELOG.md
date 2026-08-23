@@ -4,6 +4,13 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.82.0
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
 - **Export schedules are set under Settings → Feeds.** Not only the two global settings that landed
   there in 0.81.1 — the schedules themselves. **Scheduled exports** is a row per stack: never, every
   day at a time, or every so many hours, saved onto that stack's recipe. Feeds is where somebody goes
