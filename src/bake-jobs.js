@@ -109,6 +109,38 @@ export class BakeManager {
   }
 
   /**
+   * Stops every running bake and waits for each to write its checkpoint.
+   *
+   * For a service stopping. Without this a restart kills a bake where it
+   * stands: the merging half is cancellable and keeps its work, but only if
+   * something tells it to stop, and a process being torn down does not. What
+   * was merged since the last checkpoint would be merged again.
+   * @param {object} [options] - `timeoutMs` to stop waiting.
+   * @returns {Promise<number>} - How many were stopped.
+   */
+  async stopAll(options = {}) {
+    const running = [...this.#jobs.values()].filter((job) => !job.finishedAt);
+    if (running.length === 0) return 0;
+
+    for (const job of running) {
+      job.cancelling = true;
+      job.controller.abort();
+    }
+
+    // Bounded, because a shutdown that waits for ever is a shutdown that gets
+    // killed harder. A checkpoint is milliseconds; what takes time is the tile
+    // in flight noticing it has been abandoned.
+    const timeout = new Promise((resolve) =>
+      setTimeout(resolve, options.timeoutMs ?? 10000).unref?.(),
+    );
+    await Promise.race([
+      Promise.all(running.map((job) => job.promise?.catch(() => {}))),
+      timeout,
+    ]);
+    return running.length;
+  }
+
+  /**
    * Starts a bake, and answers as soon as it is running rather than when it
    * finishes.
    *

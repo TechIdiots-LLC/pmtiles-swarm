@@ -612,6 +612,56 @@ describe('stopping a bake and picking it up again', () => {
     for (const id of ids) assert.equal(tiles.get(id), `m-${id}`, `tile ${id}`);
   });
 
+  it('checkpoints on the clock, not only on the tile count', async () => {
+    // A count alone is the wrong measure. A bake merging slowly can run for an
+    // hour without reaching the count, and a process killed before its first
+    // checkpoint has nothing to resume from -- which is what a service restart
+    // does to an export that has done a few hundred tiles.
+    const a = await sourceOf([1, 2, 3, 4, 5, 6]);
+    const workDir = await scratch();
+
+    await bakeStack({
+      sources: [a],
+      workDir,
+      destination: path.join(workDir, 'ticked.pmtiles'),
+      revision: 'r1',
+      // Far more tiles than this bake has, so only the clock can fire it.
+      checkpointEvery: 1000000,
+      checkpointSeconds: 0,
+      concurrency: 2,
+      mergeTile: async () => Buffer.from('x'),
+      header: { format: 'png' },
+    });
+
+    // Cleared on success, so what proves it ran is that a mid-bake read finds
+    // one -- which the next test does by looking at a cancelled run.
+    const a2 = await sourceOf([1, 2, 3, 4, 5, 6]);
+    const workDir2 = await scratch();
+    const controller = new AbortController();
+    let merged = 0;
+    await assert.rejects(() =>
+      bakeStack({
+        sources: [a2],
+        workDir: workDir2,
+        destination: path.join(workDir2, 'ticked2.pmtiles'),
+        revision: 'r1',
+        signal: controller.signal,
+        checkpointEvery: 1000000,
+        checkpointSeconds: 0,
+        concurrency: 1,
+        mergeTile: async () => {
+          merged += 1;
+          if (merged === 4) controller.abort();
+          return Buffer.from('x');
+        },
+      }),
+    );
+
+    const saved = await readCheckpoint(workDir2, 'r1');
+    assert.ok(saved, 'the clock never fired a checkpoint');
+    assert.ok(saved.written >= 3, `only ${saved.written} were recorded`);
+  });
+
   it('ignores a checkpoint whose tile buffer went missing', async () => {
     const workDir = await scratch();
     const paths = checkpointPaths(workDir);

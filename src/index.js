@@ -474,6 +474,22 @@ PMTILES_SWARM_PUBLIC_URL
     cutlines,
   });
 
+  // Early in the sequence, so an export is told to stop before the pieces it
+  // reads through are taken away. Its checkpoint is the hours already spent.
+  stoppers.unshift({
+    label: 'stack exports',
+    stop: async () => {
+      const stopped = await bakes.stopAll();
+      if (stopped > 0) {
+        console.log(
+          `[shutdown] stopped ${stopped} stack export(s); each kept its ` +
+            'checkpoint, so exporting again carries on from there',
+        );
+      }
+    },
+    ms: 12000,
+  });
+
   // Reads the head of anything joined but not yet understood — the header,
   // then the root directory and metadata it points at. Without this an archive
   // being mirrored is unservable until the download happens to reach byte

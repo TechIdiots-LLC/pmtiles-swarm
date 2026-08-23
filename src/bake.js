@@ -25,6 +25,17 @@ import { Compression, PMTilesWriter, TileType } from './pmtiles-write.js';
 /** Tiles merged between checkpoints. */
 const DEFAULT_CHECKPOINT_EVERY = 5000;
 
+/**
+ * Seconds between checkpoints, however few tiles have been done.
+ *
+ * A count alone is the wrong measure. A bake merging slowly -- a big tile, a
+ * cache-mode source, a stack with several layers -- can run for an hour
+ * without reaching five thousand, and a process killed before its first
+ * checkpoint has nothing to resume from at all. A checkpoint costs about
+ * eleven milliseconds, so doing one on the clock is close to free.
+ */
+const DEFAULT_CHECKPOINT_SECONDS = 30;
+
 /** Tiles merged at once. */
 const DEFAULT_CONCURRENCY = 4;
 
@@ -454,6 +465,7 @@ export async function bakeStack(options) {
     header = {},
     deduplicate = true,
     checkpointEvery = DEFAULT_CHECKPOINT_EVERY,
+    checkpointSeconds = DEFAULT_CHECKPOINT_SECONDS,
     pauseMs = 0,
     concurrency = DEFAULT_CONCURRENCY,
   } = options;
@@ -486,6 +498,7 @@ export async function bakeStack(options) {
   let skipped = found?.skipped ?? 0;
   let lastTileId = found?.lastTileId ?? -1;
   let sinceCheckpoint = 0;
+  let checkpointedAt = Date.now();
   let persisted = found?.entries.length ?? 0;
 
   /**
@@ -508,6 +521,7 @@ export async function bakeStack(options) {
       persisted,
     );
     sinceCheckpoint = 0;
+    checkpointedAt = Date.now();
   };
 
   try {
@@ -563,7 +577,13 @@ export async function bakeStack(options) {
       }
 
       batch = [];
-      if (sinceCheckpoint >= checkpointEvery) await checkpoint();
+      // Whichever comes first. The count keeps a fast bake from checkpointing
+      // constantly; the clock keeps a slow one from never checkpointing at
+      // all.
+      const due =
+        sinceCheckpoint >= checkpointEvery ||
+        Date.now() - checkpointedAt >= checkpointSeconds * 1000;
+      if (due) await checkpoint();
       signal?.throwIfAborted();
 
       // Handing time back, where the operator asked for that. A bake on a node

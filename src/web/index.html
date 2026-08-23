@@ -4019,7 +4019,12 @@ Every piece is hashed against the ` +
                     ? `<div class="links">
                          ${copyable(ends.tileJson, 'TileJSON')}
                          ${copyable(ends.xyz, 'XYZ')}
-                         ${link(ends.preview, 'preview')}
+                         ${
+                           drawsAsTerrain(newest)
+                             ? `${link(`${ends.preview}?raw=1`, 'preview')}
+                                ${link(ends.preview, 'terrain')}`
+                             : link(ends.preview, 'preview')
+                         }
                          ${link(ends.torrent, '.torrent', true)}
                          ${copyable(ends.magnet, 'magnet', true)}
                          ${copyable(ends.feed, 'RSS')}
@@ -6995,17 +7000,19 @@ Every piece is hashed against the ` +
       }
 
       // ── Tabs ──────────────────────────────────────────────────────────────
+      /** Views a URL may name, so a link can come back to the right one. */
+      const TABS = ['archives', 'categories', 'stacks', 'traffic', 'settings'];
+
       const showTab = (name) => {
-        for (const tab of [
-          'archives',
-          'categories',
-          'stacks',
-          'traffic',
-          'settings',
-        ]) {
+        for (const tab of TABS) {
           $(`view-${tab}`).hidden = tab !== name;
           $(`tab-${tab}`).classList.toggle('on', tab === name);
         }
+        // Written into the address, so a page that sends somebody here can say
+        // where to land -- a preview of a stack belongs back at Stacks, not at
+        // whatever the console opens on. `replaceState` rather than assigning
+        // the hash, which would scroll and add a history entry per tab.
+        history.replaceState(null, '', name === 'archives' ? '#' : `#${name}`);
         if (name === 'settings') loadSettings().catch((e) => toast(e.message));
         if (name === 'categories') loadCategories().catch((e) => toast(e.message));
         if (name === 'stacks') loadStacks().catch((e) => toast(e.message));
@@ -7014,6 +7021,13 @@ Every piece is hashed against the ` +
           loadSwarmTraffic();
         }
       };
+      // A view named in the address wins over the one this opens on. Ignored
+      // when it names nothing, so an old bookmark is not a blank console.
+      const tabFromUrl = () => {
+        const named = location.hash.replace('#', '');
+        return TABS.includes(named) ? named : null;
+      };
+
       // The footer's year, set from the clock rather than typed into a file
       // nobody will remember to edit. The version beside it arrives with the
       // first status, and reads "…" until then.
@@ -8312,6 +8326,10 @@ Every piece is hashed against the ` +
           // An unreachable server is reported by refresh() in the status line.
         }
         refresh();
+        // After the archives have been asked for, so the tab that opens is the
+        // one asked for and not the one this happens to start on.
+        const named = tabFromUrl();
+        if (named && named !== 'archives') showTab(named);
       }
 
       start();

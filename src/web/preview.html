@@ -69,7 +69,7 @@
       <code id="endpoint"></code>
       <span class="links">
         <a id="mode" href="#" hidden></a>
-        <a href="/">← console</a>
+        <a id="back" href="/">← console</a>
       </span>
     </header>
     <div id="note" hidden></div>
@@ -95,6 +95,18 @@
         '/tiles.json',
       );
       const $ = (id) => document.getElementById(id);
+
+      // Back to the view this was opened from rather than to whatever the
+      // console opens on. The path already says which: a stack was reached
+      // from Stacks, a category from Categories, an archive from the list.
+      const back = $('back');
+      if (back) {
+        back.href = location.pathname.startsWith('/stacks/')
+          ? '/#stacks'
+          : location.pathname.startsWith('/latest/')
+            ? '/#categories'
+            : '/';
+      }
 
       const fail = (message) => {
         document.body.innerHTML = `<div class="banner">${message}</div>`;

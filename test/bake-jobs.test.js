@@ -456,6 +456,57 @@ describe('where a bake does its work', () => {
   });
 });
 
+describe('stopping every export, for a service going down', () => {
+  // A restart kills a bake where it stands. The merging half is cancellable
+  // and keeps its work, but only if something tells it to stop -- and a
+  // process being torn down does not.
+
+  it('stops what is running and waits for its checkpoint', async () => {
+    const archive = await sourceArchive('shutdown', [[1, 0, 0]]);
+    let release;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    const manager = new BakeManager({
+      tiles: storeOver(archive),
+      config: { dataDir: path.join(workspace, 'data-shutdown') },
+      loadCodec: async () => null,
+      library: {
+        addLocalArchive: async () => {
+          await held;
+          return { infoHash: 'e'.repeat(40) };
+        },
+        resolveSavePath: async () => undefined,
+      },
+    });
+
+    await manager.start({ resolved: stackOver(archive) });
+    const stopped = await manager.stopAll({ timeoutMs: 2000 });
+    assert.equal(stopped, 1);
+
+    release();
+    const job = await settled(manager, 'terrain');
+    assert.ok(
+      ['cancelled', 'done'].includes(job.phase),
+      `left in ${job.phase}`,
+    );
+  });
+
+  it('has nothing to stop when nothing is running', async () => {
+    const archive = await sourceArchive('quiet', [[1, 0, 0]]);
+    const manager = new BakeManager({
+      tiles: storeOver(archive),
+      config: { dataDir: path.join(workspace, 'data-quiet') },
+      loadCodec: async () => null,
+      library: {
+        addLocalArchive: async () => ({}),
+        resolveSavePath: async () => undefined,
+      },
+    });
+    assert.equal(await manager.stopAll(), 0);
+  });
+});
+
 describe('running a bake as a job', () => {
   /**
    * A manager over one source, with a library that records what it was given.

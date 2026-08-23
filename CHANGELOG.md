@@ -7,6 +7,33 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.71.0
+### ✨ Features and improvements
+- **The preview comes back to where it was opened from.** The link out of a preview said
+  "console" and went to the archive list, whatever had been previewed - so previewing a stack and
+  coming back meant finding the Stacks tab again. The console now names its view in the address
+  and honours one it is given, and a preview links to the view it belongs to.
+
+- **A category offers terrain where its newest build is terrain.** Archives and stacks got the
+  second button; categories did not, on either page. Same rule and the same reason: the raster
+  keeps the plain name because it is the view that shows a hole.
+
+### 🐞 Bug fixes
+- **A stopped export resumed; a restarted service did not.** Both were called "stopping keeps the
+  work", and only one of them did. **Stop export** cancels the job, which writes a checkpoint. A
+  service restart tells it nothing at all: the process is torn down, and whatever had been merged
+  since the last checkpoint was merged again.
+
+  Two things were wrong. Nothing asked a running export to stop when the node did, so exports are
+  now a shutdown step of their own - cancelled early in the sequence, before the pieces they read
+  through are taken away, and waited for so each writes its checkpoint.
+
+  And a checkpoint fired on a tile count alone, every five thousand. That is the wrong measure for
+  a bake merging slowly, which can run for an hour without reaching it - an export that had done a
+  few hundred tiles had never checkpointed at all, so a restart lost everything it had done. There
+  is a clock now as well, thirty seconds, whichever comes first. A checkpoint costs about eleven
+  milliseconds.
+
 ## 0.70.0
 ### ✨ Features and improvements
 - **An export works on the disk the archive is going to.** It worked under the data directory and
