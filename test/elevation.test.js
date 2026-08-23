@@ -5,6 +5,7 @@ import {
   blurHeights,
   blurRadius,
   cropMargin,
+  maskRanges,
   isResampling,
   encodingFactors,
   hasUsableEncoding,
@@ -212,63 +213,87 @@ describe('a mapbox source with a base and interval of its own', () => {
 });
 
 describe('a mask against an archive that was resampled', () => {
-  // Measured on a real merge: the planet source held 109,441 pixels at exactly
-  // 0 -- the sea -- and a range reaching -0.4 m, because cubic overshoots at
-  // every coastline it crosses. maskValues [0] took the zeroes and left the
-  // rest, and with bathymetry underneath each survivor stood up to 25 m proud
-  // of the water around it. 1227 pixels of one tile, which is what stipples a
-  // hillshade.
+  // Measured on a real merge: a terrain source over GEBCO bathymetry, masking
+  // the colours #018696 and #0186a0 -- which decode to exactly -1.0 m and
+  // 0.0 m. The archive was built with cubic resampling, which overshoots at
+  // every coastline it crosses, so the sea arrived as a scattering across
+  // -0.9 m to 0. The nine colours between the two masked ones were never
+  // masked, and with bathymetry underneath each survivor stood 25 m proud of
+  // the water: 1,227 pixels of one tile, which is what stipples a hillshade.
 
   /**
-   * The sea as such an archive holds it: mostly 0, scattered off it.
+   * The sea as such an archive holds it, in tenths from -1 to 0.
    * @returns {Float32Array} - Heights, in metres.
    */
   const sea = () =>
-    Float32Array.from([0, 0, -0.4, 0, 0.1, 0, -0.1, 0, 0, 0.3, 0, -0.2]);
+    Float32Array.from([0, -0.9, -0.4, 0, -0.1, -0.7, 0, -0.2, -1, -0.6]);
 
   /**
-   * How many pixels the mask left behind.
-   * @param {number} [tolerance] - Metres either side.
+   * How many pixels a range leaves behind.
+   * @param {Array<number[]>|number[]} range - What the recipe says.
    * @returns {number} - Survivors.
    */
-  const survivors = (tolerance) =>
-    [...maskHeights(sea(), [0], tolerance)].filter((v) => !Number.isNaN(v))
-      .length;
+  const survivors = (range) =>
+    [...maskRanges(sea(), range)].filter((v) => !Number.isNaN(v)).length;
 
-  it('leaves the near-misses standing when it matches exactly', () => {
-    assert.equal(survivors(0), 5, 'this is the behaviour being fixed');
-    assert.equal(survivors(undefined), 5, 'absent means exact, as before');
+  it('takes the whole band, not the ends of it', () => {
+    // The failure this replaces: the two colours a recipe names are the ends
+    // of a range, and masking them exactly leaves everything between.
+    assert.equal(survivors([-1, 0]), 0);
   });
 
-  it('takes the band when it is given a width', () => {
-    assert.equal(survivors(0.5), 0);
+  it('reads a single pair or a list of them', () => {
+    assert.equal(survivors([-1, 0]), 0);
+    // Only -0.4 sits in the gap the two bands leave between them.
+    assert.equal(
+      survivors([
+        [-1, -0.5],
+        [-0.2, 0],
+      ]),
+      1,
+    );
   });
 
-  it('keeps ground that is genuinely outside the band', () => {
-    // The trade: a wider tolerance eats low coastal land. It has to stop
-    // somewhere, and where is the operator's call.
-    const ground = Float32Array.from([0, 0.4, 1.2, 8.0, -30.0]);
-    const masked = maskHeights(ground, [0], 0.5);
-    assert.ok(Number.isNaN(masked[0]));
-    assert.ok(Number.isNaN(masked[1]), '0.4 is inside a 0.5 band');
-    // Compared loosely: a Float32Array holds 1.2 as 1.2000000476837158, and
-    // what is being tested is that the value survived, not how it is stored.
-    assert.ok(Math.abs(masked[2] - 1.2) < 1e-5, 'it ate real ground');
-    assert.ok(Math.abs(masked[3] - 8) < 1e-5);
-    assert.ok(Math.abs(masked[4] + 30) < 1e-5, 'it ate the bathymetry');
+  it('includes the number written on the edge of the band', () => {
+    // A Float32Array holds -0.2 as -0.20000000298, which is outside [-0.2, 0]
+    // by arithmetic and inside it by intent. An edge that does not include the
+    // number written on it leaves a row of pixels behind.
+    const edges = Float32Array.from([-0.2, 0, -1]);
+    const masked = maskRanges(edges, [-0.2, 0]);
+    assert.ok(Number.isNaN(masked[0]), '-0.2 fell outside [-0.2, 0]');
+    assert.ok(Number.isNaN(masked[1]));
+    assert.ok(Math.abs(masked[2] + 1) < 1e-5, 'it reached past the band');
   });
 
-  it('widens every value it was given, not just the first', () => {
-    const heights = Float32Array.from([0.2, -999.8, 50]);
-    const masked = maskHeights(heights, [0, -1000], 0.5);
+  it('does not care which way round the pair is written', () => {
+    assert.equal(survivors([0, -1]), 0);
+  });
+
+  it('keeps ground outside the band', () => {
+    const ground = Float32Array.from([-30, -1, 0, 0.1, 8]);
+    const masked = maskRanges(ground, [-1, 0]);
+    assert.ok(Math.abs(masked[0] + 30) < 1e-5, 'it ate the bathymetry');
+    assert.ok(Number.isNaN(masked[1]));
+    assert.ok(Number.isNaN(masked[2]));
+    assert.ok(Math.abs(masked[3] - 0.1) < 1e-5, 'it ate real ground');
+    assert.ok(Math.abs(masked[4] - 8) < 1e-5);
+  });
+
+  it('is asymmetric, which is the point of a band', () => {
+    // Sea is everything up to zero and nothing above it. A width either side
+    // of a value cannot say that: reaching a metre down means reaching a metre
+    // up, into ground that is really there.
+    const ground = Float32Array.from([-0.9, 0, 0.4]);
+    const masked = maskRanges(ground, [-1, 0]);
     assert.ok(Number.isNaN(masked[0]));
     assert.ok(Number.isNaN(masked[1]));
-    assert.equal(masked[2], 50);
+    assert.ok(Math.abs(masked[2] - 0.4) < 1e-5, '0.4 m of land was masked');
   });
 
-  it('does nothing without values to widen', () => {
-    const heights = Float32Array.from([0, 1, 2]);
-    assert.deepEqual([...maskHeights(heights, [], 5)], [0, 1, 2]);
+  it('does nothing when there is no range to apply', () => {
+    for (const nothing of [undefined, null, [], 'wide', [0]]) {
+      assert.equal(survivors(nothing), 10, JSON.stringify(nothing));
+    }
   });
 });
 

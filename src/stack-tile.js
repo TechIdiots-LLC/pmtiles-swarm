@@ -3,9 +3,9 @@ import {
   decodeHeights,
   encodeHeights,
   fillNodata,
-  maskBands,
   maskColors,
   maskHeights,
+  maskRanges,
   mergeElevation,
 } from './elevation.js';
 import { paddedKnown, parentsFor } from './mask-edge.js';
@@ -451,7 +451,11 @@ async function gather({ reads, z, x, y, tiles, codec, signal, size, rgba }) {
  * @returns {boolean} - True when it masks anything.
  */
 function masksAnything(recipe) {
-  return Boolean(recipe?.maskValues?.length || recipe?.maskColors?.length);
+  return Boolean(
+    recipe?.maskValues?.length ||
+    recipe?.maskColors?.length ||
+    recipe?.maskRange?.length,
+  );
 }
 
 /**
@@ -511,13 +515,9 @@ async function readMaskEdges({
           // measured against a different idea of where the holes are would fade
           // toward ground that is not a hole.
           const heights = decodeHeights(raster, recipe);
-          const tolerance = Number(recipe.maskTolerance) || 0;
-          if (tolerance > 0) {
-            maskHeights(heights, maskBands(recipe), tolerance);
-          } else {
-            maskHeights(heights, recipe.maskValues);
-            maskColors(heights, raster, recipe.maskColors);
-          }
+          maskHeights(heights, recipe.maskValues);
+          maskColors(heights, raster, recipe.maskColors);
+          maskRanges(heights, recipe.maskRange);
 
           const flags = new Uint8Array(heights.length);
           for (let i = 0; i < flags.length; i += 1) {

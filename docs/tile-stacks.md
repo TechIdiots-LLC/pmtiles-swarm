@@ -241,7 +241,7 @@ it differs from the snake_case rio-rgbify-merge uses.
 | `encoding`             | `mapbox` or `terrarium`. Elevation space only.                                                             |
 | `baseVal` / `interval` | Mapbox decode offset and step. Default `-10000` and `0.1`.                                                 |
 | `maskValues`           | Decoded heights meaning "no data here". Elevation space only.                                              |
-| `maskTolerance`        | Metres either side of each masked height **or colour**. `0`, the default, matches exactly.                 |
+| `maskRange`            | `[low, high]` in metres, or a list of them. Everything inside is nodata. Elevation space only.             |
 | `heightAdjustment`     | Metres, added **after** masking. Elevation space only.                                                     |
 | `feather`              | Pixels to fade in over at the edge of the source's shape. Needs a `cutline` or `bounds`. Max 64.           |
 | `opacity`              | `0`–`1`, scales the source alpha. RGBA space only.                                                         |
@@ -1044,22 +1044,38 @@ bathymetry underneath, each survivor became a spike as tall as the difference
 between the two sources — a scattering of 25 m pillars over open water, which
 is what stipples a hillshade.
 
-`maskTolerance` widens each of them into a band. A masked colour is a masked
-height in this space, so both are widened by the same number and a recipe that
-masks by colour needs no rewriting:
+`maskRange` says the band outright:
+
+```json
+{ "archive": "planet", "maskRange": [-1, 0] }
+```
+
+A band rather than a width either side of a value, because nodata is rarely
+symmetric about anything. Sea is everything up to zero and nothing above it,
+and a width reaching a metre down reaches a metre up as well, into ground that
+is really there. It is also what the recipe above was already reaching for: its
+two colours are the ends of one.
+
+Several, where a source has a sentinel as well as a band:
 
 ```json
 {
   "archive": "planet",
-  "maskColors": ["#018696", "#0186a0"],
-  "maskTolerance": 0.5
+  "maskRange": [
+    [-1, 0],
+    [-10001, -9999]
+  ]
 }
 ```
 
-It is a trade rather than a free win, which is why it is not the default: a
-band wide enough to catch the resampling's overshoot also eats genuine ground
-inside it. Half a metre of coastal flat is usually the right price for removing
-the pillars; five metres would not be.
+The edges are inclusive and compared in thousandths, because a `Float32Array`
+holds -0.2 as -0.20000000298 and an edge that does not include the number
+written on it leaves a row of pixels behind.
+
+It is a trade rather than a free win: a band wide enough to catch the
+resampling's overshoot also eats genuine ground inside it. Reaching down to the
+lowest value the sea arrives at is usually the right price; reaching up above
+zero is not, which is the asymmetry a band can express and a width cannot.
 
 Worth knowing that neither a median nor a colour ramp shows this. The merged
 tile above measures 0.2 m of roughness at the median and looks smooth by every

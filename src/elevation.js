@@ -146,77 +146,89 @@ export function encodeHeights(heights, options) {
  * encoding produces, and shifting the terrain first leaves none of them
  * matching anything. Decoding lands on exact multiples of the interval, so
  * equality is the right comparison and a tolerance would mask real ground.
- *
- * `tolerance` widens each value into a band. An archive resampled on its way
- * to being built does not hold the number it was authored with: cubic
- * overshoots at every edge it crosses, so a sea authored as exactly 0 arrives
- * as a field of 0 with -0.4 and 0.1 scattered through it near the coast. An
- * exact mask takes the zeroes and leaves the rest standing, and where another
- * source is underneath, each survivor becomes a spike as tall as the
- * difference between them -- measured at 25 m on a real merge, on half a per
- * cent of the tile, which is what stipples a hillshade. See
- * docs/tile-stacks.md -- "What a mask has to match".
  * @param {Float32Array} heights - Metres, modified in place.
  * @param {number[]} [maskValues] - Heights meaning no data.
- * @param {number} [tolerance] - Metres either side of each value. 0 is exact.
  * @returns {Float32Array} - The same array.
  */
-export function maskHeights(heights, maskValues, tolerance = 0) {
+export function maskHeights(heights, maskValues) {
   if (!maskValues?.length) return heights;
-
-  if (!(tolerance > 0)) {
-    // Rounded to the nearest thousandth before comparing. Decoding produces
-    // base + n * interval in floating point, so a mask of -0.1 meets a decoded
-    // -0.09999999999763531 and exact equality alone would never fire.
-    const wanted = new Set(maskValues.map((value) => Math.round(value * 1000)));
-    for (let i = 0; i < heights.length; i += 1) {
-      if (wanted.has(Math.round(heights[i] * 1000))) heights[i] = Number.NaN;
-    }
-    return heights;
-  }
-
-  const bands = maskValues.map(Number).filter(Number.isFinite);
+  // Rounded to the nearest thousandth before comparing. Decoding produces
+  // base + n * interval in floating point, so a mask of -0.1 meets a decoded
+  // -0.09999999999763531 and exact equality alone would never fire.
+  const wanted = new Set(maskValues.map((value) => Math.round(value * 1000)));
   for (let i = 0; i < heights.length; i += 1) {
-    const height = heights[i];
-    if (Number.isNaN(height)) continue;
-    for (const value of bands) {
-      if (Math.abs(height - value) <= tolerance) {
-        heights[i] = Number.NaN;
-        break;
-      }
-    }
+    if (wanted.has(Math.round(heights[i] * 1000))) heights[i] = Number.NaN;
   }
   return heights;
 }
 
 /**
- * Every height a source calls nodata, however the recipe said it.
+ * Reads `maskRange` into a list of low-high pairs.
  *
- * A masked colour is a masked height wearing a different hat: in this space the
- * three channels are one number, so `#0186a0` and `0` are the same statement
- * about the same pixel. Folding them together is what lets a tolerance widen
- * both -- and a recipe that masks by colour needs that more than one masking by
- * value, because a colour picked off a tile is one exact number and the
- * resampled ground either side of it is nine others.
- * @param {object} source - One source out of a recipe.
- * @returns {number[]} - Heights, in metres.
+ * One pair or several, because both read naturally: `[-1, 0]` is the common
+ * case and `[[-1, 0], [-10001, -9999]]` is a source with a sentinel as well as
+ * a band. A pair the wrong way round is taken as the same band rather than
+ * refused -- the recipe validation says so, and a merge that has got this far
+ * should not silently mask nothing.
+ * @param {Array<number[]>|number[]|undefined} maskRange - What the recipe said.
+ * @returns {Array<number[]>} - Pairs, low first.
  */
-export function maskBands(source) {
-  const heights = [...(source?.maskValues ?? [])]
-    .map(Number)
-    .filter(Number.isFinite);
-  const { redFactor, greenFactor, blueFactor, baseShift } =
-    encodingFactors(source);
+export function rangesOf(maskRange) {
+  if (!Array.isArray(maskRange) || maskRange.length === 0) return [];
+  const pairs = Array.isArray(maskRange[0]) ? maskRange : [maskRange];
+  const out = [];
+  for (const pair of pairs) {
+    if (!Array.isArray(pair) || pair.length < 2) continue;
+    const low = Number(pair[0]);
+    const high = Number(pair[1]);
+    if (!Number.isFinite(low) || !Number.isFinite(high)) continue;
+    out.push(low <= high ? [low, high] : [high, low]);
+  }
+  return out;
+}
 
-  for (const colour of source?.maskColors ?? []) {
-    const packed = parseColor(colour);
-    if (packed === null) continue;
-    heights.push(
-      ((packed >> 16) & 255) * redFactor +
-        ((packed >> 8) & 255) * greenFactor +
-        (packed & 255) * blueFactor -
-        baseShift,
-    );
+/**
+ * Blanks every height inside a band.
+ *
+ * The shape nodata actually has. An archive resampled on its way to being
+ * built does not hold the number it was authored with -- cubic overshoots at
+ * every edge it crosses, so a sea authored as exactly 0 arrives as a field of
+ * 0 with -0.4 and 0.1 scattered through it near the coast. Masking the exact
+ * values takes some of them and leaves the rest standing, and where another
+ * source is underneath each survivor becomes a spike as tall as the difference
+ * between them: measured at 25 m on a real merge, on half a per cent of the
+ * tile, which is what stipples a hillshade.
+ *
+ * A band rather than a width either side of a value, because nodata is rarely
+ * symmetric about anything. Sea is everything from the deepest sentinel up to
+ * zero and nothing above it, and a width wide enough to reach the bottom of
+ * that reaches the same distance into real ground. See docs/tile-stacks.md --
+ * "What a mask has to match".
+ * @param {Float32Array} heights - Metres, modified in place.
+ * @param {Array<number[]>|number[]} [maskRange] - A `[low, high]` pair, or a list of them.
+ * @returns {Float32Array} - The same array.
+ */
+export function maskRanges(heights, maskRange) {
+  const bands = rangesOf(maskRange).map(([low, high]) => [
+    Math.round(low * 1000),
+    Math.round(high * 1000),
+  ]);
+  if (bands.length === 0) return heights;
+
+  // Compared in thousandths, the same way maskHeights compares. A Float32Array
+  // holds -0.2 as -0.20000000298, which falls outside a band written as
+  // [-0.2, 0] -- and an edge that does not include the number written on it is
+  // a mask that quietly leaves a row of pixels behind.
+  for (let i = 0; i < heights.length; i += 1) {
+    const height = heights[i];
+    if (Number.isNaN(height)) continue;
+    const at = Math.round(height * 1000);
+    for (const [low, high] of bands) {
+      if (at >= low && at <= high) {
+        heights[i] = Number.NaN;
+        break;
+      }
+    }
   }
   return heights;
 }
@@ -698,16 +710,11 @@ export function mergeElevation(contributions, options) {
     // before the height adjustment, which would otherwise shift the values
     // out from under the comparison.
     //
-    // With a tolerance they become one test. A masked colour is a masked
-    // height in this space, and widening only half of them would leave a
-    // recipe that masks by colour exactly where it started.
-    const tolerance = Number(source.maskTolerance) || 0;
-    if (tolerance > 0) {
-      maskHeights(heights, maskBands(source), tolerance);
-    } else {
-      maskHeights(heights, source.maskValues);
-      maskColors(heights, contribution.raster, source.maskColors);
-    }
+    maskHeights(heights, source.maskValues);
+    maskColors(heights, contribution.raster, source.maskColors);
+    // A band as well as, not instead of: a source may have a sentinel it names
+    // exactly and a range of ground it does not want either.
+    maskRanges(heights, source.maskRange);
     if (source.heightAdjustment) {
       for (let i = 0; i < heights.length; i += 1) {
         heights[i] += source.heightAdjustment;

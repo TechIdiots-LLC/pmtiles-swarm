@@ -35,8 +35,8 @@ import { BLEND_MODES, isBlendMode } from './rgba.js';
  * @property {number} [baseVal] - Mapbox decode offset.
  * @property {number} [interval] - Mapbox decode step.
  * @property {number[]} [maskValues] - Heights meaning "no data here".
- * @property {number} [maskTolerance] - Metres either side of each masked value.
- *   0, the default, matches exactly.
+ * @property {Array<number[]>|number[]} [maskRange] - A `[low, high]` band of
+ *   heights meaning "no data here", or a list of them.
  * @property {Array<string|number[]>} [maskColors] - Pixel colours meaning the
  *   same, as "#rrggbb" or [r, g, b]. Exact, where a height mask has to round.
  * @property {number} [heightAdjustment] - Metres, added after masking.
@@ -129,23 +129,27 @@ export function validateStack(stack) {
     if (source?.maskValues !== undefined && !Array.isArray(source.maskValues)) {
       problems.push(`sources[${index}].maskValues must be a list`);
     }
-    if (source?.maskTolerance !== undefined) {
-      const tolerance = Number(source.maskTolerance);
-      if (!Number.isFinite(tolerance) || tolerance < 0) {
-        problems.push(`sources[${index}].maskTolerance must be 0 or more`);
+    if (source?.maskRange !== undefined) {
+      // One pair or a list of them. Anything else is a range nobody can read,
+      // and a mask that silently matches nothing is the failure this whole
+      // feature is most prone to.
+      const given = Array.isArray(source.maskRange) ? source.maskRange : null;
+      const pairs =
+        given && given.length && Array.isArray(given[0]) ? given : [given];
+      const usable =
+        given &&
+        given.length > 0 &&
+        pairs.every(
+          (pair) =>
+            Array.isArray(pair) &&
+            pair.length === 2 &&
+            pair.every((edge) => Number.isFinite(Number(edge))),
+        );
+      if (!usable) {
+        problems.push(
+          `sources[${index}].maskRange must be [low, high], or a list of them`,
+        );
       }
-    }
-    // A width with nothing to widen. Refused rather than ignored: it reads as
-    // a mask that catches more than it does. A masked colour counts -- in
-    // elevation space it is a masked height written another way.
-    if (
-      source?.maskTolerance &&
-      !source.maskValues?.length &&
-      !source.maskColors?.length
-    ) {
-      problems.push(
-        `sources[${index}].maskTolerance needs maskValues or maskColors to widen`,
-      );
     }
     if (source?.feather !== undefined) {
       const feather = Number(source.feather);

@@ -1905,6 +1905,21 @@
         );
 
       /**
+       * A mask range as the field shows it.
+       *
+       * One pair is written plainly; a recipe carrying several is shown as
+       * JSON, because the editor offers one band and the file may hold more
+       * than the editor can draw.
+       * @param {*} range - What the recipe says.
+       * @returns {string} - What to put in the box.
+       */
+      const rangeText = (range) => {
+        if (!Array.isArray(range) || range.length === 0) return '';
+        if (Array.isArray(range[0])) return JSON.stringify(range);
+        return range.slice(0, 2).join(', ');
+      };
+
+      /**
        * Redraws the open detail pane, when it is one that changes by itself.
        *
        * Guarded against overlapping, because a piece map of a large archive is
@@ -7620,10 +7635,11 @@ Every piece is hashed against the ` +
                       value="${escapeHtml((source.maskValues ?? []).join(', '))}" />
              </label>
              <label class="choice"
-                    title="Match a masked height OR colour within this many metres rather than exactly — in this space a colour is a height, so both are widened. An archive resampled on its way to being built does not hold the number it was authored with: cubic overshoots at every coastline, so a sea authored as 0 arrives as 0 with -0.4 and 0.1 scattered through it, and masking #0186a0 catches 0.0 m while -0.1 m through -0.9 m stand. With another source underneath, each survivor becomes a spike as tall as the difference between them. 0 matches exactly, as before.">
-               ± <input type="number" step="any" min="0" style="width:5rem" placeholder="0"
-                        data-stack-field="maskTolerance" data-stack-index="${index}"
-                        value="${source.maskTolerance ?? ''}" /> m
+                    title="Mask every height inside a band, written low, high. Nodata is rarely one number: an archive resampled on its way to being built does not hold what it was authored with, so a sea authored as 0 arrives scattered across -0.9 m to 0 — and masking the two ends of that leaves everything between, standing proud of whatever is underneath. A band says what you mean, and asymmetrically: sea is everything up to zero and nothing above it.">
+               Mask range
+               <input style="width:9rem" placeholder="-1, 0"
+                      data-stack-field="maskRange" data-stack-index="${index}"
+                      value="${escapeHtml(rangeText(source.maskRange))}" /> m
              </label>`;
 
         return `
@@ -7745,11 +7761,16 @@ Every piece is hashed against the ` +
             .filter(Boolean);
         } else if (field === 'required') {
           source.required = event.target.checked;
-        } else if (field === 'maskTolerance') {
-          const metres = Number(event.target.value);
-          if (event.target.value === '' || !(metres > 0)) {
-            delete source.maskTolerance;
-          } else source.maskTolerance = metres;
+        } else if (field === 'maskRange') {
+          // Held while it is half-typed, the way the clip box is: four numbers
+          // arrive one keystroke at a time and a field that cleared itself
+          // after the first comma could never be filled in.
+          const numbers = event.target.value
+            .split(',')
+            .map((part) => Number(part.trim()))
+            .filter((n) => Number.isFinite(n));
+          if (numbers.length >= 2) source.maskRange = numbers.slice(0, 2);
+          else if (event.target.value.trim() === '') delete source.maskRange;
         } else if (field === 'feather') {
           const pixels = Number(event.target.value);
           if (event.target.value === '' || !(pixels > 0)) delete source.feather;
