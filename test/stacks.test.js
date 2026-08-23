@@ -260,9 +260,60 @@ describe('noticing that the file changed', () => {
         ],
       }),
     );
+    // The timestamp is moved on rather than waited for. A filesystem's clock
+    // ticks about every 15 ms on NTFS, so two writes this close together
+    // usually share an mtime -- which made this test a coin toss on how the
+    // two writes fell against the clock rather than on whether a change is
+    // noticed. Measured at 36 rewrites in 40 keeping the same mtime.
+    const later = new Date(Date.now() + 10_000);
+    await fs.utimes(file, later, later);
+
     // Past the one-second floor that stops a map statting per tile.
     await new Promise((resolve) => setTimeout(resolve, 1100));
     assert.equal(await store.refresh(), true);
+    assert.equal(store.list().length, 2);
+  });
+
+  it('notices an edit the filesystem clock did not tick for', async () => {
+    // The narrow case behind that flake, which is real and not only a test
+    // problem: an edit inside one clock tick leaves the mtime where it was,
+    // and a refresh comparing only the timestamp would never read it.
+    const dir = await fs.mkdtemp(path.join(workspace, 'sametick-'));
+    const file = path.join(dir, 'stacks.json');
+    await fs.writeFile(
+      file,
+      JSON.stringify({ stacks: [{ id: 'one', sources: [{ category: 'a' }] }] }),
+    );
+    const stamp = new Date(Date.UTC(2026, 0, 1, 12, 0, 0));
+    await fs.utimes(file, stamp, stamp);
+
+    const store = new StackStore(dir);
+    await store.load();
+    const recorded = (await fs.stat(file)).mtimeMs;
+
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        stacks: [
+          { id: 'one', sources: [{ category: 'a' }] },
+          { id: 'two', sources: [{ category: 'b' }] },
+        ],
+      }),
+    );
+    // Both stamped to the same instant rather than one restored from the
+    // other: reading a time back gives a Date, which is only accurate to the
+    // millisecond, so a restored timestamp is not reliably the one that was
+    // there. Setting both leaves nothing to chance -- and this has to be exact
+    // or the test passes for the wrong reason.
+    await fs.utimes(file, stamp, stamp);
+    assert.equal(
+      (await fs.stat(file)).mtimeMs,
+      recorded,
+      'the two timestamps differ, so this is not the case being tested',
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    assert.equal(await store.refresh(), true, 'the edit went unseen');
     assert.equal(store.list().length, 2);
   });
 

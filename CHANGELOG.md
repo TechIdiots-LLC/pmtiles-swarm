@@ -14,6 +14,18 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- **An edit inside one clock tick went unnoticed.** `stacks.json` is re-read when its modification
+  time changes, and a filesystem's clock is coarser than an edit: on NTFS the tick is about 15 ms,
+  measured here at 36 rapid rewrites in 40 landing on the same timestamp. Two edits that close
+  together left the mtime alone and the second was never read.
+
+  The size is compared as well now, which catches the ones that changed the file's length - most of
+  them - and costs nothing, since the stat was already being made.
+
+  This is also what made the reload test flake, roughly one run in three: it wrote the file twice in
+  quick succession and then depended on how those two writes fell against the clock. It stamps both
+  writes to the same instant now and asserts they really are the same, so it tests whether a change
+  is noticed rather than whether the clock happened to tick.
 - **A stack with a shallow global source served holes above z14.** How far the merge would climb
   for a source with no tile at this zoom was a fixed six levels. GEBCO is z0-8 and the sea floor has
   no more detail to give, so a stack serving z16 has to upscale that z8 tile eight levels - and at

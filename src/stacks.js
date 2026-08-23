@@ -528,6 +528,7 @@ export class StackStore {
   #stacks = new Map();
   #problems = new Map();
   #mtime = null;
+  #size = null;
   #checkedAt = 0;
 
   /**
@@ -552,10 +553,13 @@ export class StackStore {
     let raw;
     try {
       raw = JSON.parse(await fs.readFile(this.#file, 'utf8'));
-      this.#mtime = (await fs.stat(this.#file)).mtimeMs;
+      const stat = await fs.stat(this.#file);
+      this.#mtime = stat.mtimeMs;
+      this.#size = stat.size;
     } catch (error) {
       if (error.code === 'ENOENT') {
         this.#mtime = null;
+        this.#size = null;
         return;
       }
       throw error;
@@ -588,9 +592,15 @@ export class StackStore {
     if (now - this.#checkedAt < 1000) return false;
     this.#checkedAt = now;
 
+    // Size as well as the timestamp. A filesystem's clock is coarser than an
+    // edit: on NTFS the tick is about 15 ms, so two writes in quick succession
+    // land on the same mtime and the second would never be seen. Comparing the
+    // length as well catches the ones that changed it, which is most of them --
+    // and it costs nothing, since the stat was made anyway.
     const stat = await fs.stat(this.#file).catch(() => null);
     const mtime = stat?.mtimeMs ?? null;
-    if (mtime === this.#mtime) return false;
+    const size = stat?.size ?? null;
+    if (mtime === this.#mtime && size === this.#size) return false;
     await this.load();
     return true;
   }
@@ -676,6 +686,8 @@ export class StackStore {
 `,
     );
     await fs.rename(temp, this.#file);
-    this.#mtime = (await fs.stat(this.#file)).mtimeMs;
+    const written = await fs.stat(this.#file);
+    this.#mtime = written.mtimeMs;
+    this.#size = written.size;
   }
 }
