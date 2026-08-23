@@ -323,9 +323,13 @@ export function passThroughRead({
   if (clip && clip.where !== INSIDE) return null;
 
   const recipe = only.source.source ?? {};
-  // Anything the recipe asks of *this* source changes its pixels.
+  // Anything the recipe asks of *this* source changes its pixels. Every mask
+  // belongs on this list: one left off is a tile handed back with the very
+  // pixels the recipe asked to remove, on exactly the tiles where no other
+  // source answered and the mask mattered most.
   if (recipe.maskValues?.length) return null;
   if (recipe.maskColors?.length) return null;
+  if (recipe.maskRange?.length) return null;
   if (recipe.heightAdjustment) return null;
   if (recipe.opacity !== undefined && Number(recipe.opacity) !== 1) return null;
   if (recipe.blend && recipe.blend !== 'normal') return null;

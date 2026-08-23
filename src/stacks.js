@@ -293,6 +293,7 @@ export function needsCodec(stack) {
   for (const [index, source] of (stack.sources ?? []).entries()) {
     if (source.maskValues?.length) return `sources[${index}].maskValues`;
     if (source.maskColors?.length) return `sources[${index}].maskColors`;
+    if (source.maskRange?.length) return `sources[${index}].maskRange`;
     if (source.heightAdjustment) return `sources[${index}].heightAdjustment`;
     if (source.opacity !== undefined && Number(source.opacity) !== 1) {
       return `sources[${index}].opacity`;

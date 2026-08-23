@@ -338,4 +338,22 @@ describe('what a clip costs the short-circuit', () => {
   it('refuses a tile the shape excludes', () => {
     assert.equal(check({ bounds: [0, 0, 1, 1] }, OUTSIDE), null);
   });
+
+  // Every mask, named one at a time. The short-circuit hands back the source's
+  // own bytes, so a mask it does not know about is a mask that does nothing --
+  // and only on the tiles where no other source answered, which is where the
+  // hole it was meant to leave matters most. `maskRange` was missing: a stack
+  // masking its sea as a band served that sea unmasked, and the bathymetry
+  // underneath never showed.
+  for (const [what, recipe] of [
+    ['a list of heights', { maskValues: [0] }],
+    ['a band of heights', { maskRange: [-10, 0] }],
+    ['a list of bands', { maskRange: [[-10, 0]] }],
+    ['a colour', { maskColors: ['#000000'] }],
+    ['a height adjustment', { heightAdjustment: 3 }],
+  ]) {
+    it(`refuses a source masked by ${what}`, () => {
+      assert.equal(check(recipe), null);
+    });
+  }
 });

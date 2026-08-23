@@ -5,7 +5,17 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A source masked only by `maskRange` was served unmasked.** The short-circuit that hands a tile
+  back byte-for-byte, rather than decoding and merging it, lists the recipe fields that make a tile
+  need the merge — and `maskRange` was never added to it when the field shipped in 0.76.0. So on
+  every tile where exactly one source answered, the mask did nothing at all: a stack masking its sea
+  as a band served that sea at its own height, and the bathymetry underneath never showed. Adding
+  `maskValues` alongside appeared to fix it, because that field *was* on the list and forced the
+  decode the band then rode along with.
+
+  The list names one mask at a time rather than asking whether a source masks anything, so it is
+  covered field by field now. `needsCodec` had the same gap: a stack whose only mask was a band
+  claimed to need no codec, which on a node without `sharp` is the same silence by another route.
 
 ## 0.79.0
 ### ✨ Features and improvements
