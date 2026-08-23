@@ -4,6 +4,13 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.85.1
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
 - **An export no longer pretends a stack has categories.** Both doors fell back to
   `stack.categories` when none were given — a field the typedef never had, validation never checked,
   the editor has no box for and nothing ever wrote. A category is what an *archive* is filed under,
