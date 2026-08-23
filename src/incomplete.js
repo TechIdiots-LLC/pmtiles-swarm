@@ -147,7 +147,10 @@ export class CompletionWatcher {
     this.#config = config;
   }
 
-  /** Whether marking is switched on at all. @returns {boolean} - True when armed. */
+  /**
+   * Whether marking is switched on at all.
+   * @returns {boolean} - True when armed.
+   */
   get enabled() {
     return suffixFor(this.#config) !== '';
   }
@@ -168,7 +171,10 @@ export class CompletionWatcher {
     this.#timer.unref?.();
   }
 
-  /** Stops watching. @returns {void} */
+  /**
+   * Stops watching.
+   * @returns {void}
+   */
   stop() {
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = undefined;

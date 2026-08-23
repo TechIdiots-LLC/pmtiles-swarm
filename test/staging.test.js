@@ -9,7 +9,12 @@ import { INCOMING, settleFromStaging } from '../src/library.js';
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-staging-'));
 after(() => fs.rm(workspace, { recursive: true, force: true }));
 
-/** A staging directory holding one finished download. */
+/**
+ * A staging directory holding one finished download.
+ * @param {string} name - The downloaded file's name.
+ * @param {string} [bytes] - What is in it.
+ * @returns {Promise<object>} - The root, the staging directory and the file.
+ */
 async function staged(name, bytes = 'archive bytes') {
   const root = await fs.mkdtemp(path.join(workspace, 'root-'));
   const staging = path.join(root, INCOMING, 'abc123');
@@ -231,7 +236,10 @@ describe('clearing staging at startup', () => {
 });
 
 describe('two requests for one URL', () => {
-  /** A slow server, so a second request genuinely overlaps the first. */
+  /**
+   * A slow server, so a second request genuinely overlaps the first.
+   * @returns {Promise<object>} - Its URL, how often it was asked, and close().
+   */
   async function slowArchive() {
     const dir = await fs.mkdtemp(path.join(workspace, 'dup-'));
     const fixture = path.join(dir, 'src.pmtiles');
@@ -262,7 +270,11 @@ describe('two requests for one URL', () => {
     };
   }
 
-  /** A library over a throwaway catalog and an inert engine. */
+  /**
+   * A library over a throwaway catalog and an inert engine.
+   * @param {string} dir - Where the catalog and the archives go.
+   * @returns {Promise<object>} - The library.
+   */
   async function libraryIn(dir) {
     const { Catalog } = await import('../src/catalog.js');
     const { Library } = await import('../src/library.js');

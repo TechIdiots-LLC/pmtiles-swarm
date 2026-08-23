@@ -9,7 +9,6 @@ import { TileStore } from './tiles.js';
  * just a saving: a node in cache mode holds almost none of the archive, so
  * reading the header to answer a TileJSON request would mean pulling pieces out
  * of the swarm before a map has asked for a single tile.
- *
  * @see https://github.com/mapbox/tilejson-spec/tree/master/3.0.0
  */
 

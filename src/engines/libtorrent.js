@@ -477,6 +477,10 @@ export class LibtorrentEngine {
     }
   }
 
+  /**
+   * Every torrent the sidecar holds.
+   * @returns {Promise<object[]>} - Normalised torrents.
+   */
   async list() {
     // A node that is shutting down still has a console polling it and a sweep
     // or two in flight. Answering "the sidecar exited" to each of them fills
@@ -759,6 +763,7 @@ export class LibtorrentEngine {
   /**
    * Persists resume data, so the next start skips re-hashing the store.
    * @param {string} [infoHash] - One torrent, or all when omitted.
+   * @param {object} [options] - `timeoutMs` to override the default deadline.
    * @returns {Promise<{written: number, asked: number}>} - How many torrents
    *   were told to write resume data, and how many actually did before the
    *   deadline.
@@ -807,7 +812,7 @@ export class LibtorrentEngine {
    * @param {string} op - Operation name.
    * @param {object} params - Operation parameters.
    * @param {number} [timeoutMs] - How long to wait. Default 60s.
-   * @returns {Promise<any>} - The result.
+   * @returns {Promise<unknown>} - Whatever the sidecar answered.
    */
   async #call(op, params, timeoutMs = 60000) {
     if (op !== 'shutdown') await this.connect();

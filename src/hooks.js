@@ -33,7 +33,6 @@ const TAIL_LINES = 20;
  *   %N name          %I infohash      %F content path
  *   %L category      %G categories    %D save path
  *   %Z size          %C file count
- *
  * @param {string} argument - An argument possibly containing placeholders.
  * @param {object} entry - The catalog entry that finished.
  * @returns {string} - The argument with placeholders replaced.
@@ -96,7 +95,10 @@ export class ProgramHooks {
     this.#config = config;
   }
 
-  /** Whether either command is configured. @returns {boolean} - True when armed. */
+  /**
+   * Whether either command is configured.
+   * @returns {boolean} - True when armed.
+   */
   get enabled() {
     return Boolean(
       this.#config.onComplete?.command || this.#config.onAdded?.command,
@@ -129,7 +131,10 @@ export class ProgramHooks {
     }
   }
 
-  /** Stops watching. @returns {void} */
+  /**
+   * Stops watching.
+   * @returns {void}
+   */
   stop() {
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = undefined;

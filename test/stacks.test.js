@@ -24,7 +24,14 @@ import {
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-stacks-'));
 after(() => fs.rm(workspace, { recursive: true, force: true }));
 
-/** A catalog entry standing in for a real archive. */
+/**
+ * A catalog entry standing in for a real archive.
+ * @param {string} infoHash - Its infohash.
+ * @param {string} name - Its filename.
+ * @param {string[]} categories - What it is filed under.
+ * @param {object} [pmtiles] - Probe fields to override.
+ * @returns {object} - A catalog entry.
+ */
 const archive = (infoHash, name, categories, pmtiles = {}) => ({
   infoHash,
   name,
@@ -46,6 +53,7 @@ const archive = (infoHash, name, categories, pmtiles = {}) => ({
  * @param {object[]} entries - Catalog entries.
  * @param {object[]} stackList - Stack definitions.
  * @param {object} [tileData] - infoHash to a map of "z/x/y" to bytes.
+ * @param {object} [options] - Configuration to merge in.
  * @returns {Promise<object>} - get() and close().
  */
 async function serve(entries, stackList, tileData = {}, options = {}) {

@@ -232,6 +232,27 @@ describe('a save that is refused changes nothing', () => {
     );
   });
 
+  it('refuses a key that only the prototype chain knows about', async () => {
+    // `key in DEFAULTS` answered yes to these, because every object inherits
+    // them. `config.__proto__ = {...}` is then not a setting being set: it
+    // replaces the running config's prototype, and writes the result to disk.
+    for (const key of ['__proto__', 'constructor', 'toString']) {
+      const config = { watch: [], sources: [] };
+      const updates = JSON.parse(`{"${key}": {"port": 9999}}`);
+
+      await assert.rejects(
+        () => saveConfig(config, updates),
+        /unknown setting/,
+        `${key} was accepted as a setting`,
+      );
+      assert.equal(
+        Object.getPrototypeOf(config),
+        Object.prototype,
+        `${key} changed the config's prototype`,
+      );
+    }
+  });
+
   it('applies nothing when a guarded key is genuinely changed', async () => {
     const config = { allowHooksFromApi: false, watch: [] };
     await assert.rejects(

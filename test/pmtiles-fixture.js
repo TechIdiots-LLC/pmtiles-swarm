@@ -12,7 +12,6 @@ import { zxyToTileId } from 'pmtiles';
  * tile path runs through the real `pmtiles` library, so a mistake in offsets,
  * directory encoding or the header would surface here rather than in
  * production. The spec is small enough that this is only a few dozen lines.
- *
  * @see https://github.com/protomaps/PMTiles/blob/main/spec/v3/spec.md
  */
 

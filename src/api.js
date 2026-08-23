@@ -84,10 +84,11 @@ function route(handler) {
  * Progress has its own route already: `runningAdds()` feeds `/api/adds`, the
  * console polls it, and `DELETE /api/adds` cancels the ones that can be.
  * @param {object} res - The response to answer.
- * @param {Function} start - Called with `{onValidated}`; returns the add's promise.
- * @param {object} accepted - Fields describing the source, for the 202 body.
- * @param {string} message - What the 202 tells the caller is now happening.
- * @param {string} what - Prefixed log tag and source, for a failure nobody is waiting on.
+ * @param {object} options - The add itself, and what to say about it.
+ * @param {Function} options.start - Called with `{onValidated}`; returns the add's promise.
+ * @param {object} options.accepted - Fields describing the source, for the 202 body.
+ * @param {string} options.message - What the 202 tells the caller is now happening.
+ * @param {string} options.what - Prefixed log tag and source, for a failure nobody is waiting on.
  * @returns {Promise<void>} - Resolves once the response has been sent.
  */
 async function acceptAdd(res, { start, accepted, message, what }) {
@@ -154,7 +155,6 @@ async function acceptAdd(res, { start, accepted, message, what }) {
  * worse, because it makes the shape of the fragment depend on what happened to
  * be available, so every reader has to handle both anyway. One shape,
  * `URLSearchParams` reads it, and a magnet survives the round trip exactly.
- *
  * @param {string} url - The URL a style points at.
  * @param {object} handles - `{torrent, magnet}`, either of which may be absent.
  * @returns {string} - The URL, with a fragment if there is anything to put in one.
@@ -205,6 +205,11 @@ function sourceUrlFor(category, newest, base) {
   return withSwarmHandles(url, { torrent, magnet });
 }
 
+/**
+ * Builds the HTTP surface over everything the node has already started.
+ * @param {object} parts - The node's live pieces.
+ * @returns {object} - The Express app.
+ */
 export function createApp({
   library,
   catalog,

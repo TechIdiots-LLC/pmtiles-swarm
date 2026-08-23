@@ -14,6 +14,7 @@ import { fromBounds, fromGeoJSON } from './cutline.js';
 /** Where they live under the data directory. */
 const DIRECTORY = 'cutlines';
 
+/** Loads the cutline files once and hands out prepared shapes. */
 export class CutlineStore {
   #dir;
   #shapes = new Map();
@@ -26,7 +27,10 @@ export class CutlineStore {
     this.#dir = path.join(dataDir ?? './data', DIRECTORY);
   }
 
-  /** Where cutlines are read from. @returns {string} - The directory. */
+  /**
+   * Where cutlines are read from.
+   * @returns {string} - The directory.
+   */
   get directory() {
     return this.#dir;
   }
@@ -56,7 +60,10 @@ export class CutlineStore {
     }
   }
 
-  /** Every cutline that loaded. @returns {string[]} - Their names. */
+  /**
+   * Every cutline that loaded.
+   * @returns {string[]} - Their names.
+   */
   list() {
     return [...this.#shapes.keys()].sort();
   }

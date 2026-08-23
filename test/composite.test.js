@@ -353,7 +353,11 @@ describe('reading tiles while two engines are running', () => {
 });
 
 describe('what a secondary is allowed to be handed', () => {
-  /** A primary reporting a given progress, recording what it was asked. */
+  /**
+   * A primary reporting a given progress, recording what it was asked.
+   * @param {number} progress - What it reports, 0 to 1.
+   * @returns {object} - An engine.
+   */
   const primaryAt = (progress) => ({
     name: 'libtorrent',
     added: [],

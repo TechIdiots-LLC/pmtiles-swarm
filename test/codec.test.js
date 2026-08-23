@@ -4,13 +4,27 @@ import { loadCodec, requireCodec, resetCodec } from '../src/codec.js';
 
 const codec = await loadCodec();
 
-/** Terrain-RGB: the three channels are the three bytes of one height. */
+/**
+ * Terrain-RGB: the three channels are the three bytes of one height.
+ * @param {number} metres - The height to encode.
+ * @param {number} [base] - The encoding’s base shift.
+ * @param {number} [interval] - Metres per step.
+ * @returns {number[]} - Red, green and blue.
+ */
 const encodeHeight = (metres, base = -10000, interval = 0.1) => {
   const value = Math.round((metres - base) / interval);
   return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
 };
 
-/** And back again. */
+/**
+ * And back again.
+ * @param {number} r - Red.
+ * @param {number} g - Green.
+ * @param {number} b - Blue.
+ * @param {number} [base] - The encoding’s base shift.
+ * @param {number} [interval] - Metres per step.
+ * @returns {number} - The height, in metres.
+ */
 const decodeHeight = (r, g, b, base = -10000, interval = 0.1) =>
   base + (r * 65536 + g * 256 + b) * interval;
 

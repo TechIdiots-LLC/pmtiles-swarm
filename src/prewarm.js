@@ -71,6 +71,7 @@ function tooEarly(error) {
   return /metadata has not arrived|not held here/i.test(error?.message ?? '');
 }
 
+/** Pulls each archive's header and root directory before anything asks for a tile. */
 export class HeadWarmer {
   #tiles;
   #catalog;
@@ -411,7 +412,10 @@ export class HeadWarmer {
     this.#timer.unref?.();
   }
 
-  /** Stops warming. @returns {void} */
+  /**
+   * Stops warming.
+   * @returns {void}
+   */
   stop() {
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = undefined;

@@ -805,7 +805,11 @@ describe('pointing "latest" at the newest build', () => {
 });
 
 describe('the hint about candidate dates', () => {
-  /** Captures what a poll logs against a server with nothing on it. */
+  /**
+   * Captures what a poll logs against a server with nothing on it.
+   * @param {object} source - The watched source to poll.
+   * @returns {Promise<string[]>} - Every line it logged.
+   */
   async function saidWhenEmpty(source) {
     const said = [];
     const log = console.log;
@@ -927,7 +931,11 @@ describe('retiring older builds from a source', () => {
     return { removed, optionsUsed };
   }
 
-  /** A build this source produced, `days` ago. */
+  /**
+   * A build this source produced, `days` ago.
+   * @param {number} days - How long ago it was built.
+   * @returns {object} - A catalog entry.
+   */
   const build = (days) => ({
     infoHash: `old${days}`.padEnd(40, '0'),
     name: `protomaps-${days}.pmtiles`,

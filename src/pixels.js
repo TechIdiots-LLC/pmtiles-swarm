@@ -17,6 +17,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 /** How long to wait for a worker to answer before giving up on it. */
 const REPLY_TIMEOUT_MS = 120000;
 
+/** A pool of threads for the pixel work, so a merge never blocks the server. */
 export class PixelWorker {
   #workers = [];
   #pending = new Map();
@@ -75,7 +76,10 @@ export class PixelWorker {
     }
   }
 
-  /** How many threads this pool holds. @returns {number} - The count. */
+  /**
+   * How many threads this pool holds.
+   * @returns {number} - The count.
+   */
   get size() {
     return this.#workers.length;
   }

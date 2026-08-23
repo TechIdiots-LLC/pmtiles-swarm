@@ -21,7 +21,10 @@ import { Library } from '../src/library.js';
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-remote-'));
 after(() => fs.rm(workspace, { recursive: true, force: true }));
 
-/** Serves one small but real PMTiles archive. */
+/**
+ * Serves one small but real PMTiles archive.
+ * @returns {Promise<object>} - Its URL, and close().
+ */
 async function archiveServer() {
   const dir = await fs.mkdtemp(path.join(workspace, 'node-'));
   const fixture = path.join(dir, 'src.pmtiles');
@@ -58,7 +61,10 @@ const inert = {
   destroy: async () => {},
 };
 
-/** An engine that really builds a torrent, recording how it was asked. */
+/**
+ * An engine that really builds a torrent, recording how it was asked.
+ * @returns {object} - An engine, with `calls`.
+ */
 function creating() {
   const calls = [];
   return {
@@ -99,7 +105,11 @@ function within(promise, what) {
   ]);
 }
 
-/** An engine whose hash reports where it is and then waits to be stopped. */
+/**
+ * An engine whose hash reports where it is and then waits to be stopped.
+ * @param {object} [options] - `report` is called with each progress update.
+ * @returns {object} - An engine, and a promise for when hashing began.
+ */
 function stalling({ report } = {}) {
   let began;
   const hashing = new Promise((resolve) => {

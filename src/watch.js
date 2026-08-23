@@ -22,7 +22,6 @@ import { retains, retire } from './retention.js';
  * `monthly-*.pmtiles` is what they mean. Every other character is escaped, so
  * a name containing regex punctuation matches itself rather than becoming a
  * pattern by accident.
- *
  * @param {string} pattern - A glob, matched against the basename.
  * @returns {RegExp} - Anchored, case-insensitive.
  */
@@ -38,6 +37,7 @@ export function globToRegExp(pattern) {
   return new RegExp(`^${body}$`, 'i');
 }
 
+/** Watches folders and imports the archives that appear in them. */
 export class WatchManager {
   #library;
   #watchers = [];

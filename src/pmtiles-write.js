@@ -274,12 +274,18 @@ export class PMTilesWriter {
     return new PMTilesWriter({ ...options, tempPath, handle });
   }
 
-  /** How many tiles have been offered, including duplicates. @returns {number} - The count. */
+  /**
+   * How many tiles have been offered, including duplicates.
+   * @returns {number} - The count.
+   */
   get addressedTiles() {
     return this.#addressed;
   }
 
-  /** How many entries the directories will hold. @returns {number} - The count. */
+  /**
+   * How many entries the directories will hold.
+   * @returns {number} - The count.
+   */
   get tileEntries() {
     return this.#entries.length;
   }
@@ -296,12 +302,18 @@ export class PMTilesWriter {
     return this.#entries;
   }
 
-  /** Tile bytes buffered so far. @returns {number} - The byte count. */
+  /**
+   * Tile bytes buffered so far.
+   * @returns {number} - The byte count.
+   */
   get dataBytes() {
     return this.#offset;
   }
 
-  /** Whether the tiles have arrived in order. @returns {boolean} - True while they have. */
+  /**
+   * Whether the tiles have arrived in order.
+   * @returns {boolean} - True while they have.
+   */
   get clustered() {
     return this.#clustered;
   }

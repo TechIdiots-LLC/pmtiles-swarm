@@ -10,7 +10,11 @@ import { passThroughRead } from '../src/stack-tile.js';
  * only of refusals.
  */
 
-/** A source that asks for nothing beyond its own bytes. */
+/**
+ * A source that asks for nothing beyond its own bytes.
+ * @param {object} [over] - Fields to override, `recipe` among them.
+ * @returns {object} - A resolved source.
+ */
 const plainSource = (over = {}) => ({
   name: 'base',
   source: { encoding: 'mapbox', ...over.recipe },
@@ -21,13 +25,22 @@ const plainSource = (over = {}) => ({
   },
 });
 
-/** One source having answered at the requested zoom. */
+/**
+ * One source having answered at the requested zoom.
+ * @param {object} source - The source that answered.
+ * @param {object} [over] - Fields to override on what it found.
+ * @returns {object} - One read.
+ */
 const read = (source, over = {}) => ({
   source,
   found: { tile: { data: Buffer.from('bytes') }, parentZ: 8, ...over },
 });
 
-/** The whole call, with everything set up to succeed. */
+/**
+ * The whole call, with everything set up to succeed.
+ * @param {object} [over] - Anything to change about the call.
+ * @returns {object|null} - What `passThroughRead` decided.
+ */
 const check = (over = {}) =>
   passThroughRead({
     reads: over.reads ?? [read(plainSource())],

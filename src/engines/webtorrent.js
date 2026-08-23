@@ -357,6 +357,10 @@ export class WebTorrentSeedEngine {
     };
   }
 
+  /**
+   * Every torrent the client holds.
+   * @returns {Promise<object[]>} - Normalised torrents.
+   */
   async list() {
     if (!this.#client) return [];
     return this.#client.torrents.map((torrent) => this.#normalise(torrent));

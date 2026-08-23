@@ -220,15 +220,16 @@ export class ScheduledSourceManager {
   #running = false;
   #lastRun = new Map();
 
+  /** Reads the clock. Injectable so a long import can be simulated. */
+  #now;
+
   /**
    * Creates the manager.
    * @param {import('./library.js').Library} library - Where imports go.
    * @param {import('./catalog.js').Catalog} catalog - Used to skip what we already have.
    * @param {object} config - Resolved configuration.
+   * @param {object} [options] - `now` reads the clock.
    */
-  /** Reads the clock. Injectable so a long import can be simulated. */
-  #now;
-
   constructor(library, catalog, config, { now = () => new Date() } = {}) {
     this.#library = library;
     this.#catalog = catalog;
@@ -629,7 +630,6 @@ export class ScheduledSourceManager {
    *
    * The dated file stays the real one either way, so it remains seedable under
    * its own torrent while consumers reference a fixed path.
-   *
    * @param {object} source - The source definition.
    * @param {object} entry - The freshly imported entry.
    * @returns {Promise<void>} - Resolves once linked, or logs and continues.

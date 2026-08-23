@@ -247,7 +247,6 @@ export async function createTorrentFromUrl(url, options = {}) {
  * Used to decide whether a file already under its final name is the archive
  * being asked for. A HEAD is enough and costs nothing next to the alternative,
  * which is transferring the whole thing a second time to find out.
- *
  * @param {string} url - The archive's URL.
  * @param {AbortSignal} [signal] - Cancels the probe.
  * @returns {Promise<number>} - Length, or 0.

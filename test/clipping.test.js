@@ -13,20 +13,33 @@ import { clipsFor, passThroughRead } from '../src/stack-tile.js';
  * applies where it should not removes ground somebody wanted.
  */
 
-/** A resolved source carrying a recipe. */
+/**
+ * A resolved source carrying a recipe.
+ * @param {object} [recipe] - Recipe fields to set on the source.
+ * @returns {object} - A resolved source.
+ */
 const source = (recipe = {}) => ({
   name: 'base',
   source: { encoding: 'mapbox', ...recipe },
   entry: { infoHash: 'a'.repeat(40), pmtiles: { format: 'webp' } },
 });
 
-/** A resolved stack over those sources. */
+/**
+ * A resolved stack over those sources.
+ * @param {...object} sources - Resolved sources, in recipe order.
+ * @returns {object} - A resolved stack.
+ */
 const stackOf = (...sources) => ({
   stack: { id: 's', output: {} },
   sources,
 });
 
-/** A contribution of flat ground. */
+/**
+ * A contribution of flat ground.
+ * @param {number} size - Tile width and height, in pixels.
+ * @param {object} [coverage] - What the clip left, where the source is clipped.
+ * @returns {object} - One contribution to merge.
+ */
 const flat = (size, coverage) => ({
   source: { encoding: 'mapbox' },
   parentZ: 4,

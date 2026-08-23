@@ -12,7 +12,12 @@ after(() => fs.rm(workspace, { recursive: true, force: true }));
 
 const INFO_HASH = 'a'.repeat(40);
 
-/** An engine that answers `peers` however the test says. */
+/**
+ * An engine that answers `peers` however the test says.
+ * @param {string} name - What it calls itself.
+ * @param {Function} peers - Stands in for the engine's own `peers`.
+ * @returns {object} - An engine.
+ */
 const engineThat = (name, peers) => ({
   name,
   connect: async () => {},

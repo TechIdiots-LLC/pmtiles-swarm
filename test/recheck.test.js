@@ -32,7 +32,12 @@ const base = (name) => ({
   destroy: async () => {},
 });
 
-/** A node with one archive and whatever engine the test wants. */
+/**
+ * A node with one archive and whatever engine the test wants.
+ * @param {object} engine - The engine to run over.
+ * @param {object} [entry] - Catalog fields to override.
+ * @returns {Promise<object>} - The library, the catalog and the entry.
+ */
 async function node(engine, entry = {}) {
   const dir = await fs.mkdtemp(path.join(workspace, 'node-'));
   const data = path.join(dir, 'data');

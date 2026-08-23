@@ -21,7 +21,6 @@ import { BLEND_MODES, isBlendMode } from './rgba.js';
  * catalog entries, and serving a tile by handing back the bytes of whichever
  * source has it. No pixel is decoded, which is what lets this ship before the
  * codec question is settled.
- *
  * @typedef {object} StackSource
  * @property {string} [category] - Resolve to the newest build in this category.
  * @property {string} [archive] - Or pin one infohash. Exactly one of the two.
@@ -39,7 +38,6 @@ import { BLEND_MODES, isBlendMode } from './rgba.js';
  * @property {number} [heightAdjustment] - Metres, added after masking.
  * @property {number} [opacity] - 0-1, scales source alpha. RGBA only.
  * @property {string} [blend] - Blend operator. RGBA only.
- *
  * @typedef {object} Stack
  * @property {string} id - URL segment.
  * @property {string} [title] - Shown in the console and in TileJSON.
@@ -304,7 +302,6 @@ export function resolveStack(stack, resolvers) {
  *                      stopped.
  *   category           An older build in a category with others. Removing it
  *                      changes nothing the stack can see.
- *
  * @param {Stack[]} stacks - Every stack.
  * @param {object} entry - The catalog entry about to go.
  * @param {Function} categoryInfo - Name to `{ count, newest }` infohash.

@@ -212,7 +212,6 @@ export function formatBytes(bytes) {
  * has none to give: planetiler writes that section after every tile, so on a
  * planet archive it is the very end of the file. An entry summarised from a
  * feed therefore stays due for warming, which is what fills the rest in.
- *
  * @param {string} block - The item XML.
  * @returns {object | undefined} - The summary, or undefined if absent.
  */

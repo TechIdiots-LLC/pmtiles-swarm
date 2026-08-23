@@ -27,7 +27,10 @@ after(async () => {
   await fs.rm(workspace, { recursive: true, force: true });
 });
 
-/** A working directory nobody else is using. @returns {Promise<string>} - The path. */
+/**
+ * A working directory nobody else is using.
+ * @returns {Promise<string>} - The path.
+ */
 async function scratch() {
   const dir = path.join(workspace, crypto.randomBytes(6).toString('hex'));
   await fs.mkdir(dir, { recursive: true });

@@ -58,6 +58,7 @@ export function workDirFor(job, config = {}) {
 /** A bake that has finished is kept this long, so the console can report it. */
 const KEEP_FINISHED_MS = 10 * 60 * 1000;
 
+/** The exports a node is running, and the ones it has just finished. */
 export class BakeManager {
   #library;
   #tiles;
@@ -357,6 +358,7 @@ export class BakeManager {
    * @param {string} workDir - Where the unfinished work lives.
    * @param {string} destination - Where the archive goes.
    * @param {string} format - The output format.
+   * @param {object} options - `signal` to stop early, and how often to checkpoint.
    * @returns {Promise<void>} - Resolves when the file is written.
    */
   async #merge(

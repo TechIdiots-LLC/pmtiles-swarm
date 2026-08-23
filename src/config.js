@@ -926,7 +926,10 @@ export async function saveConfig(config, updates, configPath) {
   );
 
   for (const [key] of changing) {
-    if (!(key in DEFAULTS)) {
+    // `in` would walk the prototype chain, which says yes to `__proto__` and
+    // to `constructor` — and the assignment below then swaps the config's
+    // prototype rather than setting a setting.
+    if (!Object.hasOwn(DEFAULTS, key)) {
       throw new Error(`unknown setting: ${key}`);
     }
     if (guarded.has(key)) {

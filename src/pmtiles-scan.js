@@ -125,7 +125,7 @@ async function openArchive(archive) {
  * per-tile yield across a planet is the slowest part of the loop.
  * @param {string|object} archive - Path to the `.pmtiles`, or a byte source.
  * @param {object} [options] - `signal` to stop early.
- * @returns {AsyncGenerator<number[]>} - Chunks of ascending tile ids.
+ * @yields {number[]} - Chunks of ascending tile ids.
  */
 export async function* scanTileIds(archive, options = {}) {
   const { source, header, root, owned } = await openArchive(archive);
@@ -190,7 +190,7 @@ export async function* scanTileIds(archive, options = {}) {
  * holding every tile id of every source in memory at once.
  * @param {Array<string|object>} archives - Paths, or byte sources.
  * @param {object} [options] - `signal` to stop early.
- * @returns {AsyncGenerator<number>} - Ascending tile ids, each once.
+ * @yields {number} - Ascending tile ids, each once.
  */
 export async function* unionOfTileIds(archives, options = {}) {
   const readers = archives.map((archive) => ({

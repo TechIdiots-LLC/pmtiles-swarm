@@ -29,7 +29,11 @@ function solid([r, g, b, a = 1], size = 2) {
   };
 }
 
-/** The first pixel, back in 0..255. */
+/**
+ * The first pixel, back in 0..255.
+ * @param {object} layer - A float RGBA layer.
+ * @returns {number[]} - Red, green, blue and alpha.
+ */
 const pixel = (layer) => [
   Math.round(layer.r[0] * 255),
   Math.round(layer.g[0] * 255),
@@ -163,7 +167,12 @@ describe('taking an image tile from its parent', () => {
 });
 
 describe('compositing a whole stack', () => {
-  /** A raster of one colour, as the codec would hand it over. */
+  /**
+   * A raster of one colour, as the codec would hand it over.
+   * @param {number[]} colour - Red, green, blue and optionally alpha.
+   * @param {number} [size] - Tile width and height, in pixels.
+   * @returns {object} - A decoded raster.
+   */
   const raster = ([r, g, b, a = 255], size = 2) => {
     const data = Buffer.alloc(size * size * 4);
     for (let i = 0; i < size * size; i += 1) {

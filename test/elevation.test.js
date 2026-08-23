@@ -56,7 +56,14 @@ describe('reading a height out of three bytes', () => {
 });
 
 describe('the custom encoding, where the recipe supplies the formula', () => {
-  /** MapLibre's own unpack, to check ours against. */
+  /**
+   * MapLibre's own unpack, to check ours against.
+   * @param {number} r - Red.
+   * @param {number} g - Green.
+   * @param {number} b - Blue.
+   * @param {object} f - The four numbers MapLibre takes.
+   * @returns {number} - The height, in metres.
+   */
   const maplibreUnpack = (r, g, b, f) =>
     r * f.redFactor + g * f.greenFactor + b * f.blueFactor - f.baseShift;
 

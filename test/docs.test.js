@@ -6,7 +6,10 @@ import { describe, it } from 'node:test';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Every markdown file that is documentation rather than a note in a folder. */
+/**
+ * Every markdown file that is documentation rather than a note in a folder.
+ * @returns {Promise<string[]>} - Paths, relative to the repository root.
+ */
 async function docFiles() {
   const docs = await fs.readdir(path.join(root, 'docs'));
   return [

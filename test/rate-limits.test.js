@@ -167,7 +167,10 @@ describe('which limits are in force', () => {
 });
 
 describe('applying limits to an engine', () => {
-  /** An engine that records what it was told. */
+  /**
+   * An engine that records what it was told.
+   * @returns {object} - An engine, with `calls`.
+   */
   const recording = () => {
     const calls = [];
     return {

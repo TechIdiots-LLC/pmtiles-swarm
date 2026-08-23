@@ -305,7 +305,12 @@ function twoModes(values) {
   };
 }
 
-/** A compact picture of where the latencies actually fell. */
+/**
+ * A compact picture of where the latencies actually fell.
+ * @param {number[]} values - Latencies, in milliseconds.
+ * @param {number} [width] - Widest bar, in characters.
+ * @returns {string[]} - One line per bucket.
+ */
 function histogram(values, width = 34) {
   if (values.length === 0) return [];
   const top = Math.max(...values);
@@ -323,7 +328,12 @@ function histogram(values, width = 34) {
   });
 }
 
-/** The value at a percentile of a sorted copy. */
+/**
+ * The value at a percentile of a sorted copy.
+ * @param {number[]} values - Latencies, in milliseconds.
+ * @param {number} fraction - Where to look, 0 to 1.
+ * @returns {number} - The value there, or 0 when there are none.
+ */
 function percentile(values, fraction) {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((one, two) => one - two);
@@ -427,7 +437,12 @@ function report(sides) {
   void width;
 }
 
-/** How much slower the second is than the first, as a readable ratio. */
+/**
+ * How much slower the second is than the first, as a readable ratio.
+ * @param {number} one - A's median, in milliseconds.
+ * @param {number} two - B's median, in milliseconds.
+ * @returns {string} - A phrase for the summary, or nothing when either is missing.
+ */
 function ratio(one, two) {
   if (!one || !two) return '';
   const factor = two / one;

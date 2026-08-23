@@ -20,7 +20,11 @@ after(() => fs.rm(workspace, { recursive: true, force: true }));
 
 const INFOHASH = 'a'.repeat(40);
 
-/** The engine surface a library needs, recording what it was asked. */
+/**
+ * The engine surface a library needs, recording what it was asked.
+ * @param {object} [extra] - Members to add or override.
+ * @returns {object} - An engine, with `calls`.
+ */
 function engine(extra = {}) {
   const calls = [];
   return {

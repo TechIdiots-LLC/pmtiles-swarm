@@ -108,6 +108,12 @@ export function customEncodingFactors(metadata) {
  */
 export const SUMMARY_VERSION = 3;
 
+/**
+ * What the catalog keeps about an archive, from its header and metadata.
+ * @param {object} header - A parsed PMTiles v3 header.
+ * @param {object} [metadata] - The archive's own metadata document.
+ * @returns {object} - The summary, at `SUMMARY_VERSION`.
+ */
 export function summarize(header, metadata = {}) {
   const type = TILE_TYPES[header.tileType] ?? TILE_TYPES[0];
 

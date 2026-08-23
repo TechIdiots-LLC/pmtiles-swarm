@@ -9,7 +9,11 @@ import {
   rarest,
 } from '../src/pieces.js';
 
-/** Reads a packed bucket string back, the way the console does. */
+/**
+ * Reads a packed bucket string back, the way the console does.
+ * @param {string} base64 - The packed buckets.
+ * @returns {number[]} - One number per bucket.
+ */
 const unpack = (base64) => [...Buffer.from(base64, 'base64')];
 
 describe('reducing pieces to columns', () => {

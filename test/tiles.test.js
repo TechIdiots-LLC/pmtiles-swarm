@@ -405,6 +405,7 @@ describe('libtorrent read bridge', () => {
 describe('tile http endpoints', () => {
   /**
    * Starts the app over a fixture archive.
+   * @param {object} [configExtra] - Configuration to merge in.
    * @returns {Promise<{base: string, close: Function, entry: object}>} - The server.
    */
   async function serve(configExtra = {}) {
@@ -696,7 +697,11 @@ describe('region warming', () => {
     throw new Error('warm job never settled');
   }
 
-  /** The fixture archive only reaches z1; warming deeper needs a deeper one. */
+  /**
+   * The fixture archive only reaches z1; warming deeper needs a deeper one.
+   * @param {object} [extra] - Entry fields to override.
+   * @returns {object} - A catalog entry reaching z14.
+   */
   const deep = (extra = {}) =>
     entry({ pmtiles: { ...entry().pmtiles, maxZoom: 14 }, ...extra });
 
@@ -1287,7 +1292,11 @@ describe('what may be published', () => {
 });
 
 describe('authentication', () => {
-  /** A request shaped enough for the middleware to judge it. */
+  /**
+   * A request shaped enough for the middleware to judge it.
+   * @param {object} [extra] - Fields to override.
+   * @returns {object} - A request.
+   */
   const request = (extra = {}) => ({
     path: '/api/torrents',
     headers: {},
@@ -1296,7 +1305,10 @@ describe('authentication', () => {
     ...extra,
   });
 
-  /** A response that records what the middleware did to it. */
+  /**
+   * A response that records what the middleware did to it.
+   * @returns {object} - A response.
+   */
   const response = () => {
     const res = {
       statusCode: null,
@@ -2280,6 +2292,7 @@ describe('seeding limits', () => {
 describe('a stable handle for the current build', () => {
   /**
    * Serves two builds in one category, the second newer.
+   * @param {string[]} feedCategories - What the feed advertises.
    * @returns {Promise<object>} - Fetchers and the two infohashes.
    */
   async function serve(feedCategories) {

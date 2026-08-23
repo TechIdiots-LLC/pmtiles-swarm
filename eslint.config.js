@@ -62,6 +62,12 @@ export default [
           },
         },
       ],
+      // A destructured parameter is documented as the one thing it is:
+      // `@param {object} options - what this needs`. Requiring a tag per field
+      // would put the argument list in the header twice and the reasons
+      // nowhere, and the reasons are what docs/internals.md is for.
+      'jsdoc/require-param': ['warn', { checkDestructured: false }],
+      'jsdoc/check-param-names': ['warn', { checkDestructured: false }],
       'jsdoc/require-param-description': 'warn',
       'jsdoc/require-returns-description': 'warn',
       'jsdoc/require-description-complete-sentence': 'off',

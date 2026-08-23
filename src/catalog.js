@@ -8,7 +8,6 @@ import path from 'node:path';
  * dozens, the whole thing is human-readable and hand-editable, and it avoids a
  * native dependency in a project that already asks a lot of the install.
  * Writes go through a temp file and a rename, so a crash cannot truncate it.
- *
  * @typedef {object} CatalogEntry
  * @property {string} infoHash - Hex v1 infohash. The catalog's primary key.
  * @property {string} name - Archive filename.
@@ -99,6 +98,7 @@ export function newerFirst(a, b) {
   return String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''));
 }
 
+/** What the node knows about every archive it holds. */
 export class Catalog {
   #file;
   #entries = new Map();

@@ -9,7 +9,12 @@ import { installCrashGuard, isDeadTorrentWire } from '../src/crash-guard.js';
  * is asserted to still be fatal.
  */
 
-/** An error as Node built it, stack and all. */
+/**
+ * An error as Node built it, stack and all.
+ * @param {string} message - The message Node would have produced.
+ * @param {string[]} frames - Stack frames, innermost first.
+ * @returns {TypeError} - The error.
+ */
 const thrownAt = (message, frames) => {
   const error = new TypeError(message);
   error.stack = [`TypeError: ${message}`, ...frames].join('\n    at ');

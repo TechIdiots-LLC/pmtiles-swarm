@@ -338,7 +338,10 @@ export function createAuth(config) {
     /** Whether any credential is configured. */
     enabled,
 
-    /** Whether a password login is possible, as opposed to only a token. */
+    /**
+     * Whether a password login is possible, as opposed to only a token.
+     * @returns {boolean} - True when a password or a hash is set.
+     */
     get passwordLoginEnabled() {
       return Boolean(settings().password || settings().passwordHash);
     },

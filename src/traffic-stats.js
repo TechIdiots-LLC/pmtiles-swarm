@@ -37,7 +37,6 @@ const PRUNE_EVERY_MS = 10 * 60 * 1000;
  * A week of 15-second samples is 40,000 points and a chart a thousand pixels
  * wide; sending all of them wastes the transfer and the browser's time to draw
  * something no eye can resolve. Averaging into buckets keeps the shape.
- *
  * @param {number} from - Start of the window, unix seconds.
  * @param {number} to - End of the window, unix seconds.
  * @param {number} buckets - How many points are wanted.
@@ -116,7 +115,6 @@ export class TrafficStats {
    * Zero rows are written as readily as busy ones: a gap in the series would
    * be indistinguishable from the node having been switched off, and "this
    * archive did nothing all week" is a real answer somebody wants.
-   *
    * @returns {Promise<number>} - How many rows were written.
    */
   async sample() {
@@ -163,7 +161,6 @@ export class TrafficStats {
    * Averaged into buckets rather than returned raw — see bucketSeconds. The
    * timestamp of a bucket is its start, so a caller plotting them gets evenly
    * spaced points without having to know the sample interval.
-   *
    * @param {object} [options] - Options.
    * @param {string} [options.infoHash] - One archive, or every one summed.
    * @param {number} [options.hours] - How far back to read.
@@ -226,7 +223,6 @@ export class TrafficStats {
    * sampled over. Approximate by construction -- it assumes each sample held
    * until the next -- and the right shape of approximate: it cannot drift from
    * the graph above it, because it is the same numbers.
-   *
    * @param {object} [options] - Options.
    * @param {number} [options.hours] - How far back to read.
    * @returns {object[]} - `{infoHash, down, up, samples}`, busiest first.
@@ -254,7 +250,10 @@ export class TrafficStats {
       }));
   }
 
-  /** Starts sampling and pruning. @returns {void} */
+  /**
+   * Starts sampling and pruning.
+   * @returns {void}
+   */
   start() {
     if (this.#timer) return;
     const tick = () =>
@@ -276,7 +275,10 @@ export class TrafficStats {
     this.#pruneTimer.unref?.();
   }
 
-  /** Stops sampling. @returns {void} */
+  /**
+   * Stops sampling.
+   * @returns {void}
+   */
   stop() {
     if (this.#timer) clearInterval(this.#timer);
     if (this.#pruneTimer) clearInterval(this.#pruneTimer);
@@ -292,7 +294,6 @@ export class TrafficStats {
  * resume data, the DHT node cache. The config directory is the operator's:
  * hand-edited, diffed, copied between nodes, and the thing you reach for when a
  * node will not start. A database that grows on its own does not belong there.
- *
  * @param {object} config - Resolved configuration.
  * @returns {Promise<object>} - An open DatabaseSync.
  */

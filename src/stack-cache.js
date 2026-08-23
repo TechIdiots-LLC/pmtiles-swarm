@@ -28,6 +28,7 @@ import path from 'node:path';
  */
 const SHARD = 2;
 
+/** Merged stack tiles kept on disk, bounded by total size. */
 export class StackCache {
   #dir;
   #maxBytes;
@@ -177,7 +178,7 @@ export class StackCache {
    * would issue its own reads to every source underneath.
    * @param {string} key - What is being produced.
    * @param {Function} work - Produces the tile.
-   * @returns {Promise<any>} - What `work` returned.
+   * @returns {Promise<unknown>} - What `work` returned.
    */
   async once(key, work) {
     const running = this.#inFlight.get(key);

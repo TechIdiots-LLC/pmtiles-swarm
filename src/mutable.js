@@ -105,6 +105,12 @@ export function trackersFromMagnet(magnet) {
   return new URLSearchParams(magnet.slice('magnet:?'.length)).getAll('tr');
 }
 
+/**
+ * A magnet URI for a mutable series.
+ * @param {string|Uint8Array} publicKey - The series key, hex or bytes.
+ * @param {object} [options] - `infoHash` for the current build, `trackers` to announce.
+ * @returns {string} - The magnet URI.
+ */
 export function mutableMagnet(publicKey, options = {}) {
   // Buffer.from(string) would read hex as UTF-8 and produce a 64-byte key, so
   // the two forms have to be told apart rather than coerced.

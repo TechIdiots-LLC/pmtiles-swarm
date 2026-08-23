@@ -102,6 +102,7 @@ async function newestMtime(dir) {
   return newest;
 }
 
+/** The archives this node holds, and the engine seeding them. */
 export class Library {
   #catalog;
   #engine;
@@ -1587,6 +1588,7 @@ export class Library {
    * @param {string} magnet - Its magnet URI.
    * @param {object} engine - The engine it came from.
    * @param {object} options - Adopt options.
+   * @param {boolean} [readable] - Whether the file can be opened from here.
    * @returns {Promise<object>} - The catalog entry.
    */
   async #adoptInPlace(torrent, magnet, engine, options, readable = true) {
@@ -2285,6 +2287,7 @@ export class Library {
    * above has something to read while this is still running.
    * @param {object[]} entries - Catalog entries, newest first.
    * @param {{restored: number, failed: number}} tally - Mutated as it goes.
+   * @param {object} handed - What the caller was handed, for the seeding check.
    * @returns {Promise<{restored: number, failed: number}>} - That tally.
    */
   async #restoreEach(entries, tally, handed) {

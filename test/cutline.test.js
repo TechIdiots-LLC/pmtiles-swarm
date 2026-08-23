@@ -20,7 +20,14 @@ import {
  * are silent.
  */
 
-/** A square in WGS84, as GeoJSON. */
+/**
+ * A square in WGS84, as GeoJSON.
+ * @param {number} west - Western edge.
+ * @param {number} south - Southern edge.
+ * @param {number} east - Eastern edge.
+ * @param {number} north - Northern edge.
+ * @returns {object} - A GeoJSON polygon.
+ */
 const square = (west, south, east, north) => ({
   type: 'Polygon',
   coordinates: [

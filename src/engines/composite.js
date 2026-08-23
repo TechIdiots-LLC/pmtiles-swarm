@@ -53,12 +53,18 @@ export class CompositeEngine {
     this.marksIncomplete = primary.marksIncomplete ?? false;
   }
 
-  /** The engine that owns the data. @returns {object} - The primary. */
+  /**
+   * The engine that owns the data.
+   * @returns {object} - The primary.
+   */
   get primary() {
     return this.#primary;
   }
 
-  /** The engines that only seed. @returns {object[]} - The secondaries. */
+  /**
+   * The engines that only seed.
+   * @returns {object[]} - The secondaries.
+   */
   get secondaries() {
     return this.#secondaries;
   }
@@ -342,6 +348,10 @@ export class CompositeEngine {
     return { ...(engines[0] ?? { state: 'unknown' }), engines };
   }
 
+  /**
+   * Every torrent, gathered from every engine.
+   * @returns {Promise<object[]>} - Normalised torrents.
+   */
   async list() {
     if (this.#stopping) return [];
     const primary = await this.#primary.list();
@@ -490,6 +500,7 @@ export class CompositeEngine {
    * present at all, since it is the only one that can produce a hybrid v1+v2
    * torrent — and a hybrid serves v1 and v2 clients alike, so having it seed
    * rather than lead is no reason to make a lesser torrent.
+   * @param {string} filePath - What to build it from.
    * @param {object} options - Creation options.
    * @returns {Promise<object>} - The created torrent.
    */

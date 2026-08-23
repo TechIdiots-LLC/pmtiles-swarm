@@ -87,6 +87,7 @@ describe('what belongs on a public listener', () => {
 describe('two listeners', () => {
   /**
    * A node listening on a public port and an admin port.
+   * @param {object} [overrides] - Configuration to merge in.
    * @returns {Promise<object>} - Both fetchers, and close().
    */
   async function split(overrides = {}) {

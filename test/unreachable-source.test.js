@@ -27,7 +27,10 @@ async function serving(handler) {
   };
 }
 
-/** A URL nothing is listening on. */
+/**
+ * A URL nothing is listening on.
+ * @returns {Promise<string>} - A URL whose server has been closed.
+ */
 async function deadUrl() {
   const node = await serving((_req, res) => res.end());
   const { url } = node;

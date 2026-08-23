@@ -68,6 +68,7 @@ const REROLL_AFTER = 2;
  */
 const MINIMUM_NODES = 8;
 
+/** Publishes the catalog under a BEP 46 key, and keeps it published. */
 export class MutablePublisher {
   #catalog;
   #dht;
@@ -250,6 +251,7 @@ export class MutablePublisher {
   /**
    * Waits for the DHT to bootstrap, then publishes.
    * @param {number} readyMs - How long to wait before going ahead regardless.
+   * @param {number} retryMs - How long to wait before trying again.
    * @returns {Promise<void>} - Resolves once the first attempt is done.
    */
   async #firstPublish(readyMs, retryMs) {
@@ -375,7 +377,7 @@ export class MutablePublisher {
    * holding the original would save a table belonging to a socket that has
    * been closed.
    * @param {Function} save - Receives the live DHT.
-   * @returns {Promise<*>} - Whatever `save` returns, or 0 with no socket.
+   * @returns {Promise<unknown>} - Whatever `save` returns, or 0 with no socket.
    */
   async saveTable(save) {
     if (!this.#dht) return 0;

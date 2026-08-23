@@ -128,7 +128,13 @@ describe('the terrain preview', () => {
     'utf8',
   );
 
-  /** The detection, lifted out and run against a TileJSON. */
+  /**
+   * The detection, lifted out and run against a TileJSON.
+   * @param {object} tilejson - What the page would have fetched.
+   * @param {boolean} [vector] - Whether the source is vector.
+   * @param {string} [search] - The query string, for ?raw=1.
+   * @returns {object} - `{terrainReady, terrain}`.
+   */
   const detect = (tilejson, vector = false, search = '') => {
     const from = preview.indexOf('const TERRAIN =');
     const to = preview.indexOf('const terrain = terrainReady && !raw;');
@@ -392,7 +398,11 @@ describe('the three pages that decide what terrain is', () => {
   const fileOf = (name) =>
     fsSync.readFileSync(path.join(here, '..', 'src', 'web', name), 'utf8');
 
-  /** The preview's own detection, which reads a TileJSON. */
+  /**
+   * The preview's own detection, which reads a TileJSON.
+   * @param {object} tilejson - What the page would have fetched.
+   * @returns {object} - `{terrainReady, terrain}`.
+   */
   const fromPreview = (tilejson) => {
     const file = fileOf('preview.html');
     const from = file.indexOf('const TERRAIN =');
@@ -406,7 +416,11 @@ describe('the three pages that decide what terrain is', () => {
     )(tilejson, false, { search: '' });
   };
 
-  /** A page's `drawsAsTerrain`, lifted out and made callable. */
+  /**
+   * A page's `drawsAsTerrain`, lifted out and made callable.
+   * @param {string} name - The page to lift it from.
+   * @returns {Function} - The page's own `drawsAsTerrain`.
+   */
   const fromPage = (name) => {
     const file = fileOf(name);
     const at = file.search(/(const|function) drawsAsTerrain/);

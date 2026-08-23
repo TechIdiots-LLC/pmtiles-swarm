@@ -198,7 +198,10 @@ export class SeedingLimits {
     this.#timer.unref?.();
   }
 
-  /** Stops the sweep. @returns {void} */
+  /**
+   * Stops the sweep.
+   * @returns {void}
+   */
   stop() {
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = undefined;

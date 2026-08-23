@@ -5,7 +5,16 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A settings save could set something that was not a setting.** `saveConfig` rejected a key it
+  did not recognise by asking `key in DEFAULTS`, and `in` walks the prototype chain: every object
+  inherits `__proto__`, `constructor` and `toString`, so all three passed as known settings. The
+  assignment underneath then did what those names mean rather than what a setting means -
+  `config.__proto__ = {...}` replaces the running config's prototype - and the result was written
+  to the config file. `Object.hasOwn` asks the question that was meant.
+
+  Reachable only by an admin token, which is a token that can change any setting anyway, so this
+  is a gate that was not doing its job rather than a way in. Found by reading through what
+  `security/detect-object-injection` had to say, which is what it is switched on for.
 
 ## 0.72.0
 ### ✨ Features and improvements

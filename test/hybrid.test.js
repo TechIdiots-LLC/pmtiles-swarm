@@ -43,7 +43,11 @@ function creating(name) {
   };
 }
 
-/** An engine with no creator of its own. */
+/**
+ * An engine with no creator of its own.
+ * @param {string} name - What it calls itself.
+ * @returns {object} - An engine.
+ */
 const plain = (name) => ({
   name,
   connect: async () => {},

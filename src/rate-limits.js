@@ -204,7 +204,10 @@ export class SpeedLimits {
     this.#timer.unref?.();
   }
 
-  /** Stops watching. @returns {void} */
+  /**
+   * Stops watching.
+   * @returns {void}
+   */
   stop() {
     clearInterval(this.#timer);
     this.#timer = undefined;
