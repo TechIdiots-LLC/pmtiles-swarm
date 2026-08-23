@@ -33,6 +33,7 @@ Operator-facing documentation is elsewhere — see [publishing](publishing.md),
 - [Retiring old builds](#retiring-old-builds)
 - [Prewarming a freshly joined archive](#prewarming-a-freshly-joined-archive)
 - [Named save locations](#named-save-locations)
+- [Storage](#storage)
 
 ## Marking incomplete archives
 
@@ -884,3 +885,60 @@ moving several hundred gigabytes is not something a settings screen should do as
 a side effect. A move checks free space before the engine is disturbed, since
 running out halfway through costs an hour, a partial file to clean up, and an
 archive that has to be put back.
+
+## Storage
+
+A merged tile cache with no way to empty it is a directory somebody eventually
+finds by hand, and a temporary file a crash left behind is one nobody finds at
+all. `GET /api/storage` reports what a node is holding that it could let go of;
+`DELETE /api/storage/:what` lets go of one of them. The console draws it as the
+Storage tab under Settings.
+
+Five things, and what each costs to lose:
+
+| What                      | Where              | Clearing it costs                                              |
+| ------------------------- | ------------------ | -------------------------------------------------------------- |
+| Merged stack tiles        | `stack-cache/`     | The merge again: an archive read per source, and a decode each |
+| Left-over temporary files | the data directory | Nothing — nobody is waiting for a file a crashed write left    |
+| Stopped exports           | the archive's disk | The hours already spent, which is what resuming would use      |
+| Traffic history           | `stats.db`         | The graphs go back to empty                                    |
+| Tile counters             | memory             | The count starts again; frees nothing                          |
+
+Everything on that list is derived and can be rebuilt, which is what makes a
+button reasonable — none of it asks whether the operator meant it, because none
+of it is the only copy of anything.
+
+### What is deliberately not on it
+
+**The archives**, and the resume data beside them. Both look like housekeeping
+and neither is. An archive is the data this node exists to serve, and retiring
+one is a decision made from its own panel with what it seeds in view. Resume
+data thrown away is a rehash of every byte on disk — and worse than useless as
+a repair, since a _stale partial_ resume file is the thing that cancels seed
+mode, which is a diagnosis rather than a sweep.
+
+### Which files a sweep is willing to touch
+
+By name and by age together, because either alone is wrong: the name says what
+a file was for and the age says whether anything still cares.
+
+The names are `*.tmp` and `pmtiles-write-*`, which is what the write-then-rename
+in `catalog.js`, `stacks.js`, `dht-state.js`, `stack-cache.js` and
+`pmtiles-write.js` leaves behind when a process stops between the two steps. The
+age is an hour. Every one of those renames happens within milliseconds, so an
+hour is far past generous — the margin is not for slowness, it is because this
+runs while the node is serving and a sweep with no margin could delete the file
+a catalog write is halfway through renaming into place.
+
+`torrents-data/` is skipped outright. It is terabytes of payload, nothing in it
+is a working file, and a sweep that walks it is a sweep that spends minutes
+finding nothing.
+
+### The bake working directories are read from disk
+
+Not from what the process remembers. A working directory outlives the run that
+made it, and one belonging to a stack somebody has since deleted is exactly the
+kind nobody thinks to look for. Whether an export is _running_ is memory's to
+say, and that is the only thing that decides whether it may be discarded —
+removing the directory under a running merge would have it fail on its next
+write, reporting a disk problem for something somebody chose.

@@ -206,6 +206,34 @@ export class BakeManager {
   }
 
   /**
+   * Every export with work still on disk, and where it is.
+   *
+   * Read from the filesystem rather than from what this process remembers: a
+   * working directory outlives the run that made it, and one belonging to a
+   * stack somebody has since deleted is exactly the kind nobody thinks to look
+   * for. Whether it is running is what decides if it may be discarded, and
+   * that is memory's to say.
+   * @returns {Promise<object[]>} - `{stackId, directory, running, stopped}`.
+   */
+  async heldWork() {
+    const found = [];
+    for (const root of this.#workRoots()) {
+      const base = path.join(root, WORK_DIR);
+      const names = await fs.readdir(base).catch(() => []);
+      for (const stackId of names) {
+        const job = this.#jobs.get(stackId);
+        found.push({
+          stackId,
+          directory: path.join(base, stackId),
+          running: Boolean(job && !job.finishedAt),
+          stopped: this.#held.has(stackId),
+        });
+      }
+    }
+    return found;
+  }
+
+  /**
    * Throws away what a stopped export had done.
    *
    * The counterpart to stopping. An export that will not be finished leaves

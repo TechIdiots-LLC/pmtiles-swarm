@@ -4823,6 +4823,100 @@ Every piece is hashed against the ` +
        * @param {HTMLElement} into - Where to render.
        * @returns {Promise<void>} - Resolves once rendered.
        */
+      /**
+       * What this node is holding that it could let go of.
+       *
+       * Everything listed here is derived and can be rebuilt, which is why
+       * each row is one button and not a dialog: a merged tile can be merged
+       * again, a traffic sample taken again, a half-finished write is a file
+       * nobody is waiting for. The archives are deliberately not here, and
+       * neither is the resume data beside them -- retiring an archive is its
+       * own decision, made where the archive is.
+       * @param {HTMLElement} into - The settings pane to render in.
+       * @returns {Promise<void>} - Resolves once it is drawn.
+       */
+      async function renderStorageEditor(into) {
+        const panel = document.createElement('div');
+        panel.className = 'panel';
+        panel.style.marginBottom = '1rem';
+        into.append(panel);
+
+        const draw = async () => {
+          let state;
+          try {
+            state = await api('/api/storage');
+          } catch (error) {
+            panel.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+            return;
+          }
+
+          const rows = state.items
+            .map((item) => {
+              const size =
+                item.bytes > 0 ? bytes(item.bytes) : item.available ? 'empty' : EMPTY;
+              const held =
+                Number.isFinite(item.count) && item.count > 0
+                  ? `<div class="sub">${item.count.toLocaleString()} ${escapeHtml(item.unit ?? '')}</div>`
+                  : '';
+              return `
+                <tr>
+                  <td>
+                    <b>${escapeHtml(item.title)}</b>
+                    <div class="sub">${escapeHtml(item.note)}</div>
+                    <div class="sub"><code>${escapeHtml(item.where || '')}</code></div>
+                  </td>
+                  <td style="white-space:nowrap">${size}${held}</td>
+                  <td style="text-align:right">
+                    <button data-clear="${escapeHtml(item.id)}"
+                            ${item.available && (item.bytes > 0 || item.count > 0) ? '' : 'disabled'}>
+                      Clear
+                    </button>
+                  </td>
+                </tr>`;
+            })
+            .join('');
+
+          panel.innerHTML = `
+            <h2 style="margin-top:0">Storage</h2>
+            <div class="sub" style="margin-bottom:0.8rem">
+              Everything here can be rebuilt, so none of it asks whether you
+              meant it. The archives themselves are not here: retiring one is
+              its own decision, made from its own panel, with what it seeds in
+              view. Holding <b>${bytes(state.bytes) === EMPTY ? 'nothing' : bytes(state.bytes)}</b>
+              under <code>${escapeHtml(state.dataDir)}</code>.
+            </div>
+            <table>
+              <tbody>${rows}</tbody>
+            </table>
+            <div class="sub" id="storage-note" style="margin-top:0.6rem"></div>`;
+
+          for (const button of panel.querySelectorAll('[data-clear]')) {
+            button.onclick = async () => {
+              const what = button.dataset.clear;
+              button.disabled = true;
+              try {
+                const gone = await api(`/api/storage/${what}`, {
+                  method: 'DELETE',
+                });
+                await draw();
+                const note = panel.querySelector('#storage-note');
+                if (note) {
+                  note.textContent = gone.bytes
+                    ? `Freed ${bytes(gone.bytes)}.`
+                    : 'Cleared.';
+                }
+              } catch (error) {
+                const note = panel.querySelector('#storage-note');
+                if (note) note.textContent = error.message;
+                button.disabled = false;
+              }
+            };
+          }
+        };
+
+        await draw();
+      }
+
       async function renderTokenEditor(into) {
         const panel = document.createElement('div');
         panel.className = 'panel';
@@ -5044,6 +5138,7 @@ Every piece is hashed against the ` +
 
       const SETTINGS_GROUPS = [
         'Serving tiles',
+        'Storage',
         'Feeds',
         'Publishing',
         'Network',
@@ -6323,6 +6418,7 @@ Every piece is hashed against the ` +
         // Tokens are credentials, so they sit with the rest of who may reach
         // this node. Hooks run a command when a download finishes, which is
         // what the Transfers tab is about.
+        await renderStorageEditor(paneFor('Storage'));
         await renderTokenEditor(paneFor('Security'));
         renderHookEditor(paneFor('Transfers'), config, restartKeys, true);
 

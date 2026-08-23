@@ -208,6 +208,25 @@ export class StackCache {
   }
 
   /**
+   * Throws away every tile it is holding.
+   *
+   * The hit and miss counters are left alone: they say what the cache has been
+   * doing since the process started, which emptying it does not unmake. The
+   * files go one at a time and forgivingly -- one that vanished underneath is
+   * one fewer to remove.
+   * @returns {Promise<number>} - How many tiles went.
+   */
+  async clear() {
+    const keys = [...this.#entries.keys()];
+    this.#entries.clear();
+    this.#bytes = 0;
+    for (const key of keys) {
+      await fs.rm(this.#pathFor(key), { force: true }).catch(() => {});
+    }
+    return keys.length;
+  }
+
+  /**
    * What the cache is holding, for the console and for tests.
    * @returns {object} - entries, bytes, maxBytes, hits, misses.
    */

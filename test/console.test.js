@@ -378,6 +378,20 @@ describe('clipping a source in the stack editor', () => {
     );
   });
 
+  it('offers somewhere to let go of what a node is holding', () => {
+    // A cache with no way to empty it is a directory somebody eventually finds
+    // by hand, and a leftover temporary file is one nobody finds at all.
+    assert.match(script, /'Storage',/);
+    assert.match(script, /api\('\/api\/storage'\)/);
+    assert.match(script, /data-clear=/);
+  });
+
+  it('says what clearing each thing costs, from the node rather than the page', () => {
+    // What a merged tile costs to rebuild is the merge's business, so the note
+    // travels with the measurement instead of being written twice.
+    assert.match(script, /item\.note/);
+  });
+
   it('says when a source names a cutline this node has not got', () => {
     // The source contributes nothing until there is one, and silently serving
     // no tiles is the worst way to find that out.
@@ -2031,11 +2045,13 @@ describe('the settings schema', () => {
         (match) => match[1],
       ),
     );
-    // These two are appended rather than rendered through `into:`.
+    // Some are appended rather than rendered through `into:`. Matched by the
+    // shape a renderer has rather than by name, so a new one does not have to
+    // be added here to stop this failing.
     for (const match of script.matchAll(
-      /paneFor\('([^']+)'\)\.append|renderTokenEditor\(paneFor\('([^']+)'\)|renderHookEditor\(paneFor\('([^']+)'\)/g,
+      /paneFor\('([^']+)'\)\.append|render[A-Za-z]*\(\s*paneFor\('([^']+)'\)/g,
     )) {
-      withEditor.add(match[1] ?? match[2] ?? match[3]);
+      withEditor.add(match[1] ?? match[2]);
     }
 
     const empty = declared.filter(

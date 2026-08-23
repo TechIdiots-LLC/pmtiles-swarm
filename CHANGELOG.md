@@ -2,7 +2,31 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **Somewhere to clear the caches and the files nothing is waiting for.** A merged tile cache with
+  no way to empty it is a directory somebody eventually finds by hand, and a temporary file a crash
+  left behind is one nobody finds at all. Settings has a **Storage** tab now: what this node is
+  holding, what each thing costs to lose, and a button per row.
+
+  Five things — merged stack tiles, left-over temporary files, stopped exports, traffic history and
+  the tile counters. `GET /api/storage` reports them, `DELETE /api/storage/:what` lets go of one.
+  Everything on the list is derived and can be rebuilt, which is what makes a button reasonable:
+  none of it asks whether you meant it, because none of it is the only copy of anything.
+
+  The archives are deliberately not on it, and neither is the resume data beside them. Both look
+  like housekeeping and neither is: retiring an archive is a decision made from its own panel with
+  what it seeds in view, and resume data thrown away is a rehash of every byte on disk.
+
+  A sweep picks files by name and by age together, because either alone is wrong: `*.tmp` and
+  `pmtiles-write-*`, untouched for an hour. Every write that uses one renames within milliseconds,
+  so the margin is not for slowness — it is because this runs while the node is serving, and a sweep
+  with none at all could take the file a catalog write is halfway through renaming into place.
+  `torrents-data` is skipped outright, being terabytes of payload with no working files in it.
+
+  Stopped exports are read off the disk rather than from what the process remembers, so one left by
+  a stack somebody has since deleted is found as well. A running export is left alone: removing the
+  directory under a running merge would have it fail on its next write, reporting a disk problem for
+  something somebody chose. This is also the first way to discard one without finding the directory
+  by hand — the API for it shipped in 0.76.0 with nothing calling it.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._

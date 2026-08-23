@@ -144,6 +144,18 @@ export class TrafficStats {
   }
 
   /**
+   * Throws away every sample, and the file they were in.
+   *
+   * Vacuumed rather than only deleted: deleting rows returns the pages to
+   * sqlite's free list, and somebody clearing this wants the disk back.
+   * @returns {void}
+   */
+  clear() {
+    this.#db.prepare('DELETE FROM traffic').run();
+    this.#db.exec('VACUUM');
+  }
+
+  /**
    * Deletes samples that have aged past the retention window.
    * @returns {number} - Rows removed.
    */

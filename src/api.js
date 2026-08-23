@@ -37,6 +37,7 @@ import { SUMMARY_VERSION } from './pmtiles-probe.js';
 import { TileReadError } from './tiles.js';
 import { loadCodec } from './codec.js';
 import { answerStackTile, outputFormat, outputSize } from './stack-tile.js';
+import { clearStorage, storageReport } from './storage.js';
 import {
   isPinned,
   needsCodec,
@@ -787,6 +788,38 @@ export function createApp({
       }
       stats.reset();
       res.status(204).end();
+    }),
+  );
+
+  // What this node is holding that it could let go of. Separate from the
+  // settings it sits beside in the console: a setting says what to do next and
+  // this says what to do about what was already done.
+  app.get(
+    '/api/storage',
+    route(async (_req, res) => {
+      res.setHeader('cache-control', 'no-store');
+      res.json(
+        await storageReport({ config, stackCache, stats, traffic, bakes }),
+      );
+    }),
+  );
+
+  app.delete(
+    '/api/storage/:what',
+    route(async (req, res) => {
+      const gone = await clearStorage(req.params.what, {
+        config,
+        stackCache,
+        stats,
+        traffic,
+        bakes,
+      });
+      if (!gone) {
+        return res
+          .status(404)
+          .json({ error: 'nothing here is called that, or it is turned off' });
+      }
+      return res.json(gone);
     }),
   );
 
