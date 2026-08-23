@@ -4,6 +4,14 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+- **The scheduled-export settings are under Settings → Feeds.** `stacks.scheduledExports` and
+  `stacks.exportIntervalHours` had no schema entry, so they were config-file-only and invisible in
+  the console. Feeds rather than a group of their own, because that tab is already where the
+  automations that bring a file in on a timer sit — a scheduled source watching an upstream
+  directory, a subscription following someone else's feed. A scheduled export is the same kind of
+  thing; it just produces the file here instead of fetching it, and it lands in a category and goes
+  out over the feed exactly as a fetched one does.
+
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 

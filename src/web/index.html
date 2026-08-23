@@ -6180,6 +6180,42 @@ Every piece is hashed against the ` +
             },
           ],
         },
+        // Under Feeds because that is where the automations that bring in a
+        // file sit, and this is one of those -- it just produces the file here
+        // instead of fetching it from somewhere else.
+        {
+          group: 'Feeds',
+          title: 'Scheduled stack exports',
+          blurb:
+            'Baking a stack into an archive on a timer, so a file does not ' +
+            'fall behind the recipe it came from. When each stack runs is set ' +
+            'on the stack itself, under Export to archive; these are the two ' +
+            'things that apply to all of them.',
+          fields: [
+            {
+              key: 'stacks.scheduledExports',
+              label: 'Run scheduled exports',
+              type: 'boolean',
+              help:
+                'Off leaves the schedules on the recipes without acting on ' +
+                'them, which is what a second node serving the same stacks ' +
+                'wants: the recipe travels, and only one of them should be ' +
+                'the node that bakes it.',
+            },
+            {
+              key: 'stacks.exportIntervalHours',
+              label: 'Default interval',
+              type: 'number',
+              placeholder: '24',
+              unit: 'hours',
+              help:
+                'For a stack scheduled by interval rather than by time of ' +
+                'day. A day, because that is the grain these archives are ' +
+                'rebuilt at — a run whose sources have not moved is skipped ' +
+                'anyway, so a shorter one mostly costs the checking.',
+            },
+          ],
+        },
       ];
 
       /** Reads `a.b` out of a config object. */

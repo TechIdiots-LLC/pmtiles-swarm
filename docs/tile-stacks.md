@@ -1522,6 +1522,20 @@ an export taking longer than its interval, which for a planet is not unusual.
 installed — is not recorded as a run, so the next tick tries again. A schedule
 that recorded the attempt would wait a day before showing it had ever run.
 
+#### Where the settings live
+
+The schedule itself is on the stack, because it is a fact about that stack —
+which categories it is filed under, which disk it lands on, what it is called.
+The two that apply to every stack are under **Settings → Feeds**:
+`stacks.scheduledExports` and `stacks.exportIntervalHours`.
+
+Feeds rather than a group of their own, because that tab is already where the
+automations that bring a file in on a timer sit — a scheduled source watching an
+upstream directory, a subscription following someone else's feed. A scheduled
+export is the same kind of thing. It just produces the file here instead of
+fetching it from somewhere else, and it lands in a category and goes out over
+the feed exactly as a fetched one does.
+
 `stacks.scheduledExports: false` turns the whole thing off, which is what a
 second node serving the same stacks wants: the recipe travels, and only one of
 them should be the node that bakes it.

@@ -378,6 +378,17 @@ describe('clipping a source in the stack editor', () => {
     );
   });
 
+  it('puts the export schedule settings with the other automations', () => {
+    // Feeds is where the things that bring a file in on a timer live, and a
+    // scheduled export is one of those -- it produces the file here rather
+    // than fetching it from somewhere else.
+    const at = script.indexOf("title: 'Scheduled stack exports'");
+    assert.ok(at > 0, 'no scheduled-export settings section');
+    assert.match(script.slice(at - 200, at), /group: 'Feeds'/);
+    assert.match(script, /key: 'stacks\.scheduledExports'/);
+    assert.match(script, /key: 'stacks\.exportIntervalHours'/);
+  });
+
   it('can put an export on a schedule', () => {
     // An archive is a snapshot and a stack is not: without this, a file falls
     // behind its own recipe and somebody has to notice.
