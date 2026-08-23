@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.73.0
+### ✨ Features and improvements
 - **A source can fade in at the edge of its shape instead of stopping dead.** Where a
   high-resolution local DEM meets a coarser global one the two disagree - by their survey and by
   their vertical datum - and the merge took the upper one outright, so the step between them read
@@ -89,7 +96,6 @@
 
   Anything built with a sigma has this baked in, here and in the offline merge - `gaussian_filter`
   defaults to `mode='reflect'` over one tile's array. Re-exporting is what removes it.
-- _...Add new stuff here..._
 
 ## 0.72.1
 ### 🐞 Bug fixes
