@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.79.0
+### ✨ Features and improvements
 - **Duplicate a stack.** A button beside Edit on every row, which opens the editor on a copy of that
   recipe: the same sources in the same order, the same masks, the same output, under a name of its
   own and saved only when you save it. Most stacks after the first are a variation on one that
