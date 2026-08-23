@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.77.0
+### ✨ Features and improvements
 - **A fade can be written in metres of ground.** `featherMetres` on a source says how far to blend
   it in as a distance, and the merge works out the pixels for each tile it builds -
   `40075016.686 x cos(latitude) / 2^zoom / tileSize` of them. What a fade has to hide is two sources
