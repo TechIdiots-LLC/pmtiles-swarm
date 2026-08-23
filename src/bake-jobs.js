@@ -73,10 +73,11 @@ let saidAboutThreads = false;
  * twelve cores wants twelve, and telling its operator to ask for 32 would be
  * asking them to fix something that is not broken.
  * @param {number} concurrency - What the bake was told to run.
+ * @param {number} cores - How many the machine has.
  * @returns {number} - The pool worth having.
  */
-function poolWorthHaving(concurrency) {
-  return Math.max(1, Math.min(concurrency, os.availableParallelism()));
+function poolWorthHaving(concurrency, cores) {
+  return Math.max(1, Math.min(concurrency, cores));
 }
 
 /**
@@ -92,12 +93,19 @@ function poolWorthHaving(concurrency) {
  * of this runs — so the only thing to do is say it plainly and name the fix.
  * See docs/tile-stacks.md — "Giving a bake the whole machine".
  * @param {number} concurrency - What the bake was told to run.
+ * @param {number} [cores] - How many the machine has. Injectable, so the rule
+ *   can be tested at a size rather than at whatever the test machine happens
+ *   to have -- on four cores or fewer there is nothing to be short of, and a
+ *   test asserting otherwise fails on the smallest runners and passes here.
  * @returns {void}
  */
-export function sayIfThreadStarved(concurrency) {
+export function sayIfThreadStarved(
+  concurrency,
+  cores = os.availableParallelism(),
+) {
   if (saidAboutThreads) return;
   const pool = Number(process.env.UV_THREADPOOL_SIZE) || DEFAULT_THREADPOOL;
-  const wanted = poolWorthHaving(concurrency);
+  const wanted = poolWorthHaving(concurrency, cores);
   if (pool >= wanted) return;
   saidAboutThreads = true;
   console.warn(

@@ -466,9 +466,14 @@ describe('saying when the machine cannot run the bake as wide as asked', () => {
    * The module again, so its say-once flag starts fresh.
    * @param {string|undefined} pool - What UV_THREADPOOL_SIZE is set to.
    * @param {number} concurrency - What the bake was told to run.
+   * @param {number} [cores] - The machine being described. Given rather than
+   *   taken from this one: the rule only fires when the pool is short of what
+   *   the cores could use, so a four-core runner has nothing to be short of at
+   *   the default pool of four -- and a test that assumed otherwise passed on
+   *   a sixteen-core desktop and failed in CI.
    * @returns {Promise<string[]>} - Whatever it warned, once or not at all.
    */
-  const warnedFor = async (pool, concurrency) => {
+  const warnedFor = async (pool, concurrency, cores = 16) => {
     const held = process.env.UV_THREADPOOL_SIZE;
     if (pool === undefined) delete process.env.UV_THREADPOOL_SIZE;
     else process.env.UV_THREADPOOL_SIZE = pool;
@@ -478,8 +483,8 @@ describe('saying when the machine cannot run the bake as wide as asked', () => {
     console.warn = (...parts) => said.push(parts.join(' '));
     try {
       const fresh = await import(`../src/bake-jobs.js?threads=${counter++}`);
-      fresh.sayIfThreadStarved(concurrency);
-      fresh.sayIfThreadStarved(concurrency);
+      fresh.sayIfThreadStarved(concurrency, cores);
+      fresh.sayIfThreadStarved(concurrency, cores);
       return said;
     } finally {
       console.warn = warn;
@@ -489,21 +494,17 @@ describe('saying when the machine cannot run the bake as wide as asked', () => {
   };
 
   it('names the variable and the value to give it', async () => {
-    const said = await warnedFor(undefined, 4096);
+    const said = await warnedFor(undefined, 4096, 16);
     assert.equal(said.length, 1, 'said it twice, or not at all');
     assert.match(said[0], /UV_THREADPOOL_SIZE is 4/);
     assert.match(said[0], /bakeConcurrency is 4096/);
     // The cores, not what was asked for: a thread past them has nowhere to run.
-    assert.match(
-      said[0],
-      // eslint-disable-next-line security/detect-non-literal-regexp -- built from this machine's core count
-      new RegExp(`UV_THREADPOOL_SIZE=${os.availableParallelism()}\\b`),
-    );
+    assert.match(said[0], /UV_THREADPOOL_SIZE=16\b/);
   });
 
   it('says nothing when the pool is big enough', async () => {
-    assert.deepEqual(await warnedFor('32', 32), []);
-    assert.deepEqual(await warnedFor('64', 8), []);
+    assert.deepEqual(await warnedFor('32', 32, 16), []);
+    assert.deepEqual(await warnedFor('64', 8, 16), []);
   });
 
   it('says nothing about threads the machine could not run anyway', async () => {
@@ -511,18 +512,26 @@ describe('saying when the machine cannot run the bake as wide as asked', () => {
     // told to merge far more than that at once. Nothing here is wrong, and
     // saying otherwise would send somebody to fix a machine that is already
     // using every core it has.
-    const cores = os.availableParallelism();
-    assert.deepEqual(await warnedFor(String(cores), cores * 4), []);
+    assert.deepEqual(await warnedFor('16', 48, 12), []);
   });
 
   it('says nothing at the default concurrency, which the default pool fits', async () => {
-    assert.deepEqual(await warnedFor(undefined, 4), []);
+    assert.deepEqual(await warnedFor(undefined, 4, 16), []);
+  });
+
+  it('says nothing on a machine too small to use more', async () => {
+    // Four threads is already more than two cores can run, so a bake told to
+    // merge thirty-two at once is not short of anything.
+    assert.deepEqual(await warnedFor(undefined, 32, 2), []);
   });
 
   it('reads the environment rather than assuming the default', async () => {
-    const said = await warnedFor('8', 16);
+    // Eight, not the four it would have assumed -- and eight is still short of
+    // the sixteen this machine could use.
+    const said = await warnedFor('8', 32, 16);
     assert.equal(said.length, 1);
     assert.match(said[0], /UV_THREADPOOL_SIZE is 8/);
+    assert.match(said[0], /UV_THREADPOOL_SIZE=16\b/);
   });
 });
 
