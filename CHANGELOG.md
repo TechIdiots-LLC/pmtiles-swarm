@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.74.0
+### ✨ Features and improvements
 - **The holes a mask leaves are feathered now, not just a cutline's edge.** `feather` faded a source
   in at its `cutline` or `bounds` and did nothing about `maskValues` or `maskColors` - which is
   where most of these recipes actually stop, and why the field looked like it did nothing.
@@ -29,10 +36,6 @@
 
   The field is on every source in the editor now rather than appearing only once a clip is set,
   with a note where a source neither masks nor clips and it would do nothing.
-- _...Add new stuff here..._
-
-### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.73.1
 ### 🐞 Bug fixes
