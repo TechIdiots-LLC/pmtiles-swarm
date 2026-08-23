@@ -2,7 +2,23 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **An export says so when it cannot use the machine it was given.** `stacks.bakeConcurrency` sizes
+  how many tiles are merged at once and how many threads do their arithmetic. It does not size the
+  one that binds: decoding and encoding a tile is sharp, sharp does that on libuv's thread pool, and
+  that pool holds four threads unless the environment says otherwise. Raising `bakeConcurrency` past
+  four moved where the merges queued rather than how many ran, so the export stayed slow and the
+  cores stayed idle with nothing logged and nothing failing.
+
+  Measured on sixteen cores, merging 512px tiles from three sources into lossless WebP: 26 tiles/s
+  at the default pool of 4, 41 at 8, 51 at 16, 54 at 32. It cannot be set from inside the process -
+  the pool is built before any of this code runs, and setting `process.env.UV_THREADPOOL_SIZE` at
+  startup measurably does nothing - so a bake now warns once when `bakeConcurrency` is larger than
+  the pool, naming the variable and the value to give it. The systemd unit in the guide sets it,
+  and docs/tile-stacks.md has the numbers under "Giving a bake the whole machine".
+
+  The batch is not the problem, which is worth writing down because it looks like it should be:
+  replacing it with a sliding window that retires in order measured 12% better on a large pool and
+  worse on the default one.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._

@@ -5226,7 +5226,10 @@ Every piece is hashed against the ` +
                 'one at a time none of it overlaps. This is both how many are ' +
                 'in flight and how many threads do the pixel maths. One ' +
                 'restores the old behaviour. They are written in order ' +
-                'whatever it is set to.',
+                'whatever it is set to. Raising it past 4 also needs ' +
+                'UV_THREADPOOL_SIZE set to match in the environment the node ' +
+                'starts in, or the decoding stays capped at 4 and this does ' +
+                'almost nothing.',
             },
             {
               key: 'stacks.resumeExports',

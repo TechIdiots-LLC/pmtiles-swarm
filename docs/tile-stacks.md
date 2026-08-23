@@ -711,6 +711,53 @@ tiles. Zero is as fast as it can go, which is right for a node baking and doing
 nothing else. On a node that is also serving maps it is the direct trade: how
 long the bake takes against how much of the machine it takes while it runs.
 
+### Giving a bake the whole machine
+
+`stacks.bakeConcurrency` sizes two things: how many tiles are merged at once,
+and how many threads `src/pixels.js` starts to do their arithmetic on. It does
+not size the third thing, and the third thing is the one that binds.
+
+Decoding a source tile and encoding the result are sharp, and sharp does that
+work on libuv's thread pool. That pool holds **four** threads unless the
+environment says otherwise, and it is built before any of this code runs — so
+setting `process.env.UV_THREADPOOL_SIZE` from inside the process is too late and
+measurably does nothing. Raising `bakeConcurrency` past four therefore moves
+where the merges queue rather than how many of them run: they queue at the
+decode instead of at the arithmetic, and the machine sits mostly idle looking
+like a bake that is simply slow.
+
+On sixteen cores, merging 512px tiles from three sources into lossless WebP:
+
+| `UV_THREADPOOL_SIZE` | tiles/s |
+| -------------------- | ------- |
+| 4 (the default)      | 26.2    |
+| 8                    | 40.9    |
+| 16                   | 51.1    |
+| 32                   | 54.2    |
+
+So set it in the environment the node starts in, alongside `bakeConcurrency`:
+
+```ini
+Environment=UV_THREADPOOL_SIZE=16
+```
+
+Past the core count it flattens, because at that point the cores are the limit
+and that is the right place for the limit to be. A bake warns once when
+`bakeConcurrency` is larger than the pool, because the failure is otherwise
+invisible: nothing errors, nothing logs, the export is just several times slower
+than the machine can manage.
+
+`sharp.concurrency()` is a different knob — how many threads libvips uses
+_within_ one operation — and it is left alone. A 512px tile is too small to
+split usefully, and the measurements above move by under 2% whether it is 1 or 16.
+
+The batch is not the problem, which is worth writing down because it looks like
+it should be. `bakeStack` merges a batch, waits for all of it, then writes it in
+order, so nothing merges while anything writes and a batch costs the slowest
+tile in it. Replacing that with a sliding window that retires in order was
+measured at 12% on a large pool and _slower_ on the default one, which is not
+worth the second thing to get right.
+
 ### What identifies a bake
 
 `bakeRevision` is the recipe's revision and what each source resolved to,

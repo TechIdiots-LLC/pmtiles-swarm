@@ -58,6 +58,40 @@ export function workDirFor(job, config = {}) {
 /** A bake that has finished is kept this long, so the console can report it. */
 const KEEP_FINISHED_MS = 10 * 60 * 1000;
 
+/** libuv's own default, which is what is in force when nothing says otherwise. */
+const DEFAULT_THREADPOOL = 4;
+
+/** Said once per process rather than once per bake. */
+let saidAboutThreads = false;
+
+/**
+ * Says so when the machine cannot actually run the bake as wide as it was told
+ * to.
+ *
+ * Decoding and encoding a tile is sharp, and sharp does that work on libuv's
+ * thread pool, which holds four threads unless the environment says otherwise.
+ * `bakeConcurrency` sizes the batch and the pixel pool above that, so raising
+ * it past four buys nothing on its own: the merges queue at the decode instead
+ * of at the arithmetic, and the machine sits idle looking like a bake that is
+ * simply slow. It cannot be fixed from in here — the pool is built before any
+ * of this runs — so the only thing to do is say it plainly and name the fix.
+ * See docs/tile-stacks.md — "Giving a bake the whole machine".
+ * @param {number} concurrency - What the bake was told to run.
+ * @returns {void}
+ */
+export function sayIfThreadStarved(concurrency) {
+  if (saidAboutThreads) return;
+  const pool = Number(process.env.UV_THREADPOOL_SIZE) || DEFAULT_THREADPOOL;
+  if (pool >= concurrency) return;
+  saidAboutThreads = true;
+  console.warn(
+    `[bake] bakeConcurrency is ${concurrency} but UV_THREADPOOL_SIZE is ` +
+      `${pool}, so at most ${pool} tiles can be decoded or encoded at once. ` +
+      `Set UV_THREADPOOL_SIZE=${concurrency} in the environment the node ` +
+      'starts in — it cannot be set from inside the process.',
+  );
+}
+
 /** The exports a node is running, and the ones it has just finished. */
 export class BakeManager {
   #library;
@@ -316,6 +350,7 @@ export class BakeManager {
     const pixels = codec
       ? new PixelWorker({ size: this.#concurrency() })
       : null;
+    if (codec) sayIfThreadStarved(this.#concurrency());
     try {
       await this.#merge(
         job,

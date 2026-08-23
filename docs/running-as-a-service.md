@@ -213,6 +213,12 @@ WorkingDirectory=/var/lib/pmtiles-swarm
 ExecStart=/var/lib/pmtiles-swarm/node_modules/.bin/pmtiles-swarm \
   --config /etc/pmtiles-swarm/swarm.config.json
 
+# How many threads sharp gets for decoding and encoding tiles. Four unless
+# something says otherwise, and a stack export is capped by it however wide
+# stacks.bakeConcurrency is set. Match it to the core count; see
+# docs/tile-stacks.md - "Giving a bake the whole machine".
+Environment=UV_THREADPOOL_SIZE=16
+
 # Required. The console's Save & Restart exits and expects to be brought back;
 # see below.
 Restart=always

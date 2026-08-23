@@ -17,6 +17,7 @@ import { PMTilesWriter, TileType } from '../src/pmtiles-write.js';
 import { resolveStack } from '../src/stacks.js';
 
 let workspace;
+let counter = 0;
 
 before(async () => {
   workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'bake-jobs-'));
@@ -453,6 +454,61 @@ describe('where a bake does its work', () => {
       `worked in ${imported[0].file}, not under ${publishDir}`,
     );
     assert.equal(imported[0].options.publishDir, publishDir);
+  });
+});
+
+describe('saying when the machine cannot run the bake as wide as asked', () => {
+  // Nothing errors and nothing logs when the pool is the binding constraint:
+  // the export is simply several times slower than the machine can manage,
+  // which is not something anybody works out from the outside.
+
+  /**
+   * The module again, so its say-once flag starts fresh.
+   * @param {string|undefined} pool - What UV_THREADPOOL_SIZE is set to.
+   * @param {number} concurrency - What the bake was told to run.
+   * @returns {Promise<string[]>} - Whatever it warned, once or not at all.
+   */
+  const warnedFor = async (pool, concurrency) => {
+    const held = process.env.UV_THREADPOOL_SIZE;
+    if (pool === undefined) delete process.env.UV_THREADPOOL_SIZE;
+    else process.env.UV_THREADPOOL_SIZE = pool;
+
+    const said = [];
+    const warn = console.warn;
+    console.warn = (...parts) => said.push(parts.join(' '));
+    try {
+      const fresh = await import(`../src/bake-jobs.js?threads=${counter++}`);
+      fresh.sayIfThreadStarved(concurrency);
+      fresh.sayIfThreadStarved(concurrency);
+      return said;
+    } finally {
+      console.warn = warn;
+      if (held === undefined) delete process.env.UV_THREADPOOL_SIZE;
+      else process.env.UV_THREADPOOL_SIZE = held;
+    }
+  };
+
+  it('names the variable and the value to give it', async () => {
+    const said = await warnedFor(undefined, 32);
+    assert.equal(said.length, 1, 'said it twice, or not at all');
+    assert.match(said[0], /UV_THREADPOOL_SIZE is 4/);
+    assert.match(said[0], /bakeConcurrency is 32/);
+    assert.match(said[0], /UV_THREADPOOL_SIZE=32/);
+  });
+
+  it('says nothing when the pool is big enough', async () => {
+    assert.deepEqual(await warnedFor('32', 32), []);
+    assert.deepEqual(await warnedFor('64', 8), []);
+  });
+
+  it('says nothing at the default concurrency, which the default pool fits', async () => {
+    assert.deepEqual(await warnedFor(undefined, 4), []);
+  });
+
+  it('reads the environment rather than assuming the default', async () => {
+    const said = await warnedFor('8', 16);
+    assert.equal(said.length, 1);
+    assert.match(said[0], /UV_THREADPOOL_SIZE is 8/);
   });
 });
 
