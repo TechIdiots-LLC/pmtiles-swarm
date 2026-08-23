@@ -503,6 +503,9 @@ describe('what a resolved stack covers', () => {
   });
 
   it('joins every source attribution rather than dropping any', () => {
+    // With a pipe rather than a comma. These are almost always HTML links,
+    // and a comma between two anchors reads as part of the last one's text --
+    // which is why MapLibre, Mapbox and OpenLayers all use a pipe.
     const entries = [
       archive('a'.repeat(40), 'one.pmtiles', ['one'], { attribution: 'GEBCO' }),
       archive('b'.repeat(40), 'two.pmtiles', ['two'], { attribution: 'JAXA' }),
@@ -511,7 +514,7 @@ describe('what a resolved stack covers', () => {
       { id: 's', sources: [{ category: 'one' }, { category: 'two' }] },
       entries,
     );
-    assert.equal(stackCoverage(resolved).attribution, 'GEBCO, JAXA');
+    assert.equal(stackCoverage(resolved).attribution, 'GEBCO | JAXA');
   });
 });
 

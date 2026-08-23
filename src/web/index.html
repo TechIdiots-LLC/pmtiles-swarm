@@ -687,6 +687,20 @@
         </div>
 
         <div class="field">
+          <label for="bake-attribution">Attribution</label>
+          <input id="bake-attribution" placeholder="" />
+          <div class="sub">
+            Written into the archive's own metadata, so the credit travels with
+            the file rather than living in whatever style happened to load it.
+            Filled in from every source's attribution joined with
+            <code>|</code>, since a stack is a derived work of all of them and
+            this is the thing that reliably goes missing when tiles are
+            combined. The stack's own <code>attribution</code> wins where it
+            has one.
+          </div>
+        </div>
+
+        <div class="field">
           <label for="bake-description">Description</label>
           <input id="bake-description" placeholder="" />
           <div class="sub">
@@ -8234,6 +8248,10 @@ Every piece is hashed against the ` +
         // how tiles are combined; an archive describes what it is, and only
         // the person exporting it knows that.
         $('bake-description').value = '';
+        // Unlike the description, this is filled in: it is not a thing only
+        // the person exporting knows, it is a fact about the sources, and an
+        // archive published without it is the failure worth preventing.
+        $('bake-attribution').value = stack?.attribution ?? '';
         $('bake-categories').value = (stack?.categories ?? []).join(', ');
         $('bake-output').textContent = bakeOutputSummary(stack);
         showBakeFilename();
@@ -8325,6 +8343,7 @@ Every piece is hashed against the ` +
         const name = $('bake-name').value.trim();
         const filename = $('bake-file').value.trim();
         const description = $('bake-description').value.trim();
+        const attribution = $('bake-attribution').value.trim();
 
         try {
           await api(`/api/stacks/${encodeURIComponent(id)}/bake`, {
@@ -8335,6 +8354,7 @@ Every piece is hashed against the ` +
               ...(name ? { name } : {}),
               ...(filename ? { filename } : {}),
               ...(description ? { description } : {}),
+              ...(attribution ? { attribution } : {}),
             },
           });
         } catch (error) {

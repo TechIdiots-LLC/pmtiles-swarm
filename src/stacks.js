@@ -586,10 +586,13 @@ export function stackCoverage(resolved) {
   // A stack is a derived work of every source in it, and attribution is the
   // thing that reliably goes missing when tiles are combined. Joined rather
   // than dropped when the recipe does not state one.
+  // Pipes, not commas. These are almost always HTML links, and a comma
+  // between two anchors reads as part of the last one's text -- which is how
+  // MapLibre, Mapbox and OpenLayers all write a multi-source attribution.
   const attribution =
     resolved.stack.attribution ??
     [...new Set(summaries.map((s) => s.attribution).filter(Boolean))].join(
-      ', ',
+      ' | ',
     ) ??
     undefined;
 

@@ -105,6 +105,17 @@ describe('what a baked archive says about itself', () => {
     assert.equal(metadata.baseShift, -32768);
   });
 
+  it('carries the attribution into the archive', () => {
+    // An archive travels without the style that loaded it, so this is the one
+    // place the credit survives -- and a stack is a derived work of every
+    // source in it.
+    assert.equal(
+      bakedMetadata({ attribution: 'GEBCO | JAXA' }).attribution,
+      'GEBCO | JAXA',
+    );
+    assert.equal(bakedMetadata({}).attribution, undefined);
+  });
+
   it('writes no factors for an encoding that has none', () => {
     const metadata = bakedMetadata({
       encoding: 'mapbox',

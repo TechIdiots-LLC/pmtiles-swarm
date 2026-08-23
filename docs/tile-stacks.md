@@ -232,7 +232,7 @@ it differs from the snake_case rio-rgbify-merge uses.
 | `boundsSource`        | Index into `sources` whose bounds become the stack's. Omit for the union.                                  |
 | `bounds`              | Explicit `[w, s, e, n]`. Wins over `boundsSource`.                                                         |
 | `minzoom` / `maxzoom` | Clamps. Default to the min and **max** over the sources.                                                   |
-| `attribution`         | Falls back to every source's, concatenated.                                                                |
+| `attribution`         | Falls back to every source's, joined with `\|`.                                                            |
 
 ### Source fields
 
@@ -253,8 +253,14 @@ it differs from the snake_case rio-rgbify-merge uses.
 
 `attribution` is not optional in practice. A stack is a derived work of every
 source in it, and the thing that reliably gets lost when tiles are combined is
-who the data belongs to. If it is omitted, the implementation should concatenate
-the sources' own TileJSON `attribution` strings rather than emit nothing.
+who the data belongs to. If it is omitted, every source's own TileJSON
+`attribution` is joined rather than nothing being emitted.
+
+Joined with `|`, not with a comma. These strings are almost always HTML links,
+and a comma between two anchors renders as part of the last one's text — which
+is why MapLibre, Mapbox and OpenLayers all separate them this way. The same
+string is what an export writes into the archive's metadata, so a file and the
+endpoint it was baked from credit their sources identically.
 
 ## Translating a rio-rgbify-merge config
 
@@ -812,6 +818,16 @@ that render as sea.
 `encoding` says how to read the pixels. A terrain-RGB archive without it is an
 image of nothing in particular, and `custom` carries its four factors or is not
 worth writing at all.
+
+`attribution` is the third, and the one an export cannot afford to leave out. An
+archive travels without the style that loaded it — it is seeded, mirrored and
+opened by people who never saw the stack it came from — so its own metadata is
+the only place the credit survives. The dialog is filled in from the stack: its
+own `attribution` where the recipe states one, and otherwise every source's
+joined with `|`, since a stack is a derived work of all of them. It is
+editable, because an export may be published under terms the recipe does not
+know about; it is filled in rather than blank, because unlike the description it
+is not something only the person exporting knows.
 
 ### Starting one, and watching it
 

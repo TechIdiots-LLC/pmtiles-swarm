@@ -3311,6 +3311,7 @@ export function createApp({
           savePath: req.body?.savePath,
           name: req.body?.name,
           description: req.body?.description,
+          attribution: req.body?.attribution,
         });
         return res.status(202).json({ bake: job });
       } catch (error) {

@@ -14,6 +14,7 @@ import {
   wasStopped,
 } from './bake.js';
 import { PixelWorker } from './pixels.js';
+import { stackCoverage } from './stacks.js';
 import { outputFormat } from './stack-tile.js';
 
 /**
@@ -409,7 +410,9 @@ export class BakeManager {
     // presses the button rather than an hour in.
     assertBakeable(resolved, codec);
 
-    const unresolved = resolved.sources.filter((source) => !source.entry);
+    const unresolved = resolved.sources.filter(
+      (source) => !source.entry && !source.nested,
+    );
     if (unresolved.length === resolved.sources.length) {
       const error = new Error(
         "none of this stack's sources resolved to an archive on this node",
@@ -601,6 +604,7 @@ export class BakeManager {
         filename: job.name,
         publishDir: job.publishDir ?? null,
         description: options.description ?? null,
+        attribution: options.attribution ?? null,
         categories: options.categories ?? null,
       },
       metadata: {
@@ -609,7 +613,11 @@ export class BakeManager {
         // description would fill in a field the dialog showed as empty, which
         // is a worse surprise than having no description at all.
         description: options.description,
-        attribution: resolved.stack.attribution,
+        // What the dialog was shown, which is the stack's own where it has one
+        // and every source's joined where it has not. An archive travels
+        // without the style that loaded it, so this is the only place the
+        // credit survives -- and a stack is a derived work of all of them.
+        attribution: options.attribution ?? stackCoverage(resolved).attribution,
         encoding: resolved.stack.output?.encoding,
         encodingFactors: resolved.stack.output,
         sparse: resolved.stack.sparse,

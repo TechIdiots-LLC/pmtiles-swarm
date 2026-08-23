@@ -378,6 +378,16 @@ describe('clipping a source in the stack editor', () => {
     );
   });
 
+  it('offers the attribution an export will carry', () => {
+    // An archive travels without the style that loaded it, so its own
+    // metadata is the only place the credit survives.
+    assert.match(page, /id="bake-attribution"/);
+    assert.match(
+      script,
+      /\$\('bake-attribution'\)\.value = stack\?\.attribution/,
+    );
+  });
+
   it('can start a stack from one that already works', () => {
     // Most stacks after the first are a variation on one that exists -- the
     // same sources at another zoom, or one mask changed -- and rebuilding

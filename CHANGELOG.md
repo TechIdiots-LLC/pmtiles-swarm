@@ -24,6 +24,18 @@
   still believed in it, and propagation is the whole point of naming a stack instead of copying it.
   The console offers held stacks in the source picker, alongside categories and archives.
 
+- **An export can set its attribution, and starts with the right one.** An archive travels without
+  the style that loaded it — seeded, mirrored, opened by people who never saw the stack it came from
+  — so its own metadata is the only place the credit survives. The export dialog has an
+  **Attribution** field, filled in from the stack: its own where the recipe states one, otherwise
+  every source's joined. Editable, because an export may be published under terms the recipe does
+  not know; filled in rather than blank, because unlike the description it is not something only the
+  person exporting knows.
+
+  Joined with ` | ` rather than `, `, in the TileJSON as well as in the archive. These strings are
+  almost always HTML links and a comma between two anchors renders as part of the last one's text,
+  which is why MapLibre, Mapbox and OpenLayers all separate them this way.
+
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
