@@ -3,6 +3,7 @@ import {
   decodeHeights,
   encodeHeights,
   fillNodata,
+  maskBands,
   maskColors,
   maskHeights,
   mergeElevation,
@@ -506,12 +507,17 @@ async function readMaskEdges({
             .catch(() => null);
           if (!raster) return;
 
-          // The same two masks the merge applies, asked of the parent. A ramp
+          // The same masking the merge applies, asked of the parent. A ramp
           // measured against a different idea of where the holes are would fade
           // toward ground that is not a hole.
           const heights = decodeHeights(raster, recipe);
-          maskHeights(heights, recipe.maskValues);
-          maskColors(heights, raster, recipe.maskColors);
+          const tolerance = Number(recipe.maskTolerance) || 0;
+          if (tolerance > 0) {
+            maskHeights(heights, maskBands(recipe), tolerance);
+          } else {
+            maskHeights(heights, recipe.maskValues);
+            maskColors(heights, raster, recipe.maskColors);
+          }
 
           const flags = new Uint8Array(heights.length);
           for (let i = 0; i < flags.length; i += 1) {

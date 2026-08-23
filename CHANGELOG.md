@@ -7,6 +7,36 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.75.0
+### ✨ Features and improvements
+- **`maskTolerance`, because a resampled archive does not hold the number it was authored with.**
+  `maskValues` and `maskColors` both compare exactly, and cubic resampling overshoots at every edge
+  it crosses - so a sea authored as `0` arrives as a field of `0` with `-0.4` and `0.1` scattered
+  through it near the coast. The exact matches were masked and the rest were left standing.
+
+  Masking by colour makes it sharper rather than softer: a colour is one exact number. A recipe
+  masking `#018696` and `#0186a0` is masking -1.0 m and 0.0 m, and leaving `#018697` through
+  `#01869f` - which are -0.9 m through -0.1 m - entirely alone. So the tolerance widens colours too;
+  in this space a colour is a height, and a recipe that masks by colour needs no rewriting.
+
+  Measured on a real merge, a planet DEM over GEBCO at z13: 109,441 pixels at exactly 0 in the
+  source, 13 left after masking - and 1,227 pixels of the merged tile standing clear of all eight
+  neighbours, the worst of them 25.1 m. Each was a survivor of the mask, left at sea level with
+  bathymetry underneath it. A scattering of 25 m pillars over open water is what stipples a
+  hillshade.
+
+  ```json
+  { "archive": "planet", "maskColors": ["#018696", "#0186a0"], "maskTolerance": 0.5 }
+  ```
+
+  A trade rather than a free win, which is why `0` and exact stays the default: a band wide enough
+  to catch the overshoot also eats genuine ground inside it. Half a metre of coastal flat is usually
+  the right price; five metres would not be.
+
+  Worth knowing that no summary statistic shows this. That merged tile measures 0.2 m of roughness
+  at the median and is smooth by every average - half a per cent of pixels never move the middle of
+  a distribution.
+
 ## 0.74.0
 ### ✨ Features and improvements
 - **The holes a mask leaves are feathered now, not just a cutline's edge.** `feather` faded a source

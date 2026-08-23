@@ -241,6 +241,7 @@ it differs from the snake_case rio-rgbify-merge uses.
 | `encoding`             | `mapbox` or `terrarium`. Elevation space only.                                                             |
 | `baseVal` / `interval` | Mapbox decode offset and step. Default `-10000` and `0.1`.                                                 |
 | `maskValues`           | Decoded heights meaning "no data here". Elevation space only.                                              |
+| `maskTolerance`        | Metres either side of each masked height **or colour**. `0`, the default, matches exactly.                 |
 | `heightAdjustment`     | Metres, added **after** masking. Elevation space only.                                                     |
 | `feather`              | Pixels to fade in over at the edge of the source's shape. Needs a `cutline` or `bounds`. Max 64.           |
 | `opacity`              | `0`–`1`, scales the source alpha. RGBA space only.                                                         |
@@ -1013,6 +1014,58 @@ the way an unresolvable source is: the stack is listed, and it says what is
 missing. Serving a source unclipped because its cutline could not be found would
 put back exactly the data somebody asked to remove, which is the one failure a
 clip must not have.
+
+## What a mask has to match
+
+`maskValues` and `maskColors` both compare exactly, and an archive that was
+resampled on its way to being built does not hold the number it was authored
+with. Cubic overshoots at every edge it crosses, so a sea authored as exactly
+`0` arrives as a field of `0` with `-0.4` and `0.1` scattered through it near
+the coast.
+
+Masking by colour makes this sharper rather than softer, because a colour is one
+exact number and the resampled ground either side of it is several others. A
+recipe masking `#018696` and `#0186a0` is masking **-1.0 m** and **0.0 m** —
+and leaving `#018697` through `#01869f`, which are -0.9 m through -0.1 m,
+entirely alone.
+
+Measured on a real merge — a planet DEM over GEBCO bathymetry, one tile at z13:
+
+|                                               |               |
+| --------------------------------------------- | ------------- |
+| planet source, pixels at exactly `0`          | 109,441       |
+| its lowest value                              | -0.4 m        |
+| merged tile, pixels at exactly `0`            | 13            |
+| merged tile, pixels clear of all 8 neighbours | 1,227 (0.47%) |
+| the worst of them                             | 25.1 m        |
+
+`maskValues: [0]` took the 109,441 zeroes and left the rest standing. With
+bathymetry underneath, each survivor became a spike as tall as the difference
+between the two sources — a scattering of 25 m pillars over open water, which
+is what stipples a hillshade.
+
+`maskTolerance` widens each of them into a band. A masked colour is a masked
+height in this space, so both are widened by the same number and a recipe that
+masks by colour needs no rewriting:
+
+```json
+{
+  "archive": "planet",
+  "maskColors": ["#018696", "#0186a0"],
+  "maskTolerance": 0.5
+}
+```
+
+It is a trade rather than a free win, which is why it is not the default: a
+band wide enough to catch the resampling's overshoot also eats genuine ground
+inside it. Half a metre of coastal flat is usually the right price for removing
+the pillars; five metres would not be.
+
+Worth knowing that neither a median nor a colour ramp shows this. The merged
+tile above measures 0.2 m of roughness at the median and looks smooth by every
+summary statistic — half a per cent of pixels never move the middle of a
+distribution. `tools/terrain-probe.mjs` reports the tail and counts pixels
+standing clear of their neighbours, which is the shape this makes.
 
 ## Feathering a seam
 

@@ -211,6 +211,67 @@ describe('a mapbox source with a base and interval of its own', () => {
   });
 });
 
+describe('a mask against an archive that was resampled', () => {
+  // Measured on a real merge: the planet source held 109,441 pixels at exactly
+  // 0 -- the sea -- and a range reaching -0.4 m, because cubic overshoots at
+  // every coastline it crosses. maskValues [0] took the zeroes and left the
+  // rest, and with bathymetry underneath each survivor stood up to 25 m proud
+  // of the water around it. 1227 pixels of one tile, which is what stipples a
+  // hillshade.
+
+  /**
+   * The sea as such an archive holds it: mostly 0, scattered off it.
+   * @returns {Float32Array} - Heights, in metres.
+   */
+  const sea = () =>
+    Float32Array.from([0, 0, -0.4, 0, 0.1, 0, -0.1, 0, 0, 0.3, 0, -0.2]);
+
+  /**
+   * How many pixels the mask left behind.
+   * @param {number} [tolerance] - Metres either side.
+   * @returns {number} - Survivors.
+   */
+  const survivors = (tolerance) =>
+    [...maskHeights(sea(), [0], tolerance)].filter((v) => !Number.isNaN(v))
+      .length;
+
+  it('leaves the near-misses standing when it matches exactly', () => {
+    assert.equal(survivors(0), 5, 'this is the behaviour being fixed');
+    assert.equal(survivors(undefined), 5, 'absent means exact, as before');
+  });
+
+  it('takes the band when it is given a width', () => {
+    assert.equal(survivors(0.5), 0);
+  });
+
+  it('keeps ground that is genuinely outside the band', () => {
+    // The trade: a wider tolerance eats low coastal land. It has to stop
+    // somewhere, and where is the operator's call.
+    const ground = Float32Array.from([0, 0.4, 1.2, 8.0, -30.0]);
+    const masked = maskHeights(ground, [0], 0.5);
+    assert.ok(Number.isNaN(masked[0]));
+    assert.ok(Number.isNaN(masked[1]), '0.4 is inside a 0.5 band');
+    // Compared loosely: a Float32Array holds 1.2 as 1.2000000476837158, and
+    // what is being tested is that the value survived, not how it is stored.
+    assert.ok(Math.abs(masked[2] - 1.2) < 1e-5, 'it ate real ground');
+    assert.ok(Math.abs(masked[3] - 8) < 1e-5);
+    assert.ok(Math.abs(masked[4] + 30) < 1e-5, 'it ate the bathymetry');
+  });
+
+  it('widens every value it was given, not just the first', () => {
+    const heights = Float32Array.from([0.2, -999.8, 50]);
+    const masked = maskHeights(heights, [0, -1000], 0.5);
+    assert.ok(Number.isNaN(masked[0]));
+    assert.ok(Number.isNaN(masked[1]));
+    assert.equal(masked[2], 50);
+  });
+
+  it('does nothing without values to widen', () => {
+    const heights = Float32Array.from([0, 1, 2]);
+    assert.deepEqual([...maskHeights(heights, [], 5)], [0, 1, 2]);
+  });
+});
+
 describe('masking, which decides what shows through', () => {
   it('blanks the values a source uses to mean nothing', () => {
     const heights = Float32Array.from([100, 0, -1, 250]);

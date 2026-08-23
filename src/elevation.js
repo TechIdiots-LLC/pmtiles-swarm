@@ -146,18 +146,77 @@ export function encodeHeights(heights, options) {
  * encoding produces, and shifting the terrain first leaves none of them
  * matching anything. Decoding lands on exact multiples of the interval, so
  * equality is the right comparison and a tolerance would mask real ground.
+ *
+ * `tolerance` widens each value into a band. An archive resampled on its way
+ * to being built does not hold the number it was authored with: cubic
+ * overshoots at every edge it crosses, so a sea authored as exactly 0 arrives
+ * as a field of 0 with -0.4 and 0.1 scattered through it near the coast. An
+ * exact mask takes the zeroes and leaves the rest standing, and where another
+ * source is underneath, each survivor becomes a spike as tall as the
+ * difference between them -- measured at 25 m on a real merge, on half a per
+ * cent of the tile, which is what stipples a hillshade. See
+ * docs/tile-stacks.md -- "What a mask has to match".
  * @param {Float32Array} heights - Metres, modified in place.
  * @param {number[]} [maskValues] - Heights meaning no data.
+ * @param {number} [tolerance] - Metres either side of each value. 0 is exact.
  * @returns {Float32Array} - The same array.
  */
-export function maskHeights(heights, maskValues) {
+export function maskHeights(heights, maskValues, tolerance = 0) {
   if (!maskValues?.length) return heights;
-  // Rounded to the nearest thousandth before comparing. Decoding produces
-  // base + n * interval in floating point, so a mask of -0.1 meets a decoded
-  // -0.09999999999763531 and exact equality alone would never fire.
-  const wanted = new Set(maskValues.map((value) => Math.round(value * 1000)));
+
+  if (!(tolerance > 0)) {
+    // Rounded to the nearest thousandth before comparing. Decoding produces
+    // base + n * interval in floating point, so a mask of -0.1 meets a decoded
+    // -0.09999999999763531 and exact equality alone would never fire.
+    const wanted = new Set(maskValues.map((value) => Math.round(value * 1000)));
+    for (let i = 0; i < heights.length; i += 1) {
+      if (wanted.has(Math.round(heights[i] * 1000))) heights[i] = Number.NaN;
+    }
+    return heights;
+  }
+
+  const bands = maskValues.map(Number).filter(Number.isFinite);
   for (let i = 0; i < heights.length; i += 1) {
-    if (wanted.has(Math.round(heights[i] * 1000))) heights[i] = Number.NaN;
+    const height = heights[i];
+    if (Number.isNaN(height)) continue;
+    for (const value of bands) {
+      if (Math.abs(height - value) <= tolerance) {
+        heights[i] = Number.NaN;
+        break;
+      }
+    }
+  }
+  return heights;
+}
+
+/**
+ * Every height a source calls nodata, however the recipe said it.
+ *
+ * A masked colour is a masked height wearing a different hat: in this space the
+ * three channels are one number, so `#0186a0` and `0` are the same statement
+ * about the same pixel. Folding them together is what lets a tolerance widen
+ * both -- and a recipe that masks by colour needs that more than one masking by
+ * value, because a colour picked off a tile is one exact number and the
+ * resampled ground either side of it is nine others.
+ * @param {object} source - One source out of a recipe.
+ * @returns {number[]} - Heights, in metres.
+ */
+export function maskBands(source) {
+  const heights = [...(source?.maskValues ?? [])]
+    .map(Number)
+    .filter(Number.isFinite);
+  const { redFactor, greenFactor, blueFactor, baseShift } =
+    encodingFactors(source);
+
+  for (const colour of source?.maskColors ?? []) {
+    const packed = parseColor(colour);
+    if (packed === null) continue;
+    heights.push(
+      ((packed >> 16) & 255) * redFactor +
+        ((packed >> 8) & 255) * greenFactor +
+        (packed & 255) * blueFactor -
+        baseShift,
+    );
   }
   return heights;
 }
@@ -638,8 +697,17 @@ export function mergeElevation(contributions, options) {
     // Both masks say the same thing -- nothing here -- and both have to run
     // before the height adjustment, which would otherwise shift the values
     // out from under the comparison.
-    maskHeights(heights, source.maskValues);
-    maskColors(heights, contribution.raster, source.maskColors);
+    //
+    // With a tolerance they become one test. A masked colour is a masked
+    // height in this space, and widening only half of them would leave a
+    // recipe that masks by colour exactly where it started.
+    const tolerance = Number(source.maskTolerance) || 0;
+    if (tolerance > 0) {
+      maskHeights(heights, maskBands(source), tolerance);
+    } else {
+      maskHeights(heights, source.maskValues);
+      maskColors(heights, contribution.raster, source.maskColors);
+    }
     if (source.heightAdjustment) {
       for (let i = 0; i < heights.length; i += 1) {
         heights[i] += source.heightAdjustment;

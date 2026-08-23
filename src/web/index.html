@@ -7618,6 +7618,12 @@ Every piece is hashed against the ` +
                <input style="width:12rem" placeholder="-10000, 0, -1"
                       data-stack-field="maskValues" data-stack-index="${index}"
                       value="${escapeHtml((source.maskValues ?? []).join(', '))}" />
+             </label>
+             <label class="choice"
+                    title="Match a masked height OR colour within this many metres rather than exactly — in this space a colour is a height, so both are widened. An archive resampled on its way to being built does not hold the number it was authored with: cubic overshoots at every coastline, so a sea authored as 0 arrives as 0 with -0.4 and 0.1 scattered through it, and masking #0186a0 catches 0.0 m while -0.1 m through -0.9 m stand. With another source underneath, each survivor becomes a spike as tall as the difference between them. 0 matches exactly, as before.">
+               ± <input type="number" step="any" min="0" style="width:5rem" placeholder="0"
+                        data-stack-field="maskTolerance" data-stack-index="${index}"
+                        value="${source.maskTolerance ?? ''}" /> m
              </label>`;
 
         return `
@@ -7739,6 +7745,11 @@ Every piece is hashed against the ` +
             .filter(Boolean);
         } else if (field === 'required') {
           source.required = event.target.checked;
+        } else if (field === 'maskTolerance') {
+          const metres = Number(event.target.value);
+          if (event.target.value === '' || !(metres > 0)) {
+            delete source.maskTolerance;
+          } else source.maskTolerance = metres;
         } else if (field === 'feather') {
           const pixels = Number(event.target.value);
           if (event.target.value === '' || !(pixels > 0)) delete source.feather;
