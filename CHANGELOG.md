@@ -7,6 +7,33 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.70.0
+### ✨ Features and improvements
+- **An export works on the disk the archive is going to.** It worked under the data directory and
+  moved the finished file afterwards, which is the wrong disk twice over. The bytes have to go
+  where there is room for them, and a 700 GiB archive is not something a data directory is sized
+  for - while the disk chosen to hold the finished archive is, by definition.
+
+  The second problem was the move. `publish` renames within a filesystem and copies across one, so
+  a bake that worked elsewhere ended with a full copy of the whole archive - and until that
+  finished, the buffered tile data and the finished file both sat on the data directory's disk.
+  Working at the destination makes the last step a rename and removes the second full-size write.
+
+  Nothing appears at the destination until the end either way: the archive is assembled in one
+  pass at finalize, so until then `<destination>/bakes/<stack>/` holds the buffered tiles and the
+  checkpoint and no `.pmtiles` at all.
+
+### 🐞 Bug fixes
+- **A stack said "without sharp installed, its tiles answer 501" whether or not sharp was
+  installed.** It is a conditional the console can resolve and the reader cannot: nothing on the
+  page said which way it fell, so the line told somebody with a working stack that it might not
+  be, and somebody with a broken one that it might be fine.
+
+  `/api/stacks` has always reported the codec. Now the stack row uses it. With one installed there
+  is nothing to say, so nothing is said - and the "needs a codec" badge is gone too, because a
+  warning on something that works teaches people to ignore warnings. Without one it says the tiles
+  answer 501 *here*, names the field responsible, and says what to install.
+
 ## 0.69.0
 ### ✨ Features and improvements
 - **An export merges several tiles at once.** It did one at a time, start to finish, before
@@ -39,9 +66,6 @@
   tile id was pulled from the sources, and a batch can be the last one — so a cancel arriving
   while it ran was never looked at again, and the export completed as though nobody had asked it
   to stop. Checked around each batch as well now.
-
-### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.68.3
 ### 🐞 Bug fixes

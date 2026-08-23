@@ -24,8 +24,35 @@ import { outputFormat } from './stack-tile.js';
  * first's work as if it were its own.
  */
 
-/** Where unfinished bakes live, under the data directory. */
+/** What the working directory is called, wherever it sits. */
 const WORK_DIR = 'bakes';
+
+/**
+ * Where a bake does its work.
+ *
+ * On the filesystem the archive is going to, not under the data directory.
+ * Two reasons, and the first is the one that decides it: the bytes have to go
+ * somewhere there is room for them, and a 700 GiB archive is not something a
+ * data directory is sized for -- while the disk chosen to hold the finished
+ * archive is, by definition.
+ *
+ * The second falls out of the first. `publish` renames the finished file into
+ * place where it can and copies it where it cannot, so working on the
+ * destination's filesystem turns the last step of a long job from a full copy
+ * of the whole archive into a rename. That also removes the second full-size
+ * write, since the buffered tile data and the finished archive no longer have
+ * to exist on the data directory's disk at the same time.
+ *
+ * The directory is removed when the bake finishes. A cancelled one keeps it,
+ * which is the point of it.
+ * @param {object} job - The job, carrying where it will publish to.
+ * @param {object} config - The node's configuration.
+ * @returns {string} - The working directory.
+ */
+export function workDirFor(job, config = {}) {
+  const root = job.publishDir ?? config.savePath ?? config.dataDir ?? './data';
+  return path.join(root, WORK_DIR, job.stackId);
+}
 
 /** A bake that has finished is kept this long, so the console can report it. */
 const KEEP_FINISHED_MS = 10 * 60 * 1000;
@@ -173,11 +200,7 @@ export class BakeManager {
    * @returns {Promise<void>} - Resolves when the archive is in the catalog.
    */
   async #run(job, resolved, codec, options) {
-    const workDir = path.join(
-      this.#config.dataDir ?? './data',
-      WORK_DIR,
-      job.stackId,
-    );
+    const workDir = workDirFor(job, this.#config);
     const destination = path.join(workDir, job.name);
     const format = outputFormat(resolved);
 

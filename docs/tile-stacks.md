@@ -789,6 +789,20 @@ One bake per stack at a time. Two runs of one recipe write the same checkpoint
 files over each other, and the second would resume the first's work believing it
 were its own.
 
+The work happens **on the filesystem the archive is going to** — under
+`<destination>/bakes/<stack>/` — not under the data directory. The bytes have
+to go where there is room for them, and a 700 GiB archive is not something a
+data directory is sized for, while the disk chosen to hold the finished archive
+is by definition. It also turns the last step of a long job from a copy of the
+whole archive into a rename, and means the buffered tile data and the finished
+archive never both have to fit on the data directory's disk.
+
+Nothing appears at the destination itself until the end. The archive is
+assembled in one pass at finalize, so until then the directory holds the
+buffered tiles and the checkpoint and no `.pmtiles` at all. Choosing a different
+location for a resumed bake looks for the checkpoint in the new place and finds
+none, so it starts over.
+
 ### What exists now
 
 `src/pmtiles-write.js` writes archives, `src/pmtiles-scan.js` reads back what one

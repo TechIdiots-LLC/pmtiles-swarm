@@ -281,6 +281,27 @@ describe("the catalogue page's sections", () => {
   });
 });
 
+describe('what a stack says about the codec', () => {
+  const script = page.split('<script type="module">')[1].split('</script>')[0];
+
+  it('says nothing about a codec that is installed', () => {
+    // The old line said "without sharp installed, its tiles answer 501" on
+    // every stack that did pixel work, whether or not sharp was installed --
+    // which is a conditional the console can resolve and the reader cannot.
+    assert.match(script, /stackCodec = codec \?\? null/);
+    assert.match(script, /stack\.needsCodec && !stackCodec/);
+    assert.doesNotMatch(script, /Without[\s]*<code>sharp/);
+  });
+
+  it('does not put a warning badge on a stack that works', () => {
+    // A warning on something working teaches people to ignore warnings.
+    const badge = script.indexOf('no codec for this');
+    assert.ok(badge > 0, 'the codec badge moved');
+    const before = script.slice(Math.max(0, badge - 200), badge);
+    assert.match(before, /!stackCodec/);
+  });
+});
+
 describe('clipping a source in the stack editor', () => {
   const script = page.split('<script type="module">')[1].split('</script>')[0];
 

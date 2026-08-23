@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import { zxyToTileId } from 'pmtiles';
-import { BakeManager } from '../src/bake-jobs.js';
+import { BakeManager, workDirFor } from '../src/bake-jobs.js';
 import {
   assertBakeable,
   bakeRevision,
@@ -379,6 +379,80 @@ describe('choosing where an export goes and what it is called', () => {
     assert.equal(job.archiveName, 'Bathymetry and terrain');
     assert.equal(job.name, 'bathy-terrain-v2.pmtiles');
     await settled(manager, 'terrain');
+  });
+});
+
+describe('where a bake does its work', () => {
+  // The bytes have to go where there is room for them. A 700 GiB archive is
+  // not something a data directory is sized for, and the disk chosen to hold
+  // the finished archive is by definition.
+
+  it('works on the filesystem the archive is going to', () => {
+    assert.equal(
+      workDirFor(
+        { stackId: 'terrain', publishDir: '/mnt/big' },
+        { dataDir: '/var/lib/node/data' },
+      ),
+      path.join('/mnt/big', 'bakes', 'terrain'),
+    );
+  });
+
+  it("falls back to the node's save path, then the data directory", () => {
+    assert.equal(
+      workDirFor(
+        { stackId: 's' },
+        { savePath: '/mnt/archives', dataDir: '/d' },
+      ),
+      path.join('/mnt/archives', 'bakes', 's'),
+    );
+    assert.equal(
+      workDirFor({ stackId: 's' }, { dataDir: '/d' }),
+      path.join('/d', 'bakes', 's'),
+    );
+  });
+
+  it("keeps each stack's work to itself", () => {
+    // Two stacks baking at once would otherwise write the same checkpoint
+    // files over each other.
+    assert.notEqual(
+      workDirFor({ stackId: 'a', publishDir: '/mnt/big' }, {}),
+      workDirFor({ stackId: 'b', publishDir: '/mnt/big' }, {}),
+    );
+  });
+
+  it('puts the work beside the archive, so the last step is a rename', async () => {
+    // `publish` renames within a filesystem and copies across one. Working
+    // where the archive is going turns the end of a long job from a copy of
+    // the whole thing into a rename -- and means the buffered tiles and the
+    // finished archive never both sit on the data directory's disk.
+    const archive = await sourceArchive('placed', [[1, 0, 0]]);
+    const publishDir = path.join(workspace, 'destination');
+    const imported = [];
+
+    const manager = new BakeManager({
+      tiles: storeOver(archive),
+      config: { dataDir: path.join(workspace, 'data-elsewhere') },
+      loadCodec: async () => null,
+      library: {
+        addLocalArchive: async (file, options) => {
+          imported.push({ file, options });
+          return { infoHash: 'd'.repeat(40) };
+        },
+        resolveSavePath: async () => publishDir,
+      },
+    });
+
+    await manager.start({ resolved: stackOver(archive), savePath: publishDir });
+    const job = await settled(manager, 'terrain');
+    assert.equal(job.phase, 'done', job.error);
+
+    // The file handed to the import came from under the destination, not from
+    // the data directory.
+    assert.ok(
+      imported[0].file.startsWith(publishDir),
+      `worked in ${imported[0].file}, not under ${publishDir}`,
+    );
+    assert.equal(imported[0].options.publishDir, publishDir);
   });
 });
 

@@ -5225,7 +5225,7 @@ Every piece is hashed against the ` +
             },
             {
               key: 'stacks.bakePauseMs',
-              label: 'Pause between tiles while exporting',
+              label: 'Pause between batches while exporting',
               type: 'number',
               placeholder: '0',
               unit: 'ms',
@@ -7042,11 +7042,15 @@ Every piece is hashed against the ` +
       // The shapes this node has, so a source can be clipped to one by name
       // rather than by remembering a filename.
       let stackCutlines = [];
+      // Which codec is installed, or null. A stack row needs it to say whether
+      // its pixel work is a problem here or merely a fact about the recipe.
+      let stackCodec = null;
 
       const loadStacks = async () => {
         const body = await api('/api/stacks');
         const { stacks, codec } = body;
         stackCutlines = body.cutlines ?? [];
+        stackCodec = codec ?? null;
         // A category resolving to a new build changes this, which is the
         // reason to poll at all -- but most polls change nothing, and
         // repainting a list somebody is about to click is worse than not.
@@ -7108,8 +7112,12 @@ Every piece is hashed against the ` +
         if (unresolved.length) {
           badges.push('<span class="pill warn">sources missing</span>');
         }
-        if (stack.needsCodec) {
-          badges.push('<span class="pill warn">needs a codec</span>');
+        // Only where it is actually a problem. With a codec installed the
+        // recipe asking for pixel work is a fact about the recipe, not
+        // something wrong with it, and a warning badge on a working stack
+        // teaches people to ignore warning badges.
+        if (stack.needsCodec && !stackCodec) {
+          badges.push('<span class="pill warn">no codec for this</span>');
         }
         if (stack.pinned) badges.push('<span class="pill">pinned</span>');
 
@@ -7191,10 +7199,10 @@ Every piece is hashed against the ` +
             }
             ${bakeLine}
             ${
-              stack.needsCodec
-                ? `<p class="muted">Serving this means decoding pixels
-                   (<code>${escapeHtml(stack.needsCodec)}</code>). Without
-                   <code>sharp</code> installed, its tiles answer 501.</p>`
+              stack.needsCodec && !stackCodec
+                ? `<p class="bad">Its tiles answer 501 here: serving this means
+                   decoding pixels (<code>${escapeHtml(stack.needsCodec)}</code>)
+                   and this node has no codec. <code>npm install sharp</code>.</p>`
                 : ''
             }
             <table class="tight">
