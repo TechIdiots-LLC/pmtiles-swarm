@@ -4,8 +4,15 @@ import {
   fillNodata,
   mergeElevation,
 } from './elevation.js';
-import { INSIDE, OUTSIDE, classifyTile, rasterizeTile } from './cutline.js';
-import { shapeFor } from './cutlines.js';
+import {
+  INSIDE,
+  OUTSIDE,
+  classifyTile,
+  cropMask,
+  featherMask,
+  rasterizeTile,
+} from './cutline.js';
+import { featherFor, shapeFor } from './cutlines.js';
 import { compositeRgba, toRaster } from './rgba.js';
 import { StackCache } from './stack-cache.js';
 import { stackCoverage, stackEtag } from './stacks.js';
@@ -89,9 +96,10 @@ export function outputFormat(resolved) {
  * @param {number} z - Zoom.
  * @param {number} x - Column.
  * @param {number} y - Row.
- * @returns {Array<object|null>} - Per source, `{shape, where}` or null.
+ * @param {number} [size] - The grid a feather is measured in, in pixels.
+ * @returns {Array<object|null>} - Per source, `{shape, feather, where}` or null.
  */
-export function clipsFor(resolved, cutlines, z, x, y) {
+export function clipsFor(resolved, cutlines, z, x, y, size = 256) {
   return resolved.sources.map((source) => {
     const recipe = source.source ?? {};
     if (!recipe.cutline && !recipe.bounds) return null;
@@ -102,7 +110,15 @@ export function clipsFor(resolved, cutlines, z, x, y) {
     // somebody asked to remove, and the stack's problems say why.
     if (!shape) return { shape: null, where: OUTSIDE, missing: true };
 
-    return { shape, where: classifyTile(shape, z, x, y) };
+    // The feather reaches inward from the edge, so a tile wholly inside but
+    // near it still has a ramp across part of itself and cannot take the cheap
+    // answer.
+    const feather = featherFor(recipe);
+    return {
+      shape,
+      feather,
+      where: classifyTile(shape, z, x, y, { margin: feather, size }),
+    };
   });
 }
 
@@ -455,7 +471,18 @@ async function merge({
   for (const [index, contribution] of contributions.entries()) {
     const clip = clips?.[index];
     if (!contribution || !clip || clip.where !== 'partial') continue;
-    contribution.coverage = rasterizeTile(clip.shape, z, x, y, grid);
+    // Rasterised with a border where the edge is feathered, because the ramp
+    // is measured from the boundary and a boundary just outside the tile still
+    // decides what the pixels inside it weigh. The shape is known in full, so
+    // this costs the extra rows and nothing else -- unlike a mask read out of
+    // a source's own pixels, which would need its neighbours.
+    const margin = clip.feather ?? 0;
+    const mask = rasterizeTile(clip.shape, z, x, y, grid, margin);
+    contribution.coverage = cropMask(
+      featherMask(mask, grid + margin * 2, clip.feather ?? 0),
+      grid,
+      margin,
+    );
   }
 
   const merging = {
@@ -563,7 +590,11 @@ export async function answerStackTile(options) {
     pixels,
     cutlines,
   } = options;
-  const clips = clipsFor(resolved, cutlines, z, x, y);
+  // 256 where the request did not say, which is the cautious guess: the
+  // margin is in pixels of the output grid, so assuming a smaller grid makes
+  // it wider on the ground, and too wide only costs a rasterise that was not
+  // needed while too narrow misses a ramp.
+  const clips = clipsFor(resolved, cutlines, z, x, y, size);
   const format = options.format ?? outputFormat(resolved);
   const rgba = resolved.stack.space === 'rgba';
 

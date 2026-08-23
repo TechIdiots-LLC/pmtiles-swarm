@@ -2,6 +2,27 @@
 
 ## master
 ### ✨ Features and improvements
+- **A source can fade in at the edge of its shape instead of stopping dead.** Where a
+  high-resolution local DEM meets a coarser global one the two disagree - by their survey and by
+  their vertical datum - and the merge took the upper one outright, so the step between them read
+  as a wall under a hillshade. `feather` on a source, in pixels, ramps its weight in from its
+  `cutline` or its `bounds`.
+
+  The step left is the height difference divided by the feather, which makes the number
+  predictable: two sources 40 m apart, faded over 16 pixels, step 2.5 m a pixel instead of 40 m at
+  once. It also hides a vertical datum disagreement, which otherwise wants a hand-tuned
+  `heightAdjustment` to correct and is the same wall by another cause.
+
+  Three things worth knowing. The ramp runs inward only, because a cutline says where a source's
+  data is good and spreading it outward would answer for ground the recipe just excluded. A
+  feathered layer over a hole stands alone, because fading into nothing would erode the source by
+  the width of its own feather exactly where it is the only cover. And RGBA needed no merge change
+  at all - alpha is already the weight that space composites with.
+
+  Not yet for a mask edge, which is where most seams actually come from. A cutline is known in
+  full, so the ramp beside a tile costs a few extra rasterised rows; a mask edge lives in the
+  source's own pixels and needs its neighbours read and decoded. docs/tile-stacks.md says what that
+  would take.
 - **Smoothing is in the stack editor, and bounded.** `gaussianBlurSigma` was honoured, documented
   and reachable only by hand-editing `stacks.json`. It now sits under the output settings beside
   Resampling, where it belongs - the two describe the same operation - and is hidden for an RGBA

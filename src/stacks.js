@@ -8,6 +8,7 @@ import {
   isResampling,
   parseColor,
 } from './elevation.js';
+import { MAX_FEATHER } from './cutlines.js';
 import { normalizeCategories } from './catalog.js';
 import { BLEND_MODES, isBlendMode } from './rgba.js';
 
@@ -37,6 +38,8 @@ import { BLEND_MODES, isBlendMode } from './rgba.js';
  * @property {Array<string|number[]>} [maskColors] - Pixel colours meaning the
  *   same, as "#rrggbb" or [r, g, b]. Exact, where a height mask has to round.
  * @property {number} [heightAdjustment] - Metres, added after masking.
+ * @property {number} [feather] - Pixels to fade in over at the edge of the
+ *   source's shape. 0, the default, makes the edge a switch.
  * @property {number} [opacity] - 0-1, scales source alpha. RGBA only.
  * @property {string} [blend] - Blend operator. RGBA only.
  * @typedef {object} Stack
@@ -123,6 +126,21 @@ export function validateStack(stack) {
     }
     if (source?.maskValues !== undefined && !Array.isArray(source.maskValues)) {
       problems.push(`sources[${index}].maskValues must be a list`);
+    }
+    if (source?.feather !== undefined) {
+      const feather = Number(source.feather);
+      if (!Number.isFinite(feather) || feather < 0 || feather > MAX_FEATHER) {
+        problems.push(
+          `sources[${index}].feather must be between 0 and ${MAX_FEATHER}`,
+        );
+      }
+    }
+    // A fade with no edge to fade at. Refused rather than ignored: it reads as
+    // a source that blends into what is under it, and it does nothing at all.
+    if (source?.feather && !source.cutline && !source.bounds) {
+      problems.push(
+        `sources[${index}].feather needs a cutline or bounds to fade at`,
+      );
     }
     if (source?.encoding === 'custom' && !hasUsableEncoding(source)) {
       // Three of four is no better than none: the tile is unreadable either

@@ -572,20 +572,35 @@ export function blurHeights(heights, size, sigma) {
  * underneath is whatever the entry above masked or never had — which is the
  * arrangement the whole feature exists for, and the one an inverted mask
  * silently destroys.
+ *
+ * A layer may arrive with a weight, which is what a feathered edge is: 1 takes
+ * the pixel outright as before, 0 leaves what is underneath, and between them
+ * the two are mixed. Only where there is something underneath to mix with --
+ * a partly-weighted layer over a hole stands alone, because fading into
+ * nothing would erode the source by the width of its own feather exactly where
+ * it is the only thing covering the ground.
  * @param {Float32Array[]} layers - Heights, in the recipe's order.
+ * @param {Array<Float32Array|null>} [weights] - One per layer, or absent.
  * @returns {Float32Array | null} - The merged heights, or null when empty.
  */
-export function paintHeights(layers) {
+export function paintHeights(layers, weights = []) {
   let result = null;
-  for (const layer of layers) {
+  for (let index = 0; index < layers.length; index += 1) {
+    const layer = layers[index];
     if (!layer) continue;
+    const weight = weights[index] ?? null;
     if (!result) {
       result = Float32Array.from(layer);
       continue;
     }
     for (let i = 0; i < result.length; i += 1) {
       const value = layer[i];
-      if (!Number.isNaN(value)) result[i] = value;
+      if (Number.isNaN(value)) continue;
+      const w = weight ? weight[i] : 1;
+      if (w <= 0) continue;
+      const under = result[i];
+      result[i] =
+        w >= 1 || Number.isNaN(under) ? value : under * (1 - w) + value * w;
     }
   }
   // Decided on the heights themselves, before any nodata is substituted in.
@@ -667,15 +682,22 @@ export function mergeElevation(contributions, options) {
     // Clipped last, and to the tile that was asked for rather than the one
     // that answered: a source falling back to a parent still covers the square
     // being served. See docs/tile-stacks.md — "Clipping a source to a shape".
+    //
+    // Nothing at all is still a hole; anything less than everything is a
+    // weight, and the merge is what acts on it. Blanking a partly-weighted
+    // pixel here instead would throw away the value the blend needs.
     if (contribution.coverage) {
       for (let i = 0; i < heights.length; i += 1) {
-        if (!contribution.coverage[i]) heights[i] = Number.NaN;
+        if (contribution.coverage[i] <= 0) heights[i] = Number.NaN;
       }
     }
     return heights;
   });
 
-  return paintHeights(layers);
+  return paintHeights(
+    layers,
+    contributions.map((contribution) => contribution?.coverage ?? null),
+  );
 }
 
 /**

@@ -92,6 +92,31 @@ export class CutlineStore {
 }
 
 /**
+ * As wide a fade as a source may ask for, in pixels.
+ *
+ * A quarter of a 256px tile. The ramp is measured from the boundary, so a
+ * feather wider than the tile is one whose edge never reaches full weight
+ * anywhere inside it -- the source is then not being blended in, it is being
+ * turned down.
+ */
+export const MAX_FEATHER = 64;
+
+/**
+ * How far a source fades in at the edge of its shape.
+ *
+ * Zero is the old behaviour and the default: the shape is a switch, and a pixel
+ * is either the source or what is underneath it. Anything more makes it a ramp.
+ * See docs/tile-stacks.md -- "Feathering a seam".
+ * @param {object} recipe - One source out of a recipe.
+ * @returns {number} - Pixels, 0 when it does not fade.
+ */
+export function featherFor(recipe) {
+  const asked = Number(recipe?.feather);
+  if (!Number.isFinite(asked) || asked <= 0) return 0;
+  return Math.min(Math.round(asked), MAX_FEATHER);
+}
+
+/**
  * The shape a source is clipped to, if any.
  *
  * `bounds` is built as a four-cornered cutline rather than handled separately:

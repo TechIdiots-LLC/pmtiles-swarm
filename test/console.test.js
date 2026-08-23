@@ -334,6 +334,22 @@ describe('clipping a source in the stack editor', () => {
     );
   });
 
+  it('offers a fade only where there is an edge to fade at', () => {
+    // The recipe refuses a feather with no cutline or bounds, so offering the
+    // field there would be offering something that cannot be saved.
+    assert.match(script, /source\.cutline \|\| source\.bounds/);
+    assert.match(script, /data-stack-field="feather"/);
+  });
+
+  it('drops the fade when the edge is taken away', () => {
+    assert.match(script, /if \(!event\.target\.value\) delete source\.feather/);
+  });
+
+  it('treats an empty fade as no fade rather than as zero', () => {
+    // Nothing in the recipe, rather than a line saying it does nothing.
+    assert.match(script, /delete source\.feather;/);
+  });
+
   it('says when a source names a cutline this node has not got', () => {
     // The source contributes nothing until there is one, and silently serving
     // no tiles is the worst way to find that out.

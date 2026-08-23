@@ -242,6 +242,7 @@ it differs from the snake_case rio-rgbify-merge uses.
 | `baseVal` / `interval` | Mapbox decode offset and step. Default `-10000` and `0.1`.                                                 |
 | `maskValues`           | Decoded heights meaning "no data here". Elevation space only.                                              |
 | `heightAdjustment`     | Metres, added **after** masking. Elevation space only.                                                     |
+| `feather`              | Pixels to fade in over at the edge of the source's shape. Needs a `cutline` or `bounds`. Max 64.           |
 | `opacity`              | `0`–`1`, scales the source alpha. RGBA space only.                                                         |
 | `blend`                | `normal`, `multiply`, `screen`, `overlay`, `darken`, `lighten`. RGBA space only.                           |
 
@@ -1015,8 +1016,8 @@ clip must not have.
 
 ## Feathering a seam
 
-_The border underneath this is built. The feathering itself is designed and
-not built; what follows is the plan and the measurements it rests on._
+_Built for a cutline and for `bounds`. A mask edge is not feathered yet, and
+the last section says what that still needs._
 
 Smoothing hides the terracing **inside** an upscaled area. It does nothing about
 the artefact the original discussion actually named — "artefacts at tiles and
@@ -1128,24 +1129,63 @@ into, so the margin genuinely means reading the neighbouring tiles — up to eig
 reads and eight decodes for that source, on that tile. That is the case to
 bound, to make opt-in, and to measure before believing.
 
-### What it would take
+### What it does
 
-- `feather` on a source, in pixels, `0` off. Bounded like `gaussianBlurSigma`
-  is, and for the same reason: it sets a radius, and a radius is quadratic in
-  what it costs before anything else has happened.
-- `coverageMask` returns weights; `shapeFor` and the cutline path keep working
-  unchanged because 0 and 1 still mean what they meant.
-- A distance ramp from the mask, computed per contribution after masking and
-  before the merge. Separable like the blur, and the same NaN discipline.
-- `paintHeights` takes a weight per layer and blends. This is the change that
-  needs the most care: it is the function the whole feature rests on, and its
-  own comment records that getting the order wrong here is the mistake the
-  offline merge made.
-- Margin reads for a native-resolution mask edge, which is the part with a real
-  cost attached and the part to measure before believing.
+`feather` on a source, in pixels, `0` and absent meaning the edge is a switch as
+before. It fades that source in over that many pixels measured inward from its
+cutline or its `bounds`:
 
-`resampleFromParent`, `marginFor`, `blurRadius` and `cropMargin` are done, and
-carry the blur already.
+```json
+{ "archive": "swissalti", "cutline": "switzerland", "feather": 16 }
+```
+
+The step left at the seam is the height difference divided by the feather, which
+is what makes the number predictable: two sources 40 m apart at the border, faded
+over 16 pixels, step 2.5 m a pixel instead of 40 m at once. Sixty-four is the
+most it takes — past that the ramp does not reach full weight anywhere inside a
+256px tile, and the source is being turned down rather than blended in.
+
+Three things fall out of the implementation and are worth stating.
+
+**The ramp runs inward only.** A pixel outside the shape stays at 0. A cutline is
+a statement about where a source's data is good, and spreading the ramp outward
+would answer for ground the recipe just said this source does not cover.
+
+**A feathered layer over a hole stands alone.** Weight is how much of what is
+underneath shows through, so with nothing underneath there is nothing to show —
+and fading into nothing would erode the source by the width of its own feather
+exactly where it is the only thing covering that ground.
+
+**RGBA needed no merge change at all.** Alpha is already the weight that space
+composites with, so the feather multiplies it and `over` does what it always did.
+
+The distance is exact Euclidean, by Felzenszwalb and Huttenlocher's lower
+envelope — linear in the tile's width, and chosen over a chamfer approximation
+because a chamfer's error is largest on diagonals and a national boundary is
+mostly diagonals.
+
+### What it does not do yet
+
+**A mask edge.** `maskValues` and `maskColors` are where most seams actually come
+from, and they are not feathered. The reason is the margin: a cutline is known in
+full, so the ramp beside a tile can be computed by rasterising a few extra rows,
+while a mask edge lives in the source's own pixels and the ramp needs the
+neighbouring tiles to be read and decoded — up to eight of them, for that source,
+on that tile.
+
+That is the piece with a real cost attached, and the one to measure before
+building. Two things make it more tractable than it looks: in a bake the tiles
+are walked in Hilbert order, which is chosen for locality, so a cache of decoded
+source tiles would be hit far more often than missed; and the ramp is smooth by
+construction, so it can be computed from the source's _parent_ at half resolution
+and upscaled, which turns eight reads at this zoom into a handful at the one
+above, shared between four children.
+
+**A source that vanishes at a tile edge.** A sparse archive simply has no tile
+outside its extent, so the seam lands exactly on a tile boundary — the most
+visible of the three and the cheapest to detect, since whether a neighbour exists
+is a directory lookup rather than a decode. It ramps down toward an absent
+neighbour, and nothing else has to happen.
 
 ## Finding a stack
 

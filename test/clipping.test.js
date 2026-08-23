@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { INSIDE, OUTSIDE, PARTIAL, fromBounds } from '../src/cutline.js';
+import {
+  INSIDE,
+  OUTSIDE,
+  PARTIAL,
+  cropMask,
+  featherMask,
+  fromBounds,
+  rasterizeTile,
+} from '../src/cutline.js';
+import { encodeHeights } from '../src/elevation.js';
 import { mergeElevation } from '../src/elevation.js';
 import { compositeRgba } from '../src/rgba.js';
 import { clipsFor, passThroughRead } from '../src/stack-tile.js';
@@ -179,6 +188,123 @@ describe('what a clip does to the pixels', () => {
       size,
     });
     assert.equal(merged, null);
+  });
+});
+
+describe('fading a source in rather than cutting it off', () => {
+  const size = 32;
+
+  /**
+   * A raster at one height everywhere, as the codec would hand it over.
+   * @param {number} metres - The height.
+   * @param {number} side - Pixels per side.
+   * @returns {object} - A raster.
+   */
+  const flatRaster = (metres, side) =>
+    encodeHeights(new Float32Array(side * side).fill(metres), {
+      width: side,
+      height: side,
+    });
+
+  /**
+   * The merged heights across the middle row, for a given feather.
+   * @param {number} feather - Pixels to fade in over.
+   * @returns {number[]} - Heights along the row, in metres.
+   */
+  const seam = (feather) => {
+    const shape = fromBounds([-180, -85, 0, 85]);
+    const margin = feather;
+    const coverage = cropMask(
+      featherMask(
+        rasterizeTile(shape, 0, 0, 0, size, margin),
+        size + margin * 2,
+        feather,
+      ),
+      size,
+      margin,
+    );
+
+    const merged = mergeElevation(
+      [
+        { raster: flatRaster(0, size), source: {} },
+        { raster: flatRaster(1000, size), source: {}, coverage },
+      ],
+      { z: 0, x: 0, y: 0, size },
+    );
+    const row = size / 2;
+    return [...merged.slice(row * size, (row + 1) * size)];
+  };
+
+  /**
+   * The largest jump between neighbouring pixels along a row.
+   * @param {number[]} row - Heights, in metres.
+   * @returns {number} - The biggest step between two of them.
+   */
+  const worstStep = (row) => {
+    let most = 0;
+    for (let i = 1; i < row.length; i += 1) {
+      most = Math.max(most, Math.abs(row[i] - row[i - 1]));
+    }
+    return most;
+  };
+
+  it('turns the cliff into a ramp', () => {
+    // The artefact this exists for: where a high-resolution source stops, the
+    // next pixel is a different survey on a different datum, and the step
+    // between them reads as a wall under a hillshade.
+    const hard = worstStep(seam(0));
+    const soft = worstStep(seam(8));
+    assert.equal(Math.round(hard), 1000, 'the unfeathered seam is the cliff');
+    assert.ok(
+      soft < hard / 4,
+      `feathering should divide the step: ${hard} m to ${soft} m`,
+    );
+  });
+
+  it('spreads the step over the width it was given', () => {
+    // Linear, so the step is the drop divided by the feather -- which is what
+    // makes the setting predictable from the height difference.
+    for (const feather of [4, 8, 16]) {
+      const step = worstStep(seam(feather));
+      assert.ok(
+        Math.abs(step - 1000 / feather) < 1,
+        `feather ${feather} should step ${1000 / feather} m, got ${step}`,
+      );
+    }
+  });
+
+  it('still reaches what the source itself says, away from the edge', () => {
+    // A ramp that never arrives would be turning the source down rather than
+    // blending it in.
+    // Not the very first pixel: a rectangle has four sides, and the west one
+    // runs down the edge of this tile, so the ramp is climbing there too.
+    const row = seam(8);
+    assert.ok(
+      Math.max(...row) > 999,
+      `it never arrives: highest was ${Math.max(...row)}`,
+    );
+    assert.equal(row[size - 1], 0, 'the far side should be untouched');
+  });
+
+  it('stands alone where there is nothing underneath to fade into', () => {
+    // Otherwise a source that is the only cover for its ground would erode
+    // itself by the width of its own feather.
+    const shape = fromBounds([-180, -85, 0, 85]);
+    const margin = 8;
+    const coverage = cropMask(
+      featherMask(rasterizeTile(shape, 0, 0, 0, size, margin), size + 16, 8),
+      size,
+      margin,
+    );
+    const merged = mergeElevation(
+      [{ raster: flatRaster(1000, size), source: {}, coverage }],
+      { z: 0, x: 0, y: 0, size },
+    );
+    const row = size / 2;
+    assert.ok(
+      Math.abs(merged[row * size + 2] - 1000) < 1,
+      'the only source should keep its own height',
+    );
   });
 });
 

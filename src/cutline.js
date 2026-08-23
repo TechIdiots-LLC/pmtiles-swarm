@@ -226,19 +226,155 @@ export function tileBox(z, x, y) {
 }
 
 /**
+ * A tile's box widened by a border of pixels.
+ *
+ * The border is in the tile's own pixels, so it stays the same width on the
+ * ground whatever the zoom -- which is what a feather in pixels means.
+ * @param {number} z - Zoom.
+ * @param {number} x - Column.
+ * @param {number} y - Row.
+ * @param {number} margin - Pixels on every side.
+ * @param {number} size - Pixels per side of the tile itself.
+ * @returns {object} - left, top, right, bottom.
+ */
+export function grownBox(z, x, y, margin, size) {
+  const box = tileBox(z, x, y);
+  if (!(margin > 0)) return box;
+  const perPixel = (box.right - box.left) / size;
+  const step = (box.bottom - box.top) / size;
+  return {
+    left: box.left - margin * perPixel,
+    top: box.top - margin * step,
+    right: box.right + margin * perPixel,
+    bottom: box.bottom + margin * step,
+  };
+}
+
+/**
+ * Squared distance to the nearest seed, along one line.
+ *
+ * Felzenszwalb and Huttenlocher's lower envelope, which is exact Euclidean and
+ * linear in the length -- rather than a chamfer approximation, because the
+ * error in those is largest on diagonals and a national boundary is mostly
+ * diagonals.
+ * @param {Float64Array} f - Cost at each position; 0 at a seed.
+ * @param {number} n - How many positions.
+ * @returns {Float64Array} - Squared distance at each position.
+ */
+function envelope(f, n) {
+  const d = new Float64Array(n);
+  const v = new Int32Array(n);
+  const z = new Float64Array(n + 1);
+  let k = 0;
+  v[0] = 0;
+  z[0] = -Infinity;
+  z[1] = Infinity;
+
+  for (let q = 1; q < n; q += 1) {
+    let s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    while (s <= z[k]) {
+      k -= 1;
+      s = (f[q] + q * q - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+    }
+    k += 1;
+    v[k] = q;
+    z[k] = s;
+    z[k + 1] = Infinity;
+  }
+
+  k = 0;
+  for (let q = 0; q < n; q += 1) {
+    while (z[k + 1] < q) k += 1;
+    d[q] = (q - v[k]) * (q - v[k]) + f[v[k]];
+  }
+  return d;
+}
+
+/** Stands in for infinity, so the envelope's arithmetic stays finite. */
+const FAR = 1e12;
+
+/**
+ * Turns a coverage mask into a weight that ramps in from the edge.
+ *
+ * The ramp runs inward only: a pixel outside the shape stays at 0 and one
+ * `feather` pixels inside reaches 1. A cutline is a statement about where a
+ * source's data is good, so spreading it outward would be answering for ground
+ * the recipe just said this source does not cover.
+ * @param {Uint8Array} mask - 1 covered, 0 not.
+ * @param {number} side - Pixels per side.
+ * @param {number} feather - How far the ramp runs, in pixels.
+ * @returns {Float32Array} - Weights, 0 to 1.
+ */
+export function featherMask(mask, side, feather) {
+  const weights = new Float32Array(mask.length);
+  if (!(feather > 0)) {
+    for (let i = 0; i < mask.length; i += 1) weights[i] = mask[i] ? 1 : 0;
+    return weights;
+  }
+
+  // Seeded on what the shape does not cover, so the distance being measured is
+  // how far inside the boundary each pixel sits.
+  const f = new Float64Array(side);
+  const squared = new Float64Array(mask.length);
+  for (let row = 0; row < side; row += 1) {
+    for (let column = 0; column < side; column += 1) {
+      f[column] = mask[row * side + column] ? FAR : 0;
+    }
+    const d = envelope(f, side);
+    for (let column = 0; column < side; column += 1) {
+      squared[row * side + column] = d[column];
+    }
+  }
+  for (let column = 0; column < side; column += 1) {
+    for (let row = 0; row < side; row += 1) {
+      f[row] = squared[row * side + column];
+    }
+    const d = envelope(f, side);
+    for (let row = 0; row < side; row += 1) {
+      const distance = Math.sqrt(d[row]);
+      weights[row * side + column] = Math.min(1, distance / feather);
+    }
+  }
+  return weights;
+}
+
+/**
+ * Takes the tile back out of a mask that was built with a border.
+ * @param {Float32Array} padded - `size + 2 * margin` a side.
+ * @param {number} size - Pixels per side of the tile wanted.
+ * @param {number} margin - The border that was added.
+ * @returns {Float32Array} - The middle of it.
+ */
+export function cropMask(padded, size, margin) {
+  if (margin <= 0) return padded;
+  const side = size + margin * 2;
+  const out = new Float32Array(size * size);
+  for (let y = 0; y < size; y += 1) {
+    const from = (y + margin) * side + margin;
+    out.set(padded.subarray(from, from + size), y * size);
+  }
+  return out;
+}
+
+/**
  * Whether a tile is wholly in the shape, wholly out, or across its edge.
  *
  * The cheap question, asked so the expensive one usually does not have to be.
  * A tile no edge crosses is entirely on one side of the boundary, so one point
  * settles it — and for a country at any useful zoom that is almost every tile.
+ *
+ * `options.margin` widens the tile before asking, in pixels. A feathered edge
+ * reaches inward from the boundary, so a tile that is wholly inside but close
+ * to it still has a ramp across part of it and cannot take the cheap answer.
  * @param {object} shape - What `prepare` built.
  * @param {number} z - Zoom.
  * @param {number} x - Column.
  * @param {number} y - Row.
+ * @param {object} [options] - `margin` in pixels, and the `size` they are of.
  * @returns {string} - `inside`, `outside` or `partial`.
  */
-export function classifyTile(shape, z, x, y) {
-  const box = tileBox(z, x, y);
+export function classifyTile(shape, z, x, y, options = {}) {
+  const box = grownBox(z, x, y, options.margin ?? 0, options.size ?? 512);
   const { bbox } = shape;
   if (
     box.right <= bbox.left ||
@@ -278,16 +414,23 @@ export function classifyTile(shape, z, x, y) {
  * Scanline rather than a point-in-polygon test per pixel: the crossings are
  * worked out once per row and the spans between them filled, so the cost is the
  * edges near the tile times its height, not times its area.
+ *
+ * `margin` asks for the same grid extended beyond the tile, which is what a
+ * feathered edge needs to be computed without a seam. The shape is known in
+ * full, so unlike a mask read out of a source's own pixels this costs nothing
+ * but the extra rows.
  * @param {object} shape - What `prepare` built.
  * @param {number} z - Zoom.
  * @param {number} x - Column.
  * @param {number} y - Row.
  * @param {number} size - Tile width in pixels.
+ * @param {number} [margin] - Extra pixels on every side.
  * @returns {Uint8Array} - 1 where the shape covers, 0 where it does not.
  */
-export function rasterizeTile(shape, z, x, y, size) {
-  const box = tileBox(z, x, y);
-  const mask = new Uint8Array(size * size);
+export function rasterizeTile(shape, z, x, y, size, margin = 0) {
+  const box = grownBox(z, x, y, margin, size);
+  const side = size + margin * 2;
+  const mask = new Uint8Array(side * side);
   const candidates = near(shape, box);
   if (candidates.length === 0) {
     const middle = (box.left + box.right) / 2;
@@ -296,10 +439,10 @@ export function rasterizeTile(shape, z, x, y, size) {
     return mask;
   }
 
-  const step = (box.bottom - box.top) / size;
-  const perPixel = (box.right - box.left) / size;
+  const step = (box.bottom - box.top) / side;
+  const perPixel = (box.right - box.left) / side;
 
-  for (let row = 0; row < size; row += 1) {
+  for (let row = 0; row < side; row += 1) {
     // Down the middle of the row, which is where the pixel is.
     const worldRow = box.top + (row + 0.5) * step;
     const crossings = [];
@@ -317,9 +460,9 @@ export function rasterizeTile(shape, z, x, y, size) {
       const from = Math.ceil((crossings[pair] - box.left) / perPixel - 0.5);
       const to = Math.floor((crossings[pair + 1] - box.left) / perPixel - 0.5);
       const start = Math.max(0, from);
-      const end = Math.min(size - 1, to);
+      const end = Math.min(side - 1, to);
       for (let column = start; column <= end; column += 1) {
-        mask[row * size + column] = 1;
+        mask[row * side + column] = 1;
       }
     }
   }

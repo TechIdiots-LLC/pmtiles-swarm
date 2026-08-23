@@ -287,9 +287,12 @@ export function compositeRgba(contributions, options) {
     // Clipped last, and to the tile that was asked for. Alpha rather than NaN,
     // which is what "nothing here" means in this space -- and it is the same
     // thing `maskColors` does above.
+    // A feathered edge needs nothing else here: alpha is already the weight
+    // this space composites with, so scaling it is the whole operation and
+    // `over` does the blend it always did.
     if (contribution.coverage) {
       for (let i = 0; i < layer.a.length; i += 1) {
-        if (!contribution.coverage[i]) layer.a[i] = 0;
+        layer.a[i] *= contribution.coverage[i];
       }
     }
 

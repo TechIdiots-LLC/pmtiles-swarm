@@ -7,6 +7,9 @@ import {
   classifyTile,
   fromBounds,
   fromGeoJSON,
+  cropMask,
+  featherMask,
+  grownBox,
   rasterizeTile,
   ringsOf,
   worldX,
@@ -249,6 +252,97 @@ describe('rasterising a tile the edge crosses', () => {
     const covered = mask.reduce((count, one) => count + one, 0);
     assert.ok(covered > 0, 'neither piece was drawn');
     assert.ok(covered < mask.length, 'the gap between them was filled in');
+  });
+});
+
+describe('fading in at the edge instead of stepping', () => {
+  /**
+   * A mask covering everything from `from` rightwards.
+   * @param {number} side - Pixels per side.
+   * @param {number} from - First covered column.
+   * @returns {Uint8Array} - The mask.
+   */
+  const halves = (side, from) => {
+    const mask = new Uint8Array(side * side);
+    for (let row = 0; row < side; row += 1) {
+      for (let column = from; column < side; column += 1) {
+        mask[row * side + column] = 1;
+      }
+    }
+    return mask;
+  };
+
+  it('ramps inward over the width it was given', () => {
+    const side = 12;
+    const weights = featherMask(halves(side, 4), side, 4);
+    const row = [...weights.slice(6 * side, 7 * side)];
+    assert.deepEqual(row.slice(0, 4), [0, 0, 0, 0], 'outside is not 0');
+    assert.deepEqual(row.slice(4, 8), [0.25, 0.5, 0.75, 1]);
+    assert.ok(
+      row.slice(8).every((v) => v === 1),
+      'it should reach full weight and stay there',
+    );
+  });
+
+  it('ramps inward only, never out past the shape', () => {
+    // A cutline says where a source's data is good. Spreading the ramp outward
+    // would answer for ground the recipe just said this source does not cover.
+    const side = 12;
+    const weights = featherMask(halves(side, 6), side, 3);
+    for (let row = 0; row < side; row += 1) {
+      for (let column = 0; column < 6; column += 1) {
+        assert.equal(weights[row * side + column], 0, 'it leaked outward');
+      }
+    }
+  });
+
+  it('is a switch again when nothing is asked for', () => {
+    const side = 8;
+    const mask = halves(side, 3);
+    const weights = featherMask(mask, side, 0);
+    for (let i = 0; i < mask.length; i += 1) {
+      assert.equal(weights[i], mask[i] ? 1 : 0);
+    }
+  });
+
+  it('measures the distance as a circle, not as a staircase', () => {
+    // A national boundary is mostly diagonal, which is exactly where a chamfer
+    // approximation is furthest out. A corner pixel is sqrt(2) from the two
+    // sides that meet at it, not 1 and not 2.
+    const side = 9;
+    const mask = new Uint8Array(side * side).fill(1);
+    mask[0] = 0;
+    const weights = featherMask(mask, side, 10);
+    assert.ok(
+      Math.abs(weights[side + 1] - Math.SQRT2 / 10) < 1e-6,
+      `the diagonal neighbour should be sqrt(2) away, got ${weights[side + 1] * 10}`,
+    );
+  });
+});
+
+describe('the border a feathered edge is measured in', () => {
+  it('grows the box by whole pixels of the tile', () => {
+    const plain = grownBox(1, 1, 0, 0, 256);
+    const grown = grownBox(1, 1, 0, 8, 256);
+    const perPixel = (plain.right - plain.left) / 256;
+    assert.ok(Math.abs(grown.left - (plain.left - 8 * perPixel)) < 1e-12);
+    assert.ok(Math.abs(grown.right - (plain.right + 8 * perPixel)) < 1e-12);
+  });
+
+  it('rasterises the border and hands back only the tile', () => {
+    const shape = fromBounds([-180, -85, 0, 85]);
+    const size = 16;
+    const margin = 4;
+    const padded = rasterizeTile(shape, 0, 0, 0, size, margin);
+    assert.equal(padded.length, (size + margin * 2) ** 2);
+
+    const cropped = cropMask(
+      featherMask(padded, size + margin * 2, 0),
+      size,
+      margin,
+    );
+    const plain = rasterizeTile(shape, 0, 0, 0, size);
+    assert.deepEqual([...cropped], [...plain].map(Number));
   });
 });
 

@@ -7673,6 +7673,19 @@ Every piece is hashed against the ` +
                   : ''
               }
               ${
+                source.cutline || source.bounds
+                  ? `<label class="choice"
+                            title="Fade this source in over this many pixels at the edge of its shape, instead of stopping dead. Where a high-resolution source meets a coarser one the two disagree — by their survey and by their vertical datum — and the step between them reads as a wall under a hillshade. The drop is divided by this: 40 m across a 8 px feather is 5 m a pixel. 0 is a hard edge.">
+                       Fade in
+                       <input type="number" min="0" max="64" step="1" style="width:4.5rem"
+                              placeholder="0"
+                              data-stack-field="feather" data-stack-index="${index}"
+                              value="${source.feather ?? ''}" />
+                       <span class="sub">px</span>
+                     </label>`
+                  : ''
+              }
+              ${
                 source.cutline && !(stackCutlines ?? []).includes(source.cutline)
                   ? `<span class="bad">no cutline called
                      <code>${escapeHtml(source.cutline)}</code> here — this
@@ -7722,6 +7735,10 @@ Every piece is hashed against the ` +
             .filter(Boolean);
         } else if (field === 'required') {
           source.required = event.target.checked;
+        } else if (field === 'feather') {
+          const pixels = Number(event.target.value);
+          if (event.target.value === '' || !(pixels > 0)) delete source.feather;
+          else source.feather = Math.min(64, Math.round(pixels));
         } else if (field === 'baseVal' || field === 'interval') {
           // Blank means "the default", not zero -- an interval of 0 would make
           // every height the base value.
@@ -7750,6 +7767,10 @@ Every piece is hashed against the ` +
           if (source) {
             delete source.cutline;
             delete source.bounds;
+            // A fade needs an edge to fade at, and the recipe validation says
+            // so -- leaving it behind would make the source unsaveable with
+            // nothing on screen to explain why.
+            if (!event.target.value) delete source.feather;
             if (event.target.value === '__bounds') {
               source.bounds = [-180, -85, 180, 85];
             } else if (event.target.value) {
