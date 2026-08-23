@@ -4,6 +4,13 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.81.0
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
 - **A stack can export itself on a schedule.** An archive is a snapshot: a stack over categories
   follows a rebuild and a file baked from it does not, so it goes stale the moment its sources move
   and somebody has to notice. An `export` block on the recipe says when — `at` for a time of day in
