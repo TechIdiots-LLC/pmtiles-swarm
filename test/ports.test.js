@@ -536,6 +536,7 @@ describe('the public page toolbar', () => {
     for (const option of options) {
       assert.match(
         page,
+        // eslint-disable-next-line security/detect-non-literal-regexp -- built from the test's own fixture
         new RegExp(`\\b${option}: `),
         `${option} has a comparator`,
       );

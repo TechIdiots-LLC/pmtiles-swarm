@@ -146,6 +146,7 @@ export function declarationDepths(source) {
   let depth = 0;
 
   const pattern =
+    // eslint-disable-next-line security/detect-unsafe-regex -- the classes do not overlap, so each character has one place to go
     /(?:^|[^.\w])(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(/g;
   const positions = [...code.matchAll(pattern)].map((match) => ({
     name: match[1],

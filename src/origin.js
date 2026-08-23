@@ -190,7 +190,6 @@ async function contentLooksDifferent(entry) {
 
     const fields = ['tileCount', 'minZoom', 'maxZoom', 'format', 'specVersion'];
     for (const field of fields) {
-      // eslint-disable-next-line security/detect-object-injection -- field comes from the constant list above
       if (stored[field] !== undefined && stored[field] !== fresh[field]) {
         return true;
       }

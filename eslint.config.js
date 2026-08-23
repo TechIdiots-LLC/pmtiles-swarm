@@ -81,13 +81,21 @@ export default [
 
       // Every path this project opens is one an operator configured or an admin
       // API call named, so the filename rule fires on essentially every line
-      // that does the job and is off. The other two stay on as warnings: they
-      // are worth a second look at the point a new one is written, and the
-      // `eslint-disable` comments already in the source are the record of that
-      // look having happened.
+      // that does the job and is off.
       'security/detect-non-literal-fs-filename': 'off',
-      'security/detect-object-injection': 'warn',
+
+      // Off for the same reason, arrived at the long way round: it was on as a
+      // warning until all 170 were read through, which found two real faults
+      // and 168 lines of `data[i]` inside pixel loops and lookup tables with a
+      // fallback. It cannot tell a loop counter from a key somebody sent, so
+      // the count grows back to where a new one cannot be seen.
+      'security/detect-object-injection': 'off',
+
+      // These two stay on as warnings: a regex built at runtime is rare enough
+      // here that a new one is worth a second look, and the `eslint-disable`
+      // comments in the source are the record of that look having happened.
       'security/detect-non-literal-regexp': 'warn',
+      'security/detect-unsafe-regex': 'warn',
     },
   },
   {

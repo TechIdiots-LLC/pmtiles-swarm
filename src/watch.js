@@ -34,6 +34,7 @@ export function globToRegExp(pattern) {
       return character.replace(/[.+^${}()|[\]\\]/g, '\\$&');
     })
     .join('');
+  // eslint-disable-next-line security/detect-non-literal-regexp -- body is the escaped glob built just above
   return new RegExp(`^${body}$`, 'i');
 }
 

@@ -156,6 +156,7 @@ describe('checking a port before binding', () => {
       const failure = await assertPortsFree({ port, host: '127.0.0.1' }).catch(
         (error) => error,
       );
+      // eslint-disable-next-line security/detect-non-literal-regexp -- built from the test's own fixture
       assert.match(failure.message, new RegExp(`"port": ${port + 10}`));
       assert.match(failure.message, /netstat/);
     } finally {

@@ -11,6 +11,7 @@
 const MAX_SEGMENT = 120;
 
 /** Reserved on Windows whatever the extension. */
+// eslint-disable-next-line security/detect-unsafe-regex -- the alternatives share no prefix, so there is nothing to backtrack over
 const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i;
 
 /** Separators, control characters, and the ones Windows refuses. */

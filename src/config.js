@@ -538,16 +538,13 @@ function merge(base, override) {
   // `libtorrent`, which would otherwise alter the defaults themselves.
   const out = {};
   for (const [key, value] of Object.entries(base ?? {})) {
-    // eslint-disable-next-line security/detect-object-injection -- keys come from DEFAULTS
     out[key] = clone(value);
   }
   for (const [key, value] of Object.entries(override ?? {})) {
     if (value === undefined) continue;
-    // eslint-disable-next-line security/detect-object-injection -- keys come from a config file the operator controls
     out[key] =
       value && typeof value === 'object' && !Array.isArray(value)
-        ? // eslint-disable-next-line security/detect-object-injection -- as above
-          merge(base[key] ?? {}, value)
+        ? merge(base[key] ?? {}, value)
         : value;
   }
   return out;

@@ -765,6 +765,7 @@ describe('the preview imports what the bundles actually export', () => {
 
     for (const [, name] of preview.matchAll(/maplibregl\.(\w+)/g)) {
       assert.ok(
+        // eslint-disable-next-line security/detect-non-literal-regexp -- built from the test's own fixture
         new RegExp(`(?:^|[,{])(?:\\w+ as )?${name}(?=[,}])`).test(exports),
         `maplibre-gl does not export ${name}`,
       );

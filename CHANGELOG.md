@@ -15,6 +15,16 @@
   Reachable only by an admin token, which is a token that can change any setting anyway, so this
   is a gate that was not doing its job rather than a way in. Found by reading through what
   `security/detect-object-injection` had to say, which is what it is switched on for.
+- **A date placeholder that was nearly right took exponentially long to reject.** `expandTemplate`
+  read a `{...}` group as a date pattern by testing it against `^[YMDymd]+([-_./ ]?[YMDymd]+)*$`.
+  With the separator optional, a run of field letters can be divided between the group and the `+`
+  in front of it in every possible way, so a group that is all field letters and one character that
+  cannot match has to try all of them before saying no: 24 characters took 100ms, and each two
+  after that doubled it.
+
+  Requiring the separator inside the group accepts exactly the same set of patterns - a run can
+  only be matched one way now - and rejects the near miss immediately. The template is config
+  rather than anything a stranger sends, so this was a source of surprise rather than a way in.
 
 ## 0.72.0
 ### ✨ Features and improvements

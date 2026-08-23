@@ -167,6 +167,7 @@ describe('filtering the archive list', () => {
       page.indexOf("$('empty').hidden"),
     );
     for (const field of ['name', 'infoHash', 'categories']) {
+      // eslint-disable-next-line security/detect-non-literal-regexp -- built from the test's own fixture
       assert.match(body, new RegExp(field), `${field} is not searched`);
     }
   });

@@ -343,6 +343,7 @@ function isoDate(value) {
  * @returns {string | undefined} - Decoded text, if found.
  */
 function tag(block, name) {
+  // eslint-disable-next-line security/detect-non-literal-regexp -- name is one of this module's own element names
   const pattern = new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)</${name}>`, 'i');
   const match = pattern.exec(block);
   if (!match) return undefined;

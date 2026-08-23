@@ -32,8 +32,13 @@ export function expandTemplate(template, date) {
 
   return String(template).replace(/\{([^{}]*)\}/g, (whole, body) => {
     // Separators an upstream might put between the fields. Anything else means
-    // this is not a date at all.
-    if (!/^[YMDymd]+([-_./ ]?[YMDymd]+)*$/.test(body)) return whole;
+    // this is not a date at all. The separator is required inside the group
+    // rather than optional: optional, a run of field letters can be divided
+    // between the group and the `+` in front of it in exponentially many ways,
+    // and something that is nearly a date but does not match takes that long
+    // to rule out.
+    // eslint-disable-next-line security/detect-unsafe-regex -- a run of field letters can only be divided one way now the separator is required
+    if (!/^[YMDymd]+(?:[-_./ ][YMDymd]+)*$/.test(body)) return whole;
 
     return body.replace(/([YMDymd])\1*|[-_./ ]/g, (run) => {
       const field = run[0].toLowerCase();
@@ -559,6 +564,7 @@ export class ScheduledSourceManager {
     let pattern = ARCHIVE_PATTERN;
     if (source.match) {
       try {
+        // eslint-disable-next-line security/detect-non-literal-regexp -- the pattern is the operator's own source config
         pattern = new RegExp(source.match, 'i');
       } catch (error) {
         throw new Error(

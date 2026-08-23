@@ -141,6 +141,7 @@ export class SubscriptionManager {
       // appetites, e.g. only taking Europe extracts.
       if (
         subscription.filter &&
+        // eslint-disable-next-line security/detect-non-literal-regexp -- the filter is this node's own subscription config
         !new RegExp(subscription.filter, 'i').test(item.title)
       ) {
         continue;
@@ -233,6 +234,7 @@ export class SubscriptionManager {
     const archives = (document.archives ?? []).filter(
       (archive) =>
         !subscription.filter ||
+        // eslint-disable-next-line security/detect-non-literal-regexp -- as above
         new RegExp(subscription.filter, 'i').test(archive.name ?? ''),
     );
 

@@ -161,6 +161,20 @@ describe('scheduled sources', () => {
     );
   });
 
+  it('rules out a near-miss placeholder promptly', () => {
+    // The check used to allow the separator to be absent, which let a run of
+    // field letters be divided between the group and the `+` in front of it in
+    // exponentially many ways. Forty letters and one character that cannot
+    // match took longer than a working day to reject; it is a config value
+    // rather than anything a stranger sends, but the fix costs nothing.
+    const date = new Date(Date.UTC(2026, 7, 6));
+    const nearly = `{${'Y'.repeat(40)}!}`;
+
+    const began = Date.now();
+    assert.strictEqual(expandTemplate(nearly, date), nearly, 'it expanded');
+    assert.ok(Date.now() - began < 1000, 'took a second to say no');
+  });
+
   it('offsets and looks back, newest first', () => {
     const now = new Date(Date.UTC(2026, 7, 7));
     const dates = candidateDates({ offsetDays: -1, lookbackDays: 2 }, now);

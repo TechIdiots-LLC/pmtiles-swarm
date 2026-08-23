@@ -312,6 +312,7 @@ describe('the public catalogue', () => {
     assert.match(
       (await catalogWith({ serveArchive: true, publicDownload: true }))
         ?.archive ?? '',
+      // eslint-disable-next-line security/detect-non-literal-regexp -- built from the test's own fixture
       new RegExp(`/archives/${hash}/archive\\.pmtiles$`),
     );
   });
