@@ -65,6 +65,12 @@ const raster = await codec.decode(Buffer.from(await response.arrayBuffer()), {
 });
 const heights = decodeHeights(raster, source);
 const { width } = raster;
+// Off the URL, so roughness can be reported against the ground a pixel covers
+// rather than in the abstract. A metre between neighbours means one thing at
+// z8 and another at z16.
+const coordinates = url.match(/\/(\d+)\/(\d+)\/(\d+)\.[a-z]+$/);
+const zoom = Number(coordinates?.[1] ?? 0);
+const tileRow = Number(coordinates?.[3] ?? 0);
 
 // Walked rather than spread into Math.min: a 512px tile is 262,144 numbers and
 // that many arguments overflows the call stack.
@@ -128,30 +134,117 @@ for (const [q, n] of ordered) {
   );
 }
 
-// The number that decides it. Ground this flat should not be bumpy, so if the
-// roughness here is more than a quantum the noise is in the data.
+// A median cannot see sparse spikes, and sparse spikes are what stipple a
+// hillshade: a scattering of pixels standing well clear of their neighbours,
+// too few to move the middle of any distribution. So the tail is what gets
+// reported, and separately the count of pixels that disagree with everything
+// around them.
 const flat = [];
+let spikes = 0;
+let worstSpike = 0;
 for (let row = 1; row < width - 1; row += 1) {
   for (let column = 1; column < width - 1; column += 1) {
     const at = row * width + column;
-    const across = heights[at + 1] - 2 * heights[at] + heights[at - 1];
-    const down = heights[at + width] - 2 * heights[at] + heights[at - width];
+    const here = heights[at];
+    if (!Number.isFinite(here)) continue;
+
+    const across = heights[at + 1] - 2 * here + heights[at - 1];
+    const down = heights[at + width] - 2 * here + heights[at - width];
     if (Number.isFinite(across) && Number.isFinite(down)) {
       flat.push(Math.abs(across) + Math.abs(down));
     }
+
+    // Standing clear of every neighbour, in the same direction. Terrain does
+    // not do this; a pixel that survived a mask its neighbours did not, or one
+    // the encoding placed a quantum out, does.
+    let above = 0;
+    let below = 0;
+    let seen = 0;
+    let nearest = Infinity;
+    for (const [dy, dx] of [
+      [-1, -1],
+      [-1, 0],
+      [-1, 1],
+      [0, -1],
+      [0, 1],
+      [1, -1],
+      [1, 0],
+      [1, 1],
+    ]) {
+      const neighbour = heights[(row + dy) * width + column + dx];
+      if (!Number.isFinite(neighbour)) continue;
+      seen += 1;
+      if (here > neighbour) above += 1;
+      else if (here < neighbour) below += 1;
+      nearest = Math.min(nearest, Math.abs(here - neighbour));
+    }
+    if (seen === 8 && (above === 8 || below === 8) && nearest > quantum * 1.5) {
+      spikes += 1;
+      worstSpike = Math.max(worstSpike, nearest);
+    }
   }
 }
+
 flat.sort((one, two) => one - two);
-const median = flat[Math.floor(flat.length / 2)] ?? 0;
+/**
+ * A value at a percentile of the sorted roughness.
+ * @param {number} share - Where to look, 0 to 1.
+ * @returns {number} - Metres.
+ */
+const at = (share) =>
+  flat[Math.min(flat.length - 1, Math.floor(flat.length * share))] ?? 0;
+
+// How much ground one pixel covers, so roughness can be read as a slope.
+// Web mercator shrinks with latitude, and the tile's row is where that comes
+// from -- a metre between neighbours means one thing at z8 and another at z16.
+const rows = 2 ** zoom;
+// Clamped: a row outside the pyramid would put the latitude past the pole and
+// report no ground at all, which reads as a broken tile rather than a typo.
+const row = Math.min(Math.max(tileRow, 0), rows - 1);
+const latitude = Math.atan(Math.sinh(Math.PI * (1 - (2 * row) / rows)));
+const groundMetres = (40075016.686 * Math.cos(latitude)) / rows / width;
+
+console.log('\n  roughness, as the second difference between neighbours:');
+for (const [label, share] of [
+  ['half of them are under', 0.5],
+  ['nine in ten under', 0.9],
+  ['ninety-nine in a hundred under', 0.99],
+  ['the worst', 1],
+]) {
+  console.log(
+    `   ${label.padEnd(32)} ${at(share).toFixed(2).padStart(9)} m` +
+      ` (${(at(share) / quantum).toFixed(0)} quanta)`,
+  );
+}
+
 console.log(
-  `\n  roughness (median second difference): ${median.toFixed(3)} m` +
-    ` = ${(median / quantum).toFixed(1)} quanta`,
+  `\n  relief across this tile: ${(high - low).toFixed(1)} m` +
+    `, about ${groundMetres.toFixed(0)} m of ground per pixel`,
 );
 console.log(
-  median <= quantum * 2.5
-    ? "  -> at the encoding's own resolution. A checkerboard here is the colour\n" +
-        '     ramp dithering across a band edge, and a hillshade exaggerating a\n' +
-        '     tenth of a metre. The data is as smooth as this format can hold.'
-    : "  -> above the encoding's resolution, so this is noise in the data itself,\n" +
-        '     not the format. Look at how the archive was resampled.',
+  `  pixels standing clear of all eight neighbours: ${spikes}` +
+    ` (${((spikes / known) * 100).toFixed(2)}%)` +
+    (spikes ? `, worst ${worstSpike.toFixed(1)} m` : ''),
 );
+
+console.log('');
+if (spikes / known > 0.002 && worstSpike > quantum * 10) {
+  console.log(
+    '  -> a scattering of pixels stands well clear of everything around it.\n' +
+      '     That is what stipples a hillshade, and terrain does not do it. Look\n' +
+      '     for something applied per pixel: a mask that matched some pixels and\n' +
+      '     not their neighbours, or two sources meeting one pixel at a time.',
+  );
+} else if (at(0.99) <= quantum * 2.5) {
+  console.log(
+    "  -> smooth to the encoding's own resolution, in the tail as well as the\n" +
+      '     middle. A checkerboard here is the colour ramp dithering across a\n' +
+      '     band edge, and a hillshade exaggerating a tenth of a metre.',
+  );
+} else {
+  console.log(
+    `  -> rough, but evenly so, against ${(high - low).toFixed(0)} m of relief across\n` +
+      '     the tile. That is what terrain looks like; compare a tile of flat\n' +
+      '     ground before calling it noise.',
+  );
+}
