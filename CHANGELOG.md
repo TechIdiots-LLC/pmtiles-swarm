@@ -5,6 +5,10 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.72.1
+### 🐞 Bug fixes
 - **A settings save could set something that was not a setting.** `saveConfig` rejected a key it
   did not recognise by asking `key in DEFAULTS`, and `in` walks the prototype chain: every object
   inherits `__proto__`, `constructor` and `toString`, so all three passed as known settings. The
