@@ -36,8 +36,41 @@ import { TileReadError } from './tiles.js';
  * a tile in an archive or a hole where one is not needed.
  */
 
-/** How far up the pyramid a merge will climb for a source with no tile here. */
+/**
+ * How far up the pyramid a merge will climb for a source with no tile here,
+ * where the stack does not say and nothing can be worked out.
+ */
 const PARENT_LIMIT = 6;
+
+/**
+ * How far this stack has to climb for its shallowest source to keep working.
+ *
+ * A global source is shallow on purpose -- GEBCO is z0-8 and the sea floor has
+ * no more detail to give -- so serving a stack to z16 means upscaling that z8
+ * tile eight levels. A fixed limit truncates exactly the arrangement this
+ * feature is for: at z15 the climb stopped one level short of the only tile
+ * that exists, no source contributed, and the stack answered no-tile over open
+ * water.
+ *
+ * So it is derived from what the stack spans rather than assumed or set: the
+ * right answer is computable, and a recipe naming a smaller one would only
+ * punch holes in itself. Somebody who wants the merge to stop climbing says so
+ * with `maxzoom`, which stops the stack serving that deep at all -- the same
+ * wish, said where it also stops the work.
+ *
+ * Never below the old fixed limit, so no stack reaches less far than it did.
+ * @param {object} resolved - The resolved stack.
+ * @returns {number} - Levels a source may climb.
+ */
+export function parentLimitFor(resolved) {
+  const { maxzoom } = stackCoverage(resolved);
+  const shallowest = resolved.sources
+    .map((source) => source.entry?.pmtiles?.maxZoom)
+    .filter((zoom) => Number.isFinite(zoom));
+  if (!shallowest.length || !Number.isFinite(maxzoom)) return PARENT_LIMIT;
+
+  return Math.max(PARENT_LIMIT, maxzoom - Math.min(...shallowest));
+}
 
 /** The deepest zoom a tile id is defined for. */
 const MAX_ZOOM = 26;
@@ -141,8 +174,8 @@ export function clipsFor(resolved, cutlines, z, x, y, size = 256) {
  * @param {object} options - Source, coordinates, the tile store and whether to climb.
  * @returns {Promise<object|null>} - The tile and the zoom it came from.
  */
-async function readFrom({ source, z, x, y, tiles, climb, signal }) {
-  const floor = climb ? Math.max(0, z - PARENT_LIMIT) : z;
+async function readFrom({ source, z, x, y, tiles, climb, signal, limit }) {
+  const floor = climb ? Math.max(0, z - (limit ?? PARENT_LIMIT)) : z;
   for (let at = z; at >= floor; at -= 1) {
     const shift = z - at;
     const tile = await tiles.getTile(
@@ -322,6 +355,7 @@ export function passThroughRead({
  * @returns {Promise<object>} - `{contributors, contributions}` or `{error}`.
  */
 async function readAll({ resolved, z, x, y, tiles, signal, clips }) {
+  const limit = parentLimitFor(resolved);
   return Promise.all(
     resolved.sources.map(async (source, index) => {
       if (!source.entry) return { source, found: null };
@@ -340,6 +374,7 @@ async function readAll({ resolved, z, x, y, tiles, signal, clips }) {
             tiles,
             climb: true,
             signal,
+            limit,
           }),
         };
       } catch (error) {

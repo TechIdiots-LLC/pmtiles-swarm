@@ -2,9 +2,30 @@
 
 ## master
 ### ✨ Features and improvements
+- **A stopped export stays stopped.** Stopping one left a checkpoint, and a checkpoint says what was
+  in progress but not why it stopped - so the next restart could not tell somebody pressing Stop
+  from a crash, and picked it up again. Stopping now writes a marker beside the checkpoint, and a
+  restart reports what it is holding rather than resuming it. Starting or resuming clears the marker.
+
+  And the work can be thrown away, which it could not be before: `DELETE /api/stacks/:id/bake/work`
+  removes the working directory, which for an abandoned export is hundreds of gigabytes of buffered
+  tiles that previously had to be found by hand. Refused while a merge is running rather than pulled
+  out from under it.
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- **A stack with a shallow global source served holes above z14.** How far the merge would climb
+  for a source with no tile at this zoom was a fixed six levels. GEBCO is z0-8 and the sea floor has
+  no more detail to give, so a stack serving z16 has to upscale that z8 tile eight levels - and at
+  z15 the climb stopped one short of the only tile that existed. Over open water, where the other
+  source was sparse and had nothing either, no source contributed at all and the stack correctly
+  answered no-tile. A rectangular hole, one tile wide, in the middle of the sea.
+
+  It is derived now rather than fixed: the deepest zoom the stack serves, less the shallowest source
+  under it. Nothing to set and nothing to get wrong - the right answer is computable, and a smaller
+  one would only punch holes. Somebody who wants the merge to stop climbing says so with `maxzoom`,
+  which stops the stack serving that deep at all: the same wish, said where it also stops the work.
+  Never below the old six, so no stack reaches less far than it did.
 - _...Add new stuff here..._
 
 ## 0.75.0

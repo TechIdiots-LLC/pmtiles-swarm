@@ -42,6 +42,7 @@ const DEFAULT_CONCURRENCY = 4;
 /** What the working directory holds while a bake is in progress. */
 const FILES = Object.freeze({
   state: 'bake-state.json',
+  stopped: 'bake-stopped.json',
   entries: 'bake-entries.bin',
   tiles: 'bake-tiles.bin',
 });
@@ -57,6 +58,64 @@ export function checkpointPaths(workDir) {
     entries: path.join(workDir, FILES.entries),
     tiles: path.join(workDir, FILES.tiles),
   };
+}
+
+/**
+ * Records that an export was stopped on purpose.
+ *
+ * A checkpoint says what was in progress, not why it stopped, so a crash and
+ * somebody pressing Stop look identical on disk -- and the node picks both up
+ * on the next start. That is right for the crash and wrong for the person, who
+ * stopped it and then watched it begin again.
+ *
+ * Written beside the checkpoint rather than into it, so it cannot be lost to a
+ * half-finished write of the state the export is still making.
+ * @param {string} workDir - The bake's working directory.
+ * @returns {Promise<void>} - Resolves once it is written.
+ */
+export async function markStopped(workDir) {
+  await fs
+    .writeFile(
+      path.join(workDir, FILES.stopped),
+      JSON.stringify({ at: new Date().toISOString() }),
+    )
+    .catch(() => {});
+}
+
+/**
+ * Forgets that an export was stopped, because it is running again.
+ * @param {string} workDir - The bake's working directory.
+ * @returns {Promise<void>} - Resolves once it is gone.
+ */
+export async function clearStopped(workDir) {
+  await fs
+    .rm(path.join(workDir, FILES.stopped), { force: true })
+    .catch(() => {});
+}
+
+/**
+ * Whether an export was stopped on purpose rather than interrupted.
+ * @param {string} workDir - The bake's working directory.
+ * @returns {Promise<boolean>} - True when somebody stopped it.
+ */
+export async function wasStopped(workDir) {
+  return fs
+    .access(path.join(workDir, FILES.stopped))
+    .then(() => true)
+    .catch(() => false);
+}
+
+/**
+ * Forgets an export's unfinished work.
+ *
+ * The whole directory, because a checkpoint is only meaningful with the tiles
+ * it names -- leaving either behind is leaving something that will be picked
+ * up and found wanting.
+ * @param {string} workDir - The bake's working directory.
+ * @returns {Promise<void>} - Resolves once it is gone.
+ */
+export async function discardCheckpoint(workDir) {
+  await fs.rm(workDir, { recursive: true, force: true });
 }
 
 /**

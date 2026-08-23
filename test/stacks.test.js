@@ -8,6 +8,7 @@ import { Catalog } from '../src/catalog.js';
 import { loadCodec } from '../src/codec.js';
 import { decodeHeights, encodeHeights } from '../src/elevation.js';
 import { StackCache } from '../src/stack-cache.js';
+import { parentLimitFor } from '../src/stack-tile.js';
 import { generateToken, hashToken, isPublicSurface } from '../src/auth.js';
 import {
   StackStore,
@@ -183,6 +184,56 @@ describe('what a stack recipe has to say to be usable', () => {
     const store = new StackStore(dir);
     await store.load();
     assert.deepEqual(store.list(), []);
+  });
+});
+
+describe('how far a source may be upscaled from', () => {
+  /**
+   * A resolved stack over sources of the given maxzooms.
+   * @param {number} maxzoom - What the stack serves to.
+   * @param {number[]} sources - Each source's maxZoom.
+   * @returns {object} - Something parentLimitFor can read.
+   */
+  const over = (maxzoom, sources) => ({
+    stack: { id: 'terrain', maxzoom },
+    sources: sources.map((maxZoom, index) => ({
+      index,
+      entry: { pmtiles: { minZoom: 0, maxZoom } },
+    })),
+  });
+
+  it('reaches the shallowest source from the deepest zoom served', () => {
+    // The case this exists for. GEBCO is z0-8 and the sea floor has no more
+    // detail to give, so serving z16 means upscaling that z8 tile eight
+    // levels. A fixed limit of six stopped one short at z15: no source
+    // contributed, and the stack answered no-tile over open water.
+    assert.equal(parentLimitFor(over(16, [8, 16])), 8);
+    assert.equal(parentLimitFor(over(14, [8, 14])), 6);
+  });
+
+  it('never reaches less far than it used to', () => {
+    // Every source deep enough to need no climbing still gets the old six,
+    // so no stack that worked before reaches less far now.
+    assert.equal(parentLimitFor(over(16, [16, 16])), 6);
+    assert.equal(parentLimitFor(over(4, [4])), 6);
+  });
+
+  it('falls back where a source has not been probed', () => {
+    assert.equal(
+      parentLimitFor({
+        stack: { id: 'a', maxzoom: 16 },
+        sources: [{ index: 0 }],
+      }),
+      6,
+    );
+  });
+
+  it('takes the stack at its word about how deep it goes', () => {
+    // A recipe that says maxzoom 12 is saying it does not serve deeper, and
+    // the climb it needs is measured against that rather than against what
+    // the sources could have supported.
+    assert.equal(parentLimitFor(over(12, [8, 16])), 6);
+    assert.equal(parentLimitFor(over(18, [8, 16])), 10);
   });
 });
 

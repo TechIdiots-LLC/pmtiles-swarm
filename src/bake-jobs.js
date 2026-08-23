@@ -7,7 +7,11 @@ import {
   bakeStack,
   bakedArchiveName,
   bakedName,
+  clearStopped,
+  discardCheckpoint,
+  markStopped,
   mergeTileFor,
+  wasStopped,
 } from './bake.js';
 import { PixelWorker } from './pixels.js';
 import { outputFormat } from './stack-tile.js';
@@ -124,6 +128,10 @@ export class BakeManager {
   #loadCodec;
   #cutlines;
   #jobs = new Map();
+  // Exports somebody stopped, whose work is still on disk. Kept so the console
+  // can offer to resume or discard them: after a restart there is no job in
+  // memory, only a directory nobody would think to look for.
+  #held = new Map();
 
   /**
    * @param {object} deps - The library, the tile store, the config and the codec probe.
@@ -152,11 +160,36 @@ export class BakeManager {
    */
   get(stackId) {
     const job = this.#jobs.get(stackId);
-    return job ? this.#describe(job) : null;
+    if (job) return this.#describe(job);
+
+    // Nothing running, but work somebody stopped may still be there. Reported
+    // in the same shape so the console has one thing to read.
+    const stopped = this.#held.get(stackId);
+    if (!stopped) return null;
+    return {
+      stackId,
+      phase: 'stopped',
+      written: stopped.written,
+      resumable: true,
+      ...stopped.describe,
+    };
   }
 
   /**
-   * Stops a bake, leaving its work where the next run can pick it up.
+   * Every stack with work waiting that nobody has decided about.
+   * @returns {string[]} - Their ids.
+   */
+  heldStacks() {
+    return [...this.#held.keys()];
+  }
+
+  /**
+   * Stops a bake, leaving its work for somebody to pick up or throw away.
+   *
+   * Marked as stopped on purpose, so the next start leaves it alone. The work
+   * is still there and `resume` takes it up again -- what changes is who
+   * decides, which for a job that may be hours from finishing should be a
+   * person rather than a restart.
    * @param {string} stackId - Which stack.
    * @returns {boolean} - True if there was one to stop.
    */
@@ -164,8 +197,44 @@ export class BakeManager {
     const job = this.#jobs.get(stackId);
     if (!job || job.finishedAt) return false;
     job.cancelling = true;
+    job.stoppedOnPurpose = true;
     job.controller.abort();
+    // Not awaited: the abort has to reach the merge now, and a mark written a
+    // moment later is still written long before anything restarts.
+    markStopped(workDirFor(job, this.#config)).catch(() => {});
     return true;
+  }
+
+  /**
+   * Throws away what a stopped export had done.
+   *
+   * The counterpart to stopping. An export that will not be finished leaves
+   * hundreds of gigabytes of buffered tiles behind, and until now the only way
+   * to be rid of them was to find the directory by hand.
+   * @param {string} stackId - Which stack.
+   * @returns {Promise<boolean>} - True if there was work to discard.
+   */
+  async discard(stackId) {
+    const running = this.#jobs.get(stackId);
+    // Refused rather than raced. Removing the directory under a running merge
+    // would have it fail on its next write, reporting a disk problem for
+    // something somebody chose.
+    if (running && !running.finishedAt) return false;
+
+    let found = false;
+    for (const root of this.#workRoots()) {
+      const directory = path.join(root, WORK_DIR, stackId);
+      const there = await fs
+        .access(directory)
+        .then(() => true)
+        .catch(() => false);
+      if (!there) continue;
+      await discardCheckpoint(directory);
+      found = true;
+    }
+    this.#jobs.delete(stackId);
+    this.#held.delete(stackId);
+    return found;
   }
 
   /**
@@ -202,6 +271,21 @@ export class BakeManager {
 
         const resolved = resolve(stackId);
         if (!resolved || bakeRevision(resolved) !== state.revision) continue;
+
+        // Somebody stopped this one. It stays where it is until they say
+        // otherwise -- an export begun again by a restart is the opposite of
+        // what pressing Stop meant.
+        if (await wasStopped(path.join(directory, stackId))) {
+          this.#held.set(stackId, {
+            written: state.written ?? 0,
+            describe: state.describe,
+          });
+          console.log(
+            `[bake] ${stackId} was stopped on purpose; leaving its ` +
+              `${state.written ?? 0} tiles for you to resume or discard`,
+          );
+          continue;
+        }
 
         try {
           const job = await this.start({ resolved, ...state.describe });
@@ -366,6 +450,12 @@ export class BakeManager {
     const workDir = workDirFor(job, this.#config);
     const destination = path.join(workDir, job.name);
     const format = outputFormat(resolved);
+
+    // Running again is the answer to having been stopped, so the mark goes.
+    // Left behind, an export somebody restarted by hand would be passed over
+    // by the next restart, which is the same surprise the other way round.
+    await clearStopped(workDir);
+    this.#held.delete(job.stackId);
 
     // Sized with the batch, so every merge in flight has a thread to do its
     // arithmetic on rather than queueing behind one. Only where there is pixel

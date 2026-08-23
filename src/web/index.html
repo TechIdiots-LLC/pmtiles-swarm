@@ -1905,18 +1905,21 @@
         );
 
       /**
-       * A mask range as the field shows it.
+       * One end of a mask range, for the box that shows it.
        *
-       * One pair is written plainly; a recipe carrying several is shown as
-       * JSON, because the editor offers one band and the file may hold more
-       * than the editor can draw.
+       * A recipe may hold several bands where the editor offers one. The first
+       * is what the boxes show, and the row says how many more there are --
+       * silently dropping them would be worse than saying the editor cannot
+       * draw them.
        * @param {*} range - What the recipe says.
+       * @param {number} which - 0 for the low end, 1 for the high.
        * @returns {string} - What to put in the box.
        */
-      const rangeText = (range) => {
+      const rangeEdge = (range, which) => {
         if (!Array.isArray(range) || range.length === 0) return '';
-        if (Array.isArray(range[0])) return JSON.stringify(range);
-        return range.slice(0, 2).join(', ');
+        const first = Array.isArray(range[0]) ? range[0] : range;
+        const edge = first[which];
+        return Number.isFinite(Number(edge)) ? String(edge) : '';
       };
 
       /**
@@ -7635,11 +7638,23 @@ Every piece is hashed against the ` +
                       value="${escapeHtml((source.maskValues ?? []).join(', '))}" />
              </label>
              <label class="choice"
-                    title="Mask every height inside a band, written low, high. Nodata is rarely one number: an archive resampled on its way to being built does not hold what it was authored with, so a sea authored as 0 arrives scattered across -0.9 m to 0 — and masking the two ends of that leaves everything between, standing proud of whatever is underneath. A band says what you mean, and asymmetrically: sea is everything up to zero and nothing above it.">
-               Mask range
-               <input style="width:9rem" placeholder="-1, 0"
-                      data-stack-field="maskRange" data-stack-index="${index}"
-                      value="${escapeHtml(rangeText(source.maskRange))}" /> m
+                    title="Mask every height between these two, inclusive. Separate from Mask heights, which takes values one at a time — nodata is often a band rather than a number, because an archive resampled on its way to being built does not hold what it was authored with. A sea authored as 0 arrives scattered across -0.9 m to 0, and masking the two ends of that leaves everything between, standing proud of whatever is underneath. Leave both empty for no band.">
+               Mask between
+               <input type="number" step="any" style="width:5.5rem" placeholder="low"
+                      data-stack-field="maskRangeLow" data-stack-index="${index}"
+                      value="${rangeEdge(source.maskRange, 0)}" />
+               and
+               <input type="number" step="any" style="width:5.5rem" placeholder="high"
+                      data-stack-field="maskRangeHigh" data-stack-index="${index}"
+                      value="${rangeEdge(source.maskRange, 1)}" /> m
+               ${
+                 Array.isArray(source.maskRange) &&
+                 Array.isArray(source.maskRange[0]) &&
+                 source.maskRange.length > 1
+                   ? `<span class="sub">and ${source.maskRange.length - 1} more,
+                      which editing here replaces</span>`
+                   : ''
+               }
              </label>`;
 
         return `
@@ -7761,16 +7776,22 @@ Every piece is hashed against the ` +
             .filter(Boolean);
         } else if (field === 'required') {
           source.required = event.target.checked;
-        } else if (field === 'maskRange') {
-          // Held while it is half-typed, the way the clip box is: four numbers
-          // arrive one keystroke at a time and a field that cleared itself
-          // after the first comma could never be filled in.
-          const numbers = event.target.value
-            .split(',')
-            .map((part) => Number(part.trim()))
-            .filter((n) => Number.isFinite(n));
-          if (numbers.length >= 2) source.maskRange = numbers.slice(0, 2);
-          else if (event.target.value.trim() === '') delete source.maskRange;
+        } else if (field === 'maskRangeLow' || field === 'maskRangeHigh') {
+          // A band needs both ends, so one on its own is a half-typed thought
+          // rather than a range -- read them together, and write nothing until
+          // there are two numbers to write.
+          const row = event.target.closest('.card');
+          const edge = (name) => {
+            const box = row?.querySelector(`[data-stack-field="${name}"]`);
+            return box && box.value.trim() !== '' ? Number(box.value) : null;
+          };
+          const low = edge('maskRangeLow');
+          const high = edge('maskRangeHigh');
+          if (Number.isFinite(low) && Number.isFinite(high)) {
+            source.maskRange = low <= high ? [low, high] : [high, low];
+          } else if (low === null && high === null) {
+            delete source.maskRange;
+          }
         } else if (field === 'feather') {
           const pixels = Number(event.target.value);
           if (event.target.value === '' || !(pixels > 0)) delete source.feather;

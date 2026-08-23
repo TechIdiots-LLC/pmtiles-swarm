@@ -3304,6 +3304,31 @@ export function createApp({
   );
 
   /**
+   * Throws away what a stopped export had done.
+   *
+   * Separate from stopping, and deliberately a second decision. Stopping keeps
+   * the work because an export may be hours in and somebody may want it back;
+   * this is for when they do not, and until now the only way to be rid of
+   * hundreds of gigabytes of buffered tiles was to find the directory by hand.
+   */
+  app.delete(
+    '/api/stacks/:id/bake/work',
+    route(async (req, res) => {
+      if (!bakes) {
+        return res.status(501).json({ error: 'this node does not bake' });
+      }
+      const discarded = await bakes.discard(req.params.id);
+      if (!discarded) {
+        return res.status(409).json({
+          error:
+            'there is no stopped export for that stack, or one is still running',
+        });
+      }
+      return res.json({ discarded: true });
+    }),
+  );
+
+  /**
    * Creates or replaces a stack.
    *
    * One route for both, because a stack is identified by the id in its own
