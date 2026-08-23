@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.80.0
+### ✨ Features and improvements
 - **A stack can be a source in another stack.** `{ "stack": "jaxa-with-gebco" }` beside `category`
   and `archive`. A base worked out once — terrain over bathymetry, masked at the coast and faded
   across it — is a thing to reuse rather than retype, and a recipe that names it follows every later
