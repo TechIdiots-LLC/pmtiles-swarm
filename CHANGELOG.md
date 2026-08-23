@@ -7,6 +7,22 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.73.1
+### 🐞 Bug fixes
+- **The console could not start at all in 0.73.0.** A string literal in the export dialog's output
+  summary lost its escape, so the console's module failed to parse - and a module that does not
+  parse does not run one line of itself. Every page rendered its static markup and then sat on
+  "connecting…" for ever, with one `SyntaxError` in the browser console and nothing anywhere else.
+
+  Nothing was in a position to catch it. eslint does not read HTML, prettier reports the file clean
+  whether or not the script inside it is valid, and the tests that do read that script match
+  patterns in its text rather than running it. So 320 KB of JavaScript shipped without anything
+  having asked whether it parses.
+
+  `test/web-parse.test.js` now hands every inline script in every page to `node --check` - the same
+  engine that will run it, so there is no second grammar to disagree with. Verified against this
+  exact fault: the test fails on it and names the line, where prettier and eslint both pass.
+
 ## 0.73.0
 ### ✨ Features and improvements
 - **A source can fade in at the edge of its shape instead of stopping dead.** Where a

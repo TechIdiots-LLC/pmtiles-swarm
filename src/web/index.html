@@ -7946,9 +7946,9 @@ Every piece is hashed against the ` +
         const output = stack?.output ?? {};
         const rgba = stack?.space === 'rgba';
         const parts = [
-          rgba ? 'rgba' : (output.encoding ?? 'the sources' encoding'),
+          rgba ? 'rgba' : (output.encoding ?? "the sources' encoding"),
           output.format ?? "the sources' format",
-          output.tileSize ? `${output.tileSize} px` : 'the sources' tile size',
+          output.tileSize ? `${output.tileSize} px` : "the sources' tile size",
         ];
         if (!rgba) {
           parts.push(`${stack?.resampling ?? 'bilinear'} resampling`);
