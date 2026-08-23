@@ -5,6 +5,13 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.79.1
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
 - **A source masked only by `maskRange` was served unmasked.** The short-circuit that hands a tile
   back byte-for-byte, rather than decoding and merging it, lists the recipe fields that make a tile
   need the merge — and `maskRange` was never added to it when the field shipped in 0.76.0. So on
