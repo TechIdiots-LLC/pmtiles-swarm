@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.76.0
+### ✨ Features and improvements
 - **A stopped export stays stopped.** Stopping one left a checkpoint, and a checkpoint says what was
   in progress but not why it stopped - so the next restart could not tell somebody pressing Stop
   from a crash, and picked it up again. Stopping now writes a marker beside the checkpoint, and a
@@ -11,7 +18,6 @@
   removes the working directory, which for an abandoned export is hundreds of gigabytes of buffered
   tiles that previously had to be found by hand. Refused while a merge is running rather than pulled
   out from under it.
-- _...Add new stuff here..._
 
 ### 🐞 Bug fixes
 - **An edit inside one clock tick went unnoticed.** `stacks.json` is re-read when its modification
@@ -38,7 +44,6 @@
   one would only punch holes. Somebody who wants the merge to stop climbing says so with `maxzoom`,
   which stops the stack serving that deep at all: the same wish, said where it also stops the work.
   Never below the old six, so no stack reaches less far than it did.
-- _...Add new stuff here..._
 
 ## 0.75.0
 ### ✨ Features and improvements
