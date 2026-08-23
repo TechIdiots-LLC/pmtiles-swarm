@@ -97,6 +97,32 @@ describe('the generated unit', () => {
     assert.match(unit, /^ProtectSystem=strict$/m);
   });
 
+  it('sizes the thread pool from what the export was told to run', () => {
+    // The fourth thing that is silent when wrong. sharp decodes and encodes on
+    // libuv's pool, which holds four threads unless the unit says otherwise,
+    // so a bakeConcurrency above four queues at the decode instead and the
+    // export runs at a fraction of the machine with nothing to show why.
+    const unit = unitFor({
+      config: config({ stacks: { bakeConcurrency: 16 } }),
+      configPath: CONFIG_PATH,
+    });
+    assert.match(unit, /^Environment=UV_THREADPOOL_SIZE=16$/m);
+  });
+
+  it('never drops the pool below what libuv would have given anyway', () => {
+    for (const stacks of [undefined, {}, { bakeConcurrency: 1 }]) {
+      const unit = unitFor({
+        config: config({ stacks }),
+        configPath: CONFIG_PATH,
+      });
+      assert.match(
+        unit,
+        /^Environment=UV_THREADPOOL_SIZE=4$/m,
+        `${JSON.stringify(stacks)} asked for fewer threads than the default`,
+      );
+    }
+  });
+
   it('grants exactly what the configuration writes to, and no more', () => {
     // The property this exists for. A unit and a config that disagree is every
     // failure this has produced under systemd, so they are derived from one

@@ -20,6 +20,11 @@
   replacing it with a sliding window that retires in order measured 12% better on a large pool and
   worse on the default one.
 
+  `init --systemd` writes `Environment=UV_THREADPOOL_SIZE` into the unit, set from
+  `stacks.bakeConcurrency`, for the same reason it derives `ReadWritePaths`: it is decidable from
+  the configuration and silent when wrong. An existing unit does not gain it by upgrading - re-run
+  `pmtiles-swarm init --systemd`, or add the line to `[Service]` by hand.
+
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 

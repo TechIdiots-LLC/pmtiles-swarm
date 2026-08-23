@@ -16,6 +16,9 @@ import { writablePaths } from './config.js';
  *     archive returns at 0% to be re-checked
  *   - a `TimeoutStopSec` shorter than the resume save kills the process
  *     mid-write, which costs the same re-check by a different route
+ *   - libuv's thread pool holds four threads unless the unit says otherwise,
+ *     so a `stacks.bakeConcurrency` above four exports at a fraction of the
+ *     machine with every core idle, no error, and nothing in the journal
  *
  * None of that is discoverable from the symptom. All of it is decidable from
  * the configuration, which is why this is generated rather than documented.
@@ -23,6 +26,24 @@ import { writablePaths } from './config.js';
 
 /** What the resume save can want, before the library has grown into it. */
 const TIMEOUT_STOP_SECONDS = 300;
+
+/** libuv's own, which is what a unit that says nothing gets. */
+const DEFAULT_THREADPOOL = 4;
+
+/**
+ * How many threads sharp gets, which is what an export is really limited by.
+ *
+ * Derived rather than left to the operator for the same reason as
+ * `ReadWritePaths`: it is decidable from the configuration, and getting it
+ * wrong produces no error at all — just an export running at a fraction of the
+ * machine, with every core idle and nothing in the journal.
+ * @param {object} config - The resolved configuration.
+ * @returns {number} - What to put in the unit.
+ */
+function threadPoolFor(config) {
+  const bake = Number(config?.stacks?.bakeConcurrency) || DEFAULT_THREADPOOL;
+  return Math.max(DEFAULT_THREADPOOL, Math.floor(bake));
+}
 
 /**
  * The unit file for a configuration.
@@ -44,6 +65,7 @@ export function unitFor({
   const home = workingDirectory ?? `/var/lib/${user}`;
   const binary = execStart ?? `${home}/node_modules/.bin/pmtiles-swarm`;
   const paths = writablePaths(config, configPath);
+  const threadPool = threadPoolFor(config);
 
   // Wrapped the way systemd's own examples are, because this list grows with
   // every watched folder and a single line of them is unreadable in a diff.
@@ -80,6 +102,14 @@ WorkingDirectory=${home}
 # Absolute: systemd reads no shell profile.
 ExecStart=${binary} \\
   --config ${path.resolve(configPath)}
+
+# How many tiles a stack export can decode or encode at once. That work is
+# sharp, sharp does it on libuv's thread pool, and the pool holds four threads
+# unless this says otherwise — so without it, stacks.bakeConcurrency above four
+# moves where the merges queue rather than how many of them run, and the export
+# is several times slower than the machine with nothing to show why. Set from
+# stacks.bakeConcurrency (${threadPool}); it cannot be set from inside the process.
+Environment=UV_THREADPOOL_SIZE=${threadPool}
 
 # Required, not a preference. The console's Save & Restart applies settings a
 # running process cannot take, so it exits 0 and expects to be brought back;
