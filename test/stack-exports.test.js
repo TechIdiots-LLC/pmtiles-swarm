@@ -95,6 +95,33 @@ describe('what a recipe may say about exporting', () => {
     assert.match(problems({ everyMinutes: -5 }).join(), /positive number/);
   });
 
+  it('takes the retention every other automation here takes', () => {
+    // The same two a watched folder and a subscription use, so an operator who
+    // has set retention once has set it everywhere.
+    assert.deepEqual(problems({ at: '03:30', keep: 4, keepDays: 30 }), []);
+    assert.match(problems({ at: '03:30', keep: 0 }).join(), /at least 1/);
+    assert.match(
+      problems({ at: '03:30', keepDays: 1.5 }).join(),
+      /whole number/,
+    );
+  });
+
+  it('takes where a build lands and how it is served', () => {
+    assert.deepEqual(
+      problems({
+        at: '03:30',
+        savePath: '/mnt/archives',
+        publishDir: '/var/www/pmtiles',
+        webSeedBase: 'https://maps.example/files',
+      }),
+      [],
+    );
+    assert.match(
+      problems({ at: '03:30', webSeedBase: 12 }).join(),
+      /must be text/,
+    );
+  });
+
   it('checks the settings it will hand to the bake', () => {
     assert.match(
       problems({ at: '03:30', categories: 'basemaps' }).join(),
@@ -115,6 +142,42 @@ describe('starting one when it is due', () => {
     await scheduler.sweep(AT);
     assert.equal(started.length, 1);
     assert.deepEqual(started[0].categories, ['basemaps']);
+  });
+
+  it('hands the whole block to the bake, not only the schedule', async () => {
+    // Everything the manual export asks for, plus the retention -- or a
+    // scheduled export would land somewhere else, under another name, and
+    // never retire anything.
+    const full = {
+      id: 'planet',
+      export: {
+        at: '03:30',
+        categories: ['basemaps'],
+        name: 'Planet terrain',
+        description: 'nightly',
+        attribution: 'GEBCO | JAXA',
+        savePath: '/mnt/archives',
+        publishDir: '/var/www/pmtiles',
+        webSeedBase: 'https://maps.example/files',
+        keep: 4,
+        keepDays: 30,
+      },
+    };
+    const { scheduler, started } = await nodeWith(full);
+    await scheduler.sweep(AT);
+    assert.equal(started.length, 1);
+    for (const key of [
+      'name',
+      'description',
+      'attribution',
+      'savePath',
+      'publishDir',
+      'webSeedBase',
+      'keep',
+      'keepDays',
+    ]) {
+      assert.deepEqual(started[0][key], full.export[key], key);
+    }
   });
 
   it('does not start it again on the next tick', async () => {

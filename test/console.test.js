@@ -392,13 +392,6 @@ describe('clipping a source in the stack editor', () => {
     assert.match(script, /enabled: false/);
   });
 
-  it('writes a schedule onto the recipe, not onto the report', () => {
-    // Twice over: the dialog and this table both read raw before writing.
-    const at = script.indexOf('data-sched-save');
-    assert.ok(at > 0);
-    assert.match(script.slice(at, at + 3000), /\/raw`/);
-  });
-
   it('puts the export schedule settings with the other automations', () => {
     // Feeds is where the things that bring a file in on a timer live, and a
     // scheduled export is one of those -- it produces the file here rather
@@ -424,11 +417,38 @@ describe('clipping a source in the stack editor', () => {
   });
 
   it('writes a schedule onto the recipe, not onto the report', () => {
-    // The list holds what each source resolved to. Writing that back would
-    // replace the recipe with its own output.
-    const at = script.indexOf('stack.export = {');
-    assert.ok(at > 0);
-    assert.match(script.slice(at - 600, at), /\/raw`/);
+    // Both writers -- the dialog and the table under Feeds -- read the recipe
+    // back before touching it. The list holds what each source resolved to, so
+    // writing that back would replace the recipe with its own output.
+    const writes = [...script.matchAll(/stack\.export = \{/g)];
+    assert.ok(writes.length >= 2, `only ${writes.length} writers found`);
+    for (const write of writes) {
+      const before = script.slice(Math.max(0, write.index - 2500), write.index);
+      assert.match(before, /\/raw`/, 'wrote a schedule without reading raw');
+    }
+  });
+
+  it('keeps the export settings beside the schedule', () => {
+    // The same things the manual export asks for, plus the retention every
+    // other automation on this tab has -- so a scheduled export is set up in
+    // one place rather than half here and half in a dialog.
+    for (const field of [
+      'categories',
+      'keep',
+      'keepDays',
+      'name',
+      'attribution',
+      'savePath',
+      'publishDir',
+      'webSeedBase',
+    ]) {
+      // Built through one `box` helper, so the field name is its argument
+      // rather than a literal attribute in the source.
+      assert.ok(
+        script.includes(`'${field}',`),
+        `no ${field} on a scheduled export`,
+      );
+    }
   });
 
   it('offers the attribution an export will carry', () => {

@@ -445,9 +445,26 @@ function exportProblems(block) {
   if (block.categories !== undefined && !Array.isArray(block.categories)) {
     problems.push('export.categories must be a list');
   }
-  for (const key of ['name', 'description', 'attribution', 'location']) {
+  for (const key of [
+    'name',
+    'description',
+    'attribution',
+    'location',
+    'savePath',
+    'publishDir',
+    'webSeedBase',
+  ]) {
     if (block[key] !== undefined && typeof block[key] !== 'string') {
       problems.push(`export.${key} must be text`);
+    }
+  }
+  // The same two a watched folder and a subscription take, so an operator who
+  // has set retention once has set it everywhere.
+  for (const key of ['keep', 'keepDays']) {
+    if (block[key] === undefined || block[key] === '') continue;
+    const value = Number(block[key]);
+    if (!Number.isInteger(value) || value < 1) {
+      problems.push(`export.${key} must be a whole number of at least 1`);
     }
   }
 

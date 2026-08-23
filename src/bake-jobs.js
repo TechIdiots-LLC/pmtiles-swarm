@@ -14,6 +14,7 @@ import {
   wasStopped,
 } from './bake.js';
 import { PixelWorker } from './pixels.js';
+import { retains, retire } from './retention.js';
 import { stackCoverage } from './stacks.js';
 import { outputFormat } from './stack-tile.js';
 
@@ -517,6 +518,12 @@ export class BakeManager {
     job.phase = 'importing';
     const entry = await this.#library.addLocalArchive(destination, {
       categories: options.categories ?? resolved.stack.categories,
+      // So the archive can be served over HTTP from where it landed, which is
+      // what makes a scheduled export useful to anybody who is not a peer.
+      webSeedBase: options.webSeedBase,
+      // Which stack made it. Without this an export has no family, and a
+      // scheduled one would pile up a build a night for ever.
+      stack: resolved.stack.id,
       // Moved out of the working directory as it is taken on, so a finished
       // archive does not live among the checkpoint files of the job that made
       // it.
@@ -525,6 +532,26 @@ export class BakeManager {
     });
 
     job.infoHash = entry.infoHash;
+
+    // The same retirement a watched folder does, over the builds this stack
+    // has produced. A schedule without it is a disk that fills at whatever
+    // rate the schedule runs -- which for a nightly planet is the fastest way
+    // to fill one that this project has.
+    if (retains(options)) {
+      await retire({
+        library: this.#library,
+        family: this.#library.catalog
+          .list()
+          .filter((candidate) => candidate.source?.stack === resolved.stack.id),
+        entry,
+        keep: options.keep,
+        keepDays: options.keepDays,
+        label: `[export] ${resolved.stack.id}`,
+      }).catch((error) =>
+        console.warn(`[export] could not retire: ${error.message}`),
+      );
+    }
+
     job.phase = 'done';
     job.finishedAt = new Date().toISOString();
   }
@@ -606,6 +633,9 @@ export class BakeManager {
         description: options.description ?? null,
         attribution: options.attribution ?? null,
         categories: options.categories ?? null,
+        webSeedBase: options.webSeedBase ?? null,
+        keep: options.keep ?? null,
+        keepDays: options.keepDays ?? null,
       },
       metadata: {
         name: job.archiveName,

@@ -1531,11 +1531,36 @@ someone else's feed. A scheduled export is the same kind of thing. It just
 produces the file here instead of fetching it from somewhere else, and it lands
 in a category and goes out over the feed exactly as a fetched one does.
 
-**Scheduled exports** is a row per stack: never, every day at a time, or every so
-many hours. Saving one writes the schedule onto that stack's recipe. Turning a
-stack to _never_ pauses it with `enabled: false` rather than deleting the block,
-because where it lands, what it is called and which categories it is filed under
-live in the same place and should survive being paused.
+**Scheduled exports** is a row per stack, and it is the whole of one — when it
+runs, and everything it needs to run:
+
+| Field                                  | What it does                                                       |
+| -------------------------------------- | ------------------------------------------------------------------ |
+| never / every day at / every N h       | The schedule. `at` is UTC.                                         |
+| Categories                             | What each build is filed under, which is what the feed follows.    |
+| Builds to keep, Keep for               | Retirement, exactly as a watched folder or a subscription does it. |
+| Archive name, Attribution, Description | What the file says about itself once it is somewhere else.         |
+| Save to                                | Where the data lands: a named location, or a path.                 |
+| Publish to, Web seed base              | A directory something already serves, and the URL it serves at.    |
+
+Those are the manual export dialog's fields plus the two retention rules every
+other automation on that tab has, which is the point: a scheduled export is set
+up in one place rather than half in a settings tab and half in a dialog.
+
+Turning a stack to _never_ pauses it with `enabled: false` rather than deleting
+the block, so all of that survives being paused.
+
+#### Retiring what it produced
+
+Without this a nightly export is a disk that fills at one archive a night, which
+for a planet build is the fastest way to fill one that this project has. `keep`
+and `keepDays` are the same two rules a watched folder uses and they are applied
+by the same code.
+
+What was missing was a _family_: retiring needs to know which archives are builds
+of the same map. A watched folder marks its imports with the folder they came
+from; a bake marked nothing, so there was nothing to compare. It records
+`source.stack` now, and the family is every archive that names this stack.
 
 Beside it are the two that apply to every stack: `stacks.scheduledExports`, and
 `stacks.exportIntervalHours` for a stack scheduled by interval rather than by

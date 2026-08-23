@@ -3315,6 +3315,9 @@ export function createApp({
           name: req.body?.name,
           description: req.body?.description,
           attribution: req.body?.attribution,
+          webSeedBase: req.body?.webSeedBase,
+          keep: req.body?.keep,
+          keepDays: req.body?.keepDays,
         });
         return res.status(202).json({ bake: job });
       } catch (error) {

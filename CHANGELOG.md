@@ -4,6 +4,19 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+- **A scheduled export is set up like the other automations beside it.** The row under Settings →
+  Feeds is the whole of one now, not only the timer: categories, builds to keep, keep for how many
+  days, archive name, attribution, description, where the data lands, a publish directory and a web
+  seed base. Those are the manual export dialog's fields plus the two retention rules every other
+  automation on that tab already had, which is the point — a scheduled export is set up in one place
+  rather than half in a settings tab and half in a dialog.
+
+  Retirement is the part that needed something new underneath. `keep` and `keepDays` are applied by
+  the same code a watched folder uses, but retiring needs a *family* — which archives are builds of
+  the same map — and a bake marked nothing, so there was nothing to compare. An archive now records
+  `source.stack`, and the family is every archive that names this stack. Without it a nightly export
+  is a disk that fills at one archive a night.
+
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 

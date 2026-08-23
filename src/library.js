@@ -326,7 +326,15 @@ export class Library {
         // same thing as the directory it sits in: with publishDir it has
         // already moved somewhere else, and an archive dropped into a watched
         // folder by hand is still that folder's to retire.
-        source: { type: 'file', location: absolute, watch: options.watch },
+        source: {
+          type: 'file',
+          location: absolute,
+          watch: options.watch,
+          // Which stack baked this, where one did. The same job `watch` does
+          // for a folder: it is what tells one build of a map from another
+          // build of the same map, which is what retiring needs to know.
+          stack: options.stack,
+        },
         // The torrent names the file, so the save path is its parent directory.
         savePath: path.dirname(absolute),
         pmtiles: summary,

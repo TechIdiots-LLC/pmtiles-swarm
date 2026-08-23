@@ -223,6 +223,10 @@ export class StackExportScheduler {
             name: block.name,
             description: block.description,
             attribution: block.attribution,
+            webSeedBase: block.webSeedBase,
+            publishDir: block.publishDir,
+            keep: block.keep,
+            keepDays: block.keepDays,
           });
           // Written before the bake finishes, on purpose. It runs for hours and
           // a restart in the middle must not start it again from the top -- the
