@@ -4,6 +4,13 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.86.0
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
 - **Stack recipes travel between nodes.** `GET /stacks.xml` is this node's own stacks as a feed;
   **Settings → Feeds → Stack feeds** follows another node's and adopts what it carries. Archives
   already travelled by category — a builder feeding two tile servers gave them the same archives —
