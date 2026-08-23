@@ -435,6 +435,18 @@ export function assembleChildren(children, span, shape) {
 }
 
 /**
+ * As much smoothing as a recipe may ask for.
+ *
+ * The sigma a recipe names is multiplied by how many zoom levels a source was
+ * upscaled, so what it costs grows with the kernel's width and with the
+ * distance at once. Eight is already past useful -- these archives were built
+ * with 1.5, and eight at a six-level upscale reaches most of the way across a
+ * 512px tile -- while fifty makes one tile take eight seconds on an endpoint
+ * anybody can ask.
+ */
+export const MAX_BLUR_SIGMA = 8;
+
+/**
  * Smooths heights, in proportion to how far they were upscaled.
  *
  * An unsmoothed 64× upscale of a DEM renders as visible terracing under a

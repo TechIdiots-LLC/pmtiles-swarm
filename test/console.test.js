@@ -347,6 +347,37 @@ describe('clipping a source in the stack editor', () => {
   });
 });
 
+describe('smoothing in the stack editor', () => {
+  const script = page.split('<script type="module">')[1].split('</script>')[0];
+
+  it('reads the field and writes it back', () => {
+    // A field that draws but never saves is the failure this catches, and it
+    // looks exactly like a setting that does nothing.
+    assert.match(
+      script,
+      /stack-blur'\)\.value = stackDraft\.gaussianBlurSigma/,
+    );
+    assert.match(script, /body\.gaussianBlurSigma = Number/);
+  });
+
+  it('leaves the key out when it is off', () => {
+    // Zero is the default, and a recipe carrying a line that does nothing is a
+    // line somebody later has to work out the meaning of.
+    assert.match(script, /stack-blur'\)\.value\) > 0/);
+  });
+
+  it('hides it for a stack that never enters elevation space', () => {
+    assert.match(script, /stack-blur-field'\)\.hidden = rgba/);
+  });
+
+  it('tells the export what it is about to write', () => {
+    // An export is hours and hundreds of gigabytes, and every setting that
+    // decides the result lives in the stack rather than in that dialog.
+    assert.match(script, /function bakeOutputSummary/);
+    assert.match(script, /bake-output'\)\.textContent = bakeOutputSummary/);
+  });
+});
+
 describe('the filename an export preview promises', () => {
   // The console shows what the file will be called as the name is typed, which
   // means the naming rule now exists in the browser as well as on the server.

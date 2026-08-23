@@ -225,7 +225,7 @@ it differs from the snake_case rio-rgbify-merge uses.
 | `output.nodata`       | Height an uncovered pixel encodes as. Elevation space only.                                                |
 | `output.tileSize`     | 256 or 512, the stack's default. A URL overrides it per request; with neither, the largest source decides. |
 | `resampling`          | `nearest`, `bilinear`, `cubic` or `lanczos`.                                                               |
-| `gaussianBlurSigma`   | Multiplied by the zoom distance of an upscaled parent. `0` disables.                                       |
+| `gaussianBlurSigma`   | Multiplied by the zoom distance of an upscaled parent. `0` disables, `8` is the most it takes.             |
 | `boundsSource`        | Index into `sources` whose bounds become the stack's. Omit for the union.                                  |
 | `bounds`              | Explicit `[w, s, e, n]`. Wins over `boundsSource`.                                                         |
 | `minzoom` / `maxzoom` | Clamps. Default to the min and **max** over the sources.                                                   |

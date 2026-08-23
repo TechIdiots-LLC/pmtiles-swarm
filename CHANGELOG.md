@@ -2,6 +2,21 @@
 
 ## master
 ### ✨ Features and improvements
+- **Smoothing is in the stack editor, and bounded.** `gaussianBlurSigma` was honoured, documented
+  and reachable only by hand-editing `stacks.json`. It now sits under the output settings beside
+  Resampling, where it belongs - the two describe the same operation - and is hidden for an RGBA
+  stack, which never enters elevation space. Zero is left out of the recipe rather than written
+  down.
+
+  Validated as well as offered. The sigma a recipe names is multiplied by how many zoom levels a
+  source was upscaled, so the cost of a typo grows with the kernel and the distance at once: `50`
+  at a six-level upscale is a 900-pixel kernel and eight seconds for one 512px tile, on an endpoint
+  anybody can ask. `8` is the most it takes now, which is already past useful - these archives were
+  built with `1.5`.
+
+  The export dialog says what the recipe will write - encoding, format, size, resampling, smoothing
+  - because an export is hours of work and every setting that decides the result lives in the stack
+  rather than in that dialog.
 - **An export says so when it cannot use the machine it was given.** `stacks.bakeConcurrency` sizes
   how many tiles are merged at once and how many threads do their arithmetic. It does not size the
   one that binds: decoding and encoding a tile is sharp, sharp does that on libuv's thread pool, and

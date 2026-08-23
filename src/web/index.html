@@ -660,6 +660,16 @@
         </div>
 
         <div class="field">
+          <label>Output</label>
+          <div class="sub" id="bake-output"></div>
+          <div class="sub">
+            The recipe's, not this dialog's — an export writes what the stack
+            already serves, so what is baked and what a map has been looking at
+            cannot disagree. Change them in the stack, then export.
+          </div>
+        </div>
+
+        <div class="field">
           <label for="bake-name">Name</label>
           <input id="bake-name" placeholder="Terrain 20260101" />
           <div class="sub">
@@ -911,6 +921,20 @@
             </select>
             <span class="sub">Used where a source has no tile at this zoom and
               one is taken from its parent.</span>
+          </div>
+        </div>
+
+        <div class="field" id="stack-blur-field">
+          <label>Smoothing</label>
+          <div class="bar">
+            <input id="stack-blur" type="number" step="any" min="0" max="8"
+              placeholder="0" style="width:6rem" />
+            <span class="sub">Multiplied by how many zoom levels a source was
+              upscaled, so a tile from its immediate parent is barely touched
+              and one from six levels up is smoothed hard. Hides the terracing
+              an upscaled DEM shows under a hillshade.
+              <code>gaussian_blur_sigma</code> in the offline merge, where 1.5
+              is the value these archives were built with. 0 is off.</span>
           </div>
         </div>
 
@@ -7339,6 +7363,7 @@ Every piece is hashed against the ` +
         }
         $('stack-out-format').value = stackDraft.output.format ?? '';
         $('stack-resampling').value = stackDraft.resampling ?? '';
+        $('stack-blur').value = stackDraft.gaussianBlurSigma ?? '';
         $('stack-out-tilesize').value = stackDraft.output.tileSize ?? '';
         $('stack-error').textContent = '';
 
@@ -7465,6 +7490,9 @@ Every piece is hashed against the ` +
         $('stack-out-mapbox').hidden =
           rgba || (outEncoding !== '' && outEncoding !== 'mapbox');
         $('stack-out-custom').hidden = rgba || outEncoding !== 'custom';
+        // Smoothing happens in elevation space, between decoding a parent's
+        // heights and re-encoding them. An RGBA stack never enters it.
+        $('stack-blur-field').hidden = rgba;
         $('stack-format-note').textContent = rgba
           ? ''
           : 'Terrain is encoded losslessly whichever format is chosen.';
@@ -7797,6 +7825,11 @@ Every piece is hashed against the ` +
         if ($('stack-resampling').value) {
           body.resampling = $('stack-resampling').value;
         }
+        // Zero is off and is also the default, so it is left out rather than
+        // written down -- a recipe should not carry a line that does nothing.
+        if ($('stack-blur').value !== '' && Number($('stack-blur').value) > 0) {
+          body.gaussianBlurSigma = Number($('stack-blur').value);
+        }
         if ($('stack-out-tilesize').value) {
           body.output.tileSize = Number($('stack-out-tilesize').value);
         }
@@ -7871,10 +7904,40 @@ Every piece is hashed against the ` +
         // the person exporting it knows that.
         $('bake-description').value = '';
         $('bake-categories').value = (stack?.categories ?? []).join(', ');
+        $('bake-output').textContent = bakeOutputSummary(stack);
         showBakeFilename();
         $('bake-location').innerHTML = locationPicker('bake-loc');
         await fillLocations('bake-loc');
         $('bake-dialog').showModal();
+      }
+
+      /**
+       * What the recipe will actually write, in one line.
+       *
+       * An export is hours of work and hundreds of gigabytes, and the settings
+       * that decide what comes out live in the stack rather than in this
+       * dialog. Showing them is the difference between confirming a build and
+       * hoping.
+       * @param {object} stack - The stack being exported.
+       * @returns {string} - A readable summary.
+       */
+      function bakeOutputSummary(stack) {
+        const output = stack?.output ?? {};
+        const rgba = stack?.space === 'rgba';
+        const parts = [
+          rgba ? 'rgba' : (output.encoding ?? 'the sources' encoding'),
+          output.format ?? "the sources' format",
+          output.tileSize ? `${output.tileSize} px` : 'the sources' tile size',
+        ];
+        if (!rgba) {
+          parts.push(`${stack?.resampling ?? 'bilinear'} resampling`);
+          parts.push(
+            stack?.gaussianBlurSigma
+              ? `smoothing ${stack.gaussianBlurSigma} per zoom level upscaled`
+              : 'no smoothing',
+          );
+        }
+        return parts.join(', ');
       }
 
       /**

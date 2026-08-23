@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
+  MAX_BLUR_SIGMA,
   RESAMPLING,
   hasUsableEncoding,
   isResampling,
@@ -42,6 +43,8 @@ import { BLEND_MODES, isBlendMode } from './rgba.js';
  * @property {string} id - URL segment.
  * @property {string} [title] - Shown in the console and in TileJSON.
  * @property {string} [space] - 'elevation' (default) or 'rgba'.
+ * @property {number} [gaussianBlurSigma] - Smoothing for an upscaled source,
+ *   multiplied by how many zoom levels it came from. 0 is off.
  * @property {StackSource[]} sources - Bottom first; the last paints over.
  * @property {object} [output] - encoding, format, nodata, tileSize (256 or
  *   512), and the four factors when encoding is 'custom'.
@@ -173,6 +176,20 @@ export function validateStack(stack) {
   }
   if (stack.resampling !== undefined && !isResampling(stack.resampling)) {
     problems.push(`resampling must be one of ${RESAMPLING.join(', ')}`);
+  }
+  if (stack.gaussianBlurSigma !== undefined) {
+    // Bounded, not just checked for being a number. The value is multiplied by
+    // how far a source was upscaled, so the cost of a typo is squared twice
+    // over: at 50 with a six-level upscale the kernel reaches 900 pixels and
+    // one 512px tile takes eight seconds, on an endpoint anybody can ask.
+    // Eight is past the point of usefulness anyway -- the archives these
+    // recipes describe were built with 1.5.
+    const sigma = Number(stack.gaussianBlurSigma);
+    if (!Number.isFinite(sigma) || sigma < 0 || sigma > MAX_BLUR_SIGMA) {
+      problems.push(
+        `gaussianBlurSigma must be between 0 and ${MAX_BLUR_SIGMA}`,
+      );
+    }
   }
   if (stack.boundsSource !== undefined) {
     const index = Number(stack.boundsSource);

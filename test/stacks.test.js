@@ -122,6 +122,34 @@ describe('what a stack recipe has to say to be usable', () => {
     );
   });
 
+  it('bounds the smoothing, because the sigma is multiplied by the upscale', () => {
+    // A typo does not cost a little more here. The value is multiplied by how
+    // many zoom levels a source came from, so 50 at a six-level upscale is a
+    // 900-pixel kernel and eight seconds for one 512px tile -- on an endpoint
+    // anybody can ask. 1.5 is what these archives were built with.
+    const sigma = (value) =>
+      validateStack({
+        id: 'terrain',
+        sources: [{ category: 'x' }],
+        gaussianBlurSigma: value,
+      }).filter((problem) => problem.includes('gaussianBlurSigma'));
+
+    assert.deepEqual(sigma(1.5), [], 'refused the value in use');
+    assert.deepEqual(sigma(0), [], 'zero is off, not invalid');
+    assert.deepEqual(sigma(undefined), [], 'absent is the default');
+    // Nobody writes null meaning "smooth hard". It is a field left empty by
+    // whatever produced the file, and off is what empty means here.
+    assert.deepEqual(sigma(null), [], 'null is empty, not wrong');
+
+    for (const bad of [50, 1000, Infinity, -1, 'wide', Number.NaN]) {
+      assert.equal(
+        sigma(bad).length,
+        1,
+        `${JSON.stringify(bad)} was accepted as a sigma`,
+      );
+    }
+  });
+
   it('reports every problem at once, not just the first', () => {
     const problems = validateStack({
       id: '',
