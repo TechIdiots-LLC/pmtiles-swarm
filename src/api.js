@@ -3244,6 +3244,9 @@ export function createApp({
           // draws progress on the row, and one poll is what keeps that
           // honest while a bake is running.
           bake: bakes?.get(stack.id) ?? null,
+          // The schedule, so the row can say a stack exports itself
+          // without anybody opening the dialog to find out.
+          export: stack.export ?? null,
           encoding: stack.output?.encoding ?? null,
           encodingFactors:
             stack.output?.encoding === 'custom'

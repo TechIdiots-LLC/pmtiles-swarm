@@ -722,6 +722,30 @@
           </div>
         </div>
 
+        <div class="field">
+          <label for="bake-repeat">Repeat</label>
+          <div class="bar">
+            <select id="bake-repeat">
+              <option value="once">once, now</option>
+              <option value="at">every day at…</option>
+              <option value="hours">every…</option>
+            </select>
+            <input id="bake-at" type="time" value="03:30" hidden />
+            <span class="sub" id="bake-at-note" hidden>UTC</span>
+            <input id="bake-every" type="number" min="1" step="1" value="24"
+                   style="width:5rem" hidden />
+            <span class="sub" id="bake-every-note" hidden>hours</span>
+          </div>
+          <div class="sub" id="bake-repeat-note">
+            An archive is a snapshot: a stack over categories follows a rebuild,
+            and an export of it does not. A schedule is what keeps the file
+            level with the recipe. It is saved on the stack rather than started
+            now, and it skips a run whose sources have not moved since the last
+            one — the same map under a new infohash is an archive to seed beside
+            the one it duplicates.
+          </div>
+        </div>
+
         <div class="sub" id="bake-error" style="color: var(--danger)"></div>
         <menu>
           <button value="cancel">Cancel</button>
@@ -7354,7 +7378,15 @@ Every piece is hashed against the ` +
               ? ''
               : baking
                 ? `<button type="button" data-stack-bake-stop="${escapeHtml(stack.id)}">Stop export</button>`
-                : `<button type="button" data-stack-bake="${escapeHtml(stack.id)}" title="Run this stack over its sources and write the result as a real archive, with its own infohash, seeded like any other.">Export to archive</button>`
+                : `<button type="button" data-stack-bake="${escapeHtml(stack.id)}" title="Run this stack over its sources and write the result as a real archive, with its own infohash, seeded like any other.">Export to archive</button>${
+                    stack.export?.at || stack.export?.everyHours
+                      ? `<span class="pill" title="This stack exports on a schedule. A run whose sources have not moved since the last one is skipped.">${
+                          stack.export.at
+                            ? `daily ${escapeHtml([].concat(stack.export.at)[0])} UTC`
+                            : `every ${escapeHtml(String(stack.export.everyHours))}h`
+                        }</span>`
+                      : ''
+                  }`
           }
           <button type="button" data-stack-edit="${escapeHtml(stack.id)}">Edit</button>
           <button type="button" data-stack-copy="${escapeHtml(stack.id)}"
@@ -8227,6 +8259,23 @@ Every piece is hashed against the ` +
       };
 
       /**
+       * Shows the half of the repeat control the choice actually uses, and
+       * says on the button whether this will bake or only save a schedule.
+       * @returns {void}
+       */
+      function showBakeRepeat() {
+        const how = $('bake-repeat').value;
+        $('bake-at').hidden = how !== 'at';
+        $('bake-at-note').hidden = how !== 'at';
+        $('bake-every').hidden = how !== 'hours';
+        $('bake-every-note').hidden = how !== 'hours';
+        // The button is the honest place to say it: pressing Export on a
+        // schedule and having nothing happen for eleven hours is the surprise
+        // worth preventing.
+        $('bake-go').textContent = how === 'once' ? 'Export' : 'Save schedule';
+      }
+
+      /**
        * Asks where an export should land before starting it.
        *
        * A dialog rather than a confirm, because there is something to decide:
@@ -8252,6 +8301,20 @@ Every piece is hashed against the ` +
         // the person exporting knows, it is a fact about the sources, and an
         // archive published without it is the failure worth preventing.
         $('bake-attribution').value = stack?.attribution ?? '';
+
+        // The schedule the recipe already carries, if it has one, so opening
+        // this on a scheduled stack shows the schedule rather than offering to
+        // replace it with a one-off.
+        const repeat = stack?.export ?? {};
+        $('bake-repeat').value = repeat.at
+          ? 'at'
+          : repeat.everyHours || repeat.everyMinutes
+            ? 'hours'
+            : 'once';
+        $('bake-at').value = [].concat(repeat.at ?? '03:30')[0];
+        $('bake-every').value =
+          repeat.everyHours ?? (repeat.everyMinutes ? repeat.everyMinutes / 60 : 24);
+        showBakeRepeat();
         $('bake-categories').value = (stack?.categories ?? []).join(', ');
         $('bake-output').textContent = bakeOutputSummary(stack);
         showBakeFilename();
@@ -8345,18 +8408,43 @@ Every piece is hashed against the ` +
         const description = $('bake-description').value.trim();
         const attribution = $('bake-attribution').value.trim();
 
+        const how = $('bake-repeat').value;
+        const settings = {
+          ...chosenLocation('bake-loc'),
+          ...(categories.length > 0 ? { categories } : {}),
+          ...(name ? { name } : {}),
+          ...(filename ? { filename } : {}),
+          ...(description ? { description } : {}),
+          ...(attribution ? { attribution } : {}),
+        };
+
         try {
-          await api(`/api/stacks/${encodeURIComponent(id)}/bake`, {
-            method: 'POST',
-            body: {
-              ...chosenLocation('bake-loc'),
-              ...(categories.length > 0 ? { categories } : {}),
-              ...(name ? { name } : {}),
-              ...(filename ? { filename } : {}),
-              ...(description ? { description } : {}),
-              ...(attribution ? { attribution } : {}),
-            },
-          });
+          if (how === 'once') {
+            await api(`/api/stacks/${encodeURIComponent(id)}/bake`, {
+              method: 'POST',
+              body: settings,
+            });
+          } else {
+            // Saved onto the recipe rather than started. Read back raw first,
+            // for the same reason editing does: the list is a report of what
+            // each source resolved to, and writing that back would replace the
+            // recipe with its own output.
+            const raw = await api(
+              `/api/stacks/${encodeURIComponent(id)}/raw`,
+            );
+            const stack = { ...raw.stack };
+            stack.export = {
+              ...settings,
+              ...(how === 'at'
+                ? { at: $('bake-at').value }
+                : { everyHours: Number($('bake-every').value) }),
+            };
+            delete stack.id;
+            await api(`/api/stacks/${encodeURIComponent(id)}`, {
+              method: 'PUT',
+              body: stack,
+            });
+          }
         } catch (error) {
           // Kept open, because the answer is usually something to change here
           // -- a location that does not exist, or a codec that is not
@@ -8366,9 +8454,11 @@ Every piece is hashed against the ` +
         }
 
         $('bake-dialog').close();
-        toast(`Exporting ${id}`);
+        toast(how === 'once' ? `Exporting ${id}` : `${id} is scheduled`);
         loadStacks().catch((e) => toast(e.message));
       });
+
+      $('bake-repeat').addEventListener('change', showBakeRepeat);
 
       // Editing and deleting hang off the list, which is redrawn on every
       // change, so they are delegated the same way the source rows are.

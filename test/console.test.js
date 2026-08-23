@@ -378,6 +378,27 @@ describe('clipping a source in the stack editor', () => {
     );
   });
 
+  it('can put an export on a schedule', () => {
+    // An archive is a snapshot and a stack is not: without this, a file falls
+    // behind its own recipe and somebody has to notice.
+    assert.match(page, /id="bake-repeat"/);
+    assert.match(script, /stack\.export = \{/);
+  });
+
+  it('says on the button whether it will bake or only save', () => {
+    // Pressing Export on a schedule and having nothing happen for eleven
+    // hours is the surprise worth preventing.
+    assert.match(script, /'Export' : 'Save schedule'/);
+  });
+
+  it('writes a schedule onto the recipe, not onto the report', () => {
+    // The list holds what each source resolved to. Writing that back would
+    // replace the recipe with its own output.
+    const at = script.indexOf('stack.export = {');
+    assert.ok(at > 0);
+    assert.match(script.slice(at - 600, at), /\/raw`/);
+  });
+
   it('offers the attribution an export will carry', () => {
     // An archive travels without the style that loaded it, so its own
     // metadata is the only place the credit survives.

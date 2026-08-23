@@ -53,6 +53,7 @@ of its parts.
 - [What a mask has to match](#what-a-mask-has-to-match)
 - [Feathering a seam](#feathering-a-seam)
 - [A stack as a source](#a-stack-as-a-source)
+  - [Exporting on a schedule](#exporting-on-a-schedule)
 - [Finding a stack](#finding-a-stack)
 - [Syncing a stack to another node](#syncing-a-stack-to-another-node)
 - [What the offline merge got wrong](#what-the-offline-merge-got-wrong)
@@ -1449,6 +1450,81 @@ than copying it is that a correction propagates.
 `isPinned` asks the same question one level down. A nested stack is only as
 pinned as what is underneath it, which is what decides whether the outer stack's
 tiles are safe to cache hard.
+
+### Exporting on a schedule
+
+An archive is a snapshot. A stack over categories follows its sources — when a
+new planet build lands, the stack serves it the next time anybody asks — and an
+archive baked from that stack does not. It goes stale the moment the sources
+move, and somebody has to notice and press Export again, which is exactly the
+kind of noticing that does not happen reliably.
+
+So a stack may carry an `export` block:
+
+```json
+{
+  "id": "planet-terrain",
+  "sources": [...],
+  "export": {
+    "at": "03:30",
+    "categories": ["basemaps"],
+    "location": "archives",
+    "attribution": "GEBCO 2026 | AW3D30 (JAXA)"
+  }
+}
+```
+
+`at` is a time of day in UTC, or a list of them; `everyHours` and `everyMinutes`
+are the interval form. That is the same shape a scheduled source uses and it is
+read by the same code, because they are one question and a node should not have
+two ways of answering it. Everything else in the block is what the export dialog
+collects, so a schedule is a saved dialog rather than a second set of settings.
+
+The console writes it from that dialog: **Repeat** turns the Export button into
+**Save schedule**, which puts the block on the recipe and starts nothing. The
+stack's row then shows when it runs.
+
+#### Remembering across a restart
+
+This is the part that differs from the source poller it borrows its schedule
+from, and it is the whole difficulty. The poller keeps last-run times in memory,
+so a restart makes everything due again — a missed poll costs one poll. A missed
+memory of a bake costs the whole bake: hours of reading and hundreds of gigabytes
+written, on every restart.
+
+So it is written to `stack-exports.json` in the data directory, written-then-
+renamed like every other state file here, and written **before** the bake
+finishes rather than after. A restart in the middle of an export must not start
+it from the top; the checkpoint is what carries it on, and the schedule's job is
+only to not start a second one.
+
+#### A run whose sources have not moved is skipped
+
+`bakeRevision` already covers the recipe and what each source resolved to, and it
+is recorded beside the time. When the next run comes round and the revision
+matches, nothing is baked — the archive would be the same map under a new
+infohash, which then has to be seeded beside the one it duplicates, and every
+subscriber has to fetch it to find out it changed nothing.
+
+The clock is still written down in that case. Without it the comparison would be
+repeated on every tick for the rest of the day, which is cheap but pointless.
+
+#### What it will not do
+
+**Two at once.** A bake reads every tile its sources hold; two competing for the
+same disk and the same cores finish later than one after the other. Anything
+still due is due a minute later, so the tick is the queue.
+
+**Start one over a bake already running.** That is the schedule catching up with
+an export taking longer than its interval, which for a planet is not unusual.
+
+**Give up quietly.** A refusal — a location that is full, a codec that is not
+installed — is not recorded as a run, so the next tick tries again. A schedule
+that recorded the attempt would wait a day before showing it had ever run.
+
+`stacks.scheduledExports: false` turns the whole thing off, which is what a
+second node serving the same stacks wants: the recipe travels, and only one of
+them should be the node that bakes it.
 
 ## Finding a stack
 

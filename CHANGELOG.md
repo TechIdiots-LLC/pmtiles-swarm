@@ -4,6 +4,25 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+- **A stack can export itself on a schedule.** An archive is a snapshot: a stack over categories
+  follows a rebuild and a file baked from it does not, so it goes stale the moment its sources move
+  and somebody has to notice. An `export` block on the recipe says when — `at` for a time of day in
+  UTC, `everyHours` or `everyMinutes` for an interval, the same shape a scheduled source uses and
+  read by the same code — along with everything the export dialog collects. In the console, **Repeat**
+  turns the Export button into **Save schedule**, and the stack's row shows when it runs.
+
+  The hard part is remembering across a restart. The source poller keeps last-run times in memory,
+  which is fine when a missed poll costs one poll; here it would cost the whole bake, every restart,
+  for hours. So it is written to `stack-exports.json`, and written *before* the bake finishes — a
+  restart mid-export must not start it from the top, since the checkpoint is what carries it on.
+
+  A run whose sources have not moved is skipped: `bakeRevision` is recorded beside the time, and an
+  identical archive is the same map under a new infohash that then has to be seeded beside the one it
+  duplicates. It will not run two at once, will not start one over a bake already running, and does
+  not record a refusal as a run — a location that is full is something somebody fixes, and a schedule
+  that gave up quietly would hide that it ever ran. `stacks.scheduledExports: false` turns it off,
+  which is what a second node serving the same recipes wants.
+
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 

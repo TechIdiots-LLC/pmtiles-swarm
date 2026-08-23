@@ -29,6 +29,7 @@ import {
   runStoppers,
 } from './shutdown.js';
 import { ScheduledSourceManager } from './sources.js';
+import { StackExportScheduler } from './stack-exports.js';
 import { SubscriptionManager } from './subscriptions.js';
 import { TileStats } from './tile-stats.js';
 import { TrafficStats, openStatsDatabase } from './traffic-stats.js';
@@ -486,6 +487,24 @@ PMTILES_SWARM_PUBLIC_URL
   //
   // Not awaited: an export is hours, and the node should be answering requests
   // while it runs rather than after it.
+  // Baking a stack on a timer, so an archive of it does not go stale the
+  // moment its sources are rebuilt. Only where this node bakes at all.
+  const stackExports =
+    bakes && config.stacks?.scheduledExports !== false
+      ? new StackExportScheduler({
+          stacks,
+          bakes,
+          config,
+          dataDir: config.dataDir,
+          resolve: (stack) =>
+            resolveStack(stack, {
+              archive: (hash) => catalog.get(hash),
+              category: (name) => catalog.byCategory(name)[0] ?? null,
+              stack: (id) => stacks?.get(id) ?? null,
+            }),
+        })
+      : null;
+
   if (config.stacks?.resumeExports !== false) {
     bakes
       .resumeAll((stackId) => {
@@ -505,6 +524,9 @@ PMTILES_SWARM_PUBLIC_URL
   stoppers.unshift({
     label: 'stack exports',
     stop: async () => {
+      // The schedule first, or a tick landing during the shutdown would start
+      // an export into a node that is closing.
+      stackExports?.stop();
       const stopped = await bakes.stopAll();
       if (stopped > 0) {
         console.log(
@@ -641,6 +663,12 @@ PMTILES_SWARM_PUBLIC_URL
   watch.start(config.watch);
   subscriptions.start();
   sources.start();
+  // After the resume above, so a bake this node was already in the middle of
+  // is picked up before the schedule is asked whether to start another.
+  if (stackExports) {
+    await stackExports.load();
+    stackExports.start();
+  }
   seeding.start();
   speed.start();
 

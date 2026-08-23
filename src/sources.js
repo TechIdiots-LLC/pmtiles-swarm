@@ -164,7 +164,7 @@ function scheduleKey(source) {
  * @param {number} defaultHours - The fallback interval.
  * @returns {string} - Something readable.
  */
-function describeSchedule(source, defaultHours) {
+export function describeSchedule(source, defaultHours) {
   const name = source.name ?? source.url ?? source.index ?? 'unnamed';
   if (source.at) return `${name} at ${[].concat(source.at).join(' and ')} UTC`;
   if (source.everyMinutes) return `${name} every ${source.everyMinutes}m`;

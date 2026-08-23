@@ -376,6 +376,23 @@ const DEFAULTS = {
      */
     bakePauseMs: 0,
     /**
+     * How often a stack with an `export` block but no time of day is baked.
+     *
+     * The fallback for `everyHours`, the way `sourceCheckIntervalHours` is for
+     * a scheduled source. A day, because that is the grain these archives are
+     * rebuilt at -- a planet build published nightly is the case this exists
+     * for, and anything faster is a machine that never stops baking.
+     */
+    exportIntervalHours: 24,
+    /**
+     * Whether scheduled exports run at all on this node.
+     *
+     * Off turns the schedules into settings without turning them into work,
+     * which is what a second node serving the same stacks wants: the recipe
+     * travels, and only one of them should be the one that bakes it.
+     */
+    scheduledExports: true,
+    /**
      * How many tiles an export merges at once.
      *
      * Every tile is several reads, a decode each and an encode, and one at a
