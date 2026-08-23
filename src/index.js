@@ -5,8 +5,9 @@ import { parseArgs } from 'node:util';
 import { createApp } from './api.js';
 import { assertSafeToListen, createAuth } from './auth.js';
 import { Catalog } from './catalog.js';
-import { StackStore } from './stacks.js';
+import { StackStore, resolveStack } from './stacks.js';
 import { StackCache } from './stack-cache.js';
+import { installCrashGuard } from './crash-guard.js';
 import { CutlineStore } from './cutlines.js';
 import { BakeManager } from './bake-jobs.js';
 import { loadCodec } from './codec.js';
@@ -212,6 +213,11 @@ PMTILES_SWARM_PUBLIC_URL
   /** @type {Array<{label: string, stop: () => unknown, ms?: number}>} */
   const stoppers = [];
   installSignalHandlers(stoppers);
+  // Before anything opens a socket. A peer wire that outlives its torrent
+  // throws from a timer, which is an uncaught exception, which is an exit --
+  // and under Restart=always that reads as a mysterious restart rather than a
+  // crash, taking whatever was running with it.
+  installCrashGuard();
 
   // Before anything is created or any port is bound: an unauthenticated node
   // on a reachable address fails silently, working perfectly right up until
@@ -473,6 +479,25 @@ PMTILES_SWARM_PUBLIC_URL
     loadCodec,
     cutlines,
   });
+
+  // Anything a previous run did not finish. Deliberately after the stacks and
+  // the catalog are loaded, since a checkpoint is only worth picking up where
+  // the recipe still resolves to what it did when the work was done.
+  //
+  // Not awaited: an export is hours, and the node should be answering requests
+  // while it runs rather than after it.
+  if (config.stacks?.resumeExports !== false) {
+    bakes
+      .resumeAll((stackId) => {
+        const stack = stacks?.list().find((one) => one.id === stackId);
+        if (!stack) return null;
+        return resolveStack(stack, {
+          archive: (hash) => catalog.get(hash),
+          category: (name) => catalog.byCategory(name)[0] ?? null,
+        });
+      })
+      .catch((error) => console.warn(`[bake] resume failed: ${error.message}`));
+  }
 
   // Early in the sequence, so an export is told to stop before the pieces it
   // reads through are taken away. Its checkpoint is the hours already spent.

@@ -468,6 +468,11 @@ export async function bakeStack(options) {
     checkpointSeconds = DEFAULT_CHECKPOINT_SECONDS,
     pauseMs = 0,
     concurrency = DEFAULT_CONCURRENCY,
+    // Written into the checkpoint and handed back by `readCheckpoint`. A
+    // resumed export has to reproduce the one somebody asked for -- its name,
+    // where it was going, what it was filed under -- and none of that can be
+    // worked out from the tiles on disk.
+    describe,
   } = options;
   const batchSize = Math.max(1, Math.floor(concurrency));
 
@@ -516,6 +521,7 @@ export async function bakeStack(options) {
         dataBytes: writer.dataBytes,
         addressed: writer.addressedTiles,
         clustered: writer.clustered,
+        ...(describe ? { describe } : {}),
       },
       writer.entries,
       persisted,

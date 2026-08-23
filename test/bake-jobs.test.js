@@ -456,6 +456,115 @@ describe('where a bake does its work', () => {
   });
 });
 
+describe('picking up an export a previous run did not finish', () => {
+  // The case that costs the most is the one nobody chose. A checkpoint is the
+  // hours already spent, and finding one used to mean somebody remembering to
+  // press the button.
+
+  /**
+   * A manager over one source, publishing into `dir`.
+   * @param {object} archive - What `sourceArchive` returned.
+   * @param {string} dir - Where the archive is going.
+   * @param {object} [library] - Overrides for the fake library.
+   * @returns {object} - `{manager, imported}`.
+   */
+  const managerAt = (archive, dir, library = {}) => {
+    const imported = [];
+    const manager = new BakeManager({
+      tiles: storeOver(archive),
+      config: { dataDir: path.join(workspace, 'data-resume'), savePath: dir },
+      loadCodec: async () => null,
+      library: {
+        addLocalArchive: async (file, options) => {
+          imported.push({ file, options });
+          return { infoHash: 'f'.repeat(40) };
+        },
+        resolveSavePath: async () => dir,
+        ...library,
+      },
+    });
+    return { manager, imported };
+  };
+
+  it('carries on rather than starting over', async () => {
+    const archive = await sourceArchive('resumable', [
+      [1, 0, 0],
+      [2, 1, 1],
+      [3, 2, 2],
+      [4, 3, 3],
+    ]);
+    const dir = path.join(workspace, 'resume-dest');
+    await fs.mkdir(dir, { recursive: true });
+    const resolved = stackOver(archive);
+
+    // A run that stops partway, the way a crash leaves things.
+    const held = new Promise(() => {});
+    const stopping = new BakeManager({
+      tiles: storeOver(archive),
+      config: { dataDir: path.join(workspace, 'data-resume'), savePath: dir },
+      loadCodec: async () => null,
+      library: {
+        addLocalArchive: async () => held,
+        resolveSavePath: async () => dir,
+      },
+    });
+    await stopping.start({ resolved, name: 'Chosen name', filename: 'chosen' });
+    await stopping.stopAll({ timeoutMs: 2000 });
+
+    // A fresh manager, as a restarted process would have.
+    const { manager, imported } = managerAt(archive, dir);
+    const picked = await manager.resumeAll((id) =>
+      id === 'terrain' ? resolved : null,
+    );
+
+    assert.equal(picked.length, 1, 'nothing was picked up');
+    const job = await settled(manager, 'terrain');
+    assert.equal(job.phase, 'done', job.error);
+
+    // The names it was given, not new ones worked out from today.
+    assert.equal(job.archiveName, 'Chosen name');
+    assert.equal(job.name, 'chosen.pmtiles');
+    assert.ok(imported[0].file.endsWith('chosen.pmtiles'));
+  });
+
+  it('leaves a checkpoint whose recipe has moved on', async () => {
+    // It holds half of a map that no longer exists. Continuing it would put
+    // two different builds in one archive and nothing downstream could tell.
+    const archive = await sourceArchive('moved-on', [[1, 0, 0]]);
+    const dir = path.join(workspace, 'resume-moved');
+    await fs.mkdir(dir, { recursive: true });
+
+    const stopping = new BakeManager({
+      tiles: storeOver(archive),
+      config: { dataDir: path.join(workspace, 'd'), savePath: dir },
+      loadCodec: async () => null,
+      library: {
+        addLocalArchive: async () => new Promise(() => {}),
+        resolveSavePath: async () => dir,
+      },
+    });
+    await stopping.start({ resolved: stackOver(archive) });
+    await stopping.stopAll({ timeoutMs: 2000 });
+
+    // The same stack, resolving to a different build.
+    const rebuilt = {
+      ...archive,
+      entry: { ...archive.entry, infoHash: 'a'.repeat(40) },
+    };
+    const { manager } = managerAt(archive, dir);
+    const picked = await manager.resumeAll(() => stackOver(rebuilt));
+    assert.deepEqual(picked, [], 'it continued a checkpoint for another map');
+  });
+
+  it('finds nothing when there is nothing to find', async () => {
+    const archive = await sourceArchive('nothing-left', [[1, 0, 0]]);
+    const dir = path.join(workspace, 'resume-empty');
+    await fs.mkdir(dir, { recursive: true });
+    const { manager } = managerAt(archive, dir);
+    assert.deepEqual(await manager.resumeAll(() => stackOver(archive)), []);
+  });
+});
+
 describe('stopping every export, for a service going down', () => {
   // A restart kills a bake where it stands. The merging half is cancellable
   // and keeps its work, but only if something tells it to stop -- and a

@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   assertBakeable,
@@ -106,6 +107,77 @@ export class BakeManager {
     job.cancelling = true;
     job.controller.abort();
     return true;
+  }
+
+  /**
+   * Picks up exports a previous run did not finish.
+   *
+   * A checkpoint is the hours already spent, and finding one again used to
+   * mean somebody remembering to press the button. That is fine for an export
+   * stopped on purpose and wrong for one a crash took -- which is the case
+   * that costs the most and gives the least warning.
+   *
+   * Only where the recipe still resolves to what it did. `bakeRevision` covers
+   * what each source became, so a rebuilt source means the checkpoint holds
+   * half of a map that no longer exists; that is left alone rather than
+   * continued, and discarded when somebody exports again deliberately.
+   * @param {Function} resolve - `(stackId) => resolved stack | null`.
+   * @returns {Promise<object[]>} - The jobs started.
+   */
+  async resumeAll(resolve) {
+    const started = [];
+
+    for (const root of this.#workRoots()) {
+      const directory = path.join(root, WORK_DIR);
+      const found = await fs.readdir(directory).catch(() => []);
+
+      for (const stackId of found) {
+        if (this.#jobs.has(stackId)) continue;
+        const state = await fs
+          .readFile(path.join(directory, stackId, 'bake-state.json'), 'utf8')
+          .then((raw) => JSON.parse(raw))
+          .catch(() => null);
+        // Written by a version that did not record what the job was. There is
+        // nothing to reproduce it from, so it waits for a person.
+        if (!state?.describe) continue;
+
+        const resolved = resolve(stackId);
+        if (!resolved || bakeRevision(resolved) !== state.revision) continue;
+
+        try {
+          const job = await this.start({ resolved, ...state.describe });
+          started.push(job);
+          console.log(
+            `[bake] picking up ${stackId} where it stopped: ` +
+              `${state.written ?? 0} tiles already merged`,
+          );
+        } catch (error) {
+          // A stack that cannot be baked now -- no codec, sources gone -- is
+          // said out loud and left. Its checkpoint is still there.
+          console.warn(`[bake] could not resume ${stackId}: ${error.message}`);
+        }
+      }
+    }
+
+    return started;
+  }
+
+  /**
+   * Everywhere an export might have left work.
+   *
+   * The working directory follows the destination, and a destination is
+   * whatever was chosen at the time -- so this is every place one could have
+   * been: the named locations, the default save path, and the data directory,
+   * where exports worked before the working directory moved.
+   * @returns {string[]} - Roots to look under, without repeats.
+   */
+  #workRoots() {
+    const roots = [
+      ...(this.#config.locations ?? []).map((one) => one?.path),
+      this.#config.savePath,
+      this.#config.dataDir,
+    ].filter(Boolean);
+    return [...new Set(roots.map((one) => path.resolve(one)))];
   }
 
   /**
@@ -341,6 +413,17 @@ export class BakeManager {
       header: { format },
       pauseMs: this.#config.stacks?.bakePauseMs ?? 0,
       concurrency: this.#concurrency(),
+      // Written into the checkpoint in the shape `start` takes, so picking one
+      // up is handing it back rather than reconstructing it. Nothing here can
+      // be worked out from the tiles on disk: what the archive is called, what
+      // the file is called, where it was going, what it is filed under.
+      describe: {
+        name: job.archiveName,
+        filename: job.name,
+        publishDir: job.publishDir ?? null,
+        description: options.description ?? null,
+        categories: options.categories ?? null,
+      },
       metadata: {
         name: job.archiveName,
         // Only what was asked for. Falling back to the recipe's own

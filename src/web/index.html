@@ -5229,6 +5229,16 @@ Every piece is hashed against the ` +
                 'whatever it is set to.',
             },
             {
+              key: 'stacks.resumeExports',
+              label: 'Pick up an unfinished export when the node starts',
+              type: 'boolean',
+              restart: true,
+              help:
+                'A checkpoint is the hours already spent, and the case that ' +
+                'costs most is the one nobody chose - a crash, or a restart ' +
+                'mid-run. Only where the recipe still resolves to what it did.',
+            },
+            {
               key: 'stacks.bakePauseMs',
               label: 'Pause between batches while exporting',
               type: 'number',

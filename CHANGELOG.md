@@ -7,6 +7,45 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.72.0
+### ✨ Features and improvements
+- **An unfinished export is picked up when the node starts.** The checkpoint was always there;
+  finding it again meant somebody remembering to press the button. That is fine for an export
+  stopped on purpose and wrong for one a crash took, which is the case that costs the most and
+  gives the least warning.
+
+  The checkpoint now records what the job was - what the archive is called, what the file is
+  called, where it was going, what it is filed under - because none of that can be worked out from
+  the tiles on disk, and a resumed export has to be the one somebody asked for rather than a new
+  one with today's date on it.
+
+  Only where the recipe still resolves to what it did. `bakeRevision` covers what each source
+  became, so a rebuilt source means the checkpoint holds half of a map that no longer exists;
+  that is left alone and reported, to be discarded when somebody exports again deliberately.
+  `stacks.resumeExports` turns it off for a node where hours of merging should never begin
+  without being asked for.
+
+### 🐞 Bug fixes
+- **The node was exiting when a peer wire outlived its torrent.** Twice in one evening on a real
+  node, both times killing an export that was hours in:
+
+      torrent.js:2092  this.client._debugId    -> reading '_debugId' of null
+      peer.js:201      this.swarm.client.dht   -> reading 'dht' of null
+
+  WebTorrent nulls `torrent.client` when a torrent is destroyed and does not always tear down that
+  torrent's peer wires with it. One fired a keep-alive timeout afterwards and the other finished a
+  handshake, and both reached through the dead reference. They happen inside a timer or a socket
+  callback, so there is no promise to reject and no call of ours to wrap - it is an uncaught
+  exception, and Node's answer to that is to exit. Under `Restart=always` that reads as a
+  mysterious restart rather than as a crash.
+
+  `src/crash-guard.js` survives exactly that shape and nothing else: a TypeError, about one of a
+  named list of properties, raised from a frame inside the torrent libraries. Every other uncaught
+  exception still stops the process, because one that survives everything is one that lies about
+  its own state. The two stacks from the journal are in the tests verbatim, alongside the near
+  misses that must still be fatal - the same error from our own code, a different error from
+  theirs.
+
 ## 0.71.0
 ### ✨ Features and improvements
 - **The preview comes back to where it was opened from.** The link out of a preview said

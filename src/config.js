@@ -388,6 +388,19 @@ const DEFAULTS = {
      * not clustered is bad at the one thing PMTiles is for.
      */
     bakeConcurrency: 4,
+    /**
+     * Whether an unfinished export is picked up when the node starts.
+     *
+     * A checkpoint is the hours already spent, and the case that costs most is
+     * the one nobody chose: a crash, or a restart in the middle of a run. On
+     * by default for that reason. Off for a node where hours of merging should
+     * never begin without somebody asking for it.
+     *
+     * Only where the recipe still resolves to what it did. A rebuilt source
+     * means the checkpoint holds half of a map that no longer exists, and that
+     * is left alone either way.
+     */
+    resumeExports: true,
   },
   /**
    * Folders scanned for new archives. Each entry is `{ path, categories,
