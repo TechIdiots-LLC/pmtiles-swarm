@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.78.0
+### ✨ Features and improvements
 - **Somewhere to clear the caches and the files nothing is waiting for.** A merged tile cache with
   no way to empty it is a directory somebody eventually finds by hand, and a temporary file a crash
   left behind is one nobody finds at all. Settings has a **Storage** tab now: what this node is
