@@ -4,6 +4,13 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.85.0
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
 - **A scheduled export can be served by the node that baked it.** The **Local file** choice, the same
   one every other row under Feeds offers: http, http + web seed, http + catalog. It is worth more
   here than anywhere else — a baked archive is already on this disk, so serving it costs a route
