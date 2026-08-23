@@ -4,6 +4,13 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.81.1
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
 - **The scheduled-export settings are under Settings → Feeds.** `stacks.scheduledExports` and
   `stacks.exportIntervalHours` had no schema entry, so they were config-file-only and invisible in
   the console. Feeds rather than a group of their own, because that tab is already where the
