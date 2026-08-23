@@ -61,8 +61,6 @@ import { BLEND_MODES, isBlendMode } from './rgba.js';
  *   512), and the four factors when encoding is 'custom'.
  * @property {number} [minzoom] - Floor. Defaults to the minimum over sources.
  * @property {number} [maxzoom] - Ceiling. Defaults to the maximum over sources.
- * @property {object} [export] - How and when to bake this stack into an
- *   archive: `at` or `everyHours`, and the settings the export dialog collects.
  * @property {number[]} [bounds] - Explicit [w, s, e, n]. Wins over boundsSource.
  * @property {number} [boundsSource] - Index into sources.
  * @property {string} [attribution] - Falls back to every source's, joined.
@@ -299,8 +297,6 @@ export function validateStack(stack) {
     // told about while they are still looking at it.
     problems.push('output.tileSize must be 256 or 512');
   }
-  if (stack.export !== undefined)
-    problems.push(...exportProblems(stack.export));
   if (stack.resampling !== undefined && !isResampling(stack.resampling)) {
     problems.push(`resampling must be one of ${RESAMPLING.join(', ')}`);
   }
@@ -399,76 +395,6 @@ export function stackRevision(stack) {
     .update(JSON.stringify(stack))
     .digest('hex')
     .slice(0, 12);
-}
-
-/** A time of day a schedule may name. */
-const AT = /^\d{1,2}:\d{2}$/;
-
-/**
- * What is wrong with an export block, if anything.
- *
- * The schedule is the same shape a scheduled source uses and is checked the
- * same way -- they are one question, and a node should not have two answers to
- * it. Everything else in the block is what the export dialog collects, checked
- * only for being the right kind of thing: what a location means is the bake's
- * business, and it says so when it starts.
- * @param {object} block - The recipe's `export`.
- * @returns {string[]} - The problems.
- */
-function exportProblems(block) {
-  if (!block || typeof block !== 'object' || Array.isArray(block)) {
-    return ['export must be an object'];
-  }
-  const problems = [];
-
-  if (block.at !== undefined) {
-    const times = [].concat(block.at);
-    const usable =
-      times.length > 0 &&
-      times.every((time) => {
-        const text = String(time).trim();
-        if (!AT.test(text)) return false;
-        const [hours, minutes] = text.split(':').map(Number);
-        return hours <= 23 && minutes <= 59;
-      });
-    if (!usable) {
-      problems.push('export.at must be times of day as "HH:MM", read as UTC');
-    }
-  }
-  for (const key of ['everyHours', 'everyMinutes']) {
-    if (block[key] === undefined) continue;
-    const value = Number(block[key]);
-    if (!Number.isFinite(value) || value <= 0) {
-      problems.push(`export.${key} must be a positive number`);
-    }
-  }
-  if (block.categories !== undefined && !Array.isArray(block.categories)) {
-    problems.push('export.categories must be a list');
-  }
-  for (const key of [
-    'name',
-    'description',
-    'attribution',
-    'location',
-    'savePath',
-    'publishDir',
-    'webSeedBase',
-  ]) {
-    if (block[key] !== undefined && typeof block[key] !== 'string') {
-      problems.push(`export.${key} must be text`);
-    }
-  }
-  // The same two a watched folder and a subscription take, so an operator who
-  // has set retention once has set it everywhere.
-  for (const key of ['keep', 'keepDays']) {
-    if (block[key] === undefined || block[key] === '') continue;
-    const value = Number(block[key]);
-    if (!Number.isInteger(value) || value < 1) {
-      problems.push(`export.${key} must be a whole number of at least 1`);
-    }
-  }
-
-  return problems;
 }
 
 /**

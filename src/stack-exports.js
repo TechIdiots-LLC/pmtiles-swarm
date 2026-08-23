@@ -14,38 +14,58 @@ import { describeSchedule, isDue } from './sources.js';
  *
  * The schedule is the same shape a scheduled source uses — `at` for a time of
  * day, `everyHours` or `everyMinutes` for an interval — because they are the
- * same question and a node should not have two ways of answering it. See
- * docs/tile-stacks.md — "Exporting on a schedule".
+ * same question and a node should not have two ways of answering it.
+ *
+ * A list in the config beside the watched folders and the scheduled sources,
+ * rather than a field on each stack. Two shapes were tried and both were the
+ * same mistake: one block per recipe, and one row per stack. A stack may want
+ * two schedules — a nightly build to the fast disk and a weekly one published
+ * somewhere else — and neither shape can say that. See docs/tile-stacks.md —
+ * "Exporting on a schedule".
  */
 
 /** Where the last run of each stack is remembered, under the data directory. */
 const STATE_FILE = 'stack-exports.json';
 
 /**
- * The export schedule a stack carries, if it has one.
- * @param {object} stack - The recipe.
- * @returns {object|null} - The export block, or null.
+ * Whether a row is one this node should act on.
+ * @param {object} row - One entry of `stackExports`.
+ * @returns {boolean} - True when it names a stack and says when.
  */
-export function exportSchedule(stack) {
-  const block = stack?.export;
-  if (!block || typeof block !== 'object') return null;
-  if (block.enabled === false) return null;
-  // A block with no schedule in it is the settings for a manual export, which
-  // is a reasonable thing to keep and not a reason to run one.
-  if (!block.at && !block.everyHours && !block.everyMinutes) return null;
-  return block;
+export function isSchedule(row) {
+  if (!row || typeof row !== 'object' || !row.stack) return false;
+  if (row.enabled === false) return false;
+  // A row with settings but no schedule is half-typed, not a reason to bake.
+  return Boolean(row.at || row.everyHours || row.everyMinutes);
 }
 
 /**
- * How a stack's export schedule reads in a log line.
- * @param {object} stack - The recipe.
+ * A stable name for one row, for remembering when it last ran.
+ *
+ * The stack and the schedule together, rather than the row's position: a list
+ * that is reordered in the console must not make every schedule due again, and
+ * two rows over one stack have to be told apart. Two rows that agree on both
+ * are the same schedule written twice.
+ * @param {object} row - One entry of `stackExports`.
+ * @returns {string} - The key.
+ */
+export function scheduleKey(row) {
+  const when = row.at
+    ? [].concat(row.at).join('+')
+    : row.everyHours
+      ? `${row.everyHours}h`
+      : `${row.everyMinutes}m`;
+  return `${row.stack}@${when}`;
+}
+
+/**
+ * How one row reads in a log line.
+ * @param {object} row - One entry of `stackExports`.
  * @param {number} defaultHours - The fallback interval.
  * @returns {string} - One line.
  */
-export function describeExportSchedule(stack, defaultHours) {
-  const block = exportSchedule(stack);
-  if (!block) return `${stack.id}: not scheduled`;
-  return `${stack.id} ${describeSchedule(block, defaultHours)}`;
+export function describeExportSchedule(row, defaultHours) {
+  return `${row.stack} ${describeSchedule(row, defaultHours)}`;
 }
 
 /**
@@ -126,7 +146,7 @@ export class StackExportScheduler {
 
   /**
    * What this scheduler remembers, for the console.
-   * @returns {object[]} - `{id, at, revision}` per stack that has exported.
+   * @returns {object[]} - `{id, at, revision}` per schedule that has run.
    */
   history() {
     return [...this.#state.entries()].map(([id, record]) => ({
@@ -151,13 +171,13 @@ export class StackExportScheduler {
     this.#timer = setInterval(tick, 60 * 1000);
     this.#timer.unref?.();
 
-    const scheduled = (this.#stacks?.list() ?? []).filter(exportSchedule);
+    const scheduled = (this.#config.stackExports ?? []).filter(isSchedule);
     if (scheduled.length > 0) {
       const fallback = this.#config.stacks?.exportIntervalHours ?? 24;
       console.log(
         `[export] ${scheduled.length} scheduled export(s): ` +
           scheduled
-            .map((stack) => describeExportSchedule(stack, fallback))
+            .map((row) => describeExportSchedule(row, fallback))
             .join(', '),
       );
     }
@@ -189,17 +209,29 @@ export class StackExportScheduler {
       const defaultHours = this.#config.stacks?.exportIntervalHours ?? 24;
       const started = [];
 
-      for (const stack of this.#stacks?.list() ?? []) {
-        const block = exportSchedule(stack);
-        if (!block) continue;
+      for (const row of this.#config.stackExports ?? []) {
+        if (!isSchedule(row)) continue;
 
-        const last = this.#state.get(stack.id);
+        const key = scheduleKey(row);
+        const last = this.#state.get(key);
         const lastRun = last?.at ? new Date(last.at) : undefined;
-        if (!isDue(block, lastRun, { defaultHours, now })) continue;
+        if (!isDue(row, lastRun, { defaultHours, now })) continue;
 
-        // Refused rather than queued: one already running is the schedule
-        // catching up with a bake that is taking longer than its interval.
-        const running = this.#bakes?.get(stack.id);
+        const stack = (this.#stacks?.list() ?? []).find(
+          (one) => one.id === row.stack,
+        );
+        if (!stack) {
+          // Said rather than skipped in silence: a row naming a stack that was
+          // renamed or deleted is a schedule that will never run again, and
+          // nothing else would ever mention it.
+          console.warn(`[export] ${row.stack}: no such stack`);
+          continue;
+        }
+
+        // Refused rather than queued: one already running is either a schedule
+        // catching up with a bake taking longer than its interval, or the
+        // stack's other schedule coming round at the same moment.
+        const running = this.#bakes?.get(row.stack);
         if (running && !running.finishedAt) continue;
 
         const resolved = this.#resolve?.(stack) ?? null;
@@ -210,35 +242,35 @@ export class StackExportScheduler {
           // Nothing has changed, so the archive would be the same map under a
           // new infohash. The clock is still written down, or this would be
           // re-checked on every tick for the rest of the day.
-          await this.#remember(stack.id, { at: now.toISOString(), revision });
+          await this.#remember(key, { at: now.toISOString(), revision });
           continue;
         }
 
         try {
           const job = await this.#bakes.start({
             resolved,
-            categories: block.categories,
-            location: block.location,
-            savePath: block.savePath,
-            name: block.name,
-            description: block.description,
-            attribution: block.attribution,
-            webSeedBase: block.webSeedBase,
-            publishDir: block.publishDir,
-            keep: block.keep,
-            keepDays: block.keepDays,
+            categories: row.categories,
+            location: row.location,
+            savePath: row.savePath,
+            name: row.name,
+            description: row.description,
+            attribution: row.attribution,
+            webSeedBase: row.webSeedBase,
+            publishDir: row.publishDir,
+            keep: row.keep,
+            keepDays: row.keepDays,
           });
           // Written before the bake finishes, on purpose. It runs for hours and
           // a restart in the middle must not start it again from the top -- the
           // checkpoint is what carries it on, not the schedule.
-          await this.#remember(stack.id, { at: now.toISOString(), revision });
-          started.push({ id: stack.id, job });
-          console.log(`[export] ${stack.id}: started on schedule`);
+          await this.#remember(key, { at: now.toISOString(), revision });
+          started.push({ id: row.stack, key, job });
+          console.log(`[export] ${key}: started on schedule`);
         } catch (error) {
           // Not remembered, so the next tick tries again. A location that is
           // full or a codec that is missing is a thing somebody fixes, and a
           // schedule that gave up silently would hide that it ever ran.
-          console.warn(`[export] ${stack.id}: ${error.message}`);
+          console.warn(`[export] ${key}: ${error.message}`);
         }
       }
 

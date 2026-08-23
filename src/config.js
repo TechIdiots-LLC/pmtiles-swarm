@@ -343,6 +343,20 @@ const DEFAULTS = {
     sparse: undefined,
   },
   /**
+   * Baking a stack into an archive on a timer.
+   *
+   * A list rather than a field on each stack, and rows rather than one per
+   * stack, because both of those turn out to be the same mistake: a stack may
+   * want two schedules -- a nightly build to the fast disk and a weekly one
+   * published somewhere else -- and a shape that holds one cannot say that.
+   *
+   * `[{ stack, at | everyHours | everyMinutes, categories, keep, keepDays,
+   * name, description, attribution, savePath, publishDir, webSeedBase,
+   * enabled }]`. See docs/tile-stacks.md -- "Exporting on a schedule".
+   */
+  stackExports: [],
+
+  /**
    * Tile stacks: several archives served as one endpoint. See
    * docs/tile-stacks.md.
    */
@@ -829,6 +843,7 @@ export const RELOADABLE = new Map([
   ['onComplete', 'hooks'],
   ['onCompleteCheckIntervalSeconds', 'hooks'],
   ['sources', 'sources'],
+  ['stackExports', 'stackExports'],
   ['sourceCheckIntervalHours', 'sources'],
   ['subscriptions', 'subscriptions'],
   ['subscriptionIntervalSeconds', 'subscriptions'],

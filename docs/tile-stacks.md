@@ -1459,30 +1459,62 @@ archive baked from that stack does not. It goes stale the moment the sources
 move, and somebody has to notice and press Export again, which is exactly the
 kind of noticing that does not happen reliably.
 
-So a stack may carry an `export` block:
+So **Settings → Feeds → Scheduled exports** is a list of rows, beside the
+monitored folders and the scheduled sources:
 
 ```json
-{
-  "id": "planet-terrain",
-  "sources": [...],
-  "export": {
+"stackExports": [
+  {
+    "stack": "planet-terrain",
     "at": "03:30",
     "categories": ["basemaps"],
-    "location": "archives",
+    "keep": 4,
+    "savePath": "/mnt/fast",
     "attribution": "GEBCO 2026 | AW3D30 (JAXA)"
+  },
+  {
+    "stack": "planet-terrain",
+    "everyHours": 168,
+    "publishDir": "/var/www/pmtiles",
+    "webSeedBase": "https://maps.example/files"
   }
-}
+]
 ```
 
-`at` is a time of day in UTC, or a list of them; `everyHours` and `everyMinutes`
-are the interval form. That is the same shape a scheduled source uses and it is
-read by the same code, because they are one question and a node should not have
-two ways of answering it. Everything else in the block is what the export dialog
-collects, so a schedule is a saved dialog rather than a second set of settings.
+A row names the stack and when. `at` is a time of day in UTC, or a list of them;
+`everyHours` and `everyMinutes` are the interval form. That is the same shape a
+scheduled source uses and it is read by the same code, because they are one
+question and a node should not have two ways of answering it.
 
-The console writes it from that dialog: **Repeat** turns the Export button into
-**Save schedule**, which puts the block on the recipe and starts nothing. The
-stack's row then shows when it runs.
+Everything else on a row is what the export dialog collects, plus the two
+retention rules every other automation on that tab has:
+
+| Field                                | What it does                                                    |
+| ------------------------------------ | --------------------------------------------------------------- |
+| `categories`                         | What each build is filed under, which is what the feed follows. |
+| `keep`, `keepDays`                   | Retirement, exactly as a watched folder does it.                |
+| `name`, `attribution`, `description` | What the file says about itself once it is somewhere else.      |
+| `savePath`                           | Where the data lands: a named location, or a path.              |
+| `publishDir`, `webSeedBase`          | A directory something already serves, and the URL it serves at. |
+| `enabled: false`                     | Pauses the row without losing any of the above.                 |
+
+#### Rows, not a field on the recipe
+
+Two other shapes were built first and both were the same mistake. An `export`
+block on each stack, then a table of one row per stack: neither can say that a
+stack has **two** schedules — a nightly build to the fast disk and a weekly one
+published somewhere else — which is an ordinary thing to want and impossible to
+express in a shape that holds one.
+
+Rows also put the schedule where the other automations already are. A watched
+folder and a subscription are node-level: they say what _this machine_ does, not
+what a map is. A schedule is the same kind of statement, and keeping it out of
+the recipe means a recipe copied to another node does not quietly start baking
+there.
+
+The export dialog no longer offers to repeat, for the same reason: a stack may
+have several schedules and a dialog opened on the stack cannot say which one it
+would be editing. It exports once and points at the settings tab.
 
 #### Remembering across a restart
 
@@ -1498,6 +1530,11 @@ finishes rather than after. A restart in the middle of an export must not start
 it from the top; the checkpoint is what carries it on, and the schedule's job is
 only to not start a second one.
 
+A row is remembered under the stack and its schedule — `planet-terrain@03:30` —
+rather than its position in the list. Two rows over one stack have to be told
+apart, and a list somebody reordered in the console must not make every schedule
+due again.
+
 #### A run whose sources have not moved is skipped
 
 `bakeRevision` already covers the recipe and what each source resolved to, and it
@@ -1508,47 +1545,6 @@ subscriber has to fetch it to find out it changed nothing.
 
 The clock is still written down in that case. Without it the comparison would be
 repeated on every tick for the rest of the day, which is cheap but pointless.
-
-#### What it will not do
-
-**Two at once.** A bake reads every tile its sources hold; two competing for the
-same disk and the same cores finish later than one after the other. Anything
-still due is due a minute later, so the tick is the queue.
-
-**Start one over a bake already running.** That is the schedule catching up with
-an export taking longer than its interval, which for a planet is not unusual.
-
-**Give up quietly.** A refusal — a location that is full, a codec that is not
-installed — is not recorded as a run, so the next tick tries again. A schedule
-that recorded the attempt would wait a day before showing it had ever run.
-
-#### Where the settings live
-
-All of it is under **Settings → Feeds**, because that tab is already where the
-automations that bring a file in on a timer sit — a monitored folder, a
-scheduled source watching an upstream directory, a subscription following
-someone else's feed. A scheduled export is the same kind of thing. It just
-produces the file here instead of fetching it from somewhere else, and it lands
-in a category and goes out over the feed exactly as a fetched one does.
-
-**Scheduled exports** is a row per stack, and it is the whole of one — when it
-runs, and everything it needs to run:
-
-| Field                                  | What it does                                                       |
-| -------------------------------------- | ------------------------------------------------------------------ |
-| never / every day at / every N h       | The schedule. `at` is UTC.                                         |
-| Categories                             | What each build is filed under, which is what the feed follows.    |
-| Builds to keep, Keep for               | Retirement, exactly as a watched folder or a subscription does it. |
-| Archive name, Attribution, Description | What the file says about itself once it is somewhere else.         |
-| Save to                                | Where the data lands: a named location, or a path.                 |
-| Publish to, Web seed base              | A directory something already serves, and the URL it serves at.    |
-
-Those are the manual export dialog's fields plus the two retention rules every
-other automation on that tab has, which is the point: a scheduled export is set
-up in one place rather than half in a settings tab and half in a dialog.
-
-Turning a stack to _never_ pauses it with `enabled: false` rather than deleting
-the block, so all of that survives being paused.
 
 #### Retiring what it produced
 
@@ -1562,19 +1558,24 @@ of the same map. A watched folder marks its imports with the folder they came
 from; a bake marked nothing, so there was nothing to compare. It records
 `source.stack` now, and the family is every archive that names this stack.
 
-Beside it are the two that apply to every stack: `stacks.scheduledExports`, and
-`stacks.exportIntervalHours` for a stack scheduled by interval rather than by
-time of day.
+#### What it will not do
 
-Storing the schedule on the stack rather than in this node's config is the one
-arguable part. It sits with the rest of what an export needs — the categories,
-the disk, the name — and those are unmistakably the stack's. The cost is that a
-recipe copied to another node carries its schedule with it, which is what
-`stacks.scheduledExports: false` is for.
+**Two at once.** A bake reads every tile its sources hold; two competing for the
+same disk and the same cores finish later than one after the other. Anything
+still due is due a minute later, so the tick is the queue.
 
-`stacks.scheduledExports: false` turns the whole thing off, which is what a
-second node serving the same stacks wants: the recipe travels, and only one of
-them should be the node that bakes it.
+**Start one over a bake already running.** That is either a schedule catching up
+with an export taking longer than its interval, or a stack's second schedule
+coming round while its first is still going.
+
+**Give up quietly.** A refusal — a location that is full, a codec that is not
+installed, a row naming a stack that has been deleted — is not recorded as a run,
+so the next tick tries again and says so. A schedule that recorded the attempt
+would wait a day before showing it had ever run.
+
+`stacks.scheduledExports: false`, beside the rows, turns the whole thing off.
+That is what a second node serving the same stacks wants: only one of them
+should be the node that bakes.
 
 ## Finding a stack
 

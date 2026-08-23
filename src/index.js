@@ -567,6 +567,12 @@ PMTILES_SWARM_PUBLIC_URL
       sources.stop();
       sources.start();
     },
+    stackExports: () => {
+      // The rows are read fresh on every tick, so this is mostly to say the
+      // change applied -- and to pick up a node that had none at all.
+      stackExports?.stop();
+      stackExports?.start();
+    },
     subscriptions: () => {
       subscriptions.stop();
       subscriptions.start();

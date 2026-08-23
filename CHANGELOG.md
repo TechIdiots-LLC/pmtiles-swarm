@@ -4,6 +4,23 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+- **Scheduled exports are rows, like every other automation beside them.** `stackExports` in the
+  config, edited under Settings → Feeds with the same row editor the monitored folders and the
+  scheduled sources use: add a row, choose the stack from a dropdown, say when, and fill in the rest
+  — categories, builds to keep, keep for how many days, save location, publish directory, web seed
+  base, archive name, attribution, description.
+
+  **Several rows may name one stack.** That is what the two earlier shapes could not say: an `export`
+  block on the recipe, and then a table of one row per stack, both hold exactly one schedule — and a
+  nightly build to the fast disk beside a weekly one published elsewhere is an ordinary thing to
+  want. It also puts the schedule where the other automations already are: a watched folder says what
+  *this machine* does, not what a map is, and keeping it out of the recipe means a recipe copied to
+  another node does not quietly start baking there.
+
+  The export dialog no longer offers to repeat — a stack may have several schedules and a dialog
+  opened on the stack cannot say which it would edit. It exports once and points at the settings tab.
+  A stack's row in the Stacks view still shows the schedules aimed at it.
+
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 

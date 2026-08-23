@@ -379,17 +379,20 @@ describe('clipping a source in the stack editor', () => {
   });
 
   it('sets each stack schedule beside the other automations', () => {
-    // Not only the two global settings: this is where somebody goes to say
-    // when a thing runs, so it is where the schedules are set.
-    assert.match(script, /renderStackScheduleEditor\(paneFor\('Feeds'\)\)/);
-    assert.match(script, /Scheduled exports/);
-    assert.match(script, /data-sched-save=/);
+    // The same row editor the monitored folders and the scheduled sources
+    // use, on the same tab, because it is the same kind of thing.
+    const at = script.indexOf("key: 'stackExports'");
+    assert.ok(at > 0, 'no scheduled-export row editor');
+    assert.match(script.slice(at - 400, at), /into: paneFor\('Feeds'\)/);
   });
 
-  it('pauses a schedule rather than forgetting what it was', () => {
-    // Where it lands, what it is called and its categories live in the same
-    // block; turning the timer off should not take them with it.
-    assert.match(script, /enabled: false/);
+  it('lets a stack have more than one schedule', () => {
+    // A nightly build to the fast disk and a weekly one published elsewhere
+    // are two rows over one stack, which a field on the recipe could not say.
+    const at = script.indexOf("key: 'stackExports'");
+    const spec = script.slice(at, at + 3000);
+    assert.match(spec, /field: 'stack'/, 'a row has to name its stack');
+    assert.match(spec, /options: \[/, 'and name it by choosing one');
   });
 
   it('puts the export schedule settings with the other automations', () => {
@@ -403,35 +406,18 @@ describe('clipping a source in the stack editor', () => {
     assert.match(script, /key: 'stacks\.exportIntervalHours'/);
   });
 
-  it('can put an export on a schedule', () => {
-    // An archive is a snapshot and a stack is not: without this, a file falls
-    // behind its own recipe and somebody has to notice.
-    assert.match(page, /id="bake-repeat"/);
-    assert.match(script, /stack\.export = \{/);
+  it('sends somebody wanting it to repeat where the schedules are', () => {
+    // The dialog exports once. It cannot edit a schedule any more, because a
+    // stack may have several and the dialog could not say which.
+    assert.doesNotMatch(page, /id="bake-repeat"/);
+    assert.match(page, /Scheduled exports<\/b>/);
   });
 
-  it('says on the button whether it will bake or only save', () => {
-    // Pressing Export on a schedule and having nothing happen for eleven
-    // hours is the surprise worth preventing.
-    assert.match(script, /'Export' : 'Save schedule'/);
-  });
-
-  it('writes a schedule onto the recipe, not onto the report', () => {
-    // Both writers -- the dialog and the table under Feeds -- read the recipe
-    // back before touching it. The list holds what each source resolved to, so
-    // writing that back would replace the recipe with its own output.
-    const writes = [...script.matchAll(/stack\.export = \{/g)];
-    assert.ok(writes.length >= 2, `only ${writes.length} writers found`);
-    for (const write of writes) {
-      const before = script.slice(Math.max(0, write.index - 2500), write.index);
-      assert.match(before, /\/raw`/, 'wrote a schedule without reading raw');
-    }
-  });
-
-  it('keeps the export settings beside the schedule', () => {
-    // The same things the manual export asks for, plus the retention every
-    // other automation on this tab has -- so a scheduled export is set up in
-    // one place rather than half here and half in a dialog.
+  it('gives a scheduled export everything a manual one has', () => {
+    // Plus the retention every other automation on this tab already had, so
+    // it is set up in one place rather than half here and half in a dialog.
+    const at = script.indexOf("key: 'stackExports'");
+    const spec = script.slice(at, at + 3000);
     for (const field of [
       'categories',
       'keep',
@@ -442,13 +428,22 @@ describe('clipping a source in the stack editor', () => {
       'publishDir',
       'webSeedBase',
     ]) {
-      // Built through one `box` helper, so the field name is its argument
-      // rather than a literal attribute in the source.
       assert.ok(
-        script.includes(`'${field}',`),
+        spec.includes(`field: '${field}'`),
         `no ${field} on a scheduled export`,
       );
     }
+  });
+
+  it('offers save locations by name, as the other rows do', () => {
+    // A path like M:\\archives\\finished-unsorted is typed once under
+    // Settings, not again in every row that lands something.
+    const at = script.indexOf(
+      "field: 'savePath'",
+      script.indexOf("key: 'stackExports'"),
+    );
+    assert.ok(at > 0);
+    assert.match(script.slice(at, at + 400), /config\.locations/);
   });
 
   it('offers the attribution an export will carry', () => {
@@ -2356,6 +2351,7 @@ describe('the settings schema', () => {
       'sources',
       'subscriptions',
       'locations',
+      'stackExports',
     ]);
 
     const stranded = declared.filter(

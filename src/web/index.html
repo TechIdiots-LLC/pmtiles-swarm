@@ -722,28 +722,11 @@
           </div>
         </div>
 
-        <div class="field">
-          <label for="bake-repeat">Repeat</label>
-          <div class="bar">
-            <select id="bake-repeat">
-              <option value="once">once, now</option>
-              <option value="at">every day at…</option>
-              <option value="hours">every…</option>
-            </select>
-            <input id="bake-at" type="time" value="03:30" hidden />
-            <span class="sub" id="bake-at-note" hidden>UTC</span>
-            <input id="bake-every" type="number" min="1" step="1" value="24"
-                   style="width:5rem" hidden />
-            <span class="sub" id="bake-every-note" hidden>hours</span>
-          </div>
-          <div class="sub" id="bake-repeat-note">
-            An archive is a snapshot: a stack over categories follows a rebuild,
-            and an export of it does not. A schedule is what keeps the file
-            level with the recipe. It is saved on the stack rather than started
-            now, and it skips a run whose sources have not moved since the last
-            one — the same map under a new infohash is an archive to seed beside
-            the one it duplicates.
-          </div>
+        <div class="sub" style="margin-bottom:0.8rem">
+          This exports once, now. To have it run again by itself — nightly, or
+          every so many hours — add a row under
+          <b>Settings → Feeds → Scheduled exports</b>, where the other
+          automations that bring an archive in on a timer are set up.
         </div>
 
         <div class="sub" id="bake-error" style="color: var(--danger)"></div>
@@ -4874,275 +4857,6 @@ Every piece is hashed against the ` +
        * @param {HTMLElement} into - The settings pane to render in.
        * @returns {Promise<void>} - Resolves once it is drawn.
        */
-      /**
-       * When each stack bakes itself into an archive.
-       *
-       * With the feeds because that is where the automations that bring a file
-       * in on a timer sit -- a monitored folder, a scheduled source, someone
-       * else's feed. This is one of those: it produces the archive here rather
-       * than fetching one, and it lands in a category and goes out over the
-       * feed exactly as a fetched one does.
-       *
-       * Only the *when* is edited here. Where it lands, what it is called and
-       * which categories it is filed under come from the export dialog, and
-       * they are written on the stack because that is where the rest of the
-       * recipe already is.
-       * @param {HTMLElement} into - The settings pane to render in.
-       * @returns {Promise<void>} - Resolves once it is drawn.
-       */
-      async function renderStackScheduleEditor(into) {
-        const panel = document.createElement('div');
-        panel.className = 'panel';
-        panel.style.marginBottom = '1rem';
-        into.append(panel);
-
-        const draw = async () => {
-          let held;
-          try {
-            held = (await api('/api/stacks')).stacks ?? [];
-          } catch (error) {
-            panel.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
-            return;
-          }
-
-          const rows = held
-            .map((stack) => {
-              const block = stack.export ?? {};
-              const how =
-                block.enabled === false
-                  ? 'off'
-                  : block.at
-                    ? 'at'
-                    : block.everyHours || block.everyMinutes
-                      ? 'hours'
-                      : 'off';
-              const at = [].concat(block.at ?? '03:30')[0];
-              const every =
-                block.everyHours ??
-                (block.everyMinutes ? block.everyMinutes / 60 : 24);
-              const id = escapeHtml(stack.id);
-              /** One labelled box, since there are nine of them. */
-              const box = (field, label, attrs, value, help) => `
-                <label class="choice" ${help ? `title="${escapeHtml(help)}"` : ''}>
-                  ${label}
-                  <input data-sched="${id}" data-sched-field="${field}" ${attrs}
-                         value="${escapeHtml(String(value ?? ''))}" />
-                </label>`;
-              return `
-                <div class="card tight">
-                  <div class="row">
-                    <b>${escapeHtml(stack.title ?? stack.id)}</b>
-                    <code class="muted">${id}</code>
-                    <span class="bar-gap"></span>
-                    <select data-sched="${id}" data-sched-field="how">
-                      <option value="off"${how === 'off' ? ' selected' : ''}>never</option>
-                      <option value="at"${how === 'at' ? ' selected' : ''}>every day at</option>
-                      <option value="hours"${how === 'hours' ? ' selected' : ''}>every</option>
-                    </select>
-                    <input type="time" style="width:7rem" data-sched="${id}"
-                           data-sched-field="at" value="${escapeHtml(String(at))}"
-                           ${how === 'at' ? '' : 'hidden'} />
-                    <span class="sub" data-sched="${id}" data-sched-field="at-note"
-                          ${how === 'at' ? '' : 'hidden'}>UTC</span>
-                    <input type="number" min="1" step="1" style="width:4.5rem"
-                           data-sched="${id}" data-sched-field="every"
-                           value="${escapeHtml(String(every))}"
-                           ${how === 'hours' ? '' : 'hidden'} />
-                    <span class="sub" data-sched="${id}" data-sched-field="every-note"
-                          ${how === 'hours' ? '' : 'hidden'}>hours</span>
-                    <button data-sched-save="${id}">Save</button>
-                  </div>
-                  <div class="bar" data-sched-body="${id}" ${how === 'off' ? 'hidden' : ''}>
-                    ${box(
-                      'categories',
-                      'Categories',
-                      'style="width:11rem" placeholder="the stack’s own"',
-                      (block.categories ?? []).join(', '),
-                      'Comma separated. What each build is filed under once it is added, which is what /latest/<category>/ follows and what a subscriber sees in the feed.',
-                    )}
-                    ${box(
-                      'keep',
-                      'Builds to keep',
-                      'type="number" min="1" step="1" style="width:5rem" placeholder="all"',
-                      block.keep,
-                      'Older builds of this stack are retired once there are more than this. The same rule a watched folder and a subscription use.',
-                    )}
-                    ${box(
-                      'keepDays',
-                      'Keep for',
-                      'type="number" min="1" step="1" style="width:5rem" placeholder="for ever"',
-                      block.keepDays,
-                      'Days. A build older than this is retired whichever rule reaches it first.',
-                    )}
-                    ${box(
-                      'name',
-                      'Archive name',
-                      'style="width:11rem" placeholder="the stack’s title"',
-                      block.name,
-                      'What the archive calls itself and what a map client shows. Left empty, the export names it from the stack and the date.',
-                    )}
-                    ${box(
-                      'attribution',
-                      'Attribution',
-                      'style="width:13rem" placeholder="every source’s, joined"',
-                      block.attribution,
-                      'Written into the archive metadata, so the credit travels with the file. Left empty, every source’s is joined with a pipe.',
-                    )}
-                    ${box(
-                      'description',
-                      'Description',
-                      'style="width:13rem" placeholder=""',
-                      block.description,
-                      'Optional. The date it was baked is recorded whether or not anything else is.',
-                    )}
-                    ${box(
-                      'savePath',
-                      'Save to',
-                      'style="width:12rem" placeholder="the default disk"',
-                      block.savePath ?? block.location,
-                      'Where the archive data lands. A named location from Settings, or a path outright.',
-                    )}
-                    ${box(
-                      'publishDir',
-                      'Publish to',
-                      'style="width:12rem" placeholder="not published"',
-                      block.publishDir,
-                      'A directory something already serves over HTTP. The archive is moved there as it is taken on, so a web seed works from the first moment.',
-                    )}
-                    ${box(
-                      'webSeedBase',
-                      'Web seed base',
-                      'style="width:13rem" placeholder="no web seed"',
-                      block.webSeedBase,
-                      'The URL that directory is served at. With it, every build carries a web seed and a peer with none can still fetch it.',
-                    )}
-                  </div>
-                </div>`;
-            })
-            .join('');
-
-          panel.innerHTML = `
-            <h2 style="margin-top:0">Scheduled exports</h2>
-            <div class="sub" style="margin-bottom:0.8rem">
-              A stack baked into an archive on a timer, so the file does not
-              fall behind the recipe it came from — the same automation as a
-              monitored folder or a feed, producing the archive here rather than
-              fetching one. A run whose sources have not moved since the last one
-              is skipped, and older builds are retired the way every other feed
-              here retires them.
-            </div>
-            ${held.length ? rows : '<div class="empty">No stacks yet.</div>'}
-            <div class="sub" id="sched-note" style="margin-top:0.6rem"></div>`;
-
-          /**
-           * Shows the half of a row the choice actually uses.
-           * @param {string} id - Which stack's row.
-           * @returns {void}
-           */
-          const showRow = (id) => {
-            const how = panel.querySelector(
-              `[data-sched="${id}"][data-sched-field="how"]`,
-            )?.value;
-            for (const [field, when] of [
-              ['at', 'at'],
-              ['at-note', 'at'],
-              ['every', 'hours'],
-              ['every-note', 'hours'],
-            ]) {
-              const box = panel.querySelector(
-                `[data-sched="${id}"][data-sched-field="${field}"]`,
-              );
-              if (box) box.hidden = how !== when;
-            }
-            // The settings are still saved when a stack is set to never -- they
-            // are what it will use when it is turned back on -- but there is no
-            // reason to look at them while nothing runs.
-            const body = panel.querySelector(`[data-sched-body="${id}"]`);
-            if (body) body.hidden = how === 'off';
-          };
-
-          for (const select of panel.querySelectorAll(
-            '[data-sched-field="how"]',
-          )) {
-            select.onchange = () => showRow(select.dataset.sched);
-          }
-
-          for (const button of panel.querySelectorAll('[data-sched-save]')) {
-            button.onclick = async () => {
-              const id = button.dataset.schedSave;
-              const value = (field) =>
-                panel.querySelector(
-                  `[data-sched="${id}"][data-sched-field="${field}"]`,
-                )?.value;
-              const note = panel.querySelector('#sched-note');
-              button.disabled = true;
-              try {
-                // The recipe, not the row: the list holds what each source
-                // resolved to, and writing that back would replace the recipe
-                // with its own output.
-                const raw = await api(
-                  `/api/stacks/${encodeURIComponent(id)}/raw`,
-                );
-                const stack = { ...raw.stack };
-                const how = value('how');
-                // Everything the export needs, beside the schedule and in the
-                // same block: an empty box means "the default", which is left
-                // out of the recipe rather than written as blank.
-                const settings = {};
-                for (const field of [
-                  'name',
-                  'description',
-                  'attribution',
-                  'savePath',
-                  'publishDir',
-                  'webSeedBase',
-                ]) {
-                  const typed = (value(field) ?? '').trim();
-                  if (typed) settings[field] = typed;
-                }
-                for (const field of ['keep', 'keepDays']) {
-                  const typed = (value(field) ?? '').trim();
-                  if (typed) settings[field] = Number(typed);
-                }
-                const categories = (value('categories') ?? '')
-                  .split(',')
-                  .map((one) => one.trim())
-                  .filter(Boolean);
-                if (categories.length) settings.categories = categories;
-
-                if (how === 'off') {
-                  // Turned off rather than removed, so the rest of what the
-                  // export dialog collected survives being paused.
-                  if (stack.export) {
-                    stack.export = { ...stack.export, enabled: false };
-                  }
-                } else if (how === 'at') {
-                  stack.export = { ...settings, at: value('at'), enabled: true };
-                } else {
-                  stack.export = {
-                    ...settings,
-                    everyHours: Number(value('every')),
-                    enabled: true,
-                  };
-                }
-                delete stack.id;
-                await api(`/api/stacks/${encodeURIComponent(id)}`, {
-                  method: 'PUT',
-                  body: stack,
-                });
-                if (note) note.textContent = `Saved ${id}.`;
-                await draw();
-              } catch (error) {
-                if (note) note.textContent = error.message;
-                button.disabled = false;
-              }
-            };
-          }
-        };
-
-        await draw();
-      }
-
       async function renderStorageEditor(into) {
         const panel = document.createElement('div');
         panel.className = 'panel';
@@ -6648,6 +6362,12 @@ Every piece is hashed against the ` +
 
       async function loadSettings() {
         const { config, restartRequired, configPath } = await api('/api/config');
+        // For the scheduled-export rows, whose first column is a choice of
+        // stack. Failing to read them leaves the choice empty rather than
+        // failing the whole settings page, which would be a poor trade.
+        const stackChoices = await api('/api/stacks')
+          .then((held) => held.stacks ?? [])
+          .catch(() => []);
         restartKeys = new Set(restartRequired);
         $('settings-note').textContent = configPath
           ? `saved to ${configPath}`
@@ -6763,7 +6483,6 @@ Every piece is hashed against the ` +
         // this node. Hooks run a command when a download finishes, which is
         // what the Transfers tab is about.
         await renderStorageEditor(paneFor('Storage'));
-        await renderStackScheduleEditor(paneFor('Feeds'));
         await renderTokenEditor(paneFor('Security'));
         renderHookEditor(paneFor('Transfers'), config, restartKeys, true);
 
@@ -6877,6 +6596,86 @@ Every piece is hashed against the ` +
             'new data is placed: an archive records where it was put and keeps ' +
             'it, so repointing a location never moves anything that already ' +
             'exists.',
+        });
+
+        renderRowEditor({
+          // With the monitored folders and the scheduled sources, because it
+          // is the same kind of thing: something that puts an archive into
+          // this node on a timer. It just bakes the archive here rather than
+          // fetching one from somewhere else, and what it produces lands in a
+          // category and goes out over the feed exactly as a fetch would.
+          into: paneFor('Feeds'),
+          key: 'stackExports',
+          title: 'Scheduled exports',
+          blurb:
+            'A stack baked into an archive on a timer, so the file does not ' +
+            'fall behind the recipe it came from. A row names the stack and ' +
+            'when — several rows may name one stack, which is how a nightly ' +
+            'build to the fast disk and a weekly one published elsewhere are ' +
+            'both said.',
+          columns: [
+            {
+              field: 'stack',
+              label: 'Stack',
+              options: [
+                ['', 'choose a stack…'],
+                ...stackChoices.map((one) => [one.id, one.title ?? one.id]),
+              ],
+            },
+            {
+              field: 'at',
+              label: 'Every day at',
+              placeholder: '03:30 UTC',
+            },
+            {
+              field: 'everyHours',
+              label: 'or every (hours)',
+              placeholder: '—',
+              number: true,
+            },
+            {
+              field: 'categories',
+              label: 'Categories',
+              placeholder: 'the stack’s own',
+              list: true,
+            },
+            { field: 'keep', label: 'Builds to keep', placeholder: 'all', number: true },
+            {
+              field: 'keepDays',
+              label: 'Keep for (days)',
+              placeholder: 'for ever',
+              number: true,
+            },
+            {
+              field: 'savePath',
+              label: 'Save location',
+              options: [
+                ['', 'default'],
+                ...(config.locations ?? []).map((entry) => [
+                  entry.path,
+                  entry.name,
+                ]),
+              ],
+            },
+            { field: 'publishDir', label: 'Publish to', placeholder: '/var/www/pmtiles' },
+            { field: 'webSeedBase', label: 'Web seed base', placeholder: 'https://…/files' },
+            { field: 'name', label: 'Archive name', placeholder: 'the stack’s title' },
+            {
+              field: 'attribution',
+              label: 'Attribution',
+              placeholder: 'every source’s, joined',
+              wide: true,
+            },
+            { field: 'description', label: 'Description', placeholder: '' },
+          ],
+          rows: config.stackExports ?? [],
+          footnote:
+            'A time of day is read as UTC, the same clock the scheduled ' +
+            'sources use. A run whose sources have not moved since the last ' +
+            'one is skipped: an identical archive is the same map under a new ' +
+            'infohash, which then has to be seeded beside the one it ' +
+            'duplicates. Older builds of the same stack are retired by the ' +
+            'two rules above, exactly as a watched folder retires its own.',
         });
 
         renderRowEditor({
@@ -7684,15 +7483,7 @@ Every piece is hashed against the ` +
               ? ''
               : baking
                 ? `<button type="button" data-stack-bake-stop="${escapeHtml(stack.id)}">Stop export</button>`
-                : `<button type="button" data-stack-bake="${escapeHtml(stack.id)}" title="Run this stack over its sources and write the result as a real archive, with its own infohash, seeded like any other.">Export to archive</button>${
-                    stack.export?.at || stack.export?.everyHours
-                      ? `<span class="pill" title="This stack exports on a schedule. A run whose sources have not moved since the last one is skipped.">${
-                          stack.export.at
-                            ? `daily ${escapeHtml([].concat(stack.export.at)[0])} UTC`
-                            : `every ${escapeHtml(String(stack.export.everyHours))}h`
-                        }</span>`
-                      : ''
-                  }`
+                : `<button type="button" data-stack-bake="${escapeHtml(stack.id)}" title="Run this stack over its sources and write the result as a real archive, with its own infohash, seeded like any other.">Export to archive</button>${scheduleBadge(stack.scheduled)}`
           }
           <button type="button" data-stack-edit="${escapeHtml(stack.id)}">Edit</button>
           <button type="button" data-stack-copy="${escapeHtml(stack.id)}"
@@ -7809,6 +7600,30 @@ Every piece is hashed against the ` +
 
       /** Forty characters of hex is not a label. */
       const shortHash = (hash) => (hash ? `${hash.slice(0, 12)}…` : hash);
+
+      /**
+       * What a stack's row says about exporting itself.
+       *
+       * Several schedules over one stack is normal rather than a mistake, so
+       * this counts the rest instead of showing whichever happened to be
+       * written down first.
+       * @param {object[]} rows - The schedules aimed at this stack.
+       * @returns {string} - Markup, or nothing where there are none.
+       */
+      const scheduleBadge = (rows) => {
+        const held = rows ?? [];
+        if (held.length === 0) return '';
+        const first = held[0];
+        const when = first.at
+          ? `daily ${[].concat(first.at)[0]} UTC`
+          : first.everyHours
+            ? `every ${first.everyHours}h`
+            : `every ${first.everyMinutes}m`;
+        const more = held.length > 1 ? ` +${held.length - 1}` : '';
+        return `<span class="pill" title="Exports itself on a schedule, set under Settings → Feeds. A run whose sources have not moved since the last one is skipped.">${escapeHtml(
+          when + more,
+        )}</span>`;
+      };
 
       /** Whether the draft is imagery rather than terrain. */
       const draftIsRgba = () => stackDraft?.space === 'rgba';
@@ -8565,23 +8380,6 @@ Every piece is hashed against the ` +
       };
 
       /**
-       * Shows the half of the repeat control the choice actually uses, and
-       * says on the button whether this will bake or only save a schedule.
-       * @returns {void}
-       */
-      function showBakeRepeat() {
-        const how = $('bake-repeat').value;
-        $('bake-at').hidden = how !== 'at';
-        $('bake-at-note').hidden = how !== 'at';
-        $('bake-every').hidden = how !== 'hours';
-        $('bake-every-note').hidden = how !== 'hours';
-        // The button is the honest place to say it: pressing Export on a
-        // schedule and having nothing happen for eleven hours is the surprise
-        // worth preventing.
-        $('bake-go').textContent = how === 'once' ? 'Export' : 'Save schedule';
-      }
-
-      /**
        * Asks where an export should land before starting it.
        *
        * A dialog rather than a confirm, because there is something to decide:
@@ -8608,19 +8406,6 @@ Every piece is hashed against the ` +
         // archive published without it is the failure worth preventing.
         $('bake-attribution').value = stack?.attribution ?? '';
 
-        // The schedule the recipe already carries, if it has one, so opening
-        // this on a scheduled stack shows the schedule rather than offering to
-        // replace it with a one-off.
-        const repeat = stack?.export ?? {};
-        $('bake-repeat').value = repeat.at
-          ? 'at'
-          : repeat.everyHours || repeat.everyMinutes
-            ? 'hours'
-            : 'once';
-        $('bake-at').value = [].concat(repeat.at ?? '03:30')[0];
-        $('bake-every').value =
-          repeat.everyHours ?? (repeat.everyMinutes ? repeat.everyMinutes / 60 : 24);
-        showBakeRepeat();
         $('bake-categories').value = (stack?.categories ?? []).join(', ');
         $('bake-output').textContent = bakeOutputSummary(stack);
         showBakeFilename();
@@ -8714,43 +8499,18 @@ Every piece is hashed against the ` +
         const description = $('bake-description').value.trim();
         const attribution = $('bake-attribution').value.trim();
 
-        const how = $('bake-repeat').value;
-        const settings = {
-          ...chosenLocation('bake-loc'),
-          ...(categories.length > 0 ? { categories } : {}),
-          ...(name ? { name } : {}),
-          ...(filename ? { filename } : {}),
-          ...(description ? { description } : {}),
-          ...(attribution ? { attribution } : {}),
-        };
-
         try {
-          if (how === 'once') {
-            await api(`/api/stacks/${encodeURIComponent(id)}/bake`, {
-              method: 'POST',
-              body: settings,
-            });
-          } else {
-            // Saved onto the recipe rather than started. Read back raw first,
-            // for the same reason editing does: the list is a report of what
-            // each source resolved to, and writing that back would replace the
-            // recipe with its own output.
-            const raw = await api(
-              `/api/stacks/${encodeURIComponent(id)}/raw`,
-            );
-            const stack = { ...raw.stack };
-            stack.export = {
-              ...settings,
-              ...(how === 'at'
-                ? { at: $('bake-at').value }
-                : { everyHours: Number($('bake-every').value) }),
-            };
-            delete stack.id;
-            await api(`/api/stacks/${encodeURIComponent(id)}`, {
-              method: 'PUT',
-              body: stack,
-            });
-          }
+          await api(`/api/stacks/${encodeURIComponent(id)}/bake`, {
+            method: 'POST',
+            body: {
+              ...chosenLocation('bake-loc'),
+              ...(categories.length > 0 ? { categories } : {}),
+              ...(name ? { name } : {}),
+              ...(filename ? { filename } : {}),
+              ...(description ? { description } : {}),
+              ...(attribution ? { attribution } : {}),
+            },
+          });
         } catch (error) {
           // Kept open, because the answer is usually something to change here
           // -- a location that does not exist, or a codec that is not
@@ -8760,11 +8520,9 @@ Every piece is hashed against the ` +
         }
 
         $('bake-dialog').close();
-        toast(how === 'once' ? `Exporting ${id}` : `${id} is scheduled`);
+        toast(`Exporting ${id}`);
         loadStacks().catch((e) => toast(e.message));
       });
-
-      $('bake-repeat').addEventListener('change', showBakeRepeat);
 
       // Editing and deleting hang off the list, which is redrawn on every
       // change, so they are delegated the same way the source rows are.

@@ -3244,9 +3244,17 @@ export function createApp({
           // draws progress on the row, and one poll is what keeps that
           // honest while a bake is running.
           bake: bakes?.get(stack.id) ?? null,
-          // The schedule, so the row can say a stack exports itself
-          // without anybody opening the dialog to find out.
-          export: stack.export ?? null,
+          // The schedules aimed at this stack, so its row can say it
+          // exports itself without anybody going to look. Several is normal:
+          // a nightly build to the fast disk and a weekly one published
+          // elsewhere are two rows over one stack.
+          scheduled: (config.stackExports ?? [])
+            .filter((row) => row?.stack === stack.id && row.enabled !== false)
+            .map((row) => ({
+              at: row.at,
+              everyHours: row.everyHours,
+              everyMinutes: row.everyMinutes,
+            })),
           encoding: stack.output?.encoding ?? null,
           encodingFactors:
             stack.output?.encoding === 'custom'
