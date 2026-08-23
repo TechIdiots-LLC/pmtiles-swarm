@@ -4,6 +4,13 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.83.0
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
 - **A scheduled export is set up like the other automations beside it.** The row under Settings →
   Feeds is the whole of one now, not only the timer: categories, builds to keep, keep for how many
   days, archive name, attribution, description, where the data lands, a publish directory and a web
