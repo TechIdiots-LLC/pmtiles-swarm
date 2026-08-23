@@ -521,6 +521,13 @@ export class BakeManager {
       // So the archive can be served over HTTP from where it landed, which is
       // what makes a scheduled export useful to anybody who is not a peer.
       webSeedBase: options.webSeedBase,
+      // And what this node itself does with the file: serve it, offer itself
+      // as a web seed for it, list it for download. A baked archive is already
+      // on this disk, so all three are nearly free and none of them is the
+      // default.
+      serveArchive: options.serveArchive,
+      selfWebSeed: options.selfWebSeed,
+      publicDownload: options.publicDownload,
       // Which stack made it. Without this an export has no family, and a
       // scheduled one would pile up a build a night for ever.
       stack: resolved.stack.id,
@@ -634,6 +641,9 @@ export class BakeManager {
         attribution: options.attribution ?? null,
         categories: options.categories ?? null,
         webSeedBase: options.webSeedBase ?? null,
+        serveArchive: options.serveArchive ?? null,
+        selfWebSeed: options.selfWebSeed ?? null,
+        publicDownload: options.publicDownload ?? null,
         keep: options.keep ?? null,
         keepDays: options.keepDays ?? null,
       },

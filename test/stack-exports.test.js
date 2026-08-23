@@ -149,6 +149,9 @@ describe('starting one when it is due', () => {
       savePath: '/mnt/archives',
       publishDir: '/var/www/pmtiles',
       webSeedBase: 'https://maps.example/files',
+      serveArchive: true,
+      selfWebSeed: true,
+      publicDownload: true,
       keep: 4,
       keepDays: 30,
     };
@@ -162,6 +165,9 @@ describe('starting one when it is due', () => {
       'savePath',
       'publishDir',
       'webSeedBase',
+      'serveArchive',
+      'selfWebSeed',
+      'publicDownload',
       'keep',
       'keepDays',
     ]) {

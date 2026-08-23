@@ -4,6 +4,16 @@
 ### ✨ Features and improvements
 - _...Add new stuff here..._
 
+- **A scheduled export can be served by the node that baked it.** The **Local file** choice, the same
+  one every other row under Feeds offers: http, http + web seed, http + catalog. It is worth more
+  here than anywhere else — a baked archive is already on this disk, so serving it costs a route
+  rather than a download, and without it a scheduled export produces something only peers can reach.
+  A nightly build behind a URL that is always current is usually the point of scheduling one.
+
+  `publishDir` and `webSeedBase` remain the other half of the same question, for a directory
+  something else already serves. The two are not exclusive: publishing to a served directory *and*
+  offering this node as a web seed gives a client two places to get the same bytes.
+
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 

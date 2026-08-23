@@ -257,6 +257,9 @@ export class StackExportScheduler {
             attribution: row.attribution,
             webSeedBase: row.webSeedBase,
             publishDir: row.publishDir,
+            serveArchive: row.serveArchive,
+            selfWebSeed: row.selfWebSeed,
+            publicDownload: row.publicDownload,
             keep: row.keep,
             keepDays: row.keepDays,
           });

@@ -435,6 +435,15 @@ describe('clipping a source in the stack editor', () => {
     }
   });
 
+  it('lets this node serve what it just baked', () => {
+    // The same Local file choice every other row on this tab has. A baked
+    // archive is already on this disk, so serving it over HTTP costs nothing
+    // and is the difference between one only peers can get and one anybody
+    // with the link can.
+    const at = script.indexOf("key: 'stackExports'");
+    assert.match(script.slice(at, at + 3500), /\.\.\.publishingColumns/);
+  });
+
   it('offers save locations by name, as the other rows do', () => {
     // A path like M:\\archives\\finished-unsorted is typed once under
     // Settings, not again in every row that lands something.

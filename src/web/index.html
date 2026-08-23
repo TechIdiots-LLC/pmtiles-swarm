@@ -6659,6 +6659,11 @@ Every piece is hashed against the ` +
             },
             { field: 'publishDir', label: 'Publish to', placeholder: '/var/www/pmtiles' },
             { field: 'webSeedBase', label: 'Web seed base', placeholder: 'https://…/files' },
+            // What this node does with the file it just wrote. A baked archive
+            // is already on this disk, so serving it over HTTP costs nothing
+            // and is the difference between an archive only peers can get and
+            // one anybody with the link can.
+            ...publishingColumns,
             { field: 'name', label: 'Archive name', placeholder: 'the stack’s title' },
             {
               field: 'attribution',

@@ -3324,6 +3324,9 @@ export function createApp({
           description: req.body?.description,
           attribution: req.body?.attribution,
           webSeedBase: req.body?.webSeedBase,
+          serveArchive: req.body?.serveArchive,
+          selfWebSeed: req.body?.selfWebSeed,
+          publicDownload: req.body?.publicDownload,
           keep: req.body?.keep,
           keepDays: req.body?.keepDays,
         });

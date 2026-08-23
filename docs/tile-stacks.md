@@ -1489,14 +1489,36 @@ question and a node should not have two ways of answering it.
 Everything else on a row is what the export dialog collects, plus the two
 retention rules every other automation on that tab has:
 
-| Field                                | What it does                                                    |
-| ------------------------------------ | --------------------------------------------------------------- |
-| `categories`                         | What each build is filed under, which is what the feed follows. |
-| `keep`, `keepDays`                   | Retirement, exactly as a watched folder does it.                |
-| `name`, `attribution`, `description` | What the file says about itself once it is somewhere else.      |
-| `savePath`                           | Where the data lands: a named location, or a path.              |
-| `publishDir`, `webSeedBase`          | A directory something already serves, and the URL it serves at. |
-| `enabled: false`                     | Pauses the row without losing any of the above.                 |
+| Field                                           | What it does                                                         |
+| ----------------------------------------------- | -------------------------------------------------------------------- |
+| `categories`                                    | What each build is filed under, which is what the feed follows.      |
+| `keep`, `keepDays`                              | Retirement, exactly as a watched folder does it.                     |
+| `name`, `attribution`, `description`            | What the file says about itself once it is somewhere else.           |
+| `savePath`                                      | Where the data lands: a named location, or a path.                   |
+| `publishDir`, `webSeedBase`                     | A directory something already serves, and the URL it serves at.      |
+| `serveArchive`, `selfWebSeed`, `publicDownload` | What this node itself does with the file: the **Local file** choice. |
+| `enabled: false`                                | Pauses the row without losing any of the above.                      |
+
+#### Serving what it just baked
+
+**Local file** is the same choice every other row on that tab offers, and it is
+worth more here than anywhere else: a baked archive is already on this disk, so
+serving it costs a route rather than a download.
+
+- **http** — this node serves the file at its archive URL.
+- **http + web seed** — and offers itself as a web seed for it, so a peer that
+  finds nobody seeding can still fetch it over HTTP.
+- **http + catalog** — and lists it for download, so somebody with the link and
+  no torrent client gets the file.
+
+Without it a scheduled export produces an archive only peers can reach. With it,
+a nightly build is a URL that is always current, which is usually the point of
+scheduling one.
+
+`publishDir` and `webSeedBase` are the other half of the same question and are
+for a directory **something else** already serves — nginx, a CDN. The two are
+not exclusive: publishing to a served directory and offering this node as a web
+seed gives a client two places to get the same bytes.
 
 #### Rows, not a field on the recipe
 
