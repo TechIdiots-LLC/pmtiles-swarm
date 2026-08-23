@@ -25,6 +25,11 @@
   the configuration and silent when wrong. An existing unit does not gain it by upgrading - re-run
   `pmtiles-swarm init --systemd`, or add the line to `[Service]` by hand.
 
+  Both the unit it writes and the warning ask for `min(bakeConcurrency, cores)` rather than
+  `bakeConcurrency`, because past the core count a thread has nowhere to run and the measurements
+  flatten. A node merging 32 tiles at once on twelve cores wants twelve threads and is not
+  misconfigured; the first version of this would have told its operator otherwise.
+
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 

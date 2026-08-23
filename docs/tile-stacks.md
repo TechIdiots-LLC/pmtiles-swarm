@@ -742,10 +742,14 @@ Environment=UV_THREADPOOL_SIZE=16
 ```
 
 Past the core count it flattens, because at that point the cores are the limit
-and that is the right place for the limit to be. A bake warns once when
-`bakeConcurrency` is larger than the pool, because the failure is otherwise
-invisible: nothing errors, nothing logs, the export is just several times slower
-than the machine can manage.
+and that is the right place for the limit to be — so what the pool wants is
+`min(bakeConcurrency, cores)`, and both `init --systemd` and the warning below
+work that out rather than echoing `bakeConcurrency` back. A node merging 32
+tiles at once on twelve cores wants twelve threads and is not misconfigured.
+
+A bake warns once when the pool is smaller than that, because the failure is
+otherwise invisible: nothing errors, nothing logs, the export is just several
+times slower than the machine can manage.
 
 `sharp.concurrency()` is a different knob — how many threads libvips uses
 _within_ one operation — and it is left alone. A 512px tile is too small to

@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import {
   assertBakeable,
@@ -65,6 +66,20 @@ const DEFAULT_THREADPOOL = 4;
 let saidAboutThreads = false;
 
 /**
+ * What the pool has to hold for the cores to stay busy.
+ *
+ * Not `bakeConcurrency`: past the core count another thread has nowhere to run,
+ * and the measurements flatten there. A node told to merge 32 tiles at once on
+ * twelve cores wants twelve, and telling its operator to ask for 32 would be
+ * asking them to fix something that is not broken.
+ * @param {number} concurrency - What the bake was told to run.
+ * @returns {number} - The pool worth having.
+ */
+function poolWorthHaving(concurrency) {
+  return Math.max(1, Math.min(concurrency, os.availableParallelism()));
+}
+
+/**
  * Says so when the machine cannot actually run the bake as wide as it was told
  * to.
  *
@@ -82,13 +97,14 @@ let saidAboutThreads = false;
 export function sayIfThreadStarved(concurrency) {
   if (saidAboutThreads) return;
   const pool = Number(process.env.UV_THREADPOOL_SIZE) || DEFAULT_THREADPOOL;
-  if (pool >= concurrency) return;
+  const wanted = poolWorthHaving(concurrency);
+  if (pool >= wanted) return;
   saidAboutThreads = true;
   console.warn(
     `[bake] bakeConcurrency is ${concurrency} but UV_THREADPOOL_SIZE is ` +
       `${pool}, so at most ${pool} tiles can be decoded or encoded at once. ` +
-      `Set UV_THREADPOOL_SIZE=${concurrency} in the environment the node ` +
-      'starts in — it cannot be set from inside the process.',
+      `Set UV_THREADPOOL_SIZE=${wanted} in the environment the node starts ` +
+      'in — it cannot be set from inside the process.',
   );
 }
 

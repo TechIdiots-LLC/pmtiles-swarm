@@ -1,4 +1,5 @@
 import assert from 'node:assert';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { writablePaths } from '../src/config.js';
@@ -102,11 +103,28 @@ describe('the generated unit', () => {
     // libuv's pool, which holds four threads unless the unit says otherwise,
     // so a bakeConcurrency above four queues at the decode instead and the
     // export runs at a fraction of the machine with nothing to show why.
+    const asked = Math.max(1, os.availableParallelism() - 1);
     const unit = unitFor({
-      config: config({ stacks: { bakeConcurrency: 16 } }),
+      config: config({ stacks: { bakeConcurrency: asked } }),
       configPath: CONFIG_PATH,
     });
-    assert.match(unit, /^Environment=UV_THREADPOOL_SIZE=16$/m);
+    assert.match(
+      unit,
+      // eslint-disable-next-line security/detect-non-literal-regexp -- built from this machine's core count
+      new RegExp(`^Environment=UV_THREADPOOL_SIZE=${Math.max(4, asked)}$`, 'm'),
+    );
+  });
+
+  it('does not ask for more threads than the machine has cores', () => {
+    // Past the core count a thread has nowhere to run, and the throughput
+    // measurements flatten there. Writing a bigger number would be telling the
+    // operator their machine is misconfigured when it is not.
+    const unit = unitFor({
+      config: config({ stacks: { bakeConcurrency: 4096 } }),
+      configPath: CONFIG_PATH,
+    });
+    const wrote = Number(unit.match(/UV_THREADPOOL_SIZE=(\d+)/)[1]);
+    assert.equal(wrote, Math.max(4, os.availableParallelism()));
   });
 
   it('never drops the pool below what libuv would have given anyway', () => {

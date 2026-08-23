@@ -489,16 +489,30 @@ describe('saying when the machine cannot run the bake as wide as asked', () => {
   };
 
   it('names the variable and the value to give it', async () => {
-    const said = await warnedFor(undefined, 32);
+    const said = await warnedFor(undefined, 4096);
     assert.equal(said.length, 1, 'said it twice, or not at all');
     assert.match(said[0], /UV_THREADPOOL_SIZE is 4/);
-    assert.match(said[0], /bakeConcurrency is 32/);
-    assert.match(said[0], /UV_THREADPOOL_SIZE=32/);
+    assert.match(said[0], /bakeConcurrency is 4096/);
+    // The cores, not what was asked for: a thread past them has nowhere to run.
+    assert.match(
+      said[0],
+      // eslint-disable-next-line security/detect-non-literal-regexp -- built from this machine's core count
+      new RegExp(`UV_THREADPOOL_SIZE=${os.availableParallelism()}\\b`),
+    );
   });
 
   it('says nothing when the pool is big enough', async () => {
     assert.deepEqual(await warnedFor('32', 32), []);
     assert.deepEqual(await warnedFor('64', 8), []);
+  });
+
+  it('says nothing about threads the machine could not run anyway', async () => {
+    // The case a real node hit: twelve cores, a pool of sixteen, and an export
+    // told to merge far more than that at once. Nothing here is wrong, and
+    // saying otherwise would send somebody to fix a machine that is already
+    // using every core it has.
+    const cores = os.availableParallelism();
+    assert.deepEqual(await warnedFor(String(cores), cores * 4), []);
   });
 
   it('says nothing at the default concurrency, which the default pool fits', async () => {

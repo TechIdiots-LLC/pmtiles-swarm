@@ -1,3 +1,4 @@
+import os from 'node:os';
 import path from 'node:path';
 import { writablePaths } from './config.js';
 
@@ -37,12 +38,18 @@ const DEFAULT_THREADPOOL = 4;
  * `ReadWritePaths`: it is decidable from the configuration, and getting it
  * wrong produces no error at all — just an export running at a fraction of the
  * machine, with every core idle and nothing in the journal.
+ *
+ * Capped at the core count of the machine this is generated on, because past
+ * that a thread has nowhere to run and the measured throughput flattens. Never
+ * below libuv's own four, so the unit cannot ask for less than saying nothing
+ * would have given it.
  * @param {object} config - The resolved configuration.
  * @returns {number} - What to put in the unit.
  */
 function threadPoolFor(config) {
   const bake = Number(config?.stacks?.bakeConcurrency) || DEFAULT_THREADPOOL;
-  return Math.max(DEFAULT_THREADPOOL, Math.floor(bake));
+  const useful = Math.min(Math.floor(bake), os.availableParallelism());
+  return Math.max(DEFAULT_THREADPOOL, useful);
 }
 
 /**
