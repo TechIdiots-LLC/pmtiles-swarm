@@ -716,9 +716,11 @@
           <label for="bake-categories">Categories</label>
           <input id="bake-categories" placeholder="terrain, weekly" />
           <div class="sub">
-            Comma separated. What the archive is filed under once it is added,
-            which is what <code>/latest/&lt;category&gt;/</code> follows. Left
-            empty, it takes the stack's own.
+            Comma separated. What the archive is filed under once it is
+            added, which is what <code>/latest/&lt;category&gt;/</code> follows
+            and what a subscriber sees in the feed. A stack has none of its own
+            to fall back to — it is a recipe, not an archive — so left empty the
+            file is unfiled: held and seeded, in no category and no feed.
           </div>
         </div>
 
@@ -6636,7 +6638,7 @@ Every piece is hashed against the ` +
             {
               field: 'categories',
               label: 'Categories',
-              placeholder: 'the stack’s own',
+              placeholder: 'unfiled',
               list: true,
             },
             { field: 'keep', label: 'Builds to keep', placeholder: 'all', number: true },
@@ -8411,7 +8413,9 @@ Every piece is hashed against the ` +
         // archive published without it is the failure worth preventing.
         $('bake-attribution').value = stack?.attribution ?? '';
 
-        $('bake-categories').value = (stack?.categories ?? []).join(', ');
+        // Nothing to prefill from: categories belong to the archive this is
+        // about to write, not to the recipe writing it.
+        $('bake-categories').value = '';
         $('bake-output').textContent = bakeOutputSummary(stack);
         showBakeFilename();
         $('bake-location').innerHTML = locationPicker('bake-loc');

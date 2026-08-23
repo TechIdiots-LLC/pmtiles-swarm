@@ -435,6 +435,15 @@ describe('clipping a source in the stack editor', () => {
     }
   });
 
+  it('does not pretend a stack has categories', () => {
+    // A category is what an archive is filed under, and a stack is not an
+    // archive: no bytes, no infohash, nothing files it anywhere. The editor
+    // has no field for one either, so a default of "the stack's own" was
+    // offering something that could not exist.
+    assert.doesNotMatch(script, /stack\?\.categories/);
+    assert.match(page, /it is a recipe, not an archive/);
+  });
+
   it('lets this node serve what it just baked', () => {
     // The same Local file choice every other row on this tab has. A baked
     // archive is already on this disk, so serving it over HTTP costs nothing

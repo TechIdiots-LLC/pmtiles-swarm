@@ -1489,15 +1489,29 @@ question and a node should not have two ways of answering it.
 Everything else on a row is what the export dialog collects, plus the two
 retention rules every other automation on that tab has:
 
-| Field                                           | What it does                                                         |
-| ----------------------------------------------- | -------------------------------------------------------------------- |
-| `categories`                                    | What each build is filed under, which is what the feed follows.      |
-| `keep`, `keepDays`                              | Retirement, exactly as a watched folder does it.                     |
-| `name`, `attribution`, `description`            | What the file says about itself once it is somewhere else.           |
-| `savePath`                                      | Where the data lands: a named location, or a path.                   |
-| `publishDir`, `webSeedBase`                     | A directory something already serves, and the URL it serves at.      |
-| `serveArchive`, `selfWebSeed`, `publicDownload` | What this node itself does with the file: the **Local file** choice. |
-| `enabled: false`                                | Pauses the row without losing any of the above.                      |
+| Field                                           | What it does                                                                             |
+| ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `categories`                                    | What each build is filed under, which is what the feed follows. Empty leaves it unfiled. |
+| `keep`, `keepDays`                              | Retirement, exactly as a watched folder does it.                                         |
+| `name`, `attribution`, `description`            | What the file says about itself once it is somewhere else.                               |
+| `savePath`                                      | Where the data lands: a named location, or a path.                                       |
+| `publishDir`, `webSeedBase`                     | A directory something already serves, and the URL it serves at.                          |
+| `serveArchive`, `selfWebSeed`, `publicDownload` | What this node itself does with the file: the **Local file** choice.                     |
+| `enabled: false`                                | Pauses the row without losing any of the above.                                          |
+
+#### A category belongs to the archive, not to the recipe
+
+A stack has no categories, and the export is where they are said. That reads as
+a detail and is not: a category is what an archive is filed under — what
+`/latest/<category>/` follows and what a subscriber's feed carries — and a stack
+has no bytes and no infohash for any of that to be about. The stack editor has
+no field for one either.
+
+Both doors used to fall back to `stack.categories`, a field the typedef never
+had, validation never checked and nothing ever wrote. Left empty now, the
+archive is **unfiled**: held and seeded, in no category and no feed. That is the
+right default for a one-off export and usually a mistake for a scheduled one —
+which is why the row says `unfiled` rather than leaving the box looking finished.
 
 #### Serving what it just baked
 

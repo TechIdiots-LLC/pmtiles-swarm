@@ -517,7 +517,12 @@ export class BakeManager {
     // hashing shows up there without this having to report it twice.
     job.phase = 'importing';
     const entry = await this.#library.addLocalArchive(destination, {
-      categories: options.categories ?? resolved.stack.categories,
+      // The export's, and only the export's. A category is what an archive is
+      // filed under, and a stack is not an archive -- it has no bytes and no
+      // infohash, and nothing files it anywhere. This fell back to
+      // `stack.categories`, which the typedef never had, validation never
+      // checked and the editor has no field for.
+      categories: options.categories,
       // So the archive can be served over HTTP from where it landed, which is
       // what makes a scheduled export useful to anybody who is not a peer.
       webSeedBase: options.webSeedBase,
