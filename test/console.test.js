@@ -334,15 +334,18 @@ describe('clipping a source in the stack editor', () => {
     );
   });
 
-  it('offers a fade only where there is an edge to fade at', () => {
-    // The recipe refuses a feather with no cutline or bounds, so offering the
-    // field there would be offering something that cannot be saved.
-    assert.match(script, /source\.cutline \|\| source\.bounds/);
+  it('offers the fade on every source', () => {
+    // It was shown only once a source had a cutline, which made the feature
+    // invisible until you had already done the step that enables it -- and a
+    // mask leaves an edge to fade at just as a cutline does, which is where
+    // most of these recipes actually stop.
     assert.match(script, /data-stack-field="feather"/);
   });
 
-  it('drops the fade when the edge is taken away', () => {
-    assert.match(script, /if \(!event\.target\.value\) delete source\.feather/);
+  it('says when there is nothing for a fade to act on', () => {
+    // Offering it everywhere means it can be set on a source that neither
+    // masks nor clips, where it does nothing at all.
+    assert.match(script, /nothing to fade at yet/);
   });
 
   it('treats an empty fade as no fade rather than as zero', () => {

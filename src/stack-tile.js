@@ -1,9 +1,13 @@
 import {
   assembleChildren,
+  decodeHeights,
   encodeHeights,
   fillNodata,
+  maskColors,
+  maskHeights,
   mergeElevation,
 } from './elevation.js';
+import { paddedKnown, parentsFor } from './mask-edge.js';
 import {
   INSIDE,
   OUTSIDE,
@@ -428,12 +432,103 @@ async function gather({ reads, z, x, y, tiles, codec, signal, size, rgba }) {
 
     contributions.push({
       source: read.source.source,
+      // Carried so a feathered source can go back for its parents, which is
+      // the one thing the merge needs that is not already in this raster.
+      infoHash: read.source.entry?.infoHash,
       parentZ: read.found.parentZ,
       raster,
     });
   }
 
+  await readMaskEdges({ contributions, z, x, y, size, tiles, codec, signal });
   return { contributors, contributions };
+}
+
+/**
+ * Whether a source's recipe leaves holes a feather would have to fade.
+ * @param {object} recipe - One source out of a recipe.
+ * @returns {boolean} - True when it masks anything.
+ */
+function masksAnything(recipe) {
+  return Boolean(recipe?.maskValues?.length || recipe?.maskColors?.length);
+}
+
+/**
+ * Reads the parents a feathered source needs to see past its own tile.
+ *
+ * Only for a source that both fades and masks. A cutline's ramp is measured
+ * from a shape this node holds in full and needs nothing read; a mask's is
+ * measured from pixels, and the pixels that decide it are partly in the
+ * neighbouring tiles. See src/mask-edge.js for why the parent rather than
+ * those neighbours.
+ *
+ * A parent that cannot be read is left out rather than failing the tile. It
+ * means the ramp is measured against less than it could be, which is a slightly
+ * wrong edge -- and a tile that will not draw at all is worse than one whose
+ * coastline fades over fifteen pixels instead of sixteen.
+ * @param {object} options - The contributions, where they are, and what to read with.
+ * @returns {Promise<void>} - Resolves once every feathered source has its grid.
+ */
+async function readMaskEdges({
+  contributions,
+  z,
+  x,
+  y,
+  size,
+  tiles,
+  codec,
+  signal,
+}) {
+  if (!codec) return;
+  await Promise.all(
+    contributions.map(async (contribution) => {
+      if (!contribution) return;
+      const recipe = contribution.source ?? {};
+      const feather = featherFor(recipe);
+      if (!feather || !masksAnything(recipe)) return;
+
+      const grid = contribution.raster?.width ?? size;
+      const layout = parentsFor({ z, x, y }, grid, feather);
+      if (!layout) return;
+
+      const known = new Map();
+      let parentSize = grid;
+      await Promise.all(
+        layout.tiles.map(async (parent) => {
+          const tile = await tiles
+            .getTile(contribution.infoHash, parent.z, parent.x, parent.y, {
+              signal,
+            })
+            .catch(() => null);
+          if (!tile?.data) return;
+          const raster = await codec
+            .decode(Buffer.from(tile.data), { channels: 3 })
+            .catch(() => null);
+          if (!raster) return;
+
+          // The same two masks the merge applies, asked of the parent. A ramp
+          // measured against a different idea of where the holes are would fade
+          // toward ground that is not a hole.
+          const heights = decodeHeights(raster, recipe);
+          maskHeights(heights, recipe.maskValues);
+          maskColors(heights, raster, recipe.maskColors);
+
+          const flags = new Uint8Array(heights.length);
+          for (let i = 0; i < flags.length; i += 1) {
+            flags[i] = Number.isNaN(heights[i]) ? 0 : 1;
+          }
+          parentSize = raster.width;
+          known.set(`${parent.column},${parent.row}`, flags);
+        }),
+      );
+
+      if (known.size === 0) return;
+      contribution.neighbourhood = {
+        known: paddedKnown(layout, known, grid, feather, parentSize),
+        margin: feather,
+      };
+    }),
+  );
 }
 
 /**

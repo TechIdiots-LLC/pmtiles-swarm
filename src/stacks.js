@@ -137,9 +137,16 @@ export function validateStack(stack) {
     }
     // A fade with no edge to fade at. Refused rather than ignored: it reads as
     // a source that blends into what is under it, and it does nothing at all.
-    if (source?.feather && !source.cutline && !source.bounds) {
+    // A mask is an edge as much as a cutline is -- the hole it leaves is where
+    // most of these recipes actually stop.
+    const fades =
+      source?.cutline ||
+      source?.bounds ||
+      source?.maskValues?.length ||
+      source?.maskColors?.length;
+    if (source?.feather && !fades) {
       problems.push(
-        `sources[${index}].feather needs a cutline or bounds to fade at`,
+        `sources[${index}].feather needs a cutline, bounds, or a mask to fade at`,
       );
     }
     if (source?.encoding === 'custom' && !hasUsableEncoding(source)) {

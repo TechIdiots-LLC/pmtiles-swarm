@@ -2,6 +2,33 @@
 
 ## master
 ### ✨ Features and improvements
+- **The holes a mask leaves are feathered now, not just a cutline's edge.** `feather` faded a source
+  in at its `cutline` or `bounds` and did nothing about `maskValues` or `maskColors` - which is
+  where most of these recipes actually stop, and why the field looked like it did nothing.
+
+  A tile cannot measure that edge alone: the hole may continue past its border and nothing inside it
+  says so. Carrying the edge outward, which is the obvious answer, changes the seam by nothing at
+  all - measured across four coastline geometries, to the metre - because it only adds holes where
+  the edge pixel is already one and the distance is already zero. The tile that gets it wrong is
+  the tile with no hole in it, and no rule applied to its own pixels can invent one.
+
+  So the mask is read from the source's parent, which covers this tile and its three siblings and
+  sees past every one of their borders. Four parents cover any tile's surroundings, each is shared
+  by four children, and they are read only for a source that both masks and fades. The parent
+  supplies the border; the middle is the tile's own pixels, because a ramp measured entirely against
+  half-resolution pixels climbs in two-pixel steps, which is the terracing the fade exists to
+  remove. A 1000 m drop over a 16 px fade, stepping along the edge two tiles share:
+
+      coastline crossing at 45°        1000 m unfeathered  ->   63 m
+      crossing steeply                 1000 m              ->    0 m
+      parallel, just past the seam        0 m              ->  125 m
+      parallel, right on the seam         0 m              ->  125 m
+
+  What is left is bounded by the parent's resolution rather than by the height difference - two
+  steps of the ramp, or `2 / feather` of the drop - and shrinks as the feather widens.
+
+  The field is on every source in the editor now rather than appearing only once a clip is set,
+  with a note where a source neither masks nor clips and it would do nothing.
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes

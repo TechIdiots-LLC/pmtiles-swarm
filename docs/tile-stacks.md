@@ -1114,29 +1114,64 @@ The offline merge still has this. `scipy.ndimage.gaussian_filter` defaults to
 `mode='reflect'` and is handed one tile's array, so an archive built with a
 sigma carries the seam.
 
-### Where the margin comes from for the feather
+### Where the margin comes from for a mask edge
 
-The border above solves the upscaled case, which is the one the blur needed.
-Feathering has two more.
+A cutline is known in full, so the ramp beside a tile costs a few extra
+rasterised rows. A mask edge is not: it lives in the source's own decoded
+pixels, and a tile cannot see whether the hole continues past its own border.
 
-**A missing tile costs nothing.** Whether a neighbour exists is a directory
-lookup, not a decode. A source that vanishes at a tile edge can ramp down to 0
-approaching that edge using only knowledge of which neighbours are absent.
+That is not a boundary condition to be chosen well, which is the first thing
+worth writing down because it looks like one. Carrying the edge outward — the
+obvious fix — adds holes only where the edge pixel is already a hole, and there
+the distance is already zero. Measured against four coastline geometries it
+changes the seam by nothing at all, to the metre. The tile that gets it wrong is
+the tile with **no hole in it**, and no rule applied to its own pixels can
+invent one.
 
-**A mask hole at native resolution is the expensive one.** There the edge is in
-the source's own pixels at full resolution, with no parent to widen the window
-into, so the margin genuinely means reading the neighbouring tiles — up to eight
-reads and eight decodes for that source, on that tile. That is the case to
-bound, to make opt-in, and to measure before believing.
+So the mask is read from the source's **parent**, which covers this tile and its
+three siblings and therefore sees past every one of their borders. Four parents
+cover any tile's surroundings, each is shared by four children, and they are
+read only for a source that both masks and fades.
+
+The parent supplies the border only. Its pixels are half this tile's, so a ramp
+measured entirely against them climbs in two-pixel steps — terracing, which is
+the artefact the fade exists to remove — and the middle is overwritten with the
+tile's own pixels, which are exact.
+
+A 1000 m drop faded over 16 px, measuring the step along the edge two tiles
+share:
+
+| coastline at the seam        | no fade | tile alone | with parents |
+| ---------------------------- | ------- | ---------- | ------------ |
+| crossing at 45°              | 1000 m  | 1000 m     | 63 m         |
+| crossing steeply             | 1000 m  | 938 m      | 0 m          |
+| parallel, just past the seam | 0 m     | 438 m      | 125 m        |
+| parallel, on the seam        | 0 m     | 938 m      | 125 m        |
+
+"tile alone" is the version that measures inside the tile and is why it is not
+the version that shipped: it moves the wall off the coastline, where it is at
+least geographically meaningful, and onto the tile grid.
+
+What is left is bounded by the parent's resolution rather than by the height
+difference — two steps of the ramp, or `2 / feather` of the drop, and it shrinks
+as the feather widens. Reading the eight neighbours at native resolution instead
+would make it exact, at nine times the reads and decodes for that source; the
+extra precision is finer than a sixteen-pixel ramp can show.
+
+**A source that vanishes at a tile edge is still open.** A sparse archive has no
+tile outside its extent, so the seam lands exactly on a tile boundary. It is the
+cheapest of the three to detect — whether a neighbour exists is a directory
+lookup rather than a decode — and it is not done.
 
 ### What it does
 
 `feather` on a source, in pixels, `0` and absent meaning the edge is a switch as
-before. It fades that source in over that many pixels measured inward from its
-cutline or its `bounds`:
+before. It fades that source in over that many pixels measured inward from
+wherever it stops — the holes `maskValues` and `maskColors` leave, and the edge
+of a `cutline` or `bounds`:
 
 ```json
-{ "archive": "swissalti", "cutline": "switzerland", "feather": 16 }
+{ "archive": "swissalti", "maskValues": [0], "feather": 16 }
 ```
 
 The step left at the seam is the height difference divided by the feather, which

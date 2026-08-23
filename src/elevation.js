@@ -1,3 +1,5 @@
+import { cropMask, featherMask } from './cutline.js';
+
 /**
  * Merging terrain tiles, in metres rather than in pixels.
  *
@@ -691,6 +693,46 @@ export function mergeElevation(contributions, options) {
         if (contribution.coverage[i] <= 0) heights[i] = Number.NaN;
       }
     }
+
+    // The edge a mask left, which is the one most of these recipes have.
+    // Measured on a grid that reaches past this tile, because the pixels that
+    // decide how far a hole is may be in the next one -- `gather` reads the
+    // source's parents for exactly this. Without them there is nothing to
+    // measure against and the edge stays as it was, rather than being faded
+    // against a hole this tile cannot see.
+    if (contribution.neighbourhood) {
+      const { known, margin } = contribution.neighbourhood;
+      const side = size + margin * 2;
+
+      // The parent is half this tile's resolution, so a ramp measured entirely
+      // against it climbs in two-pixel steps -- terracing, which is the
+      // artefact this whole feature exists to remove. So the parent supplies
+      // the border only, and the middle is overwritten with this tile's own
+      // pixels, which are exact. Distances inside the tile are what the ramp
+      // is mostly made of; only the last few pixels of its reach are
+      // approximated, and there a pixel of error is a pixel of a sixteen-pixel
+      // fade.
+      const grid = Uint8Array.from(known);
+      for (let row = 0; row < size; row += 1) {
+        const from = row * size;
+        const to = (row + margin) * side + margin;
+        for (let column = 0; column < size; column += 1) {
+          grid[to + column] = Number.isNaN(heights[from + column]) ? 0 : 1;
+        }
+      }
+
+      const ramp = cropMask(featherMask(grid, side, margin), size, margin);
+      // The narrower of the two where a cutline has ramped as well: each is a
+      // separate statement about how much of this source belongs here, and
+      // both have to hold.
+      if (contribution.coverage) {
+        for (let i = 0; i < ramp.length; i += 1) {
+          ramp[i] = Math.min(ramp[i], contribution.coverage[i]);
+        }
+      }
+      contribution.coverage = ramp;
+    }
+
     return heights;
   });
 

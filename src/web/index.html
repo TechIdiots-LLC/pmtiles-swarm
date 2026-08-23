@@ -7672,19 +7672,23 @@ Every piece is hashed against the ` +
                      </label>`
                   : ''
               }
-              ${
-                source.cutline || source.bounds
-                  ? `<label class="choice"
-                            title="Fade this source in over this many pixels at the edge of its shape, instead of stopping dead. Where a high-resolution source meets a coarser one the two disagree — by their survey and by their vertical datum — and the step between them reads as a wall under a hillshade. The drop is divided by this: 40 m across a 8 px feather is 5 m a pixel. 0 is a hard edge.">
-                       Fade in
-                       <input type="number" min="0" max="64" step="1" style="width:4.5rem"
-                              placeholder="0"
-                              data-stack-field="feather" data-stack-index="${index}"
-                              value="${source.feather ?? ''}" />
-                       <span class="sub">px</span>
-                     </label>`
-                  : ''
-              }
+              <label class="choice"
+                     title="Fade this source in over this many pixels wherever it stops — the holes a mask leaves, and the edge of a cutline or box. Where a high-resolution source meets a coarser one the two disagree, by their survey and by their vertical datum, and the step between them reads as a wall under a hillshade. The drop is divided by this: 40 m across an 8 px fade is 5 m a pixel. 0 is a hard edge.">
+                Fade in
+                <input type="number" min="0" max="64" step="1" style="width:4.5rem"
+                       placeholder="0"
+                       data-stack-field="feather" data-stack-index="${index}"
+                       value="${source.feather ?? ''}" />
+                <span class="sub">px${
+                  source.feather &&
+                  !source.cutline &&
+                  !source.bounds &&
+                  !(source.maskValues ?? []).length &&
+                  !(source.maskColors ?? []).length
+                    ? ' — nothing to fade at yet: mask something, or clip it'
+                    : ''
+                }</span>
+              </label>
               ${
                 source.cutline && !(stackCutlines ?? []).includes(source.cutline)
                   ? `<span class="bad">no cutline called
@@ -7767,10 +7771,6 @@ Every piece is hashed against the ` +
           if (source) {
             delete source.cutline;
             delete source.bounds;
-            // A fade needs an edge to fade at, and the recipe validation says
-            // so -- leaving it behind would make the source unsaveable with
-            // nothing on screen to explain why.
-            if (!event.target.value) delete source.feather;
             if (event.target.value === '__bounds') {
               source.bounds = [-180, -85, 180, 85];
             } else if (event.target.value) {
