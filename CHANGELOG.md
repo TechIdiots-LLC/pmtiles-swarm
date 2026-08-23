@@ -2,10 +2,33 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **Duplicate a stack.** A button beside Edit on every row, which opens the editor on a copy of that
+  recipe: the same sources in the same order, the same masks, the same output, under a name of its
+  own and saved only when you save it. Most stacks after the first are a variation on one that
+  already works, and rebuilding that by hand is where a source gets left out.
+
+  Two things are changed for the copy and nothing else is. The name becomes `<name>-copy`, counting
+  up until it is one nothing is using, and the title gains `copy` — two stacks under one title are
+  two rows nobody can tell apart in the list they both appear in. Both are editable before saving.
+
+  It copies the **recipe** rather than the row. The list holds what each source resolved to, so a
+  copy taken from it would pin the infohashes the original follows by category and stop following
+  rebuilds from the moment it was made.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **Saving a stack with no name reported that the reply was not JSON.** `Unexpected token '<',
+  "<!DOCTYPE "... is not valid JSON`, which says nothing about a missing name. A stack with no name
+  is a `PUT /api/stacks/`, and that matches no route at all — `:id` needs a segment to be — so what
+  came back was express's own HTML error page, which the console then tried to parse.
+
+  Both halves are fixed. Every unmatched path under `/api` answers JSON now, so any future typo says
+  `no route for PUT /api/stacks/` rather than arriving as a parse error; and the dialog refuses an
+  empty or malformed name itself, since it is the one that knows what the box is for.
+
+- **A new stack could be saved over an existing one without a word.** `PUT` upserts, which is right
+  for editing and wrong for naming: typing a name already in use replaced that stack rather than
+  refusing. It is refused now when naming a new stack or a copy — where the stack it would have
+  replaced is usually the one being copied. Editing is unaffected; a stack keeps the name it has.
 
 ## 0.78.0
 ### ✨ Features and improvements

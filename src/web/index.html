@@ -840,7 +840,8 @@
 
         <div class="field">
           <label for="stack-id">Name</label>
-          <input id="stack-id" placeholder="planet-terrain" autocomplete="off" />
+          <input id="stack-id" placeholder="planet-terrain" autocomplete="off"
+                 required pattern="[A-Za-z0-9][A-Za-z0-9._-]*" />
           <div class="sub">
             Used in the URL: <code id="stack-url-preview">/stacks/…/tiles.json</code>
           </div>
@@ -7342,6 +7343,8 @@ Every piece is hashed against the ` +
                 : `<button type="button" data-stack-bake="${escapeHtml(stack.id)}" title="Run this stack over its sources and write the result as a real archive, with its own infohash, seeded like any other.">Export to archive</button>`
           }
           <button type="button" data-stack-edit="${escapeHtml(stack.id)}">Edit</button>
+          <button type="button" data-stack-copy="${escapeHtml(stack.id)}"
+                  title="Opens the editor on a copy of this recipe, under a name of its own. Nothing is saved until you save it.">Duplicate</button>
           <button type="button" data-stack-delete="${escapeHtml(stack.id)}">Delete</button>`;
 
         return `
@@ -7431,6 +7434,26 @@ Every piece is hashed against the ` +
       // space, so a form that re-derived itself from its own inputs would have
       // to know which of them are currently real.
       let stackDraft = null;
+      // Whether the dialog is naming a stack rather than editing one that is
+      // already named, and what names are already spoken for. Held here
+      // because the save is the only place it can be checked: `PUT` upserts,
+      // so a name that is taken replaces what is there rather than refusing.
+      let stackNaming = false;
+      let stackNamesTaken = new Set();
+
+      /**
+       * A name like this one that nothing is using.
+       * @param {string} base - The name being copied.
+       * @param {Set<string>} taken - What is spoken for.
+       * @returns {string} - A free name.
+       */
+      const freeStackId = (base, taken) => {
+        let candidate = `${base}-copy`;
+        for (let n = 2; taken.has(candidate); n += 1) {
+          candidate = `${base}-copy-${n}`;
+        }
+        return candidate;
+      };
 
       /** Forty characters of hex is not a label. */
       const shortHash = (hash) => (hash ? `${hash.slice(0, 12)}…` : hash);
@@ -7439,24 +7462,35 @@ Every piece is hashed against the ` +
       const draftIsRgba = () => stackDraft?.space === 'rgba';
 
       /**
-       * Opens the dialog on a new stack, or on one that already exists.
-       * @param {object} [existing] - The stack to edit.
+       * Opens the dialog on a new stack, on one that already exists, or on a
+       * copy of one.
+       * @param {object} [existing] - The stack to edit, or the copy to name.
+       * @param {object} [options] - `copy` when the draft is a duplicate, and
+       *   `taken` the names already in use.
        * @returns {Promise<void>} - Resolves once the dialog is open.
        */
-      const openStackDialog = async (existing) => {
+      const openStackDialog = async (existing, options = {}) => {
         stackDraft = existing
           ? JSON.parse(JSON.stringify(existing))
           : { id: '', title: '', space: 'elevation', sources: [], output: {} };
         stackDraft.sources ??= [];
         stackDraft.output ??= {};
 
-        $('stack-dialog-title').textContent = existing
-          ? 'Edit stack'
-          : 'Add stack';
+        // A copy arrives filled in but unnamed as far as the node is
+        // concerned, so it is edited like a new stack rather than like the one
+        // it came from.
+        stackNaming = Boolean(options.copy) || !existing;
+        stackNamesTaken = new Set(options.taken ?? []);
+
+        $('stack-dialog-title').textContent = options.copy
+          ? 'Duplicate stack'
+          : existing
+            ? 'Edit stack'
+            : 'Add stack';
         // An id is what the URL is made of, so changing one would silently
         // orphan whatever points at the old address.
         $('stack-id').value = stackDraft.id ?? '';
-        $('stack-id').disabled = Boolean(existing);
+        $('stack-id').disabled = !stackNaming;
         $('stack-title').value = stackDraft.title ?? '';
         for (const radio of document.querySelectorAll(
           'input[name="stack-space"]',
@@ -8021,6 +8055,30 @@ Every piece is hashed against the ` +
       $('stack-form').addEventListener('submit', async (event) => {
         event.preventDefault();
         const id = $('stack-id').value.trim();
+        // Caught here because the node cannot catch it: a stack with no name
+        // is a `PUT /api/stacks/`, which matches no route at all, and what
+        // comes back says only that the reply was not JSON.
+        if (!id) {
+          $('stack-error').textContent =
+            'A name is needed. It is what the stack is served under, so ' +
+            'there is nowhere to save one without it.';
+          return;
+        }
+        if (!/^[a-z0-9][a-z0-9._-]*$/i.test(id)) {
+          $('stack-error').textContent =
+            'A name may hold letters, digits, dots, dashes and underscores, ' +
+            'and has to start with a letter or a digit — it goes in a URL.';
+          return;
+        }
+        // `PUT` upserts, so a name already in use is replaced rather than
+        // refused -- which for a duplicate means quietly overwriting the very
+        // stack it was copied from.
+        if (stackNaming && stackNamesTaken.has(id)) {
+          $('stack-error').textContent =
+            `There is already a stack called "${id}". A name is what its URL ` +
+            'is made of, so saving would replace it rather than add this one.';
+          return;
+        }
         const body = {
           title: $('stack-title').value.trim() || undefined,
           space: stackDraft.space,
@@ -8086,8 +8144,16 @@ Every piece is hashed against the ` +
         loadStacks().catch((e) => toast(e.message));
       });
 
-      $('stacks-add').onclick = () =>
-        openStackDialog().catch((e) => toast(e.message));
+      $('stacks-add').onclick = async () => {
+        try {
+          const { stacks } = await api('/api/stacks');
+          await openStackDialog(undefined, {
+            taken: stacks.map((one) => one.id),
+          });
+        } catch (error) {
+          toast(error.message);
+        }
+      };
 
       /**
        * Asks where an export should land before starting it.
@@ -8231,6 +8297,7 @@ Every piece is hashed against the ` +
       // change, so they are delegated the same way the source rows are.
       $('stacks-list').addEventListener('click', async (event) => {
         const edit = event.target.dataset.stackEdit;
+        const copy = event.target.dataset.stackCopy;
         const drop = event.target.dataset.stackDelete;
         const bake = event.target.dataset.stackBake;
         const stopBake = event.target.dataset.stackBakeStop;
@@ -8260,6 +8327,23 @@ Every piece is hashed against the ` +
             const raw = await api(`/api/stacks/${encodeURIComponent(edit)}/raw`);
             await openStackDialog(raw.stack);
           }
+        } else if (copy !== undefined) {
+          const { stacks } = await api('/api/stacks');
+          // The recipe, not the report -- the same reason editing reads it.
+          // A report holds what each source resolved to, so a copy made from
+          // one would pin infohashes the original follows by category.
+          const raw = await api(`/api/stacks/${encodeURIComponent(copy)}/raw`);
+          const taken = stacks.map((one) => one.id);
+          await openStackDialog(
+            {
+              ...raw.stack,
+              id: freeStackId(copy, new Set(taken)),
+              // Named apart on purpose: two stacks under one title are two
+              // rows nobody can tell apart in the list they both appear in.
+              title: `${raw.stack.title ?? copy} copy`,
+            },
+            { copy: true, taken },
+          );
         } else if (drop !== undefined) {
           if (!confirm(`Delete the stack "${drop}"?`)) return;
           try {

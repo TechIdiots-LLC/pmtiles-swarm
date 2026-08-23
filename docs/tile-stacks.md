@@ -1586,10 +1586,33 @@ editor exists for — an editor whose primary action only works with a mouse is
 an editor half the people cannot use. The console has no drag-and-drop anywhere
 yet, so this is the first, and the buttons are what make it safe to add.
 
+### Starting from a stack that already works
+
+**Duplicate**, beside Edit on every row. It opens the editor on a copy of that
+recipe: the same sources in the same order, the same masks, the same output —
+under a name of its own, and saved only when it is saved. Most stacks after the
+first are a variation on one that already works, and rebuilding that by hand is
+where a source gets left out.
+
+Two things are changed for the copy and nothing else is. The name becomes
+`<name>-copy`, counting up until it is one nothing is using; the title gains
+`copy`, because two stacks under one title are two rows nobody can tell apart in
+the list they both appear in. Both are editable before saving — the point is
+that neither is left matching by accident.
+
+It copies the **recipe** rather than the row. The list holds what each source
+resolved to, so a copy taken from it would pin the infohashes the original
+follows by category, and stop following rebuilds from the moment it was made.
+The editor reads `/api/stacks/<id>/raw` for the same reason.
+
 ### What the editor refuses, and what it only warns about
 
 Refuses, because the stack cannot work:
 
+- A name that is already a stack's, when naming a new one or a copy. `PUT`
+  upserts, so this is the difference between adding a stack and replacing one —
+  and for a copy, the stack it would replace is usually the one being copied.
+  Editing an existing stack is unaffected: it keeps the name it has.
 - A recipe naming an `output.tileSize` that is not 256 or 512.
 - A source that resolves to nothing — an empty category, or an archive that
   retention has removed.

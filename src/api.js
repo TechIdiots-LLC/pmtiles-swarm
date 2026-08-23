@@ -3758,6 +3758,19 @@ export function createApp({
     }
   }
 
+  // An API path no route claimed. Without this express's own handler answers
+  // with an HTML error page, and a caller that parses every reply as JSON --
+  // the console does -- reports `Unexpected token '<'`, which says nothing at
+  // all about what was wrong with the request.
+  //
+  // The one that produced it was a stack saved with no name: `PUT
+  // /api/stacks/` matches no route, because `:id` needs a segment to be, and
+  // the reply came back as the start of an HTML document.
+  app.use('/api', (req, res) => {
+    const where = req.originalUrl.split('?')[0];
+    res.status(404).json({ error: `no route for ${req.method} ${where}` });
+  });
+
   app.use(express.static(path.join(here, 'web')));
 
   // Four parameters, two of them unused: express identifies an error handler

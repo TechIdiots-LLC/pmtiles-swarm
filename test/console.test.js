@@ -378,6 +378,59 @@ describe('clipping a source in the stack editor', () => {
     );
   });
 
+  it('can start a stack from one that already works', () => {
+    // Most stacks after the first are a variation on one that exists -- the
+    // same sources at another zoom, or one mask changed -- and rebuilding
+    // that by hand is where a source gets left out.
+    assert.match(script, /data-stack-copy=/);
+    assert.match(script, /Duplicate stack/);
+  });
+
+  it('copies the recipe rather than the report', () => {
+    // The list holds what each source resolved to. A copy made from it would
+    // pin the infohashes the original follows by category, so it would stop
+    // following rebuilds the moment it was made.
+    const handler = script.slice(script.indexOf('const copy = event.target'));
+    const branch = handler.slice(handler.indexOf('copy !== undefined'));
+    assert.match(branch.slice(0, 800), /\/raw`\)/);
+  });
+
+  it('gives the copy a name and a title of its own', () => {
+    assert.match(script, /freeStackId/);
+    assert.match(script, /-copy/);
+    assert.match(script, /\$\{raw\.stack\.title \?\? copy\} copy/);
+  });
+
+  it('will not save a stack with no name', () => {
+    // A stack with no name is a `PUT /api/stacks/`, which matches no route
+    // -- so what came back was an HTML error page and the dialog reported
+    // that the reply was not JSON. The node answers those in JSON now, and
+    // this never asks it.
+    assert.match(script, /A name is needed/);
+    assert.match(page, /required pattern="\[A-Za-z0-9\]/);
+  });
+
+  it('says which characters a name may hold', () => {
+    // It goes in a URL, and the node's own rule is the one quoted here.
+    assert.match(script, /\/\^\[a-z0-9\]\[a-z0-9\._-\]\*\$\/i\.test\(id\)/);
+  });
+
+  it('refuses to save a new stack over one that exists', () => {
+    // PUT upserts, so a name already in use is replaced rather than refused --
+    // which for a duplicate means overwriting the stack it was copied from.
+    assert.match(script, /stackNaming && stackNamesTaken\.has\(id\)/);
+    assert.match(script, /saving would replace it/);
+  });
+
+  it('still lets an existing stack be saved under its own name', () => {
+    // The guard is for naming, not for editing: a stack keeps its name, and
+    // a save that refused it would refuse every edit.
+    assert.match(
+      script,
+      /stackNaming = Boolean\(options\.copy\) \|\| !existing/,
+    );
+  });
+
   it('offers somewhere to let go of what a node is holding', () => {
     // A cache with no way to empty it is a directory somebody eventually finds
     // by hand, and a leftover temporary file is one nobody finds at all.
