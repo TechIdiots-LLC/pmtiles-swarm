@@ -66,9 +66,24 @@ const raster = await codec.decode(Buffer.from(await response.arrayBuffer()), {
 const heights = decodeHeights(raster, source);
 const { width } = raster;
 
-const real = [...heights].filter(Number.isFinite);
-const low = Math.min(...real);
-const high = Math.max(...real);
+// Walked rather than spread into Math.min: a 512px tile is 262,144 numbers and
+// that many arguments overflows the call stack.
+let low = Infinity;
+let high = -Infinity;
+let known = 0;
+let zeroes = 0;
+for (const value of heights) {
+  if (!Number.isFinite(value)) continue;
+  known += 1;
+  if (value === 0) zeroes += 1;
+  if (value < low) low = value;
+  if (value > high) high = value;
+}
+if (known === 0) {
+  console.log(`${url}
+  every pixel is nodata`);
+  process.exit(0);
+}
 
 // Every step between neighbouring pixels, left to right and top to bottom.
 const steps = [];
@@ -101,9 +116,7 @@ console.log(
   `  ${width}x${width}, ${source.encoding}, one quantum = ${quantum} m`,
 );
 console.log(`  heights ${low.toFixed(2)} m to ${high.toFixed(2)} m`);
-console.log(
-  `  exactly zero: ${real.filter((v) => v === 0).length} of ${real.length} pixels`,
-);
+console.log(`  exactly zero: ${zeroes} of ${known} pixels`);
 
 console.log('\n  step between neighbouring pixels:');
 const ordered = [...counts.entries()].sort((a, b) => a[0] - b[0]).slice(0, 8);
