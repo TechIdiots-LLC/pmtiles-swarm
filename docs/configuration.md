@@ -20,6 +20,7 @@ Some settings only take effect on restart. Those are marked **restart**.
 - [Scheduled sources](#scheduled-sources)
 - [Subscriptions](#subscriptions)
 - [Serving tiles](#serving-tiles)
+- [S3 buckets](#s3-buckets)
 - [Mutable publishing](#mutable-publishing)
 - [Authentication](#authentication)
 - [Statistics](#statistics)
@@ -775,6 +776,96 @@ Just after a start, what is being waited for is usually seconds away: a peer, a
 connection, a piece already in flight. Ten attempts later it is one piece at the
 far end of an archive nobody has finished, and asking every fifteen seconds
 achieves nothing but log lines.
+
+## S3 buckets
+
+A stack source may be an address rather than an archive this node holds, and
+that address may name an object in a bucket:
+
+```json
+{
+  "sources": [{ "url": "s3://terrain/planet.pmtiles", "encoding": "terrarium" }]
+}
+```
+
+Only for a bucket that is **not public**. A public object, or a presigned URL,
+is an ordinary HTTPS address: write it as one and none of this applies.
+
+```json
+{
+  "s3": [
+    {
+      "bucket": "terrain",
+      "endpoint": "https://minio.lan:9000",
+      "region": "us-east-1",
+      "accessKeyId": "…",
+      "secretAccessKey": "…"
+    }
+  ]
+}
+```
+
+| field             | default            |                                                      |
+| ----------------- | ------------------ | ---------------------------------------------------- |
+| `bucket`          | any                | which bucket this row is for; unset matches all      |
+| `endpoint`        | AWS for the region | what makes it S3-compatible rather than S3           |
+| `region`          | `us-east-1`        | signed into every request, whether or not it is used |
+| `accessKeyId`     | —                  |                                                      |
+| `secretAccessKey` | —                  |                                                      |
+| `sessionToken`    | unset              | for temporary credentials                            |
+| `pathStyle`       | path, unless AWS   | `false` puts the bucket in the hostname              |
+
+A source is read through the row naming its bucket, or through whichever row
+names none: one set of credentials for a whole account is the ordinary case,
+and writing the same keys once per bucket is busywork with a copy-paste
+mistake in it.
+
+### The endpoint is the whole point
+
+MinIO, Ceph, Garage, Cloudflare R2, Wasabi and Backblaze B2 all answer the
+same protocol at their own address, so naming that address is the difference
+between "S3" and "S3-compatible". Path-style addressing is what they speak and
+is the default here; AWS withdrew it for buckets made after September 2020, so
+an `amazonaws.com` endpoint puts the bucket in the hostname instead. Set
+`pathStyle` only for a server that insists on the other one.
+
+### Credentials from the environment
+
+With no rows configured at all, the standard variables are read — the same
+ones the AWS CLI, rclone, go-pmtiles and tileserver-gl use, so a machine
+already set up to reach a bucket needs nothing written here:
+
+| variable                                     |                                 |
+| -------------------------------------------- | ------------------------------- |
+| `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | required for any of it to apply |
+| `AWS_SESSION_TOKEN`                          | temporary credentials           |
+| `AWS_REGION`, `AWS_DEFAULT_REGION`           | region                          |
+| `AWS_S3_ENDPOINT`, `AWS_ENDPOINT_URL_S3`     | endpoint                        |
+| `AWS_S3_FORCE_PATH_STYLE`                    | addressing                      |
+
+### Signed here, not by an SDK
+
+SigV4 for a GET is a hash, four HMACs and a string, all of which `node:crypto`
+already has. An AWS client would be a large dependency for one signature, and
+an optional one would make reading a bucket work on some installs and not on
+others for no reason the operator could see — so it is neither optional nor a
+dependency. The signer is checked against AWS's own published test vectors
+rather than against itself.
+
+Every request is signed as it goes out, including the range: the header, each
+directory and each tile. Nothing is presigned and nothing is cached but the
+bytes, so revoking a key stops reads at the next request rather than at the
+next restart. Changing the settings drops the open readers for the same
+reason.
+
+### What a bucket source is, and is not
+
+It is a URL source in every other respect — see
+[tile-stacks.md](tile-stacks.md), "A source read straight from a URL". It
+carries its own `minzoom`, `maxzoom` and `bounds`, it is never seeded or
+retired, and it can be baked: a stack over private buckets exports to an
+ordinary archive with an infohash, which is the path from "terrain we hold in
+a bucket" to "terrain we publish".
 
 ## Mutable publishing
 

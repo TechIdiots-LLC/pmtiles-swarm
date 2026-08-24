@@ -6727,6 +6727,56 @@ Every piece is hashed against the ` +
         });
 
         renderRowEditor({
+          into: paneFor('Feeds'),
+          key: 's3',
+          title: 'S3 buckets',
+          blurb:
+            'Credentials for reading a stack source written as ' +
+            '<code>s3://bucket/key.pmtiles</code>. Only for a bucket that is ' +
+            'not public — a public or presigned address is read as any other ' +
+            'URL and needs nothing here. <b>Endpoint</b> is what makes it ' +
+            'S3-compatible rather than S3: MinIO, Ceph, Garage, R2, Wasabi ' +
+            'and B2 all answer the same protocol at their own address.',
+          columns: [
+            {
+              field: 'bucket',
+              label: 'Bucket',
+              placeholder: 'any bucket',
+            },
+            {
+              field: 'endpoint',
+              label: 'Endpoint',
+              placeholder: 'AWS for the region',
+              wide: true,
+            },
+            { field: 'region', label: 'Region', placeholder: 'us-east-1' },
+            { field: 'accessKeyId', label: 'Access key' },
+            { field: 'secretAccessKey', label: 'Secret key', secret: true },
+            {
+              field: 'pathStyle',
+              label: 'Addressing',
+              options: [
+                ['', 'path style, unless AWS'],
+                ['true', 'path style'],
+                ['false', 'bucket as a subdomain'],
+              ],
+            },
+          ],
+          rows: config.s3 ?? [],
+          footnote:
+            'A source is read through the row naming its bucket, or through ' +
+            'whichever row names none — one set of credentials for a whole ' +
+            'account is the ordinary case. With no rows at all the standard ' +
+            '<code>AWS_ACCESS_KEY_ID</code>, <code>AWS_SECRET_ACCESS_KEY</code>, ' +
+            '<code>AWS_REGION</code> and <code>AWS_S3_ENDPOINT</code> ' +
+            'variables are read, so a machine already set up to reach a ' +
+            'bucket needs nothing typed here. Addressing is only worth ' +
+            'setting for a server that insists: path style is what every ' +
+            'S3-compatible server speaks, and AWS itself withdrew it for ' +
+            'buckets made after September 2020.',
+        });
+
+        renderRowEditor({
           // With the monitored folders and the scheduled sources, because it
           // is the same kind of thing: something that puts an archive into
           // this node on a timer. It just bakes the archive here rather than
@@ -7801,6 +7851,18 @@ Every piece is hashed against the ` +
         return candidate;
       };
 
+      /**
+       * Whether an address is one a source can be read from.
+       *
+       * `s3://bucket/key` as well as the two web schemes: a bucket is fetched
+       * over HTTPS like anything else, once the endpoint and the signature
+       * configured under Settings have been put on it.
+       * @param {string} value - What was typed.
+       * @returns {boolean} - True if a source could use it.
+       */
+      const isSourceAddress = (value) =>
+        /^https?:\/\//i.test(value) || /^s3:\/\/[^/]+\/.+/i.test(value);
+
       /** Forty characters of hex is not a label. */
       const shortHash = (hash) => (hash ? `${hash.slice(0, 12)}…` : hash);
 
@@ -8330,13 +8392,13 @@ Every piece is hashed against the ` +
               remote
                 ? `<div class="bar">
                      <label class="choice" style="flex:1">Address
-                       <input style="flex:1;min-width:22rem" placeholder="https://example.org/terrain.pmtiles"
+                       <input style="flex:1;min-width:22rem" placeholder="https://example.org/terrain.pmtiles or s3://bucket/terrain.pmtiles"
                               data-stack-field="url" data-stack-index="${index}"
                               value="${escapeHtml(source.url ?? '')}" />
                      </label>
                      ${
-                       source.url && !/^https?:\/\//i.test(source.url)
-                         ? '<span class="bad">http:// or https://</span>'
+                       source.url && !isSourceAddress(source.url)
+                         ? '<span class="bad">http://, https:// or s3://bucket/key</span>'
                          : ''
                      }
                    </div>
@@ -8663,13 +8725,14 @@ Every piece is hashed against the ` +
         // looking.
         const blank = stackDraft.sources.findIndex(
           (source) =>
-            source.url !== undefined && !/^https?:\/\//i.test(source.url ?? ''),
+            source.url !== undefined && !isSourceAddress(source.url ?? ''),
         );
         if (blank >= 0) {
           $('stack-error').textContent =
-            `Source ${blank} needs an address beginning http:// or https://. ` +
-            'It is read straight from wherever it is published, so there is ' +
-            'nothing else to find it by.';
+            `Source ${blank} needs an address: http://, https://, or ` +
+            's3://bucket/key for a bucket set up under Settings → Feeds. It ' +
+            'is read straight from wherever it is, so there is nothing else ' +
+            'to find it by.';
           return;
         }
         const body = {

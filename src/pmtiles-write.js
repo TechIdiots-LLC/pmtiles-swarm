@@ -459,9 +459,14 @@ export class PMTilesWriter {
       // client asks for, and a header disagreeing with the directory sends it
       // looking for tiles that are not there.
       minZoom: header.minZoom ?? zoomOf(this.#entries[0].tileId),
-      maxZoom:
-        header.maxZoom ??
-        zoomOf(this.#entries[this.#entries.length - 1].tileId),
+      // The last id written, not the last entry's own. Identical tiles
+      // collapse into one entry covering a range, so an archive whose deepest
+      // tiles repeat -- open ocean, a masked-out region, anything flat --
+      // ends with an entry whose id sits at a shallower zoom than the tiles
+      // it addresses. Read as the entry's id, the header said the archive
+      // stopped short of the zoom it reaches, and a client asks for nothing
+      // past a header's maxZoom.
+      maxZoom: header.maxZoom ?? zoomOf(this.#lastId),
     };
 
     const out = await fs.open(destination, 'w');

@@ -586,6 +586,10 @@ PMTILES_SWARM_PUBLIC_URL
       stackFeeds.stop();
       stackFeeds.start();
     },
+    // Nothing to restart: the next archive opened from a bucket reads the new
+    // settings. What has to go is the readers already open, which are holding
+    // the keys they were opened with.
+    s3: () => tiles.forgetRemote(),
     seeding: () => {
       seeding.stop();
       seeding.start();

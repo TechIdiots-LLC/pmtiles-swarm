@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { FetchSource, PMTiles, SharedPromiseCache } from 'pmtiles';
+import { S3Source, bucketFor, isS3Url, splitS3Url } from './s3-source.js';
 import { TorrentSource } from 'pmtiles-torrent';
 import { NodeFileSource } from './file-source.js';
 import { onDiskPath } from './incomplete.js';
@@ -199,6 +200,18 @@ export class TileStore {
    * @param {string} url - Where the archive is.
    * @returns {Promise<object>} - The open handle.
    */
+  /**
+   * Drops every open reader of an archive read over the network.
+   *
+   * Called when the bucket settings change. A handle holds the credentials it
+   * was opened with, so without this a corrected key would apply to archives
+   * opened afterwards and not to the one being looked at.
+   * @returns {void}
+   */
+  forgetRemote() {
+    this.#remote.clear();
+  }
+
   async #acquireRemote(url) {
     const existing = this.#remote.get(url);
     if (existing) {
@@ -207,7 +220,18 @@ export class TileStore {
       return existing;
     }
 
-    const source = new FetchSource(url);
+    // A bucket rather than a web server. The difference is the signature on
+    // every request and where the address is really fetched from; everything
+    // after this line -- the archive, the directory cache, the LRU -- is the
+    // same, because a source is only a key and a way to get bytes.
+    const row = bucketFor(url, this.#config.s3);
+    if (isS3Url(url) && !row) {
+      throw new TileReadError(
+        `no credentials configured for ${splitS3Url(url).bucket}`,
+        502,
+      );
+    }
+    const source = row ? new S3Source(url, row) : new FetchSource(url);
     const handle = {
       mode: 'remote',
       source,
@@ -260,6 +284,36 @@ export class TileStore {
 
     const answer = await handle.source.getBytes(offset, length, options.signal);
     return Buffer.from(answer.data);
+  }
+
+  /**
+   * Reads a byte range out of an archive at a URL.
+   *
+   * The same question `readRange` answers, for the sources that have no
+   * infohash to ask it about. A bake needs this rather than tile-by-tile
+   * reads: it walks the directories of every source to find which tiles exist
+   * at all, and a stack of remote sources with no way to do that could be
+   * served and not exported -- which is backwards, since exporting is how
+   * something read from somewhere else becomes something this node holds.
+   * @param {string} url - The archive's address.
+   * @param {number} offset - Byte offset into the archive file.
+   * @param {number} length - How many bytes.
+   * @param {object} [options] - Abort signal.
+   * @returns {Promise<Buffer>} - The bytes.
+   */
+  async readRemoteRange(url, offset, length, options = {}) {
+    const handle = await this.#acquireRemote(url);
+    try {
+      const answer = await handle.source.getBytes(
+        offset,
+        length,
+        options.signal,
+      );
+      return Buffer.from(answer.data);
+    } catch (error) {
+      if (error instanceof TileReadError) throw error;
+      throw new TileReadError(`${url}: ${error.message}`, 502);
+    }
   }
   /**
    * Reads an archive's header and metadata, through whatever source applies.

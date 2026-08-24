@@ -349,3 +349,40 @@ describe('the zoom a tile id belongs to', () => {
     }
   });
 });
+
+describe('the zoom range an archive claims in its header', () => {
+  it('reaches the deepest tile even when the deepest tiles repeat', async () => {
+    // Identical tiles collapse into one directory entry covering a range of
+    // ids, so the last entry's own id can sit at a shallower zoom than the
+    // tiles it addresses -- and a client asks for nothing past maxZoom, so
+    // the archive looked like it stopped a zoom short.
+    const writer = await PMTilesWriter.open({ directory: workspace });
+    const same = Buffer.from('the same tile everywhere');
+    for (const [z, x, y] of [
+      [0, 0, 0],
+      [1, 0, 0],
+      [1, 1, 0],
+      [1, 1, 1],
+      [1, 0, 1],
+    ]) {
+      await writer.writeTile(zxyToTileId(z, x, y), same);
+    }
+    const file = path.join(workspace, 'runs.pmtiles');
+    const header = await writer.finalize(file, {}, { name: 'runs' });
+
+    assert.equal(header.minZoom, 0);
+    assert.equal(header.maxZoom, 1, 'the run hid the deepest zoom');
+  });
+
+  it('still takes a stated range at its word', async () => {
+    const writer = await PMTilesWriter.open({ directory: workspace });
+    await writer.writeTile(zxyToTileId(0, 0, 0), Buffer.from('one'));
+    const file = path.join(workspace, 'stated.pmtiles');
+    const header = await writer.finalize(
+      file,
+      { minZoom: 0, maxZoom: 14 },
+      { name: 'stated' },
+    );
+    assert.equal(header.maxZoom, 14);
+  });
+});

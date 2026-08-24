@@ -122,10 +122,13 @@ describe('what a recipe may say about a URL source', () => {
   });
 
   it('refuses a URL that is not one', () => {
-    assert.match(problems({ url: 'not a url' }).join(), /http\(s\) address/);
+    assert.match(
+      problems({ url: 'not a url' }).join(),
+      /http\(s\) or s3:\/\/ address/,
+    );
     assert.match(
       problems({ url: 'ftp://x.example/a' }).join(),
-      /http\(s\) address/,
+      /http\(s\) or s3:\/\/ address/,
     );
   });
 

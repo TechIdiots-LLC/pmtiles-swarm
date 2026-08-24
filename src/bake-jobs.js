@@ -411,12 +411,18 @@ export class BakeManager {
     // presses the button rather than an hour in.
     assertBakeable(resolved, codec);
 
+    // A source this node can read: an archive it holds, a recipe it can
+    // evaluate, or an address it can fetch. The last was missing, which
+    // refused exactly the bake worth having -- a stack of remote sources
+    // exported to an archive is how terrain that lives somewhere else, in a
+    // provider's file list or a private bucket, becomes something this node
+    // holds and can seed.
     const unresolved = resolved.sources.filter(
-      (source) => !source.entry && !source.nested,
+      (source) => !source.entry && !source.nested && !source.remote,
     );
     if (unresolved.length === resolved.sources.length) {
       const error = new Error(
-        "none of this stack's sources resolved to an archive on this node",
+        "none of this stack's sources resolved to anything this node can read",
       );
       error.status = 409;
       throw error;
@@ -594,15 +600,22 @@ export class BakeManager {
     // source is scanned the same way it is served: its directories come out of
     // the swarm, and the store holds them to its own byte budget.
     const sources = resolved.sources
-      .filter((source) => source.entry)
+      .filter((source) => source.entry || source.remote)
       .map((source) => ({
         getBytes: async (offset, length) => {
-          const bytes = await this.#tiles.readRange(
-            source.entry.infoHash,
-            offset,
-            length,
-            { signal: job.controller.signal },
-          );
+          // The one difference between a source this node holds and one it
+          // reads over the network, here as everywhere else: which method of
+          // the store answers. What is done with the bytes is identical.
+          const bytes = source.remote
+            ? await this.#tiles.readRemoteRange(source.remote, offset, length, {
+                signal: job.controller.signal,
+              })
+            : await this.#tiles.readRange(
+                source.entry.infoHash,
+                offset,
+                length,
+                { signal: job.controller.signal },
+              );
           // Sliced by offset and length rather than handed `.buffer` outright.
           // A Buffer is a view, and where it is a view *into* something larger
           // -- which is what Buffer.allocUnsafe hands back -- `.buffer` is the

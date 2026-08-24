@@ -15,7 +15,36 @@
   worth a click.
 
 
+- **A stack source may be an object in a private S3 bucket.**
+  `s3://bucket/terrain.pmtiles`, read with a signed request per byte range. Only for a bucket that is
+  not public — a public object or a presigned URL is an ordinary HTTPS address and always worked.
+  `endpoint` is what makes it S3-compatible rather than S3: MinIO, Ceph, Garage, R2, Wasabi and B2
+  all answer the same protocol at their own address, and path-style addressing is the default because
+  it is what they speak. Credentials go under **Settings → Feeds → S3 buckets**, per bucket or once
+  for an account; with none configured the standard `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
+  `AWS_REGION` and `AWS_S3_ENDPOINT` variables are read, so a machine already set up to reach a
+  bucket needs nothing typed in.
+
+  Signed here rather than by an SDK: SigV4 for a GET is a hash, four HMACs and a string, all of which
+  `node:crypto` has. An AWS client would be a large dependency for one signature, and an optional one
+  would make reading a bucket work on some installs and not on others for no reason the operator
+  could see — so it is neither optional nor a dependency. The signer is checked against AWS's own
+  published test vectors rather than against itself.
+
+
 ### 🐞 Bug fixes
+- **A stack of remote sources could be served but not exported.** The bake refused any stack whose
+  sources resolved to no archive on this node, which is every stack read from URLs — refusing exactly
+  the export worth having, since baking is how terrain that lives somewhere else becomes something
+  this node holds and can seed. It also had no way to walk a remote archive's directories, which is
+  how a bake finds which tiles exist at all.
+
+- **An archive whose deepest tiles repeat said it stopped a zoom short.** Identical tiles collapse
+  into one directory entry covering a range of ids, so the last entry's own id can sit at a shallower
+  zoom than the tiles it addresses — and the header was read off that id. A client asks for nothing
+  past a header's `maxZoom`, so the deepest zoom of such an archive was unreachable. Found baking a
+  stack over flat terrain, where every tile of the last zoom was the same tile.
+
 - **A stack used as a source of another stack was reported as unresolved.** It resolves to a recipe
   rather than to bytes, and the console's reader looked only for a catalog entry or an address — so a
   working nested stack showed "does not resolve", with no zoom range and no box, and put a "sources

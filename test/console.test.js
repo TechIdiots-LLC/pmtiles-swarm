@@ -2440,6 +2440,7 @@ describe('the settings schema', () => {
       'locations',
       'stackExports',
       'stackFeeds',
+      's3',
     ]);
 
     const stranded = declared.filter(
@@ -2627,7 +2628,7 @@ describe('adding a source that lives at a URL', () => {
   it('starts empty, and is refused until it is filled in', () => {
     assert.match(page, /kind === 'url'/);
     assert.match(page, /\{ url: '' \}/);
-    assert.match(page, /needs an address beginning http:\/\/ or https:\/\//);
+    assert.match(page, /needs an address: http:\/\/, https:\/\/, or /);
   });
 
   it('asks for the zoom range, which is what makes many of them cheap', () => {

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { isS3Url } from './s3-source.js';
 import {
   MAX_BLUR_SIGMA,
   RESAMPLING,
@@ -92,6 +93,20 @@ export function isHttpUrl(value) {
 }
 
 /**
+ * Whether an address is one a source may be read from.
+ *
+ * Wider than `isHttpUrl` by one scheme: `s3://bucket/key` is an object in a
+ * bucket, fetched over HTTPS like anything else once a configured endpoint
+ * and a signature have been put on it. A feed address is not this -- that is
+ * something the node fetches plainly and has no credentials for.
+ * @param {string} value - What the recipe said.
+ * @returns {boolean} - True for http, https or s3.
+ */
+export function isSourceUrl(value) {
+  return isHttpUrl(value) || isS3Url(value);
+}
+
+/**
  * How many stacks deep a recipe may reach.
  *
  * A loop is caught by name and refused outright; this is for the chain that
@@ -159,8 +174,10 @@ export function validateStack(stack) {
       );
     }
     if (source?.url !== undefined) {
-      if (typeof source.url !== 'string' || !isHttpUrl(source.url)) {
-        problems.push(`sources[${index}].url must be an http(s) address`);
+      if (typeof source.url !== 'string' || !isSourceUrl(source.url)) {
+        problems.push(
+          `sources[${index}].url must be an http(s) or s3:// address`,
+        );
       }
     }
     for (const key of ['minzoom', 'maxzoom']) {

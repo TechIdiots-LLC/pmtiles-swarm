@@ -460,6 +460,25 @@ const DEFAULTS = {
    */
   stackFeeds: [],
   /**
+   * S3-compatible buckets a stack source may be read from.
+   *
+   * `[{ bucket, endpoint, region, accessKeyId, secretAccessKey, sessionToken,
+   * pathStyle }]`. A source whose URL is `s3://bucket/key.pmtiles` is read
+   * through the row naming that bucket, or through whichever row names none.
+   * A row is needed only for a bucket that is not public: a presigned or
+   * public HTTPS address is read as any other URL and knows nothing of this.
+   *
+   * `endpoint` is what makes it S3-compatible rather than S3: MinIO, Ceph,
+   * Garage, R2, Wasabi and B2 all answer the same protocol at their own
+   * address. Left unset it is AWS's own for the region.
+   *
+   * With nothing here at all the standard `AWS_ACCESS_KEY_ID`,
+   * `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` and `AWS_S3_ENDPOINT` variables are
+   * read, so a machine already set up to reach a bucket needs no settings.
+   * See docs/configuration.md -- "S3 buckets".
+   */
+  s3: [],
+  /**
    * How often to re-check whether the sources archives were built from have
    * changed, in seconds. Zero disables it.
    */
@@ -861,6 +880,10 @@ export const RELOADABLE = new Map([
   ['sourceCheckIntervalHours', 'sources'],
   ['subscriptions', 'subscriptions'],
   ['stackFeeds', 'stackFeeds'],
+  // Read when a bucket-backed source is first opened, and the open handles are
+  // keyed by address rather than by credentials -- so a corrected key applies
+  // to the next archive opened rather than needing a restart.
+  ['s3', 's3'],
   ['subscriptionIntervalSeconds', 'subscriptions'],
   ['subscriptionsEnabled', 'subscriptions'],
   ['seeding', 'seeding'],

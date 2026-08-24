@@ -872,3 +872,120 @@ describe('what a baked archive says it is encoded as', () => {
     assert.equal(metadata.encoding, undefined);
   });
 });
+
+// A URL source can never be passed through byte-for-byte -- it has no
+// infohash to answer that question with -- so every tile is decoded, and this
+// is one of the few bakes that genuinely needs pixels.
+const codec = await (await import('../src/codec.js')).loadCodec();
+
+describe(
+  'exporting a stack whose sources are all somewhere else',
+  { skip: !codec },
+  () => {
+    /**
+     * A stack over one archive served at a URL, with range support.
+     * @returns {Promise<object>} - `{manager, imported, close}`.
+     */
+    async function overAUrl() {
+      // Real PNG tiles, not the placeholder bytes the other bakes use: a URL
+      // source has no infohash, so it is never passed through and every tile
+      // of it goes through the codec.
+      const tile = await codec.encode(
+        {
+          data: Buffer.alloc(256 * 256 * 3, 7),
+          width: 256,
+          height: 256,
+          channels: 3,
+        },
+        { format: 'png' },
+      );
+      const writer = await PMTilesWriter.open({ directory: workspace });
+      for (const [z, x, y] of [
+        [1, 0, 0],
+        [2, 1, 1],
+      ]) {
+        await writer.writeTile(zxyToTileId(z, x, y), tile);
+      }
+      const file = path.join(
+        workspace,
+        `${crypto.randomBytes(6).toString('hex')}.pmtiles`,
+      );
+      await writer.finalize(
+        file,
+        { tileType: TileType.Png },
+        { name: 'remote' },
+      );
+      const body = await fs.readFile(file);
+      const { createServer } = await import('node:http');
+      const server = createServer((req, res) => {
+        const match = /^bytes=(\d{1,15})-(\d{0,15})$/.exec(
+          req.headers.range ?? '',
+        );
+        if (!match) {
+          res.writeHead(200, { 'content-length': body.length });
+          res.end(body);
+          return;
+        }
+        const start = Number(match[1]);
+        const end = Math.min(
+          match[2] ? Number(match[2]) : body.length - 1,
+          body.length - 1,
+        );
+        res.writeHead(206, {
+          'content-range': `bytes ${start}-${end}/${body.length}`,
+          'content-length': end - start + 1,
+        });
+        res.end(body.subarray(start, end + 1));
+      });
+      server.listen(0);
+      await new Promise((resolve) => server.once('listening', resolve));
+      const url = `http://127.0.0.1:${server.address().port}/a.pmtiles`;
+
+      const imported = [];
+      const { TileStore } = await import('../src/tiles.js');
+      const manager = new BakeManager({
+        tiles: new TileStore({
+          catalog: { get: () => null },
+          engine: {},
+          config: {},
+        }),
+        config: { dataDir: path.join(workspace, `data-url-${Math.random()}`) },
+        loadCodec: async () => codec,
+        library: {
+          addLocalArchive: async (file) => {
+            imported.push(file);
+            return { infoHash: 'd'.repeat(40) };
+          },
+          resolveSavePath: async () => undefined,
+        },
+      });
+
+      const resolved = resolveStack(
+        { id: 'terrain', title: 'Terrain', sources: [{ url }] },
+        { archive: () => null, category: () => null, stack: () => null },
+      );
+      return {
+        manager,
+        resolved,
+        imported,
+        close: () => new Promise((resolve) => server.close(resolve)),
+      };
+    }
+
+    it('is allowed, which is the whole point of reading a URL', async () => {
+      // A stack of remote sources could be served and not exported, which is
+      // backwards: exporting is how terrain that lives somewhere else becomes
+      // something this node holds and can seed.
+      const set = await overAUrl();
+      try {
+        await set.manager.start({ resolved: set.resolved });
+        const job = await settled(set.manager, 'terrain');
+        assert.equal(job.phase, 'done', job.error);
+        assert.equal(job.written, 2);
+        assert.equal(set.imported.length, 1);
+      } finally {
+        await set.close();
+      }
+    });
+  },
+);
