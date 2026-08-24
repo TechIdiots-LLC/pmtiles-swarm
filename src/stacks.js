@@ -83,7 +83,7 @@ const ID = /^[a-z0-9][a-z0-9._-]*$/i;
  * @param {string} value - What the recipe said.
  * @returns {boolean} - True for a parseable http or https address.
  */
-function isHttpUrl(value) {
+export function isHttpUrl(value) {
   try {
     return ['http:', 'https:'].includes(new URL(value).protocol);
   } catch {

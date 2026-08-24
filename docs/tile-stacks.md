@@ -54,6 +54,7 @@ of its parts.
 - [Feathering a seam](#feathering-a-seam)
 - [A stack as a source](#a-stack-as-a-source)
 - [A source read straight from a URL](#a-source-read-straight-from-a-url)
+- [Importing a list of URLs](#importing-a-list-of-urls)
   - [Exporting on a schedule](#exporting-on-a-schedule)
 - [Finding a stack](#finding-a-stack)
 - [Syncing a stack to another node](#syncing-a-stack-to-another-node)
@@ -1717,6 +1718,78 @@ and that path is wired up. What is not: a parent read that fails is caught and
 skipped silently, the same forgiving rule `readMaskEdges` already applies to a
 catalog source whose parent cannot be reached, so a patchy host degrades the
 ramp rather than failing the tile.
+
+## Importing a list of URLs
+
+Naming 458 sources by hand is not work anybody should do once, let alone again
+when the provider adds a file. A provider that publishes terrain as many
+separate archives generally publishes an index of them as well, and that index
+already carries exactly what the merge needs in order to skip a source without
+opening it.
+
+**Stacks → Import URL list…** takes the address of one. Mapterhorn's is
+`https://download.mapterhorn.com/download_urls.json`.
+
+### Two shapes, detected rather than declared
+
+An **index**: an object with an `items` list, or a bare array of the same
+entries. Each entry needs a `url` and the six numbers Mapterhorn's carries —
+`min_lon`, `min_lat`, `max_lon`, `max_lat`, `min_zoom`, `max_zoom` — which
+become the source's `bounds` and its `minzoom`/`maxzoom`.
+
+A **plain list** of addresses, one per line or as a JSON array of strings, for
+a provider that publishes no index. Blank lines and `#` comments are ignored.
+Nothing states a box or a zoom range, so every source is opened for every tile
+it might cover — which is the cost of having no index, and the reason the index
+path is worth preferring.
+
+Which one it is is worked out from the document, because somebody pasting an
+address has no reason to know which their provider answers with, and guessing
+wrong would be a silent import of nothing rather than an error.
+
+### The global file becomes the base
+
+An entry whose box covers the world — Mapterhorn's `planet.pmtiles` says -180
+to 180 and ±85.0511 — is made `sources[0]` and marked `required`. A stack is
+painted bottom-first, so the thing covering everywhere has to sit underneath
+everything patching it, and the index does not list it first.
+
+It is given no `bounds`: a clip excluding nothing is a rasterise on every
+partial tile for an answer that was never in doubt. Where several entries claim
+to be global, the one reaching deepest wins and the rest become ordinary
+layers.
+
+### The encoding is the importer's to state
+
+An index rarely says. Mapterhorn's files are all terrarium and its JSON never
+mentions it, so the dialog asks and sets it on every imported source — a
+terrain source read with the wrong encoding is a cliff face rather than a
+mistake anybody has to guess at.
+
+### Re-importing
+
+Every imported source carries `importedFrom`, naming the list it came from.
+That is what lets the editor draw one row for several hundred sources, and what
+a re-import uses to know which are its to replace. A source typed by hand
+carries none and is never touched.
+
+The batch also goes back **where it already was**, rather than on the end.
+Painting order is the whole meaning of a stack: a batch that moved on every
+re-import would quietly bury a local override somebody had deliberately placed
+above it — a day later, on a schedule, with nothing to say why the map changed.
+
+### Fetched by the node, not the browser
+
+The console is often on a different network from the node, and a list is only
+useful if the machine that will actually read those archives can reach them. A
+458-entry index is also not something a browser should be parsing and posting
+back a megabyte of.
+
+`POST /api/stacks/<id>/import` takes `{ url, encoding }`. With `dryRun` it
+answers what it would write without writing it, which is what **Check** in the
+dialog shows and what the editor's **Re-import** uses to update an unsaved
+draft. A draft can send its own `sources` along, so the batch comes back merged
+into the order the operator is holding rather than into the stored one.
 
 ## Finding a stack
 

@@ -807,6 +807,7 @@ which the endpoint answers 501.
 | `GET`                  | `/api/torrents/:infoHash/stacks`                            | Which stacks would break if this archive were removed, and how                                                                                                                                                                                                                                                                             |
 | `GET`, `PUT`, `DELETE` | `/api/stacks/:id/raw`, `/api/stacks/:id`                    | Read a recipe as written, save one, or remove it. `/raw` is the recipe; `/api/stacks` is what it resolved to                                                                                                                                                                                                                               |
 
+| `POST` | `/api/stacks/:id/import` | Import a provider's list of PMTiles URLs as sources on this stack. An index with an `items` list, or a plain list of addresses; `dryRun` says what it would write without writing it |
 | `POST`, `DELETE` | `/api/stacks/:id/bake` | Run the stack over its sources and write the result as an archive, or stop one that is running. Answers as soon as the job starts; watch it on `/api/stacks` |
 | `GET` | `/stacks/:id/preview` | A map of a stack, for looking at it — **public** |
 | `GET` | `/stacks/:id/tiles.json` | TileJSON for a stack — **public**. `maxzoom` is the maximum over its sources, not the minimum |

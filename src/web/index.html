@@ -523,6 +523,7 @@
       <section id="view-stacks" hidden>
         <div class="bar">
           <button id="stacks-add">Add stack…</button>
+          <button id="stacks-import">Import URL list…</button>
           <span class="bar-gap"></span>
           <span class="muted" id="stacks-where"></span>
         </div>
@@ -640,6 +641,64 @@
         <menu>
           <button value="cancel">Cancel</button>
           <button id="move-go" value="default">Move</button>
+        </menu>
+      </form>
+    </dialog>
+
+    <dialog id="import-dialog">
+      <form method="dialog" id="import-form">
+        <h2>Import a list of PMTiles URLs</h2>
+        <div class="sub" style="margin-bottom:0.8rem">
+          A provider that publishes terrain as many separate files usually
+          publishes an index of them too — Mapterhorn's
+          <code>download_urls.json</code> names 458, each with the box it
+          covers and the zooms it holds. Those become sources read straight
+          from where they are, over HTTP: nothing is downloaded, nothing is
+          seeded, and a tile outside a file's box never asks it.
+        </div>
+
+        <div class="field">
+          <label for="import-stack">Into stack</label>
+          <input id="import-stack" placeholder="mapterhorn" required
+                 pattern="[A-Za-z0-9][A-Za-z0-9._-]*" autocomplete="off" />
+          <div class="sub">
+            An existing stack, or a new name to make one. Sources already in it
+            stay; a list imported before from this same address is replaced.
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="import-url">List address</label>
+          <input id="import-url" style="width:26rem"
+                 placeholder="https://download.mapterhorn.com/download_urls.json" />
+          <div class="sub">
+            Fetched by this node rather than by your browser — the console is
+            often on a different network, and what matters is that the machine
+            which will read the archives can reach them. An index with an
+            <code>items</code> list, or a plain list of URLs one per line.
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="import-encoding">Encoding</label>
+          <select id="import-encoding">
+            <option value="">leave unset</option>
+            <option value="terrarium">terrarium</option>
+            <option value="mapbox">mapbox</option>
+          </select>
+          <div class="sub">
+            Set on every imported source. An index rarely states it —
+            Mapterhorn's files are all terrarium and its JSON never says so —
+            and a terrain source read with the wrong one is a cliff face.
+          </div>
+        </div>
+
+        <div class="sub" id="import-preview"></div>
+        <div class="sub" id="import-error" style="color: var(--danger)"></div>
+        <menu>
+          <button value="cancel">Cancel</button>
+          <button type="button" id="import-check">Check</button>
+          <button id="import-go" value="default">Import</button>
         </menu>
       </form>
     </dialog>
@@ -7913,15 +7972,83 @@ Every piece is hashed against the ` +
             'should show wherever nothing above it has data.</div>';
           return;
         }
+        // Imported batches are collapsed to one row each. A provider's file
+        // list runs to several hundred sources -- Mapterhorn's is 458 -- and
+        // drawing a card apiece makes the dialog thousands of pixels tall and
+        // the four sources somebody actually typed impossible to find in it.
         list.innerHTML =
-          stackDraft.sources
-            .map((source, index) => renderDraftSource(source, index, rgba))
+          groupedSources(stackDraft.sources)
+            .map((group) =>
+              group.batch
+                ? renderImportedBatch(group)
+                : renderDraftSource(group.source, group.index, rgba),
+            )
             .join('') +
           `<div class="sub">A <strong>required</strong> source that cannot be read
              makes the whole tile answer 503, instead of quietly serving the rest —
              a layer that vanished looks like a plausible map rather than a failure.
              It does not mean the source must have a tile everywhere; covering
              different areas is the point.</div>`;
+      };
+
+      /**
+       * The source list with each imported batch folded into one entry.
+       *
+       * Runs of sources sharing an `importedFrom` collapse; anything else
+       * passes through as itself. A run rather than every source with that
+       * marker, because painting order is what a stack means -- a batch with
+       * a hand-written override in the middle of it is two runs, and drawing
+       * it as one would put the override somewhere it is not.
+       * @param {object[]} sources - The draft's sources.
+       * @returns {object[]} - Entries to draw.
+       */
+      const groupedSources = (sources) => {
+        const groups = [];
+        for (const [index, source] of (sources ?? []).entries()) {
+          const from = source?.importedFrom;
+          const last = groups.at(-1);
+          if (from && last?.batch && last.from === from) {
+            last.count += 1;
+            last.end = index;
+            continue;
+          }
+          groups.push(
+            from
+              ? { batch: true, from, count: 1, index, end: index }
+              : { source, index },
+          );
+        }
+        return groups;
+      };
+
+      /**
+       * One collapsed row standing for a batch of imported sources.
+       * @param {object} group - What `groupedSources` produced.
+       * @returns {string} - HTML.
+       */
+      const renderImportedBatch = (group) => {
+        const from = escapeHtml(group.from);
+        const name = escapeHtml(group.from.replace(/^https?:\/\//, ''));
+        return `
+          <div class="card tight">
+            <div class="row">
+              <span class="muted">${group.index}${
+                group.count > 1 ? `–${group.end}` : ''
+              }</span>
+              <strong>${group.count} imported source${group.count === 1 ? '' : 's'}</strong>
+              <span class="pill" title="Read straight from where they are published, over HTTP. Nothing is downloaded or seeded.">url</span>
+              <span class="bar-gap"></span>
+              <button type="button" data-batch-reimport="${from}"
+                      title="Fetch the list again and replace these sources with what it says now. Anything you added by hand stays where it is.">Re-import</button>
+              <button type="button" data-batch-remove="${from}"
+                      title="Remove every source that came from this list. Nothing else is touched.">Remove all</button>
+            </div>
+            <div class="sub"><code>${name}</code></div>
+            <div class="sub">Each carries the box and zoom range the list stated,
+              so a tile outside one skips it without a request leaving this node.
+              Edit them by re-importing, or by hand in <code>stacks.json</code> —
+              this row stands for too many to show.</div>
+          </div>`;
       };
 
       /**
@@ -8286,9 +8413,11 @@ Every piece is hashed against the ` +
         renderStackDraft();
       });
 
-      $('stack-sources').addEventListener('click', (event) => {
+      $('stack-sources').addEventListener('click', async (event) => {
         const move = event.target.dataset.stackMove;
         const remove = event.target.dataset.stackRemove;
+        const reimport = event.target.dataset.batchReimport;
+        const dropBatch = event.target.dataset.batchRemove;
         if (move !== undefined) {
           const from = Number(move);
           const to = from + Number(event.target.dataset.stackDir);
@@ -8300,6 +8429,23 @@ Every piece is hashed against the ` +
           stackDraft.sources.splice(Number(remove), 1);
           renderStackDraft();
           fillStackSourceChoices();
+        } else if (dropBatch !== undefined) {
+          stackDraft.sources = stackDraft.sources.filter(
+            (source) => source?.importedFrom !== dropBatch,
+          );
+          renderStackDraft();
+        } else if (reimport !== undefined) {
+          // Fetched by the node, not here: the console is often on a
+          // different network from it, and what matters is that the machine
+          // which will read these archives can reach the list.
+          event.target.disabled = true;
+          try {
+            await importIntoDraft(reimport, stackDraft.sources.find(
+              (source) => source?.importedFrom === reimport,
+            )?.encoding);
+          } finally {
+            event.target.disabled = false;
+          }
         }
       });
 
@@ -8437,6 +8583,112 @@ Every piece is hashed against the ` +
           toast(error.message);
         }
       };
+
+      /**
+       * Re-imports a batch into the open draft, without saving anything.
+       *
+       * A dry run, because the editor is holding a recipe nobody has agreed
+       * to yet -- saving here to find out what the list says now would commit
+       * every other unsaved edit along with it. What the draft is holding
+       * goes with the request, so the batch comes back merged into the order
+       * the operator has it in rather than into the stored one.
+       * @param {string} from - The list's address.
+       * @param {string} [encoding] - What the batch was imported with.
+       * @returns {Promise<void>} - Resolves once the draft is updated.
+       */
+      async function importIntoDraft(from, encoding) {
+        const id = $('stack-id').value.trim() || 'preview';
+        try {
+          const answer = await api(
+            `/api/stacks/${encodeURIComponent(id)}/import`,
+            {
+              method: 'POST',
+              body: {
+                url: from,
+                encoding,
+                dryRun: true,
+                sources: stackDraft.sources,
+              },
+            },
+          );
+          stackDraft.sources = answer.sources;
+          renderStackDraft();
+          toast(
+            `${answer.imported} source${answer.imported === 1 ? '' : 's'} from ${from}` +
+              (answer.skipped ? `, ${answer.skipped} skipped` : ''),
+          );
+        } catch (error) {
+          $('stack-error').textContent = error.message;
+        }
+      }
+
+      /**
+       * What the import dialog is currently asking for.
+       * @returns {object} - The request body.
+       */
+      const importRequest = () => ({
+        url: $('import-url').value.trim(),
+        encoding: $('import-encoding').value || undefined,
+      });
+
+      $('stacks-import').onclick = () => {
+        $('import-stack').value = '';
+        $('import-url').value = '';
+        $('import-encoding').value = 'terrarium';
+        $('import-preview').textContent = '';
+        $('import-error').textContent = '';
+        $('import-dialog').showModal();
+      };
+
+      // Checked before committing, because an import replaces a stack's
+      // sources and a list is somebody else's document -- reading what it
+      // actually says first is cheap and the alternative is finding out by
+      // looking at 458 rows afterwards.
+      $('import-check').onclick = async () => {
+        const id = $('import-stack').value.trim();
+        $('import-error').textContent = '';
+        $('import-preview').textContent = 'Reading…';
+        try {
+          const answer = await api(
+            `/api/stacks/${encodeURIComponent(id || 'preview')}/import`,
+            { method: 'POST', body: { ...importRequest(), dryRun: true } },
+          );
+          $('import-preview').textContent =
+            `${answer.imported} source${answer.imported === 1 ? '' : 's'} ` +
+            `from a ${answer.format === 'index' ? 'file index' : 'plain URL list'}` +
+            (answer.skipped
+              ? `, ${answer.skipped} entr${answer.skipped === 1 ? 'y' : 'ies'} skipped`
+              : '') +
+            `. The stack would hold ${answer.sources.length} in total.`;
+        } catch (error) {
+          $('import-preview').textContent = '';
+          $('import-error').textContent = error.message;
+        }
+      };
+
+      $('import-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const id = $('import-stack').value.trim();
+        if (!id) {
+          $('import-error').textContent = 'Name the stack to import into.';
+          return;
+        }
+        try {
+          const answer = await api(
+            `/api/stacks/${encodeURIComponent(id)}/import`,
+            { method: 'POST', body: importRequest() },
+          );
+          $('import-dialog').close();
+          toast(
+            `Imported ${answer.imported} source${answer.imported === 1 ? '' : 's'} into ${id}`,
+          );
+          loadStacks().catch((e) => toast(e.message));
+        } catch (error) {
+          // Kept open: what is wrong is usually the address or the stack
+          // name, both of which are on this form.
+          $('import-error').textContent = error.message;
+        }
+      });
 
       /**
        * Asks where an export should land before starting it.

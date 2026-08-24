@@ -488,6 +488,59 @@ describe('clipping a source in the stack editor', () => {
     assert.match(script.slice(Math.max(0, at - 200), at), /stack\.adopted/);
   });
 
+  it('can import a provider’s list of URLs as sources', () => {
+    // Naming 458 sources by hand is not work anybody should do once, let
+    // alone again when the provider adds a file.
+    assert.match(page, /id="import-dialog"/);
+    assert.match(script, /\/import`/);
+  });
+
+  it('checks a list before committing to it', () => {
+    // An import replaces a stack's sources, and a list is somebody else's
+    // document -- reading what it actually says first is cheap, and the
+    // alternative is finding out by looking at 458 rows afterwards.
+    assert.match(page, /id="import-check"/);
+    assert.match(script, /dryRun: true/);
+  });
+
+  it('asks for the encoding, which an index rarely states', () => {
+    // Mapterhorn's files are all terrarium and its JSON never says so. A
+    // terrain source read with the wrong encoding is a cliff face.
+    assert.match(page, /id="import-encoding"/);
+    assert.match(page, /<option value="terrarium">/);
+  });
+
+  it('draws an imported batch as one row, not hundreds', () => {
+    // A card apiece makes the dialog thousands of pixels tall and the four
+    // sources somebody actually typed impossible to find in it.
+    assert.match(script, /groupedSources/);
+    assert.match(script, /renderImportedBatch/);
+    assert.match(script, /data-batch-reimport=/);
+    assert.match(script, /data-batch-remove=/);
+  });
+
+  it('groups a batch by runs, so an override in the middle still shows', () => {
+    // Painting order is what a stack means: a batch with a hand-written
+    // override inside it is two runs, and drawing it as one would put the
+    // override somewhere it is not.
+    const at = script.indexOf('const groupedSources');
+    assert.ok(at > 0);
+    assert.match(
+      script.slice(at, at + 900),
+      /last\?\.batch && last\.from === from/,
+    );
+  });
+
+  it('re-imports into the draft without saving it', () => {
+    // The editor is holding a recipe nobody has agreed to yet; saving here to
+    // find out what the list says now would commit every other unsaved edit.
+    const at = script.indexOf('async function importIntoDraft');
+    assert.ok(at > 0);
+    const body = script.slice(at, at + 1200);
+    assert.match(body, /dryRun: true/);
+    assert.match(body, /sources: stackDraft\.sources/);
+  });
+
   it('can start a stack from one that already works', () => {
     // Most stacks after the first are a variation on one that exists -- the
     // same sources at another zoom, or one mask changed -- and rebuilding

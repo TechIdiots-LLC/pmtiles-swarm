@@ -39,7 +39,9 @@ import { loadCodec } from './codec.js';
 import { answerStackTile, outputFormat, outputSize } from './stack-tile.js';
 import { renderStackFeed } from './stack-feed.js';
 import { clearStorage, storageReport } from './storage.js';
+import { mergeImported, parseSourceList } from './url-sources.js';
 import {
+  isHttpUrl,
   isPinned,
   needsCodec,
   stacksUsing,
@@ -3631,6 +3633,105 @@ export function createApp({
           .json({ error: error.message, problems: error.problems ?? [] });
       }
       res.json({ ok: true, stack });
+    }),
+  );
+
+  /**
+   * Imports a provider's list of PMTiles files as sources on one stack.
+   *
+   * Fetched here rather than in the browser, for two reasons that both matter:
+   * the console is often on a different network from the node, and a list is
+   * only useful if the machine that will actually read the archives can reach
+   * them. A 458-entry index is also nothing a browser should be parsing and
+   * posting back a megabyte of.
+   *
+   * Answers with what it would write when `dryRun` is set, which is what the
+   * console shows before anybody agrees to replace a stack's sources.
+   */
+  app.post(
+    '/api/stacks/:id/import',
+    route(async (req, res) => {
+      const url = String(req.body?.url ?? '').trim();
+      if (!isHttpUrl(url)) {
+        return res
+          .status(400)
+          .json({ error: 'give the http(s) address of a list to import' });
+      }
+
+      let body;
+      try {
+        const answer = await fetch(url, {
+          signal: AbortSignal.timeout(Number(req.body?.timeoutMs) || 30000),
+          headers: req.body?.token
+            ? { authorization: `Bearer ${req.body.token}` }
+            : undefined,
+        });
+        if (!answer.ok) {
+          return res
+            .status(502)
+            .json({ error: `${url} answered ${answer.status}` });
+        }
+        body = await answer.text();
+      } catch (error) {
+        return res
+          .status(502)
+          .json({ error: `${url} could not be read: ${error.message}` });
+      }
+
+      let parsed;
+      try {
+        parsed = parseSourceList(body, {
+          from: url,
+          encoding: req.body?.encoding,
+        });
+      } catch (error) {
+        return res.status(422).json({ error: error.message });
+      }
+
+      // A stack that does not exist yet is a reasonable thing to import into:
+      // it is how a recipe made entirely of somebody else's files begins.
+      const existing = stacks?.get(req.params.id) ?? null;
+      // Merged against what the caller is holding where it says so, and
+      // against what is stored otherwise. The editor works on an unsaved
+      // draft, and merging its re-import against the stored recipe would put
+      // the batch back among sources the operator has since moved -- or drop
+      // edits they have not saved yet.
+      const into = Array.isArray(req.body?.sources)
+        ? req.body.sources
+        : existing?.sources;
+      const sources = mergeImported(into, parsed.sources, url);
+      const stack = {
+        ...(existing ?? { id: req.params.id, space: 'elevation' }),
+        id: req.params.id,
+        sources,
+      };
+
+      if (req.body?.dryRun) {
+        return res.json({
+          dryRun: true,
+          format: parsed.format,
+          imported: parsed.sources.length,
+          skipped: parsed.skipped,
+          // The merged list itself, so an editor can apply it to a draft
+          // rather than saving to find out what it would have been.
+          sources,
+        });
+      }
+
+      try {
+        await stacks.put(stack);
+      } catch (error) {
+        return res
+          .status(error.status ?? 400)
+          .json({ error: error.message, problems: error.problems ?? [] });
+      }
+      return res.json({
+        ok: true,
+        format: parsed.format,
+        imported: parsed.sources.length,
+        skipped: parsed.skipped,
+        total: sources.length,
+      });
     }),
   );
 

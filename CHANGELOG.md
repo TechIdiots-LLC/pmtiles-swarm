@@ -20,7 +20,30 @@
 
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A provider's list of PMTiles URLs can be imported as sources.** **Stacks → Import URL list…**,
+  or `POST /api/stacks/<id>/import`. Mapterhorn's `download_urls.json` names 458 files with the box
+  and zoom range of each; naming those by hand is not work anybody should do once, let alone again
+  when the provider adds one. An index with an `items` list is read, and so is a plain list of
+  addresses for a provider that publishes no index — which shape it is is worked out from the
+  document, since somebody pasting an address has no reason to know.
+
+  The global file becomes `sources[0]` and `required`: a stack is painted bottom-first, so the thing
+  covering everywhere has to sit under everything patching it, and the index does not list it first.
+  Every other entry keeps its box and zoom range, which is what lets a tile outside one skip it
+  without a request leaving the node. The encoding is asked for rather than read — an index rarely
+  states it, Mapterhorn's files are all terrarium and its JSON never says so, and a terrain source
+  read with the wrong one is a cliff face.
+
+  The list is fetched **by the node**, not the browser: the console is often on a different network,
+  and what matters is that the machine which will read the archives can reach them. **Check** shows
+  what an import would write before it writes anything.
+
+  In the editor an imported batch is one row rather than several hundred cards, with **Re-import**
+  and **Remove all**. A re-import replaces only what came from that same address — anything typed by
+  hand is left alone — and puts the batch back **where it already was** rather than on the end:
+  painting order is the whole meaning of a stack, and a batch that moved each time would quietly bury
+  a local override, a day later, on a schedule, with nothing to say why the map had changed.
+
 
 ## 0.89.0
 ### ✨ Features and improvements
