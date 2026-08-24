@@ -5,6 +5,10 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.93.0
+### 🐞 Bug fixes
 - **A trusted-proxy list typed with commas stopped the node from starting.** The settings field
   split what was typed on newlines only, so one line reading `172.16.1.2, 172.16.1.3` was saved as
   an array holding both addresses in one string. Express splits a comma list when it is handed a
