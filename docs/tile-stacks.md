@@ -60,6 +60,7 @@ of its parts.
 - [Syncing a stack to another node](#syncing-a-stack-to-another-node)
 - [What the offline merge got wrong](#what-the-offline-merge-got-wrong)
 - [The stack editor](#the-stack-editor)
+- [Merging vector sources](#merging-vector-sources)
 - [Staging](#staging)
 - [Open questions](#open-questions)
 
@@ -2199,6 +2200,135 @@ Debounced, and it should not follow the map past the stack's `maxzoom`: above
 that the client overzooms and there is nothing new to see, but the tiles are
 still requested and still composited.
 
+## Merging vector sources
+
+**Not built.** This is the design, written down before anything is started so
+that the hard part is on record rather than discovered halfway through it.
+
+Most of the machinery is indifferent to what a tile contains. Source
+resolution, per-source `minzoom`, `maxzoom` and `bounds`, painting order,
+nested stacks, the cache, the ETag, `unionOfTileIds` and the bake all treat a
+tile as an opaque thing, and the byte-for-byte passthrough already serves a
+vector archive today. What a vector space adds is a merge, and the merge is
+where the analogy with the two pixel spaces breaks.
+
+### What has no vector analogue
+
+`opacity`, `blend`, `feather`, `featherMetres`, `gaussianBlurSigma`,
+`output.encoding`, `output.tileSize`, `maskValues`, `maskRange` and
+`maskColors`. Every one of them is an operation on a pixel, and there are no
+pixels. A recipe naming any of them under a vector space should be **refused by
+validation**, not accepted and ignored: a stack that says `feather: 50` and
+draws a hard edge is a worse answer than one that will not save.
+
+The idea of a mask survives in three other forms — clip to a **shape**, keep or
+drop whole **layers** by name, and filter **features** by a property. Those
+three are the vector mask, and none of them is a mask in the sense the
+elevation space means.
+
+### Overlap is the whole problem
+
+The pixel spaces work because the unit is a pixel, every source has one
+everywhere, and "the topmost covered source wins" is a complete rule. Vector's
+unit is a feature. Two sources that both carry a `water` layer over the same
+ground hold **two polygons of the same lake**, and emitting both overwrites
+neither. The tile carries both, the style draws both, and it shows as doubled
+outlines, darker semi-transparent fills, duplicated labels, and z-fighting
+between them.
+
+So the first thing a vector space has to define is what winning means. Three
+answers, and the third is not a default:
+
+**Per-layer replacement.** For each layer _name_, the topmost source carrying it
+supplies it whole, and the same-named layer of every source below is dropped for
+that tile. No geometry work at all: read the layer list, choose, re-emit. It is
+the right answer for a base plus an overlay of layers the base does not have —
+an OSM base under your own `buildings`, or under contours generated from the
+terrain these stacks already merge — and it is correct for a base plus a patch
+wherever the tile falls wholly inside the patch.
+
+**Clip and union.** Each source is clipped to its own coverage, and the source
+below is additionally clipped _against_ the coverage of the one above it, so the
+two cannot both carry the same lake. This is the true counterpart of the pixel
+merge, and the only thing that works on a tile the boundary of a patch runs
+through. A **rectangle** clip in tile coordinates is cheap and exact —
+Sutherland-Hodgman for polygons, Liang-Barsky for lines — and a rectangle is
+what an imported file list states for every patch in it. An arbitrary
+**cutline** is a different matter and wants a real polygon-clipping library.
+
+**Renaming.** The patch's `water` becomes `patch_water`, and the style decides
+what to do with it. No conflict and no geometry work, at the cost of a style
+that has to know. Worth having as a way out; not worth having as the rule.
+
+The recommendation is per-layer replacement as the default, rectangle clipping
+for the base-and-patch case, and a **recipe warning** wherever two sources carry
+the same layer with no clip between them: _sources 0 and 1 both provide `water`,
+and tiles where they meet will carry both_. Silent doubling is the failure that
+gets found six months later by somebody squinting at a coastline.
+
+### A seam cannot be feathered
+
+Where two sources disagree geometrically at a boundary, a road jogs and a
+coastline steps, and there is nothing to fade. [Feathering a
+seam](#feathering-a-seam) works because a pixel can be a mixture of two values.
+A feature cannot be a mixture of two features.
+
+Vector merging is therefore clean only where the sources were cut to agree — the
+same condition that makes a provider's raster patches merge cleanly, minus the
+fade that hides the cases where it is not quite true. That belongs in the
+console rather than on the map.
+
+### Overzooming a parent
+
+Possible, and needed: a base to z12 under a patch to z14 has to climb the base
+at z13, exactly as [resampling from a parent](#resampling-from-a-parent-tile)
+does for pixels. Scale the parent's coordinates by the zoom difference, subtract
+the quadrant's offset, clip to the extent plus the buffer. Exact for geometry,
+and it invents nothing: the generalisation and the label placement were chosen
+for the parent's zoom, so an overzoomed tile is thinner than a real one at that
+zoom and looks it.
+
+### Extent, buffer and schema
+
+Sources at different **extents** — 4096 and 512 are both common — have to be
+normalised to one before anything is combined. A power-of-two ratio is exact;
+anything else quantises coordinates.
+
+**Buffers** have to be re-clipped after any coordinate change, or features leak
+past the edge of the tile and draw twice at the join.
+
+**Schemas** are the quiet one. Two sources whose `water` layers use `class` and
+`kind` merge into a layer the style half understands, and nothing in the merge
+can reconcile them. Worth comparing key sets on the first merged tile and
+reporting the disagreement as a problem on the stack, the way an unresolved
+source is reported.
+
+**Feature ids** collide across sources. Renumbering settles the collision and
+breaks any client-side feature state keyed on them, so it is a choice to make
+out loud rather than a detail to settle inside the encoder.
+
+### The libraries
+
+`@mapbox/vector-tile` and `pbf` to read, `vt-pbf` to write. Small, pure
+JavaScript, and ordinary dependencies rather than a probe: the optional
+treatment [the codec gets](#the-codec-problem) exists because a native build
+genuinely fails to install on some platforms, and none of that applies here.
+
+Not written here either, unlike the PMTiles writer and the S3 signer. A protobuf
+round-trip has more edge cases than either — geometry command encoding, unknown
+value types, key and value pools shared across features — and getting one wrong
+produces a tile that parses and is subtly wrong.
+
+### Staging, when it is started
+
+1. **Layer operations only.** `space: "vector"`, with keep, drop and rename by
+   layer name, over the per-source zoom and bounds skipping that already exists.
+   Covers base-plus-overlay, and needs no geometry code whatsoever.
+2. **Overzoom and rectangle clipping.** Covers base-plus-patch, which is the
+   shape [importing a list of URLs](#importing-a-list-of-urls) makes easy to
+   build.
+3. **Cutline clipping and property filters.**
+
 ## Staging
 
 1. ~~**Recipe and resolution.**~~ Done. `data/stacks.json`, load and validate,
@@ -2230,10 +2360,11 @@ handling whatsoever.
 
 ## Open questions
 
-- **Vector tiles.** Merging MVT layers from two archives is a real want and a
-  completely different operation — decode protobuf, merge layer by layer,
-  re-encode, with feature ID collisions to settle. It should be its own feature
-  and should not be smuggled in under `space`.
+- **Vector tiles.** Designed rather than open now: see [merging vector
+  sources](#merging-vector-sources). It is its own space and its own merge,
+  and what stays open is whether the overlap rule proposed there — layer
+  replacement by default, clipping for a patch — holds up against a real
+  pair of archives.
 - **Does the recipe travel?** A stack is a small JSON document and the feed
   already distributes documents. Publishing recipes so a subscriber gets the
   stack along with its sources is attractive, and raises an obvious question

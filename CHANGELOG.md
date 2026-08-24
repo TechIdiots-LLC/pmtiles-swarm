@@ -5,7 +5,15 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **Signing in threw away the view you asked for.** A link to `#stacks` on a guarded node asked for a
+  password and then showed the archives, with the address still reading `#stacks` — which is what
+  made it look broken rather than like a redirect. Both ways into the console now land where the
+  address says.
+
+- **An archive the engine has no record of was drawn as 0%.** That is a different fact from "none of
+  it is here", and it is the more alarming one to get wrong: a library the engine failed to take back
+  after a restart read as a library that had lost its data. The row now says **not loaded**, and says
+  where the reason is logged and that nothing on disk has been touched.
 
 ## 0.91.0
 ### ✨ Features and improvements

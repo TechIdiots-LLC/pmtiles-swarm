@@ -1875,6 +1875,11 @@
         for (const entry of shown) {
           const s = entry.status ?? {};
           const progress = s.progress ?? 0;
+          // The engine has never mentioned this archive. That is not the same
+          // fact as "none of it is here", and drawing it as 0% said the second
+          // -- so a library the engine failed to take back after a restart
+          // read as a library that had lost its data.
+          const known = Boolean(entry.status);
           const mode = entry.mode ?? 'mirror';
           const tr = document.createElement('tr');
           if (entry.infoHash === selected) tr.className = 'on';
@@ -1893,12 +1898,14 @@
             <td>${added(entry.createdAt)}</td>
             <td><span class="pill ${mode}">${mode}</span></td>
             <td>${originCell(entry)}</td>
-            <td>
-              <div class="track">
-                <i class="${progress >= 1 ? 'done' : ''}" style="width:${Math.min(100, progress * 100)}%"></i>
-              </div>
-              <div class="sub">${pct(progress)}</div>
-            </td>
+            <td>${
+              known
+                ? `<div class="track">
+                     <i class="${progress >= 1 ? 'done' : ''}" style="width:${Math.min(100, progress * 100)}%"></i>
+                   </div>
+                   <div class="sub">${pct(progress)}</div>`
+                : `<div class="sub bad" title="The engine has no record of this archive, so nothing here is being seeded or downloaded. It usually means the restore after a restart could not hand it back — the log says why, under [restore]. Nothing has been deleted; the data on disk is untouched.">not loaded</div>`
+            }</td>
             <td title="${peersTitle(s)}">${s.peers ?? 0} / ${s.seeds ?? 0}${swarmSuffix(s)}</td>
             <td>${rate(s.downloadSpeed)}</td>
             <td>${rate(s.uploadSpeed)}</td>
@@ -7506,6 +7513,22 @@ Every piece is hashed against the ` +
         return TABS.includes(named) ? named : null;
       };
 
+      /**
+       * Lands on the view the address names, once there is a console to land
+       * in.
+       *
+       * Two ways in, and both have to honour it: opening the page already
+       * signed in, and signing in on arrival. Only the first did, so following
+       * a link to `#stacks` on a guarded node asked for a password and then
+       * showed the archives -- the address still saying `#stacks`, which is
+       * the part that makes it read as broken rather than as a redirect.
+       * @returns {void}
+       */
+      const landFromUrl = () => {
+        const named = tabFromUrl();
+        if (named && named !== 'archives') showTab(named);
+      };
+
       // The footer's year, set from the clock rather than typed into a file
       // nobody will remember to edit. The version beside it arrives with the
       // first status, and reads "…" until then.
@@ -9451,6 +9474,7 @@ Every piece is hashed against the ` +
           $('login').hidden = true;
           $('login-pass').value = '';
           refresh();
+          landFromUrl();
         } catch (error) {
           $('login-error').textContent = error.message;
         }
@@ -9476,8 +9500,7 @@ Every piece is hashed against the ` +
         refresh();
         // After the archives have been asked for, so the tab that opens is the
         // one asked for and not the one this happens to start on.
-        const named = tabFromUrl();
-        if (named && named !== 'archives') showTab(named);
+        landFromUrl();
       }
 
       start();

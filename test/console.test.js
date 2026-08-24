@@ -2645,3 +2645,33 @@ describe('adding a source that lives at a URL', () => {
     assert.match(handler.slice(0, 400), /delete source\[field\]/);
   });
 });
+
+describe('landing where the address asked for', () => {
+  it('applies the hash after signing in, not only on a fresh load', () => {
+    // Following a link to #stacks on a guarded node asked for a password and
+    // then showed the archives, with the address still saying #stacks -- which
+    // is what makes it read as broken rather than as a redirect.
+    const login = page.slice(page.indexOf("$('login-form').onsubmit"));
+    assert.match(login.slice(0, 900), /landFromUrl\(\)/);
+  });
+
+  it('has one place that decides it, so the two ways in agree', () => {
+    assert.equal((page.match(/landFromUrl\(\)/g) ?? []).length, 2);
+    assert.match(page, /const landFromUrl = \(\) => \{/);
+  });
+});
+
+describe('an archive the engine has never mentioned', () => {
+  it('is not drawn as nought per cent', () => {
+    // "The engine has no record of this" and "none of it is here" are
+    // different facts, and a library the engine failed to take back after a
+    // restart read as a library that had lost its data.
+    assert.match(page, /const known = Boolean\(entry\.status\)/);
+    assert.match(page, /not loaded<\/div>/);
+  });
+
+  it('says the data is still there, since that is the first fear', () => {
+    const cell = page.slice(page.indexOf('not loaded') - 700);
+    assert.match(cell.slice(0, 700), /Nothing has been deleted/);
+  });
+});
