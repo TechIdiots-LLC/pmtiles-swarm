@@ -339,11 +339,28 @@ PMTILES_SWARM_PUBLIC_URL
 
   const catalogued = catalog.list().length;
   if (catalogued > 0) {
-    const { restored, failed } = await library.restore();
-    console.log(
-      `[restore] ${restored} of ${catalogued} archives handed back to the engine` +
-        (failed > 0 ? ` (${failed} could not be)` : ''),
-    );
+    // Reported, never fatal. Restore already tolerates a failure per archive;
+    // what this catches is the whole call coming apart -- and the node it
+    // takes down with it is the one that could have said so. Under
+    // `Restart=always` that is a crash loop with no console to look at, which
+    // is a worse failure than a library that is not being seeded: the console
+    // marks an archive the engine has no record of as `not loaded`, so a node
+    // that comes up says exactly what went wrong here.
+    try {
+      const { restored, failed } = await library.restore();
+      console.log(
+        `[restore] ${restored} of ${catalogued} archives handed back to the engine` +
+          (failed > 0 ? ` (${failed} could not be)` : ''),
+      );
+    } catch (error) {
+      console.error(
+        `[restore] could not hand the library back to the engine: ` +
+          `${error.stack ?? error.message}
+` +
+          '[restore] the node is starting anyway; every archive will show as ' +
+          'not loaded until this is fixed and it is restarted.',
+      );
+    }
   }
 
   // And again if the engine loses its backing process and starts another. A

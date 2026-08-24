@@ -5,7 +5,16 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A failed restore took the whole node down, console included.** Handing the library back to the
+  engine at startup already tolerates a failure per archive; the call coming apart as a whole was
+  unguarded, and it happens before the listener binds — so under `Restart=always` the result is a
+  crash loop with no console to look at and no way to see why. It is now reported and the node
+  starts anyway, where every archive shows as **not loaded** until it is fixed.
+
+- **Nothing tested that the node starts at all.** Every other test builds the pieces `src/index.js`
+  wires together and never runs the wiring, so an import cycle or a step that throws before the
+  listener binds was a failure only a real start could find. There is now a boot test that runs the
+  entry point the way the service does and asks it for a page.
 
 ## 0.92.0
 ### 🐞 Bug fixes
