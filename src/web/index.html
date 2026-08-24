@@ -7538,6 +7538,12 @@ Every piece is hashed against the ` +
                 ? `<button type="button" data-stack-bake-stop="${escapeHtml(stack.id)}">Stop export</button>`
                 : `<button type="button" data-stack-bake="${escapeHtml(stack.id)}" title="Run this stack over its sources and write the result as a real archive, with its own infohash, seeded like any other.">Export to archive</button>${scheduleBadge(stack.scheduled)}`
           }
+          ${
+            stack.adopted
+              ? ''
+              : `<button type="button" data-stack-feed="${escapeHtml(stack.id)}"
+                         title="The address another node follows to keep its copy of this recipe level with this one. Add it there under Settings → Feeds → Stack feeds.">RSS</button>`
+          }
           <button type="button" data-stack-edit="${escapeHtml(stack.id)}">Edit</button>
           <button type="button" data-stack-copy="${escapeHtml(stack.id)}"
                   title="Opens the editor on a copy of this recipe, under a name of its own. Nothing is saved until you save it.">Duplicate</button>
@@ -8583,7 +8589,8 @@ Every piece is hashed against the ` +
       // change, so they are delegated the same way the source rows are.
       $('stacks-list').addEventListener('click', async (event) => {
         const edit = event.target.dataset.stackEdit;
-        const copy = event.target.dataset.stackCopy;
+        const duplicate = event.target.dataset.stackCopy;
+        const feed = event.target.dataset.stackFeed;
         const drop = event.target.dataset.stackDelete;
         const bake = event.target.dataset.stackBake;
         const stopBake = event.target.dataset.stackBakeStop;
@@ -8613,20 +8620,28 @@ Every piece is hashed against the ` +
             const raw = await api(`/api/stacks/${encodeURIComponent(edit)}/raw`);
             await openStackDialog(raw.stack);
           }
-        } else if (copy !== undefined) {
+        } else if (feed !== undefined) {
+          // Absolute, because the whole point of this address is to be pasted
+          // into another node's settings.
+          await copy(
+            new URL(`/stacks/${encodeURIComponent(feed)}.xml`, location.href)
+              .href,
+            'Stack feed',
+          );
+        } else if (duplicate !== undefined) {
           const { stacks } = await api('/api/stacks');
           // The recipe, not the report -- the same reason editing reads it.
           // A report holds what each source resolved to, so a copy made from
           // one would pin infohashes the original follows by category.
-          const raw = await api(`/api/stacks/${encodeURIComponent(copy)}/raw`);
+          const raw = await api(`/api/stacks/${encodeURIComponent(duplicate)}/raw`);
           const taken = stacks.map((one) => one.id);
           await openStackDialog(
             {
               ...raw.stack,
-              id: freeStackId(copy, new Set(taken)),
+              id: freeStackId(duplicate, new Set(taken)),
               // Named apart on purpose: two stacks under one title are two
               // rows nobody can tell apart in the list they both appear in.
-              title: `${raw.stack.title ?? copy} copy`,
+              title: `${raw.stack.title ?? duplicate} copy`,
             },
             { copy: true, taken },
           );

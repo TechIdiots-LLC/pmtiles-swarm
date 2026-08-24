@@ -369,7 +369,14 @@
       const copyButton = (links, href, text, fetched) => {
         const button = el('button', 'copy', text);
         button.type = 'button';
-        const absolute = new URL(href, location.href).href;
+        // `new URL` percent-encodes braces, because they are not legal in a
+        // path -- and an XYZ template is very little but braces, so the
+        // address copied out of here came back as `%7Bz%7D` and no client
+        // would take it. Resolving is still what makes a relative address
+        // absolute, so the two sequences it introduces are put back.
+        const absolute = new URL(href, location.href).href
+          .replaceAll('%7B', '{')
+          .replaceAll('%7D', '}');
         button.title = absolute;
         button.onclick = async () => {
           try {
@@ -540,6 +547,10 @@
           // style is copied, and a page is followed.
           if (ends.tileJson) copyButton(links, ends.tileJson, 'TileJSON');
           if (ends.xyz) copyButton(links, ends.xyz, 'XYZ');
+          // Copied rather than followed: this address is for another node's
+          // settings, not for reading here. A browser shown an RSS document
+          // mostly offers to download it.
+          if (ends.feed) copyButton(links, ends.feed, 'RSS');
           if (ends.preview) {
             if (drawsAsTerrain(stack)) {
               add(`${ends.preview}?raw=1`, 'preview');

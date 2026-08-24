@@ -474,6 +474,20 @@ describe('clipping a source in the stack editor', () => {
     );
   });
 
+  it('hands out the address another node follows this stack at', () => {
+    // Copied rather than followed: it is for another node's settings, and a
+    // browser shown an RSS document mostly offers to download it.
+    assert.match(script, /data-stack-feed=/);
+    assert.match(script, /\/stacks\/\$\{encodeURIComponent\(feed\)\}\.xml/);
+  });
+
+  it('does not offer a feed for a stack it adopted', () => {
+    // Somebody else's recipe is theirs to publish. Republishing it would put
+    // two nodes' names on one stack.
+    const at = script.indexOf('data-stack-feed=');
+    assert.match(script.slice(Math.max(0, at - 200), at), /stack\.adopted/);
+  });
+
   it('can start a stack from one that already works', () => {
     // Most stacks after the first are a variation on one that exists -- the
     // same sources at another zoom, or one mask changed -- and rebuilding
@@ -486,15 +500,17 @@ describe('clipping a source in the stack editor', () => {
     // The list holds what each source resolved to. A copy made from it would
     // pin the infohashes the original follows by category, so it would stop
     // following rebuilds the moment it was made.
-    const handler = script.slice(script.indexOf('const copy = event.target'));
-    const branch = handler.slice(handler.indexOf('copy !== undefined'));
+    const handler = script.slice(
+      script.indexOf('const duplicate = event.target'),
+    );
+    const branch = handler.slice(handler.indexOf('duplicate !== undefined'));
     assert.match(branch.slice(0, 800), /\/raw`\)/);
   });
 
   it('gives the copy a name and a title of its own', () => {
     assert.match(script, /freeStackId/);
     assert.match(script, /-copy/);
-    assert.match(script, /\$\{raw\.stack\.title \?\? copy\} copy/);
+    assert.match(script, /\$\{raw\.stack\.title \?\? duplicate\} copy/);
   });
 
   it('will not save a stack with no name', () => {

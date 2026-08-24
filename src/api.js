@@ -2347,6 +2347,10 @@ export function createApp({
             tileJson: `${base}/stacks/${id}/tiles.json`,
             xyz: `${base}/stacks/${id}/{z}/{x}/{y}.${tileExtension(format)}`,
             preview: `${base}/stacks/${id}/preview`,
+            // What another node follows to keep its copy of this recipe level
+            // with this one. Only for a stack this node authored: one it
+            // adopted is somebody else's to publish.
+            feed: stack.adopted ? null : `${base}/stacks/${id}.xml`,
           },
         });
       }
@@ -2659,6 +2663,32 @@ export function createApp({
       renderStackFeed(stacks?.list() ?? [], {
         baseUrl: baseUrl(req),
         title: `${config.nodeName ?? os.hostname()} stacks`,
+      }),
+    );
+  });
+
+  /**
+   * One stack's own feed, for following a single recipe.
+   *
+   * The whole-node feed is what a replica wants; this is for the node that
+   * wants one map out of somebody's several, and does not want the rest
+   * appearing on it every time they add one.
+   *
+   * Adopted stacks are not published here either, and 404 rather than being
+   * served empty: a feed that exists and carries nothing looks like a stack
+   * that was withdrawn, which is a different thing entirely.
+   */
+  app.get('/stacks/:id.xml', (req, res) => {
+    const stack = stacks?.get(req.params.id);
+    if (!stack || stack.adopted) {
+      return res.status(404).json({ error: 'no such stack feed' });
+    }
+    res.type('application/rss+xml');
+    res.setHeader('cache-control', 'no-store');
+    return res.send(
+      renderStackFeed([stack], {
+        baseUrl: baseUrl(req),
+        title: `${stack.title ?? stack.id}`,
       }),
     );
   });

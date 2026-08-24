@@ -1707,6 +1707,23 @@ Per feed, because it depends on what the far node is:
 A stack that comes back has the mark taken off again rather than left to puzzle
 over.
 
+### One stack's feed, and the whole node's
+
+`/stacks.xml` carries every stack this node authored, which is what a replica
+wants: one row in its settings and it follows all of them, including ones added
+later.
+
+`/stacks/<id>.xml` carries one. That is for the node that wants a single map out
+of somebody's several and does not want the rest appearing on it every time they
+add one. It 404s for a stack this node adopted rather than serving it — a feed
+that exists and carries nothing looks like a stack that was withdrawn, which is
+a different thing.
+
+Both are offered where the addresses are: an **RSS** button on the stack's row
+in the console, and beside TileJSON and XYZ on the public page. Copied rather
+than followed, because the address is for another node's settings and a browser
+shown an RSS document mostly offers to download it.
+
 ### Baking is still the other answer
 
 A baked stack is an ordinary archive with an infohash, and archives already sync.

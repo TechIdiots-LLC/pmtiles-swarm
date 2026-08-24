@@ -2,10 +2,21 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **A feed per stack, and an address to copy for it.** `/stacks/<id>.xml` carries one recipe, for
+  following a single map out of somebody's several rather than everything they publish. An **RSS**
+  button on the stack's row in the console and beside TileJSON and XYZ on the public page. Copied
+  rather than followed: the address is for another node's settings, and a browser shown an RSS
+  document mostly offers to download it. A stack this node adopted has no button and its feed 404s —
+  somebody else's recipe is theirs to publish.
+
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **The copied XYZ address came back percent-encoded.** `http://…/stacks/test/%7Bz%7D/%7Bx%7D/%7By%7D.png`
+  rather than `{z}/{x}/{y}`, which no client will take. The public page resolves a relative address
+  against the page's own URL to make it absolute, and `new URL` percent-encodes braces because they
+  are not legal in a path — and an XYZ template is very little but braces. The TileJSON link was
+  unaffected, having none. Resolving still happens; the two sequences it introduces are put back.
+
 
 ## 0.86.0
 ### ✨ Features and improvements
