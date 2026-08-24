@@ -602,14 +602,25 @@ describe('serving a stack', () => {
     assert.equal(doc.sparse, false);
   });
 
-  it('names what it resolved to, so a rebuild is visible', async () => {
+  it('fingerprints what it resolved to, so a rebuild is visible', async () => {
+    // Not the sources themselves: they are not a client's to join, and one
+    // may be an address this document has no business publishing.
     const node = await serve([global, region], [stack]);
     after(() => node.close());
     const doc = await (await node.get('/stacks/terrain/tiles.json')).json();
-    assert.deepEqual(
-      doc.stack.sources.map((s) => s.infohash),
-      [global.infoHash, region.infoHash],
+    assert.equal(doc.stack.sources, 2);
+    assert.match(doc.stack.revision, /^[0-9a-f]{16}$/);
+
+    // The same recipe over a rebuilt source is a different resolution.
+    const rebuilt = await serve(
+      [{ ...global, infoHash: 'c'.repeat(40) }, region],
+      [stack],
     );
+    after(() => rebuilt.close());
+    const moved = await (
+      await rebuilt.get('/stacks/terrain/tiles.json')
+    ).json();
+    assert.notEqual(moved.stack.revision, doc.stack.revision);
   });
 
   it('lets the top source answer where both have the tile', async () => {

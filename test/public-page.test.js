@@ -406,23 +406,57 @@ describe('the TileJSON for a stack of many URL sources', () => {
     assert.equal(doc.encoding, 'terrarium');
   });
 
-  it('names a handful of sources rather than hundreds', async () => {
-    // Mapterhorn's index is 458. Listing every one puts tens of kilobytes of
-    // addresses in a document every map load fetches.
-    const doc = await tileJson(100);
-    assert.equal(doc.stack.sources.length, 25);
-    assert.equal(doc.stack.total, 100);
-    assert.equal(doc.stack.more, 75);
-    assert.ok(
-      JSON.stringify(doc).length < 6000,
-      `document is ${JSON.stringify(doc).length} bytes`,
-    );
+  it('publishes no address a source is read from', async () => {
+    // The document is served to anybody who can load the map. The archives
+    // behind it are read with credentials nobody else has, and a bucket and
+    // key is not something to hand out with the tile URLs.
+    stacks = [
+      {
+        id: 'many',
+        space: 'elevation',
+        output: {},
+        sources: [
+          { url: 's3://private-terrain/planet.pmtiles', encoding: 'terrarium' },
+          { url: 'https://inside.example/secret.pmtiles', minzoom: 13 },
+        ],
+      },
+    ];
+    const body = await (await fetch(`${base}/stacks/many/tiles.json`)).text();
+
+    assert.doesNotMatch(body, /private-terrain/);
+    assert.doesNotMatch(body, /inside\.example/);
+    assert.doesNotMatch(body, /s3:\/\//);
   });
 
-  it('lists them all when there are few, and counts nothing', async () => {
-    const doc = await tileJson(3);
-    assert.equal(doc.stack.sources.length, 3);
+  it('says how many there are and nothing about what they are', async () => {
+    // A stack's sources are not a client's to join -- they are ingredients of
+    // the one endpoint the document points at.
+    const doc = await tileJson(100);
+    assert.equal(doc.stack.sources, 100);
     assert.equal(doc.stack.more, undefined);
+    assert.equal(doc.stack.total, undefined);
+  });
+
+  it('carries a fingerprint that moves when a resolution does', async () => {
+    // What the list was actually good for: telling one resolution from the
+    // next without diffing tile URLs.
+    const one = await tileJson(2);
+    const again = await tileJson(2);
+    const other = await tileJson(3);
+
+    assert.match(one.stack.revision, /^[0-9a-f]{16}$/);
+    assert.equal(one.stack.revision, again.stack.revision, 'it is not stable');
+    assert.notEqual(one.stack.revision, other.stack.revision);
+  });
+
+  it('stays small however many sources there are', async () => {
+    // Mapterhorn's index is 458, and every entry was an address in a document
+    // every map load fetches.
+    const doc = await tileJson(458);
+    assert.ok(
+      JSON.stringify(doc).length < 1000,
+      `document is ${JSON.stringify(doc).length} bytes`,
+    );
   });
 });
 

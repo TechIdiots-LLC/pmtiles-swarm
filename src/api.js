@@ -50,15 +50,7 @@ import {
   stackCoverage,
   stackEtag,
 } from './stacks.js';
-
-/**
- * How many sources a stack's TileJSON names before it starts counting.
- *
- * Generous for a hand-written recipe -- those run to a handful -- and a hard
- * stop for one imported from a provider's index, where the list is hundreds
- * long and every entry is an address no client reads.
- */
-const TILEJSON_SOURCE_LIMIT = 25;
+import { bakeRevision } from './bake.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -3800,34 +3792,27 @@ export function createApp({
         minzoom: coverage.minzoom,
         maxzoom: coverage.maxzoom,
         bounds: coverage.bounds,
-        // Names what it resolved to, so a consumer can tell one resolution
-        // from the next without diffing tile URLs — the same reason the
-        // `/latest/` document carries a `latest` block.
+        // Says that it resolved, and whether the resolution has moved, so a
+        // consumer can tell one from the next without diffing tile URLs --
+        // the same reason the `/latest/` document carries a `latest` block.
         //
-        // Capped. A stack imported from a provider's file index has hundreds
-        // of sources — Mapterhorn's is 458 — and listing every one puts tens
-        // of kilobytes of addresses in a document every map load fetches, to
-        // say something no client does anything with. What the block is for is
-        // telling one resolution from the next, and what moves between
-        // resolutions is the infohashes, so those are what it keeps.
+        // A count and a fingerprint rather than the sources themselves. They
+        // were listed here once, and it was wrong twice over. A stack's
+        // sources are not a client's to join: they are the ingredients of one
+        // endpoint, and a document listing them invites somebody to fetch
+        // those instead of the tiles. And a source may be an address -- a URL,
+        // or a bucket and a key -- which this document has no business
+        // publishing: the tiles are public where the archives behind them are
+        // read with credentials nobody else has.
+        //
+        // The fingerprint covers the recipe and what every source resolved
+        // to, so it moves when a category resolves to a new build. That was
+        // the only thing the list was good for.
         stack: {
           id: resolved.stack.id,
           space: resolved.stack.space ?? 'elevation',
-          sources: resolved.sources
-            .slice(0, TILEJSON_SOURCE_LIMIT)
-            .map((source) => ({
-              name: source.name,
-              infohash: source.entry?.infoHash ?? null,
-              archive: source.entry?.name ?? null,
-            })),
-          // Said rather than silently truncated: a consumer comparing two of
-          // these has to know it is looking at part of a list.
-          ...(resolved.sources.length > TILEJSON_SOURCE_LIMIT
-            ? {
-                more: resolved.sources.length - TILEJSON_SOURCE_LIMIT,
-                total: resolved.sources.length,
-              }
-            : {}),
+          sources: resolved.sources.length,
+          revision: bakeRevision(resolved),
         },
       };
       // A stack says how its tiles are encoded, so a style pointing at it does

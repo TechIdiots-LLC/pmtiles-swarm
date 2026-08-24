@@ -542,20 +542,41 @@ Derived from the resolved sources rather than from any one archive:
 - `attribution` — every source's, concatenated.
 - `tiles` — `/stacks/<id>/{z}/{x}/{y}.<ext>`.
 
-Plus a non-standard `stack` block naming what it resolved to, mirroring the
-`latest` block on `/latest/<category>/tiles.json`, so a consumer can tell one
-resolution from the next:
+Plus a non-standard `stack` block, mirroring the `latest` block on
+`/latest/<category>/tiles.json`, so a consumer can tell one resolution from the
+next:
 
 ```jsonc
 "stack": {
   "id": "planet-terrain",
-  "revision": 7,
-  "sources": [
-    { "category": "gebco", "infohash": "a074186d…", "name": "GEBCO_2026_…" },
-    { "category": "planet-bathymetry", "infohash": "…", "name": "…" }
-  ]
+  "space": "elevation",
+  "sources": 2,
+  "revision": "9f2c1a77b3e04d16"
 }
 ```
+
+`revision` covers the recipe and what every source resolved to, so it moves
+when a category resolves to a new build — which is the whole reason the block
+exists.
+
+### The sources themselves are not in it
+
+They were once, and it was wrong twice over.
+
+A stack's sources are not a client's to join. They are the ingredients of one
+endpoint, and this document exists to point at that endpoint: a map reads
+`tiles`, not the archives behind it. Listing them invites somebody to fetch
+those instead, which is the one thing a stack is there to stop them having to
+do.
+
+And a source may be an **address**. A URL, or a bucket and a key, published in
+a document that is served to anybody who can load the map — while the archive
+at the other end of it is read with credentials nobody else has. The tiles are
+public on purpose; where they come from is not.
+
+What is left says the same thing the list said, in twenty bytes rather than
+tens of kilobytes: how many sources there are, and a fingerprint that moves
+when any of them does.
 
 ## When a source will not answer
 

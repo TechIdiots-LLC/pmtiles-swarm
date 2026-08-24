@@ -5,6 +5,15 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- **A stack's TileJSON published the addresses its sources are read from.** A URL source is named by
+  its URL and an S3 source by its bucket and key, and the document naming them is served to anybody
+  who can load the map — while the archives at the other end are read with credentials nobody else
+  has. The sources are gone from it entirely, which was the right answer anyway: they are the
+  ingredients of one endpoint, not a list for a client to join, and listing them invited fetching
+  those instead of the tiles. What is left is a count and a `revision` fingerprint covering the
+  recipe and what every source resolved to — the one thing the list was good for, in twenty bytes
+  rather than tens of kilobytes. The document for a 459-source stack is now 336 bytes.
+
 - **Signing in threw away the view you asked for.** A link to `#stacks` on a guarded node asked for a
   password and then showed the archives, with the address still reading `#stacks` — which is what
   made it look broken rather than like a redirect. Both ways into the console now land where the
