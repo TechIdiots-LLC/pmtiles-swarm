@@ -3400,45 +3400,64 @@ export function createApp({
           // The order the recipe lists them: lowest priority first, last
           // wins. The console shows this order as it stands rather than
           // inverting it, so the screen and the file never disagree.
-          sources: resolved.sources.map((source) => ({
-            index: source.index,
-            name: source.name,
-            pinned: source.pinned,
-            required: source.required,
-            // What kind of source this is, said outright rather than left to
-            // be inferred from which fields happen to be null. A URL source
-            // has no infohash and no catalog entry, so a reader guessing from
-            // those calls it an unresolved category -- which is two wrong
-            // things about a source that is working perfectly well.
-            kind: source.remote
-              ? 'url'
-              : source.nested
-                ? 'stack'
-                : source.pinned
-                  ? 'archive'
-                  : 'category',
-            // A URL source resolves by definition: there is nothing to look
-            // up, the address is the answer. Whether it can actually be read
-            // is a question for the first tile, the same as for an archive
-            // this node holds but cannot open.
-            resolved: Boolean(source.entry) || Boolean(source.remote),
-            url: source.remote ?? null,
-            infohash: source.entry?.infoHash ?? null,
-            archiveName: source.entry?.name ?? null,
-            // The recipe's own, where it states them. For a URL source that is
-            // the only place they are known without opening the file, and it
-            // is what the merge itself uses to decide whether to.
-            minzoom:
-              source.entry?.pmtiles?.minZoom ?? source.source?.minzoom ?? null,
-            maxzoom:
-              source.entry?.pmtiles?.maxZoom ?? source.source?.maxzoom ?? null,
-            bounds:
-              source.entry?.pmtiles?.bounds ??
-              (Array.isArray(source.source?.bounds)
-                ? source.source.bounds
-                : null),
-            format: source.entry?.pmtiles?.format ?? null,
-          })),
+          sources: resolved.sources.map((source) => {
+            // A nested stack answers for the ground its own sources cover,
+            // and knows it without opening anything -- so the row can say
+            // what it reaches rather than a dash.
+            const inner = source.nested ? stackCoverage(source.nested) : null;
+            return {
+              index: source.index,
+              name: source.name,
+              pinned: source.pinned,
+              required: source.required,
+              // What kind of source this is, said outright rather than left to
+              // be inferred from which fields happen to be null. A URL source
+              // has no infohash and no catalog entry, so a reader guessing from
+              // those calls it an unresolved category -- which is two wrong
+              // things about a source that is working perfectly well.
+              kind: source.remote
+                ? 'url'
+                : source.nested
+                  ? 'stack'
+                  : source.pinned
+                    ? 'archive'
+                    : 'category',
+              // A URL source resolves by definition: there is nothing to look
+              // up, the address is the answer. Whether it can actually be read
+              // is a question for the first tile, the same as for an archive
+              // this node holds but cannot open.
+              resolved:
+                Boolean(source.entry) ||
+                Boolean(source.remote) ||
+                Boolean(source.nested),
+              // How many sources the nested recipe has, which is the only
+              // useful thing to say in a column that names an archive file for
+              // every other kind: a stack resolves to a recipe, not to bytes.
+              nested: source.nested ? source.nested.sources.length : null,
+              url: source.remote ?? null,
+              infohash: source.entry?.infoHash ?? null,
+              archiveName: source.entry?.name ?? null,
+              // The recipe's own, where it states them. For a URL source that is
+              // the only place they are known without opening the file, and it
+              // is what the merge itself uses to decide whether to.
+              minzoom:
+                source.entry?.pmtiles?.minZoom ??
+                source.source?.minzoom ??
+                inner?.minzoom ??
+                null,
+              maxzoom:
+                source.entry?.pmtiles?.maxZoom ??
+                source.source?.maxzoom ??
+                inner?.maxzoom ??
+                null,
+              bounds:
+                source.entry?.pmtiles?.bounds ??
+                (Array.isArray(source.source?.bounds)
+                  ? source.source.bounds
+                  : (inner?.bounds ?? null)),
+              format: source.entry?.pmtiles?.format ?? null,
+            };
+          }),
         };
       });
       // Reported so the console can say "install sharp" beside the stacks

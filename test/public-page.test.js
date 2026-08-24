@@ -425,3 +425,71 @@ describe('the TileJSON for a stack of many URL sources', () => {
     assert.equal(doc.stack.more, undefined);
   });
 });
+
+describe('what the console is told about a nested stack', () => {
+  const INNER = {
+    id: 'mapterhorn',
+    space: 'elevation',
+    output: {},
+    sources: [
+      {
+        url: 'https://x.example/planet.pmtiles',
+        encoding: 'terrarium',
+        minzoom: 0,
+        maxzoom: 12,
+        required: true,
+      },
+      {
+        url: 'https://x.example/alps.pmtiles',
+        encoding: 'terrarium',
+        minzoom: 13,
+        maxzoom: 18,
+        bounds: [5.62, 45, 11.25, 48.9],
+      },
+    ],
+  };
+
+  /**
+   * The outer stack's entry in the admin listing.
+   * @returns {Promise<object>} - Its source row for the nested stack.
+   */
+  async function nestedRow() {
+    stacks = [
+      INNER,
+      {
+        id: 'gebco-mapterhorn',
+        space: 'elevation',
+        output: {},
+        sources: [{ stack: 'mapterhorn' }],
+      },
+    ];
+    const doc = await (await fetch(`${base}/api/stacks`)).json();
+    const outer = doc.stacks.find((one) => one.id === 'gebco-mapterhorn');
+    return outer.sources[0];
+  }
+
+  it('is a stack, and it resolves', async () => {
+    // It resolves to a recipe rather than to bytes, so a reader looking only
+    // for a catalog entry or an address reported a working nested stack as
+    // broken -- and put a "sources missing" badge on the stack above it.
+    const row = await nestedRow();
+    assert.equal(row.kind, 'stack');
+    assert.equal(row.resolved, true);
+  });
+
+  it('says how big the recipe it stands for is', async () => {
+    // The column names an archive file for every other kind of source, and a
+    // stack has none to name.
+    const row = await nestedRow();
+    assert.equal(row.nested, 2);
+  });
+
+  it('reaches as deep as the stack it names', async () => {
+    // Worked out one level down, from the same sources that stack would
+    // serve. Reported as a dash before, which reads as "nothing here".
+    const row = await nestedRow();
+    assert.equal(row.minzoom, 0);
+    assert.equal(row.maxzoom, 18);
+    assert.deepEqual(row.bounds, [-180, -85.051129, 180, 85.051129]);
+  });
+});

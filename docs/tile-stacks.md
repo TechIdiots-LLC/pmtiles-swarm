@@ -1681,6 +1681,22 @@ archive — Mapterhorn's own base stops at z12 — is upscaled for a deeper
 request exactly as GEBCO is, through the same code, because reading one is now
 a question of which store method answers and nothing else.
 
+### Adding one by hand
+
+**Add source → an address you type…** in the stack editor, which is the same
+source the importer writes and edits the same way. The card asks for two
+things nothing else can know: the address, and the zoom range the archive
+holds. A catalog archive states its range in its own header and a URL source
+has no header this node has read, so an unstated range means every tile asks
+it — correct, and the thing worth avoiding once there are several.
+
+Anything published as a plain HTTPS download works, which includes an S3
+bucket that serves range requests: an object URL, or a presigned one, is an
+address like any other, and this asks for byte ranges the way any PMTiles
+reader does. What it cannot do is a private bucket named `s3://…`, which is
+not a URL a browser or a fetch can follow — that needs a signed request and
+somewhere to keep the credentials, and neither exists here yet.
+
 ### Cheap to have hundreds of
 
 The one thing that makes hundreds of these practical rather than merely
@@ -1829,6 +1845,14 @@ is wiped by the next re-import, which replaces the batch entire. On a schedule
 that is a map changing at 4am with nothing to say why. A hand-written source
 carries no `importedFrom`, is never replaced, and is the place for anything the
 index could not have told us.
+
+### Seeing them in the console
+
+A stack's source list collapses behind a summary once there are more than
+five, with the count and the base named on the fold. A stack imported from a
+provider's list is several hundred rows and drawing them flat buries every
+other stack on the page under one of them; a stack of a base and a layer or
+two stays open, since folding that hides nothing worth a click.
 
 ## Finding a stack
 

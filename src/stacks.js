@@ -653,8 +653,13 @@ export function stackCoverage(resolved) {
       (at?.nested ? stackCoverage(at.nested).bounds : undefined);
   }
   if (!bounds && summaries.length) {
-    const boxes = summaries.map((s) => s.bounds).filter(Array.isArray);
-    if (boxes.length) {
+    const boxes = summaries.map((s) => s.bounds);
+    // Every source, or none of them. A source that states no box is not one
+    // covering nothing: an archive's box comes off its own header, and the
+    // source without one is the imported global base, which covers the world.
+    // Unioning only the boxes that exist advertised a planet-wide stack as
+    // covering whichever patches happened to state theirs.
+    if (boxes.length && boxes.every(Array.isArray)) {
       bounds = [
         Math.min(...boxes.map((b) => b[0])),
         Math.min(...boxes.map((b) => b[1])),

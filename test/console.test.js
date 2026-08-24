@@ -2579,3 +2579,68 @@ describe('cancelling a dialog that has required fields', () => {
     );
   });
 });
+
+describe('a stack with hundreds of sources on the stacks page', () => {
+  it('folds the source table behind a summary', () => {
+    // An imported list is 458 rows. Drawn flat it buries every other stack on
+    // the page under one of them.
+    assert.match(page, /<details\$\{stack\.sources\.length > SOURCES_SHOWN/);
+    assert.match(page, /<summary>\$\{stack\.sources\.length\} source/);
+  });
+
+  it('leaves an ordinary stack open, so nothing is hidden behind a click', () => {
+    // The `open` attribute is written when the list is short, which is the
+    // stack of a base and a layer or two.
+    assert.match(page, /SOURCES_SHOWN \? '' : ' open'/);
+    assert.match(page, /const SOURCES_SHOWN = 5;/);
+  });
+
+  it('says what is inside without opening it', () => {
+    assert.match(page, /const summarizeSources = \(sources\) => \{/);
+    assert.match(page, /all read over HTTP/);
+  });
+});
+
+describe('a stack used as a source of another stack', () => {
+  it('is not reported as unresolved', () => {
+    // It resolves to a recipe rather than to an archive, so a reader looking
+    // only for a catalog entry or a URL called a working nested stack broken.
+    const api = fsSync.readFileSync(
+      path.join(here, '..', 'src', 'api.js'),
+      'utf8',
+    );
+    assert.match(api, /Boolean\(source\.nested\)/);
+  });
+
+  it('says what it resolves to, rather than an archive name it has not got', () => {
+    assert.match(page, /recipe of \$\{/);
+  });
+});
+
+describe('adding a source that lives at a URL', () => {
+  it('is offered in the menu, always', () => {
+    // It names nothing this node holds, so there is no list of them to be
+    // empty -- and no reason for it to be missing when the others are.
+    assert.match(page, /<option value="url:">an address you type/);
+  });
+
+  it('starts empty, and is refused until it is filled in', () => {
+    assert.match(page, /kind === 'url'/);
+    assert.match(page, /\{ url: '' \}/);
+    assert.match(page, /needs an address beginning http:\/\/ or https:\/\//);
+  });
+
+  it('asks for the zoom range, which is what makes many of them cheap', () => {
+    // Nothing else knows it: a URL source has no catalog entry, and asking
+    // the archive itself would mean opening all of them to draw a page.
+    assert.match(page, /data-stack-field="minzoom"/);
+    assert.match(page, /data-stack-field="maxzoom"/);
+  });
+
+  it('treats an empty zoom box as "any", not as zero', () => {
+    // A maxzoom of 0 would silence the source everywhere above z0, which
+    // looks like the source being broken rather than the box being empty.
+    const handler = page.slice(page.indexOf("field === 'minzoom'"));
+    assert.match(handler.slice(0, 400), /delete source\[field\]/);
+  });
+});

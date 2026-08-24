@@ -7655,19 +7655,62 @@ Every piece is hashed against the ` +
                    and this node has no codec. <code>npm install sharp</code>.</p>`
                 : ''
             }
-            <table class="tight">
-              <thead>
-                <tr><th>#</th><th>Source</th><th>Resolves to</th><th>Zooms</th><th></th></tr>
-              </thead>
-              <tbody>
-                ${stack.sources.map(renderStackSource).join('')}
-              </tbody>
-            </table>
-            <p class="muted">
-              Listed in the file's order: the first is the base, each one covers
-              the one before it wherever it has data, and the last wins.
-            </p>
+            <details${stack.sources.length > SOURCES_SHOWN ? '' : ' open'}>
+              <summary>${stack.sources.length} source${
+                stack.sources.length === 1 ? '' : 's'
+              }${
+                stack.sources.length > SOURCES_SHOWN
+                  ? ` <span class="muted">— ${escapeHtml(
+                      summarizeSources(stack.sources),
+                    )}</span>`
+                  : ''
+              }</summary>
+              <table class="tight">
+                <thead>
+                  <tr><th>#</th><th>Source</th><th>Resolves to</th><th>Zooms</th><th></th></tr>
+                </thead>
+                <tbody>
+                  ${stack.sources.map(renderStackSource).join('')}
+                </tbody>
+              </table>
+              <p class="muted">
+                Listed in the file's order: the first is the base, each one covers
+                the one before it wherever it has data, and the last wins.
+              </p>
+            </details>
           </div>`;
+      };
+
+      /**
+       * How many sources a stack shows without being asked.
+       *
+       * A stack built from a provider's file list runs to several hundred
+       * rows, which buries every other stack on the page under one of them.
+       * Small enough that the ordinary stack -- a base and a layer or two --
+       * is still open on arrival, since collapsing that hides nothing worth
+       * the click.
+       */
+      const SOURCES_SHOWN = 5;
+
+      /**
+       * What a collapsed source list says about itself.
+       * @param {object[]} sources - The stack's sources.
+       * @returns {string} - A line naming the base and the shape of the rest.
+       */
+      const summarizeSources = (sources) => {
+        const first = sources[0];
+        const base =
+          first?.kind === 'url'
+            ? (first.url ?? '').replace(/^https?:\/\//, '')
+            : (first?.name ?? '');
+        const urls = sources.filter((s) => s.kind === 'url').length;
+        const rest =
+          urls === sources.length
+            ? 'all read over HTTP'
+            : urls
+              ? `${urls} read over HTTP`
+              : '';
+        return [base, rest].filter(Boolean).join(', ');
       };
 
       /**
@@ -7713,7 +7756,11 @@ Every piece is hashed against the ` +
               source.resolved
                 ? source.kind === 'url'
                   ? `<span class="muted" title="Read straight from this address over HTTP. Nothing is downloaded or seeded, and whether it answers is settled at the first tile.">read over HTTP</span>`
-                  : `<code class="muted">${escapeHtml(source.archiveName ?? '')}</code>`
+                  : source.kind === 'stack'
+                    ? `<span class="muted" title="Another recipe, evaluated for this tile and merged as one layer. It follows every later change to that stack.">recipe of ${
+                        source.nested ?? 0
+                      } source${source.nested === 1 ? '' : 's'}</span>`
+                    : `<code class="muted">${escapeHtml(source.archiveName ?? '')}</code>`
                 : '<span class="bad">does not resolve</span>'
             }</td>
             <td>${zooms}${
@@ -7972,11 +8019,14 @@ Every piece is hashed against the ` +
           );
         }
 
-        select.innerHTML = groups.length
-          ? groups.join('')
-          : '<option value="">nothing left to add</option>';
-        select.disabled = groups.length === 0;
-        $('stack-add-source-go').disabled = groups.length === 0;
+        // Always offered, and last: it names nothing this node holds, so
+        // there is no list to be empty and no reason to prefer it over an
+        // archive that is already here.
+        groups.push(
+          `<optgroup label="A URL — read over HTTP, never downloaded"><option value="url:">an address you type…</option></optgroup>`,
+        );
+
+        select.innerHTML = groups.join('');
       };
 
       /** Redraws the source list and the fields that depend on the space. */
@@ -8124,6 +8174,10 @@ Every piece is hashed against the ` +
         // against. Those fields are left out rather than shown and refused on
         // save; everything that acts on heights stays.
         const nested = Boolean(source.stack);
+        // An archive somewhere else. It has no catalog entry to read a zoom
+        // range or an extent from, so the recipe is the only place either can
+        // come from -- which is why the card asks for them.
+        const remote = source.url !== undefined;
         const perSpace = rgba
           ? `<label class="choice">Opacity
                <input type="number" min="0" max="1" step="0.05" style="width:5rem"
@@ -8240,16 +8294,29 @@ Every piece is hashed against the ` +
             <div class="row">
               <span class="muted">${index}</span>
               <code>${escapeHtml(
-                source.stack ?? source.category ?? shortHash(source.archive) ?? '',
+                remote
+                  ? (source.url || 'an address').replace(/^https?:\/\//, '')
+                  : (source.stack ??
+                      source.category ??
+                      shortHash(source.archive) ??
+                      ''),
               )}</code>
               <span class="sub" title="${
-                source.archive
-                  ? 'Pinned to this build. It will not follow a rebuild, and breaks if the archive is removed.'
-                  : source.stack
-                    ? 'Another stack, merged as one layer. It follows every later change to that recipe, and to whatever it resolves to.'
-                    : 'Follows whichever build in this category is newest.'
+                remote
+                  ? 'Read straight from this address over HTTP, with byte ranges. Nothing is downloaded, nothing is seeded, and this node never rebuilds or retires it.'
+                  : source.archive
+                    ? 'Pinned to this build. It will not follow a rebuild, and breaks if the archive is removed.'
+                    : source.stack
+                      ? 'Another stack, merged as one layer. It follows every later change to that recipe, and to whatever it resolves to.'
+                      : 'Follows whichever build in this category is newest.'
               }">${
-                source.archive ? 'pinned' : source.stack ? 'stack' : 'category'
+                remote
+                  ? 'url'
+                  : source.archive
+                    ? 'pinned'
+                    : source.stack
+                      ? 'stack'
+                      : 'category'
               }</span>
               ${role}
               <span class="bar-gap"></span>
@@ -8259,6 +8326,38 @@ Every piece is hashed against the ` +
                       ${last ? 'disabled' : ''} title="Later: covers more">↓</button>
               <button type="button" data-stack-remove="${index}">Remove</button>
             </div>
+            ${
+              remote
+                ? `<div class="bar">
+                     <label class="choice" style="flex:1">Address
+                       <input style="flex:1;min-width:22rem" placeholder="https://example.org/terrain.pmtiles"
+                              data-stack-field="url" data-stack-index="${index}"
+                              value="${escapeHtml(source.url ?? '')}" />
+                     </label>
+                     ${
+                       source.url && !/^https?:\/\//i.test(source.url)
+                         ? '<span class="bad">http:// or https://</span>'
+                         : ''
+                     }
+                   </div>
+                   <div class="bar">
+                     <label class="choice"
+                            title="The zooms this archive actually holds. Checked before anything is opened, so a tile outside the range skips it without a request leaving this node — which is what makes a stack of many of these cheap. Leave empty and every tile asks it.">
+                       Only zooms
+                       <input type="number" min="0" max="24" step="1" style="width:4.5rem"
+                              placeholder="any"
+                              data-stack-field="minzoom" data-stack-index="${index}"
+                              value="${source.minzoom ?? ''}" />
+                       to
+                       <input type="number" min="0" max="24" step="1" style="width:4.5rem"
+                              placeholder="any"
+                              data-stack-field="maxzoom" data-stack-index="${index}"
+                              value="${source.maxzoom ?? ''}" />
+                     </label>
+                     <span class="sub">Clip it to a box below to skip it by area too.</span>
+                   </div>`
+                : ''
+            }
             <div class="bar">
               ${perSpace}
               ${
@@ -8402,6 +8501,12 @@ Every piece is hashed against the ` +
               source.featherMetres = width;
             }
           }
+        } else if (field === 'minzoom' || field === 'maxzoom') {
+          // Blank means "every zoom", so an empty box removes the field
+          // rather than writing 0 -- which for minzoom is the same thing and
+          // for maxzoom would silence the source everywhere above z0.
+          if (event.target.value === '') delete source[field];
+          else source[field] = Math.round(Number(event.target.value));
         } else if (field === 'baseVal' || field === 'interval') {
           // Blank means "the default", not zero -- an interval of 0 would make
           // every height the base value.
@@ -8499,7 +8604,12 @@ Every piece is hashed against the ` +
             ? { archive: name }
             : kind === 'stk'
               ? { stack: name }
-              : { category: name },
+              : kind === 'url'
+                ? // Empty, because the address is typed into the card rather
+                  // than chosen from a menu. It is refused on save until it
+                  // is filled in.
+                  { url: '' }
+                : { category: name },
         );
         renderStackDraft();
         fillStackSourceChoices();
@@ -8544,6 +8654,22 @@ Every piece is hashed against the ` +
           $('stack-error').textContent =
             `There is already a stack called "${id}". A name is what its URL ` +
             'is made of, so saving would replace it rather than add this one.';
+          return;
+        }
+        // A URL source is the one kind whose name is typed rather than
+        // chosen, so it is the one kind that can be left half-made. Caught
+        // here because the reply to a recipe the node refuses says which
+        // source is wrong by index, which is not where the operator is
+        // looking.
+        const blank = stackDraft.sources.findIndex(
+          (source) =>
+            source.url !== undefined && !/^https?:\/\//i.test(source.url ?? ''),
+        );
+        if (blank >= 0) {
+          $('stack-error').textContent =
+            `Source ${blank} needs an address beginning http:// or https://. ` +
+            'It is read straight from wherever it is published, so there is ' +
+            'nothing else to find it by.';
           return;
         }
         const body = {

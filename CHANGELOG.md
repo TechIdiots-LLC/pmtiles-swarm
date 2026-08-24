@@ -2,10 +2,30 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **A source at a URL can be added by hand, not only imported.** **Add source → an address you
+  type…** in the stack editor, writing the same source the importer does. The card asks for the
+  address and for the zoom range the archive holds — a catalog archive states its range in its own
+  header and this has no header anybody has read, so leaving it empty means every tile asks it.
+  Anything published as a plain HTTPS download works, an S3 object or presigned URL included; a
+  private `s3://` bucket does not, having no request this can make without credentials to sign it.
+
+- **A stack's source list folds up past five sources.** An imported list is several hundred rows,
+  which buried every other stack on the page under one of them. The fold says how many there are and
+  names the base; a stack of a base and a layer or two stays open, since folding that hides nothing
+  worth a click.
+
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A stack used as a source of another stack was reported as unresolved.** It resolves to a recipe
+  rather than to bytes, and the console's reader looked only for a catalog entry or an address — so a
+  working nested stack showed "does not resolve", with no zoom range and no box, and put a "sources
+  missing" badge on the stack above it. It now says what it stands for and how deep it reaches,
+  worked out from the sources that stack would serve.
+
+- **A stack's advertised box ignored any source that stated none.** The union was taken over
+  whichever sources had a box, so a stack of a global base plus regional patches — an imported list,
+  exactly — advertised the patches as its extent and left the base out of it. A source with no box
+  is not one covering nothing, so it is now every box or none, and none means the world.
 
 ## 0.90.0
 ### ✨ Features and improvements
