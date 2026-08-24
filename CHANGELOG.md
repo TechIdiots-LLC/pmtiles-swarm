@@ -5,7 +5,15 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **Saving settings rewrote a proxy list nobody had touched.** A trusted-proxy list may be stored as
+  a string — `"loopback, 10.0.0.0/8"` is what the documentation shows — and the box rendered that as
+  one line while reading it back as an array. The two never compared equal, so the field was sent on
+  every Save whether or not anybody had looked at it, and before the previous release that rewrite
+  was the thing that stopped the node from starting. Opening the settings page and pressing Save was
+  enough to do it.
+
+  The box now shows one entry per line whichever way the config wrote them, and records what a save
+  will read back rather than what the config holds — so an untouched field is untouched.
 
 ## 0.93.0
 ### 🐞 Bug fixes

@@ -6311,7 +6311,14 @@ Every piece is hashed against the ` +
               field.type === 'secret'
                 ? `<input type="password" autocomplete="new-password" data-setting="${field.key}"${locked} data-type="secret" data-initial="&quot;&quot;" value="" placeholder="${escapeHtml(field.placeholder ?? 'unchanged')}" />`
                 : field.type === 'addresses'
-                ? `<textarea data-setting="${field.key}"${locked} data-type="addresses"${initial} rows="3" placeholder="${escapeHtml(field.placeholder ?? '')}">${escapeHtml(Array.isArray(value) ? value.join('\n') : value === undefined || value === null ? '' : String(value))}</textarea>`
+                ? // Its own initial, because this is the one field whose
+                    // box holds a different shape from the config. A
+                    // stored string never compares equal to the array
+                    // the box parses to, so sharing `initial` meant
+                    // every Save rewrote a setting nobody had touched
+                    // -- which is how a value that worked became one
+                    // the node would not start with.
+                    `<textarea data-setting="${field.key}"${locked} data-type="addresses" data-initial="${escapeHtml(JSON.stringify(parseAddresses(addressText(value))))}" rows="3" placeholder="${escapeHtml(field.placeholder ?? '')}">${escapeHtml(addressText(value))}</textarea>`
                 : field.type === 'list'
                 ? `<textarea data-setting="${field.key}"${locked} data-type="list"${initial} rows="${Math.min(8, Math.max(3, (Array.isArray(value) ? value.length : 0) + 1))}" placeholder="${escapeHtml(field.placeholder ?? '')}">${escapeHtml((Array.isArray(value) ? value : []).join('\n'))}</textarea>`
                 : field.type === 'boolean'
@@ -6340,6 +6347,56 @@ Every piece is hashed against the ` +
           ${rows}`;
         return panel;
       }
+
+      /**
+       * The entries an address field holds, however the config wrote them.
+       *
+       * A list may be stored as an array or as one comma-separated string --
+       * Express accepts both, and the documented example is a string. Shown
+       * one per line either way, so that what a save reads back is the list
+       * that was rendered rather than a different shape of the same thing.
+       * @param {null|boolean|number|string|string[]} value - What the config holds.
+       * @returns {string} - The textarea's contents.
+       */
+      const addressText = (value) => {
+        if (value === undefined || value === null) return '';
+        const entries = Array.isArray(value) ? value : [String(value)];
+        return entries
+          .flatMap((entry) => String(entry).split(/[\n,]/))
+          .map((entry) => entry.trim())
+          .filter(Boolean)
+          .join('\n');
+      };
+
+      /**
+       * What an address field means by what it holds.
+       *
+       * Express takes four things here and means something different by each:
+       * `true` trusts any caller, a number is a hop count, and a string or an
+       * array of them names the proxies. What was typed decides which.
+       *
+       * Commas separate as well as newlines. Express splits a comma list only
+       * when it is handed a bare string and never inside an array, so one line
+       * reading `10.0.0.1, 10.0.0.2` was saved as a one-element array holding
+       * both -- which is not an address, and which Express rejects while the
+       * app is being built, before the listener binds. The node then would not
+       * start, and could not be corrected from the console that wrote it.
+       * @param {string} text - What the box holds.
+       * @returns {null|boolean|number|string[]} - What to save.
+       */
+      const parseAddresses = (text) => {
+        const lines = String(text)
+          .split(/[\n,]/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        if (!lines.length) return null;
+        if (lines.length === 1) {
+          if (lines[0] === 'true') return true;
+          if (lines[0] === 'false') return false;
+          if (!Number.isNaN(Number(lines[0]))) return Number(lines[0]);
+        }
+        return lines;
+      };
 
       /**
        * Collects every schema control into an update, grouped by top-level key.
@@ -6372,30 +6429,8 @@ Every piece is hashed against the ` +
             continue;
           }
           if (type === 'boolean') value = element.checked;
-          else if (type === 'addresses') {
-            // Express takes four things here and means something different by
-            // each: `true` trusts any caller, a number is a hop count, and a
-            // string or an array of them names the proxies. What was typed
-            // decides which of the four it is.
-            //
-            // Split on commas as well as newlines. Express splits a comma
-            // list only when it is handed a bare string and never inside an
-            // array, so one line reading `10.0.0.1, 10.0.0.2` became a
-            // one-element array holding both -- which is not an address, and
-            // which Express rejects while the app is being built, before the
-            // listener binds. The node then would not start, and could not be
-            // corrected from the console that wrote the value.
-            const lines = String(element.value)
-              .split(/[\n,]/)
-              .map((line) => line.trim())
-              .filter(Boolean);
-            if (!lines.length) value = null;
-            else if (lines.length === 1 && (lines[0] === 'true' || lines[0] === 'false')) {
-              value = lines[0] === 'true';
-            } else if (lines.length === 1 && !Number.isNaN(Number(lines[0]))) {
-              value = Number(lines[0]);
-            } else value = lines;
-          } else if (type === 'list') {
+          else if (type === 'addresses') value = parseAddresses(element.value);
+          else if (type === 'list') {
             // One per line, which is how a person reads a list of trackers —
             // and empty means an empty list rather than "unset", because a
             // node with no trackers is a real thing to want and JSON would

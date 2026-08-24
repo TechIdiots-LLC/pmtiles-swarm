@@ -2066,8 +2066,10 @@ describe('the settings schema', () => {
     script.indexOf('const SETTINGS_SCHEMA'),
     script.indexOf('/** Reads `a.b`'),
   );
+  // From the address helpers rather than from the reader itself: the reader
+  // calls them, so lifting it out without them is lifting out half of it.
   const reader = script.slice(
-    script.indexOf('function readSchemaEditors'),
+    script.indexOf('const addressText'),
     script.indexOf('async function loadSettings'),
   );
   const read = (controls) =>
@@ -2673,5 +2675,90 @@ describe('an archive the engine has never mentioned', () => {
   it('says the data is still there, since that is the first fear', () => {
     const cell = page.slice(page.indexOf('not loaded') - 700);
     assert.match(cell.slice(0, 700), /Nothing has been deleted/);
+  });
+});
+
+describe('opening the settings page and pressing Save', () => {
+  const script = page.split('<script type="module">')[1].split('</script>')[0];
+  const reader = script.slice(
+    script.indexOf('const addressText'),
+    script.indexOf('async function loadSettings'),
+  );
+  const sandbox = new Function(
+    'document',
+    reader + '; return { addressText, parseAddresses, readSchemaEditors };',
+  );
+  const helpers = sandbox({ querySelectorAll: () => [] });
+
+  /**
+   * What a save would send, given what the config holds and no edit at all.
+   * @param {null|boolean|number|string|string[]} stored - The config value.
+   * @returns {object} - The update.
+   */
+  const untouched = (stored) => {
+    const shown = helpers.addressText(stored);
+    const initial = JSON.stringify(helpers.parseAddresses(shown));
+    const read = sandbox({
+      querySelectorAll: () => [
+        {
+          dataset: { setting: 'trustProxy', type: 'addresses', initial },
+          value: shown,
+        },
+      ],
+    });
+    return read.readSchemaEditors();
+  };
+
+  it('does not rewrite a proxy list nobody touched', () => {
+    // How a working config became one the node would not start with. A stored
+    // string renders as one line; the box parses that to an array; the array
+    // never compares equal to the string, so the field was sent on every Save
+    // whether or not anybody had looked at it.
+    assert.deepEqual(untouched('172.16.1.2, 172.16.1.3'), {});
+    assert.deepEqual(untouched(['172.16.1.2', '172.16.1.3']), {});
+    assert.deepEqual(untouched('loopback, 10.0.0.0/8'), {});
+    assert.deepEqual(untouched(2), {});
+    assert.deepEqual(untouched(true), {});
+    assert.deepEqual(untouched(null), {});
+  });
+
+  it('shows a stored string one entry per line', () => {
+    // Which is what makes the round trip stable: what is read back is the
+    // list that was rendered, not a different shape of the same thing.
+    assert.equal(
+      helpers.addressText('172.16.1.2, 172.16.1.3'),
+      '172.16.1.2\n172.16.1.3',
+    );
+    assert.equal(
+      helpers.addressText(['172.16.1.2', '172.16.1.3']),
+      '172.16.1.2\n172.16.1.3',
+    );
+  });
+
+  it('still sends a real edit', () => {
+    const read = sandbox({
+      querySelectorAll: () => [
+        {
+          dataset: {
+            setting: 'trustProxy',
+            type: 'addresses',
+            initial: JSON.stringify(['172.16.1.2']),
+          },
+          value: '172.16.1.2\n172.16.1.9',
+        },
+      ],
+    });
+    assert.deepEqual(read.readSchemaEditors(), {
+      trustProxy: ['172.16.1.2', '172.16.1.9'],
+    });
+  });
+
+  it('renders the initial from what the box will parse, not from the config', () => {
+    // The two have to be compared like with like, or "unchanged" is decided
+    // between a string and an array and is never true.
+    assert.match(
+      page,
+      /data-initial="\$\{escapeHtml\(JSON\.stringify\(\s*parseAddresses\(addressText\(value\)\),?\s*\)\)\}"/,
+    );
   });
 });
