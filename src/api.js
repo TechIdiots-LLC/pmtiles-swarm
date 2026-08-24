@@ -2801,6 +2801,43 @@ export function createApp({
     );
   });
 
+  /**
+   * Every category, as the build each one currently resolves to.
+   *
+   * The third of a set: `/feed.xml` carries every archive, `/stacks.xml` every
+   * stack, and this every category. Without it the only way to follow all of
+   * them was to add each by hand and to keep adding them, which is not
+   * following a node's categories -- it is following a list of names that was
+   * true once.
+   *
+   * The items are archives, because a category has no bytes of its own and the
+   * build it points at is what a subscriber would join. That is also what
+   * separates this from `/feed.xml`: the whole catalogue carries every build a
+   * node holds, and this carries the current one of each category. On a node
+   * keeping four builds apiece the difference is fourfold.
+   */
+  app.get('/categories.xml', (req, res) => {
+    const newest = [];
+    for (const category of catalog.categories?.() ?? []) {
+      if (!publishesCategory(category, req)) continue;
+      const [build] = catalog.byCategory(category);
+      if (build) newest.push(build);
+    }
+
+    res.type('application/rss+xml').send(
+      renderFeed(newest, {
+        title: `${config.feedTitle ?? 'PMTiles archives'} — categories`,
+        description:
+          'The build each category currently resolves to. Following this ' +
+          'follows every category on this node, including ones added later.',
+        baseUrl: baseUrl(req),
+        self: `${baseUrl(req)}/categories.xml`,
+        copyright: config.feedCopyright,
+        maxItems: feedLimit(req),
+      }),
+    );
+  });
+
   app.get('/feed/:category.xml', (req, res) => {
     const { category } = req.params;
     // 404 rather than 403: refusing by name would confirm the category exists,

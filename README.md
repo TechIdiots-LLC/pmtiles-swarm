@@ -66,7 +66,7 @@ been sending and receiving, kept in SQLite so it survives a restart; an indicato
 peers can reach this node at all; and a settings screen covering monitored folders, watched web
 locations, remote nodes, save locations, access tokens and the external-program hooks.
 
-**Publishes RSS.** `/feed.xml`, and `/feed/<category>.xml` per category. Plain RSS 2.0 with
+**Publishes RSS.** `/feed.xml` for every archive, `/categories.xml` for the build each category currently resolves to, `/stacks.xml` for the stack recipes, and `/feed/<category>.xml` per category. Plain RSS 2.0 with
 torrent enclosures, so **qBittorrent's built-in RSS auto-downloader can subscribe today** with no
 new software. Items also carry a namespaced description of the map — format, zoom range, bounds,
 tile count — so a subscriber can decide whether it wants a 72 GiB download before starting one.
@@ -813,6 +813,8 @@ which the endpoint answers 501.
 | `GET` | `/stacks/:id/:size/:z/:x/:y.:ext` | The same tile at 256 or 512 px. A tile's coordinates are an extent rather than a pixel count, so this is the same ground on a finer or coarser grid |
 | `GET` | `/stacks/:id/:z/:x/:y.:ext` | One tile of a stack — **public**. Answered by the topmost source holding it; `X-Stack-Sources` says which were asked and what each said |
 | `GET` | `/feed.xml`, `/feed/:category.xml`, `/latest/:category.xml` | RSS — **public** |
+| `GET` | `/categories.xml` | Every category, as the build each resolves to — **public** |
+| `GET` | `/stacks.xml`, `/stacks/:id.xml` | Stack recipes, for another node to follow — **public** |
 
 Everything under `/api/` is guarded once a credential is configured; tiles, TileJSON and the feeds
 never are. A `peer` token may read but not change, and may be narrowed to some categories. See

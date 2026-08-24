@@ -48,9 +48,15 @@ function xml(value) {
  * @returns {string} - The feed XML.
  */
 export function renderFeed(entries, options) {
-  const self = options.category
-    ? `${options.baseUrl}/feed/${encodeURIComponent(options.category)}.xml`
-    : `${options.baseUrl}/feed.xml`;
+  // Said outright where the caller knows it, derived where it does not. A
+  // third feed arrived that is neither the whole catalogue nor one category,
+  // and a self link naming the wrong document is how a reader ends up
+  // subscribed to something it did not choose.
+  const self =
+    options.self ??
+    (options.category
+      ? `${options.baseUrl}/feed/${encodeURIComponent(options.category)}.xml`
+      : `${options.baseUrl}/feed.xml`);
 
   // Entries arrive newest first, so a cap keeps the most recent builds. Set it
   // with a subscriber's poll interval in mind: a feed holding one item is only

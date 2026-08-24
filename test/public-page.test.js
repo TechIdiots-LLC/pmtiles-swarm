@@ -191,3 +191,127 @@ describe('the addresses at the foot of the public page', () => {
     assert.match(page, /href="\/stacks\.xml">stack RSS feed</);
   });
 });
+
+describe('the feed that carries every category', () => {
+  /**
+   * A node holding two builds of one category and one of another.
+   * @returns {Promise<object>} - `{base, close}`.
+   */
+  async function node() {
+    const build = (hash, name, category, when) => ({
+      infoHash: hash,
+      name,
+      size: 100,
+      categories: [category],
+      createdAt: when,
+      magnet: `magnet:?xt=urn:btih:${hash}`,
+      pmtiles: { format: 'webp', minZoom: 0, maxZoom: 8 },
+    });
+    const held = [
+      build(
+        'a'.repeat(40),
+        'terrain-20260810.pmtiles',
+        'terrain',
+        '2026-08-10',
+      ),
+      build(
+        'b'.repeat(40),
+        'terrain-20260809.pmtiles',
+        'terrain',
+        '2026-08-09',
+      ),
+      build(
+        'c'.repeat(40),
+        'omt-20260810.pmtiles',
+        'openmaptiles',
+        '2026-08-10',
+      ),
+    ];
+    const app = createApp({
+      library: { listWithStatus: async () => [] },
+      catalog: {
+        list: () => held,
+        categories: () => ['terrain', 'openmaptiles'],
+        byCategory: (name) =>
+          held.filter((one) => one.categories.includes(name)),
+        get: (hash) => held.find((one) => one.infoHash === hash),
+      },
+      engine: {},
+      subscriptions: {},
+      tiles: { status: () => null },
+      config: { watch: [], subscriptions: [] },
+    });
+    const listening = app.listen(0);
+    await new Promise((resolve) => listening.once('listening', resolve));
+    return {
+      base: `http://127.0.0.1:${listening.address().port}`,
+      close: () => new Promise((resolve) => listening.close(resolve)),
+    };
+  }
+
+  it('carries the build each category currently resolves to', async () => {
+    // Which is what separates it from the whole catalogue: that carries every
+    // build a node holds, and this the current one of each category. On a node
+    // keeping four apiece the difference is fourfold.
+    const served = await node();
+    try {
+      const body = await (await fetch(`${served.base}/categories.xml`)).text();
+      const hashes = [...body.matchAll(/<pmtiles:infohash>([^<]*)/g)].map(
+        (found) => found[1],
+      );
+      assert.deepEqual(hashes, ['a'.repeat(40), 'c'.repeat(40)]);
+    } finally {
+      await served.close();
+    }
+  });
+
+  it('is more than the whole catalogue is not', async () => {
+    const served = await node();
+    try {
+      const whole = await (await fetch(`${served.base}/feed.xml`)).text();
+      const count = (body) => (body.match(/<item[\s>]/g) ?? []).length;
+      const categories = await (
+        await fetch(`${served.base}/categories.xml`)
+      ).text();
+      assert.equal(count(whole), 3);
+      assert.equal(count(categories), 2);
+    } finally {
+      await served.close();
+    }
+  });
+
+  it('says its own address rather than another feed’s', async () => {
+    // A self link naming the wrong document is how a reader ends up
+    // subscribed to something it did not choose.
+    const served = await node();
+    try {
+      const body = await (await fetch(`${served.base}/categories.xml`)).text();
+      assert.match(body, /atom:link href="[^"]+\/categories\.xml"/);
+    } finally {
+      await served.close();
+    }
+  });
+
+  it('carries a magnet per item, so an existing subscriber can follow it', async () => {
+    // The reason the items are archives rather than a shape of their own: a
+    // category has no bytes, and every consumer already knows how to read
+    // this one.
+    const served = await node();
+    try {
+      const body = await (await fetch(`${served.base}/categories.xml`)).text();
+      assert.equal((body.match(/<pmtiles:magnet>/g) ?? []).length, 2);
+      assert.equal((body.match(/<enclosure /g) ?? []).length, 2);
+    } finally {
+      await served.close();
+    }
+  });
+
+  it('is linked at the foot of the public page', async () => {
+    const { readFile } = await import('node:fs/promises');
+    const page = await readFile(
+      new URL('../src/web/public.html', import.meta.url),
+      'utf8',
+    );
+    assert.match(page, /href="\/categories\.xml">category RSS feed</);
+  });
+});

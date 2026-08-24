@@ -162,6 +162,7 @@ export function isPublicSurface(path, options = {}) {
     // A recipe names categories and infohashes, which the catalogue beside it
     // already publishes, so this gives away nothing that does not.
     path === '/stacks.xml' ||
+    path === '/categories.xml' ||
     path.startsWith('/feed/') ||
     path.startsWith('/archives/') ||
     path.startsWith('/latest/') ||

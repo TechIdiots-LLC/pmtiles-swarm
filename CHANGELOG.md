@@ -9,7 +9,20 @@
 
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A feed carrying every category.** `/categories.xml`, beside `/feed.xml` and `/stacks.xml` — the
+  set was inconsistent, and following all of a node's categories meant adding each by hand and
+  remembering to add the next one, which is not following its categories at all. It is what a
+  subscriber wants when they want everything this node files: including categories added later.
+
+  The items are archives, because a category has no bytes of its own and the build it resolves to is
+  what a subscriber would join — which also means every existing consumer already knows how to read
+  it, magnets and enclosures included. That is what separates it from the whole catalogue: `/feed.xml`
+  carries every build a node holds, and this carries the current one of each category. On a node
+  keeping four builds apiece the difference is fourfold.
+
+  In the footer of the public page it replaces `categories JSON`, which was the odd one out among
+  three feeds. `/latest/` is untouched and remains the JSON index.
+
 
 ## 0.88.0
 ### ✨ Features and improvements
