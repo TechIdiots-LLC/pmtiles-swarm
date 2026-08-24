@@ -15,7 +15,7 @@ import {
 } from './bake.js';
 import { PixelWorker } from './pixels.js';
 import { retains, retire } from './retention.js';
-import { stackCoverage } from './stacks.js';
+import { stackCoverage, stackEncoding } from './stacks.js';
 import { outputFormat } from './stack-tile.js';
 
 /**
@@ -663,8 +663,10 @@ export class BakeManager {
         // without the style that loaded it, so this is the only place the
         // credit survives -- and a stack is a derived work of all of them.
         attribution: options.attribution ?? stackCoverage(resolved).attribution,
-        encoding: resolved.stack.output?.encoding,
-        encodingFactors: resolved.stack.output,
+        // Not `output.encoding` alone: a recipe that says nothing writes
+        // whatever its base is written in, and an archive that leaves the
+        // field empty is read back as imagery.
+        ...stackEncoding(resolved),
         sparse: resolved.stack.sparse,
         bakedAt: job.startedAt,
       },

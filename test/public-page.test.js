@@ -315,3 +315,113 @@ describe('the feed that carries every category', () => {
     assert.match(page, /href="\/categories\.xml">category RSS feed</);
   });
 });
+
+describe('what the console is told about a URL source', () => {
+  /**
+   * The admin listing for a stack built from URL sources.
+   * @param {object[]} sources - Its sources.
+   * @returns {Promise<object>} - Its entry in `/api/stacks`.
+   */
+  async function admin(sources) {
+    stacks = [{ id: 'mapterhorn', space: 'elevation', sources, output: {} }];
+    const doc = await (await fetch(`${base}/api/stacks`)).json();
+    return doc.stacks[0];
+  }
+
+  const PATCH = {
+    url: 'https://x.example/6-33-22.pmtiles',
+    encoding: 'terrarium',
+    minzoom: 13,
+    maxzoom: 18,
+    bounds: [5.625, 45, 11.25, 48.9],
+  };
+
+  it('says it is a url, not an unresolved category', async () => {
+    // Guessing the kind from which fields are null called a working URL
+    // source an unresolved category -- two wrong things about one source.
+    const one = await admin([PATCH]);
+    assert.equal(one.sources[0].kind, 'url');
+  });
+
+  it('says it resolves, because the address is the answer', async () => {
+    // There is nothing to look up. Whether it can be read is a question for
+    // the first tile, the same as for an archive this node holds but cannot
+    // open.
+    const one = await admin([PATCH]);
+    assert.equal(one.sources[0].resolved, true);
+  });
+
+  it('carries the zoom range and box the recipe states', async () => {
+    // The only place they are known without opening the file, and what the
+    // merge itself uses to decide whether to.
+    const one = await admin([PATCH]);
+    assert.equal(one.sources[0].minzoom, 13);
+    assert.equal(one.sources[0].maxzoom, 18);
+    assert.deepEqual(one.sources[0].bounds, [5.625, 45, 11.25, 48.9]);
+  });
+
+  it('reports the encoding, so the console offers a terrain preview', async () => {
+    // An imported stack states no `output.encoding`; reading only that
+    // reported null, and a null encoding is indistinguishable from imagery.
+    const one = await admin([PATCH]);
+    assert.equal(one.encoding, 'terrarium');
+  });
+});
+
+describe('the TileJSON for a stack of many URL sources', () => {
+  /**
+   * The document for a stack of `count` URL sources.
+   * @param {number} count - How many.
+   * @returns {Promise<object>} - The parsed TileJSON.
+   */
+  async function tileJson(count) {
+    stacks = [
+      {
+        id: 'many',
+        space: 'elevation',
+        output: {},
+        sources: Array.from({ length: count }, (_unused, at) => ({
+          url: `https://x.example/${at}.pmtiles`,
+          encoding: 'terrarium',
+          minzoom: 13,
+          maxzoom: 14,
+        })),
+      },
+    ];
+    return (await fetch(`${base}/stacks/many/tiles.json`)).json();
+  }
+
+  it('advertises the extension the endpoint actually serves', async () => {
+    // A stack whose sources state no format has no coverage format to read.
+    // The document advertised `.bin` for tiles answered as webp.
+    const doc = await tileJson(2);
+    assert.match(doc.tiles[0], /\{z\}\/\{x\}\/\{y\}\.webp$/);
+    assert.equal(doc.format, 'webp');
+  });
+
+  it('says how the tiles are encoded even when the recipe does not', async () => {
+    // Guessing wrong renders terrarium heights through the mapbox formula,
+    // which is not a subtle error.
+    const doc = await tileJson(2);
+    assert.equal(doc.encoding, 'terrarium');
+  });
+
+  it('names a handful of sources rather than hundreds', async () => {
+    // Mapterhorn's index is 458. Listing every one puts tens of kilobytes of
+    // addresses in a document every map load fetches.
+    const doc = await tileJson(100);
+    assert.equal(doc.stack.sources.length, 25);
+    assert.equal(doc.stack.total, 100);
+    assert.equal(doc.stack.more, 75);
+    assert.ok(
+      JSON.stringify(doc).length < 6000,
+      `document is ${JSON.stringify(doc).length} bytes`,
+    );
+  });
+
+  it('lists them all when there are few, and counts nothing', async () => {
+    const doc = await tileJson(3);
+    assert.equal(doc.stack.sources.length, 3);
+    assert.equal(doc.stack.more, undefined);
+  });
+});

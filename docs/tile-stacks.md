@@ -1791,6 +1791,45 @@ dialog shows and what the editor's **Re-import** uses to update an unsaved
 draft. A draft can send its own `sources` along, so the batch comes back merged
 into the order the operator is holding rather than into the stored one.
 
+### Following the list instead of importing it once
+
+Mapterhorn's index has grown through several versions, and a node that imported
+it in March is a node serving March. The same address goes in **Settings →
+Feeds → Stack feeds** with **Into stack** naming the stack to keep level, and
+the poll that already checks other nodes for recipes checks this for files.
+
+The row says which of the two it is by whether **Into stack** is filled in. A
+feed of recipes names its own stacks and this one cannot: an index is a list of
+files with no opinion about what they are for, so the row supplies the stack
+and the encoding the index does not state.
+
+Reconciliation is the same one **Re-import** does, for the same reasons and
+with the same guarantees: hand-written sources are left alone, the batch stays
+where it was put, and a file the provider withdrew stops being asked for. A
+poll where nothing changed writes nothing at all — not the same recipe again,
+which would move its revision and with it every tile cached against it.
+
+A stack named here that does not exist yet is created. One that does keeps
+everything it had; following a list never amounts to taking a recipe over.
+
+### What a bulk import cannot say
+
+Every imported source gets a box and a zoom range, because the index states
+them. It gets no **mask** — no per-source clip beyond its bounding box, no
+feathered edge — because there is nowhere in an index for one to come from.
+
+That is fine where the provider has already merged for you. Mapterhorn's files
+are cut so that a patch and the planet agree at the seam, so a rectangular clip
+is the right clip. It is not fine where two sources genuinely overlap at
+different quality and the edge between them matters, and there the answer is to
+import the batch and then write the overlapping source by hand, above it.
+
+Note what happens if you edit an imported source instead: a mask typed onto one
+is wiped by the next re-import, which replaces the batch entire. On a schedule
+that is a map changing at 4am with nothing to say why. A hand-written source
+carries no `importedFrom`, is never replaced, and is the place for anything the
+index could not have told us.
+
 ## Finding a stack
 
 A stack has no infohash and appears in no feed, so nothing about it is

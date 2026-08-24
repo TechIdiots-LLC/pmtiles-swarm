@@ -276,3 +276,180 @@ describe('following a feed end to end', () => {
     assert.ok(stacks.get('pinned'), 'a pinned recipe was refused');
   });
 });
+
+describe('following a provider’s file list instead of a feed', () => {
+  let server;
+  let url;
+  let index = { items: [] };
+
+  before(async () => {
+    const { createServer } = await import('node:http');
+    server = createServer((_req, res) => {
+      res.setHeader('content-type', 'application/json');
+      res.end(JSON.stringify(index));
+    });
+    server.listen(0);
+    await new Promise((resolve) => server.once('listening', resolve));
+    url = `http://127.0.0.1:${server.address().port}/download_urls.json`;
+  });
+
+  after(() => new Promise((resolve) => server.close(resolve)));
+
+  /**
+   * One item of a provider index.
+   * @param {string} name - Its file name.
+   * @param {object} box - `min_zoom`, `max_zoom` and the four edges.
+   * @returns {object} - The item.
+   */
+  const item = (name, box) => ({
+    url: `https://files.example/${name}.pmtiles`,
+    min_zoom: 0,
+    max_zoom: 12,
+    min_lon: -180,
+    max_lon: 180,
+    min_lat: -85,
+    max_lat: 85,
+    ...box,
+  });
+
+  const PLANET = item('planet', {});
+  const ALPS = item('alps', {
+    min_zoom: 13,
+    max_zoom: 18,
+    min_lon: 5.6,
+    max_lon: 11.2,
+    min_lat: 45,
+    max_lat: 48.9,
+  });
+
+  /**
+   * A subscriber pointed at the index above.
+   * @param {object} feed - Its settings, beyond the URL.
+   * @param {object} stacks - The store to import into.
+   * @returns {StackFeedSubscriber} - Ready to read.
+   */
+  const following = (feed, stacks) =>
+    new StackFeedSubscriber({
+      stacks,
+      config: {
+        stackFeeds: [{ url, name: 'mapterhorn', into: 'mapterhorn', ...feed }],
+      },
+    });
+
+  /**
+   * Reads the index once.
+   * @param {object} stacks - The store.
+   * @param {object} [feed] - Extra feed settings.
+   * @returns {Promise<object[]>} - What was done.
+   */
+  const readOnce = (stacks, feed = {}) =>
+    following(feed, stacks).read({
+      url,
+      name: 'mapterhorn',
+      into: 'mapterhorn',
+      ...feed,
+    });
+
+  it('makes the stack it was told to keep up to date', async () => {
+    index = { items: [PLANET, ALPS] };
+    const stacks = store();
+    const settled = await readOnce(stacks, { encoding: 'terrarium' });
+
+    assert.deepEqual(settled, [
+      {
+        id: 'mapterhorn',
+        action: 'adopt',
+        imported: 2,
+        at: settled[0].at,
+      },
+    ]);
+    const held = stacks.get('mapterhorn');
+    assert.equal(held.sources.length, 2);
+    assert.equal(held.sources[0].url, PLANET.url);
+    assert.equal(held.sources[0].required, true);
+    assert.equal(held.sources[0].encoding, 'terrarium');
+    assert.equal(held.sources[1].minzoom, 13);
+    assert.deepEqual(held.sources[1].bounds, [5.6, 45, 11.2, 48.9]);
+  });
+
+  it('writes nothing at all when the list has not changed', async () => {
+    // The ordinary case on every poll. A rewrite would move the recipe’s
+    // revision and with it every tile cached against it, for no new data.
+    index = { items: [PLANET, ALPS] };
+    const stacks = store();
+    await readOnce(stacks);
+    const before = stacks.get('mapterhorn');
+
+    const settled = await readOnce(stacks);
+    assert.deepEqual(settled, [
+      { id: 'mapterhorn', action: 'skip', why: 'unchanged' },
+    ]);
+    assert.equal(stacks.get('mapterhorn'), before, 'the recipe was rewritten');
+  });
+
+  it('picks up a file the provider added', async () => {
+    index = { items: [PLANET] };
+    const stacks = store();
+    await readOnce(stacks);
+
+    index = { items: [PLANET, ALPS] };
+    const settled = await readOnce(stacks);
+    assert.equal(settled[0].action, 'update');
+    assert.equal(stacks.get('mapterhorn').sources.length, 2);
+  });
+
+  it('drops a file the provider withdrew', async () => {
+    // The batch is replaced rather than added to, so a file that has gone
+    // stops being asked for -- which for a URL source means a 404 per tile.
+    index = { items: [PLANET, ALPS] };
+    const stacks = store();
+    await readOnce(stacks);
+
+    index = { items: [PLANET] };
+    await readOnce(stacks);
+    assert.equal(stacks.get('mapterhorn').sources.length, 1);
+  });
+
+  it('leaves sources the list did not put there', async () => {
+    // A stack is somebody’s own recipe. Following a list only ever owns
+    // what it imported.
+    index = { items: [PLANET] };
+    const mine = { category: 'local-dem' };
+    const stacks = store([
+      { id: 'mapterhorn', space: 'elevation', sources: [mine] },
+    ]);
+    await readOnce(stacks);
+
+    const held = stacks.get('mapterhorn');
+    assert.deepEqual(held.sources[0], mine);
+    assert.equal(held.sources[1].url, PLANET.url);
+  });
+
+  it('keeps the batch where it was put, under a hand-placed override', async () => {
+    // Order is priority. An override written above the imported sources has
+    // to still be above them after the provider adds a file.
+    index = { items: [PLANET] };
+    const override = { category: 'better-dem' };
+    const stacks = store();
+    await readOnce(stacks);
+    const held = stacks.get('mapterhorn');
+    await stacks.put({ ...held, sources: [override, ...held.sources] });
+
+    index = { items: [PLANET, ALPS] };
+    await readOnce(stacks);
+    const after = stacks.get('mapterhorn').sources;
+    assert.deepEqual(after[0], override);
+    assert.equal(after.length, 3);
+  });
+
+  it('says why rather than throwing when the recipe is refused', async () => {
+    index = { items: [PLANET] };
+    const stacks = store();
+    stacks.put = async () => {
+      throw new Error('that id is not allowed');
+    };
+    const settled = await readOnce(stacks);
+    assert.equal(settled[0].action, 'refused');
+    assert.match(settled[0].why, /not allowed/);
+  });
+});

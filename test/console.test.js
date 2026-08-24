@@ -2556,3 +2556,26 @@ describe('the settings schema', () => {
     );
   });
 });
+
+describe('cancelling a dialog that has required fields', () => {
+  it('lets every Cancel button out without filling the form in', () => {
+    // A <button> inside a form submits by default, and a form submits only
+    // after the browser checks its required fields -- so Cancel on the import
+    // or warm dialog answered "Please fill out this field" instead of
+    // closing. `formnovalidate` skips the check and keeps method="dialog"
+    // closing with returnValue "cancel", which is what the handlers read.
+    const cancels = [...page.matchAll(/<button[^>]*value="cancel"[^>]*>/g)].map(
+      (match) => match[0],
+    );
+
+    assert.ok(cancels.length >= 5, `found ${cancels.length} cancel buttons`);
+    assert.deepEqual(
+      cancels.filter(
+        (button) =>
+          !/formnovalidate/.test(button) && !/type="button"/.test(button),
+      ),
+      [],
+      'these Cancel buttons validate the form before they close it',
+    );
+  });
+});

@@ -615,7 +615,7 @@
         <div class="sub" id="warm-estimate"></div>
         <div class="sub" id="warm-error" style="color:var(--danger)"></div>
         <menu>
-          <button value="cancel">Cancel</button>
+          <button value="cancel" formnovalidate>Cancel</button>
           <button id="warm-go" value="default">Start warming</button>
         </menu>
       </form>
@@ -639,7 +639,7 @@
 
         <div class="sub" id="move-error" style="color:var(--danger)"></div>
         <menu>
-          <button value="cancel">Cancel</button>
+          <button value="cancel" formnovalidate>Cancel</button>
           <button id="move-go" value="default">Move</button>
         </menu>
       </form>
@@ -696,7 +696,7 @@
         <div class="sub" id="import-preview"></div>
         <div class="sub" id="import-error" style="color: var(--danger)"></div>
         <menu>
-          <button value="cancel">Cancel</button>
+          <button value="cancel" formnovalidate>Cancel</button>
           <button type="button" id="import-check">Check</button>
           <button id="import-go" value="default">Import</button>
         </menu>
@@ -792,7 +792,7 @@
 
         <div class="sub" id="bake-error" style="color: var(--danger)"></div>
         <menu>
-          <button value="cancel">Cancel</button>
+          <button value="cancel" formnovalidate>Cancel</button>
           <button id="bake-go" value="default">Export</button>
         </menu>
       </form>
@@ -904,7 +904,7 @@
 
         <div class="sub" id="adopt-error" style="color:var(--danger)"></div>
         <menu>
-          <button value="cancel">Cancel</button>
+          <button value="cancel" formnovalidate>Cancel</button>
           <button id="adopt-go" value="default" disabled>Adopt selected</button>
         </menu>
       </form>
@@ -6664,11 +6664,12 @@ Every piece is hashed against the ` +
           key: 'stackFeeds',
           title: 'Stack feeds',
           blurb:
-            'Other nodes’ stack recipes, followed the way a category is. ' +
-            'Archives already travel — a pair of tile servers fed from one ' +
-            'builder has the same archives — and this is how the recipes that ' +
-            'combine them travel with them, so a stack is written once and ' +
-            'corrected once.',
+            'Two things followed on a timer. Another node’s stack recipes, so ' +
+            'a pair of tile servers fed from one builder has the same stacks ' +
+            'as well as the same archives — written once and corrected once. ' +
+            'Or a provider’s list of PMTiles URLs, kept level with a stack ' +
+            'here: name that stack under <b>Into stack</b> and this reads a ' +
+            'file index rather than a feed of recipes.',
           columns: [
             {
               field: 'url',
@@ -6691,6 +6692,20 @@ Every piece is hashed against the ` +
                 ['remove', 'remove it here too'],
               ],
             },
+            {
+              field: 'into',
+              label: 'Into stack',
+              placeholder: 'a feed of recipes',
+            },
+            {
+              field: 'encoding',
+              label: 'Encoding',
+              options: [
+                ['', 'leave unset'],
+                ['terrarium', 'terrarium'],
+                ['mapbox', 'mapbox'],
+              ],
+            },
             { field: 'token', label: 'Token', placeholder: 'none', secret: true },
           ],
           rows: config.stackFeeds ?? [],
@@ -6702,7 +6717,13 @@ Every piece is hashed against the ` +
             'same name; that is refused and said. A source the recipe names ' +
             'and this node has not got is not a reason to refuse it either: ' +
             'the stack is adopted and reports the missing source until it ' +
-            'arrives.',
+            'arrives. A row with <b>Into stack</b> set works differently: it ' +
+            'reads a provider’s file index and keeps that one stack’s ' +
+            'imported sources level with it, replacing only what it imported ' +
+            'before and leaving anything you added by hand exactly where it ' +
+            'is. That is the same reconciliation the Import button does, on a ' +
+            'timer — a provider adding a file reaches this node without ' +
+            'anybody remembering to press it.',
         });
 
         renderRowEditor({
@@ -7657,11 +7678,22 @@ Every piece is hashed against the ` +
        * @returns {string} - HTML.
        */
       const renderStackSource = (source, index, all) => {
-        const kind = source.pinned ? 'archive' : 'category';
+        // Said by the node rather than guessed from which fields are null.
+        // Guessing called a URL source an unresolved category, which is two
+        // wrong things about one that is working.
+        const kind = source.kind ?? (source.pinned ? 'archive' : 'category');
         const zooms =
-          source.minzoom === null
+          source.minzoom === null || source.minzoom === undefined
             ? '<span class="muted">—</span>'
             : `z${source.minzoom}–z${source.maxzoom}`;
+
+        // The box a source covers, where anything knows it: an archive's own
+        // header, or the recipe for one read from a URL. Rounded, because
+        // seven decimal places of a bounding box is not a thing anybody reads
+        // off a list.
+        const box = Array.isArray(source.bounds)
+          ? source.bounds.map((n) => Number(n).toFixed(2)).join(', ')
+          : null;
 
         const notes = [];
         if (index === all.length - 1 && all.length > 1) {
@@ -7679,10 +7711,16 @@ Every piece is hashed against the ` +
                 <span class="muted">${kind}</span></td>
             <td>${
               source.resolved
-                ? `<code class="muted">${escapeHtml(source.archiveName ?? '')}</code>`
+                ? source.kind === 'url'
+                  ? `<span class="muted" title="Read straight from this address over HTTP. Nothing is downloaded or seeded, and whether it answers is settled at the first tile.">read over HTTP</span>`
+                  : `<code class="muted">${escapeHtml(source.archiveName ?? '')}</code>`
                 : '<span class="bad">does not resolve</span>'
             }</td>
-            <td>${zooms}</td>
+            <td>${zooms}${
+              box
+                ? `<div class="sub" title="The box this source covers. A tile outside it skips the source without a request leaving this node.">${escapeHtml(box)}</div>`
+                : ''
+            }</td>
             <td>${notes.join(' ')}</td>
           </tr>`;
       };

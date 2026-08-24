@@ -44,11 +44,21 @@ import {
   isHttpUrl,
   isPinned,
   needsCodec,
+  stackEncoding,
   stacksUsing,
   resolveStack,
   stackCoverage,
   stackEtag,
 } from './stacks.js';
+
+/**
+ * How many sources a stack's TileJSON names before it starts counting.
+ *
+ * Generous for a hand-written recipe -- those run to a handful -- and a hard
+ * stop for one imported from a provider's index, where the list is hundreds
+ * long and every entry is an address no client reads.
+ */
+const TILEJSON_SOURCE_LIMIT = 25;
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -168,67 +178,6 @@ function withSwarmHandles(url, { torrent, magnet }) {
   if (torrent) parts.push(`torrent=${encodeURIComponent(torrent)}`);
   if (magnet) parts.push(`magnet=${encodeURIComponent(magnet)}`);
   return parts.length > 0 ? `${url}#${parts.join('&')}` : url;
-}
-
-/**
- * What a stack's tiles are actually encoded as.
- *
- * A recipe that says nothing re-encodes to whatever its base source is written
- * in, which is the ordinary case -- so reading only `output.encoding` reports
- * null for most terrain stacks, and anything deciding whether to offer a
- * hillshade from that decides wrongly.
- * @param {object} resolved - The resolved stack.
- * @returns {object} - `{encoding, encodingFactors}`, either possibly null.
- */
-function stackEncoding(resolved) {
-  // Imagery has none, whatever its sources happen to be written in: the
-  // channels are a colour, and a page told otherwise would offer a hillshade
-  // of a photograph.
-  if (resolved.stack.space === 'rgba') {
-    return { encoding: null, encodingFactors: null };
-  }
-  const output = resolved.stack.output ?? {};
-  if (output.encoding) {
-    const factors = {};
-    for (const name of [
-      'redFactor',
-      'greenFactor',
-      'blueFactor',
-      'baseShift',
-    ]) {
-      const value = Number(output[name]);
-      if (Number.isFinite(value)) factors[name] = value;
-    }
-    return {
-      encoding: output.encoding,
-      encodingFactors: Object.keys(factors).length ? factors : null,
-    };
-  }
-
-  // Unstated, so the merge writes what the base source is written in. The
-  // base rather than whichever source says something first, because that is
-  // what the merge does -- and they have to agree, or the document describes
-  // tiles in one encoding and the tiles arrive in another.
-  const base = resolved.sources[0];
-  const said = base?.source?.encoding ?? base?.entry?.pmtiles?.encoding;
-  if (!said) return { encoding: null, encodingFactors: null };
-
-  const factors =
-    base.source?.encoding === 'custom'
-      ? base.source
-      : base.entry?.pmtiles?.encodingFactors;
-  return {
-    encoding: said,
-    encodingFactors:
-      said === 'custom' && factors
-        ? {
-            redFactor: Number(factors.redFactor),
-            greenFactor: Number(factors.greenFactor),
-            blueFactor: Number(factors.blueFactor),
-            baseShift: Number(factors.baseShift),
-          }
-        : null,
-  };
 }
 
 /**
@@ -3440,16 +3389,13 @@ export function createApp({
               everyHours: row.everyHours,
               everyMinutes: row.everyMinutes,
             })),
-          encoding: stack.output?.encoding ?? null,
-          encodingFactors:
-            stack.output?.encoding === 'custom'
-              ? {
-                  redFactor: Number(stack.output.redFactor),
-                  greenFactor: Number(stack.output.greenFactor),
-                  blueFactor: Number(stack.output.blueFactor),
-                  baseShift: Number(stack.output.baseShift),
-                }
-              : null,
+          // What the tiles are actually written in, not only what the recipe
+          // restates. A recipe saying nothing re-encodes to its base source's
+          // encoding, which is the ordinary case and every imported one --
+          // and reporting null for it left the console unable to tell a
+          // terrain stack from imagery, so it offered no hillshade for the
+          // stacks that are nothing but terrain.
+          ...stackEncoding(resolved),
           ...coverage,
           // The order the recipe lists them: lowest priority first, last
           // wins. The console shows this order as it stands rather than
@@ -3459,11 +3405,38 @@ export function createApp({
             name: source.name,
             pinned: source.pinned,
             required: source.required,
-            resolved: Boolean(source.entry),
+            // What kind of source this is, said outright rather than left to
+            // be inferred from which fields happen to be null. A URL source
+            // has no infohash and no catalog entry, so a reader guessing from
+            // those calls it an unresolved category -- which is two wrong
+            // things about a source that is working perfectly well.
+            kind: source.remote
+              ? 'url'
+              : source.nested
+                ? 'stack'
+                : source.pinned
+                  ? 'archive'
+                  : 'category',
+            // A URL source resolves by definition: there is nothing to look
+            // up, the address is the answer. Whether it can actually be read
+            // is a question for the first tile, the same as for an archive
+            // this node holds but cannot open.
+            resolved: Boolean(source.entry) || Boolean(source.remote),
+            url: source.remote ?? null,
             infohash: source.entry?.infoHash ?? null,
             archiveName: source.entry?.name ?? null,
-            minzoom: source.entry?.pmtiles?.minZoom ?? null,
-            maxzoom: source.entry?.pmtiles?.maxZoom ?? null,
+            // The recipe's own, where it states them. For a URL source that is
+            // the only place they are known without opening the file, and it
+            // is what the merge itself uses to decide whether to.
+            minzoom:
+              source.entry?.pmtiles?.minZoom ?? source.source?.minzoom ?? null,
+            maxzoom:
+              source.entry?.pmtiles?.maxZoom ?? source.source?.maxzoom ?? null,
+            bounds:
+              source.entry?.pmtiles?.bounds ??
+              (Array.isArray(source.source?.bounds)
+                ? source.source.bounds
+                : null),
             format: source.entry?.pmtiles?.format ?? null,
           })),
         };
@@ -3791,7 +3764,13 @@ export function createApp({
 
       const coverage = stackCoverage(resolved);
       const root = `${baseUrl(req)}/stacks/${encodeURIComponent(req.params.id)}`;
-      const extension = tileExtension(coverage.format);
+      // What the endpoint actually serves, which is what `answerStackTile`
+      // decides with -- not what the sources happen to report. A stack whose
+      // sources state no format at all, which is every one built from URL
+      // sources, has no coverage format to read: the document then advertised
+      // `.bin` for tiles the endpoint answers as webp.
+      const format = outputFormat(resolved);
+      const extension = tileExtension(format);
 
       res.setHeader('access-control-allow-origin', '*');
       const doc = {
@@ -3805,36 +3784,54 @@ export function createApp({
         // Names what it resolved to, so a consumer can tell one resolution
         // from the next without diffing tile URLs — the same reason the
         // `/latest/` document carries a `latest` block.
+        //
+        // Capped. A stack imported from a provider's file index has hundreds
+        // of sources — Mapterhorn's is 458 — and listing every one puts tens
+        // of kilobytes of addresses in a document every map load fetches, to
+        // say something no client does anything with. What the block is for is
+        // telling one resolution from the next, and what moves between
+        // resolutions is the infohashes, so those are what it keeps.
         stack: {
           id: resolved.stack.id,
           space: resolved.stack.space ?? 'elevation',
-          sources: resolved.sources.map((source) => ({
-            name: source.name,
-            infohash: source.entry?.infoHash ?? null,
-            archive: source.entry?.name ?? null,
-          })),
+          sources: resolved.sources
+            .slice(0, TILEJSON_SOURCE_LIMIT)
+            .map((source) => ({
+              name: source.name,
+              infohash: source.entry?.infoHash ?? null,
+              archive: source.entry?.name ?? null,
+            })),
+          // Said rather than silently truncated: a consumer comparing two of
+          // these has to know it is looking at part of a list.
+          ...(resolved.sources.length > TILEJSON_SOURCE_LIMIT
+            ? {
+                more: resolved.sources.length - TILEJSON_SOURCE_LIMIT,
+                total: resolved.sources.length,
+              }
+            : {}),
         },
       };
-      // A stack that re-encodes says how, so a style pointing at it does not
-      // have to restate an encoding the document already knows -- which is how
-      // a style and its data drift into disagreeing. `custom` is unreadable
-      // without its four numbers, so they travel with the word.
-      const outputEncoding = resolved.stack.output?.encoding;
+      // A stack says how its tiles are encoded, so a style pointing at it does
+      // not have to restate an encoding the document already knows -- which is
+      // how a style and its data drift into disagreeing. `custom` is
+      // unreadable without its four numbers, so they travel with the word.
+      //
+      // What the tiles are actually written in, not only what `output` says:
+      // a recipe that states nothing re-encodes to its base source's encoding,
+      // and a document that then declared none left a client to guess. Guessing
+      // wrong renders terrarium heights through the mapbox formula, which is
+      // not a subtle error -- it is a different planet.
+      const { encoding: outputEncoding, encodingFactors } =
+        stackEncoding(resolved);
       if (outputEncoding) {
         doc.encoding = outputEncoding;
-        if (outputEncoding === 'custom') {
-          for (const name of [
-            'redFactor',
-            'greenFactor',
-            'blueFactor',
-            'baseShift',
-          ]) {
-            const value = Number(resolved.stack.output[name]);
+        if (outputEncoding === 'custom' && encodingFactors) {
+          for (const [name, value] of Object.entries(encodingFactors)) {
             if (Number.isFinite(value)) doc[name] = value;
           }
         }
       }
-      if (coverage.format) doc.format = coverage.format;
+      if (format) doc.format = format;
       if (coverage.attribution) doc.attribution = coverage.attribution;
       // Sparse by default, and for a stack that is not a guess.
       //

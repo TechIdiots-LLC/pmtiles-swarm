@@ -1,4 +1,5 @@
 import { stackRevision } from './stacks.js';
+import { mergeImported, parseSourceList } from './url-sources.js';
 
 /**
  * Publishing stack recipes, and adopting the ones another node publishes.
@@ -317,7 +318,15 @@ export class StackFeedSubscriber {
     if (!response.ok) throw new Error(`answered ${response.status}`);
 
     const from = feed.name ?? feed.url;
-    const published = parseStackFeed(await response.text());
+    const body = await response.text();
+
+    // A provider's list of archives rather than another node's recipes. Two
+    // quite different documents reached the same way, so the row says which
+    // it is: a list has no stack of its own to name, and the row has to say
+    // which stack here it keeps up to date.
+    if (feed.into) return this.#readUrlList(feed, body, now);
+
+    const published = parseStackFeed(body);
     const settled = [];
 
     for (const incoming of published) {
@@ -357,6 +366,64 @@ export class StackFeedSubscriber {
 
     settled.push(...(await this.#settleWithdrawn(feed, from, published, now)));
     return settled;
+  }
+
+  /**
+   * Keeps one stack's imported sources level with a provider's file list.
+   *
+   * The other half of what a stack feed can follow. A provider adding a file
+   * — Mapterhorn's index has grown through several versions — should reach a
+   * node that asked to follow it, without anybody remembering to press
+   * Re-import. The reconciliation is the same one the manual import does, so
+   * a hand-written source is left alone and the batch stays where it was put.
+   * @param {object} feed - One entry of `stackFeeds`, carrying `into`.
+   * @param {string} body - What the address answered.
+   * @param {Date} now - The clock.
+   * @returns {Promise<object[]>} - What was done.
+   */
+  async #readUrlList(feed, body, now) {
+    const from = feed.name ?? feed.url;
+    const id = feed.into;
+    const parsed = parseSourceList(body, {
+      from: feed.url,
+      encoding: feed.encoding,
+    });
+
+    const held = this.#stacks?.get(id) ?? null;
+    // A stack somebody made here is theirs. This only ever owns the sources
+    // it imported, and adding a batch to a recipe is not the same as taking
+    // it over -- so a stack that does not exist yet is created, and one that
+    // does keeps everything it had.
+    const sources = mergeImported(held?.sources, parsed.sources, feed.url);
+
+    // Compared before writing, because a list that has not changed is the
+    // ordinary case on every poll and rewriting the recipe would touch its
+    // modification time, its revision, and every cached tile keyed on it.
+    if (held && JSON.stringify(held.sources) === JSON.stringify(sources)) {
+      return [{ id, action: 'skip', why: 'unchanged' }];
+    }
+
+    const stack = {
+      ...(held ?? { id, space: 'elevation' }),
+      id,
+      sources,
+    };
+    try {
+      await this.#stacks.put(stack);
+    } catch (error) {
+      return [{ id, action: 'refused', why: error.message }];
+    }
+    console.log(
+      `[stack-feed] ${from}: ${parsed.sources.length} source(s) into ${id}`,
+    );
+    return [
+      {
+        id,
+        action: held ? 'update' : 'adopt',
+        imported: parsed.sources.length,
+        at: now.toISOString(),
+      },
+    ];
   }
 
   /**

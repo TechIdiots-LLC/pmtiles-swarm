@@ -808,3 +808,67 @@ describe('running a bake as a job', () => {
     assert.equal(manager.cancel('terrain'), false);
   });
 });
+
+describe('what a baked archive says it is encoded as', () => {
+  /**
+   * Bakes a stack and reads the metadata off the file that came out.
+   * @param {object} recipe - Extra recipe fields.
+   * @returns {Promise<object>} - The archive's metadata.
+   */
+  async function bakedMetadataFor(recipe) {
+    const archive = await sourceArchive(`meta-${Math.random()}`, [[1, 0, 0]]);
+    const imported = [];
+    const manager = new BakeManager({
+      tiles: storeOver(archive),
+      config: { dataDir: path.join(workspace, `data-meta-${Math.random()}`) },
+      loadCodec: async () => null,
+      library: {
+        addLocalArchive: async (file) => {
+          imported.push(file);
+          return { infoHash: 'c'.repeat(40) };
+        },
+        resolveSavePath: async () => undefined,
+      },
+    });
+
+    await manager.start({ resolved: stackOver(archive, recipe) });
+    const job = await settled(manager, 'terrain');
+    assert.equal(job.phase, 'done', job.error);
+
+    const { PMTiles } = await import('pmtiles');
+    const { NodeFileSource } = await import('../src/file-source.js');
+    const source = new NodeFileSource(imported[0]);
+    try {
+      return await new PMTiles(source).getMetadata();
+    } finally {
+      source.close?.();
+    }
+  }
+
+  it('carries the encoding a recipe states outright', async () => {
+    const metadata = await bakedMetadataFor({
+      output: { encoding: 'mapbox' },
+    });
+    assert.equal(metadata.encoding, 'mapbox');
+  });
+
+  it("carries the base source's where the recipe states none", async () => {
+    // An imported list sets the encoding on every source and says nothing
+    // about the output, because the merge re-encodes to nothing. Reading only
+    // `output.encoding` wrote no encoding at all, and an archive without one
+    // is read back as imagery -- so an exported Mapterhorn stack rendered
+    // terrarium heights through the mapbox formula.
+    const metadata = await bakedMetadataFor({
+      sources: [{ category: 'base', encoding: 'terrarium' }],
+    });
+    assert.equal(metadata.encoding, 'terrarium');
+  });
+
+  it('says nothing for imagery, whatever its sources hold', async () => {
+    const metadata = await bakedMetadataFor({
+      space: 'rgba',
+      sources: [{ category: 'base', encoding: 'terrarium' }],
+    });
+    assert.equal(metadata.encoding, undefined);
+  });
+});

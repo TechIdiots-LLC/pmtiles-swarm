@@ -18,8 +18,6 @@
   infohash to answer that question with, and is not seeded, retired or rebuilt — none of the mechanisms
   built for an archive this node actually holds apply to one it does not.
 
-
-### 🐞 Bug fixes
 - **A provider's list of PMTiles URLs can be imported as sources.** **Stacks → Import URL list…**,
   or `POST /api/stacks/<id>/import`. Mapterhorn's `download_urls.json` names 458 files with the box
   and zoom range of each; naming those by hand is not work anybody should do once, let alone again
@@ -43,6 +41,39 @@
   hand is left alone — and puts the batch back **where it already was** rather than on the end:
   painting order is the whole meaning of a stack, and a batch that moved each time would quietly bury
   a local override, a day later, on a schedule, with nothing to say why the map had changed.
+
+
+- **A stack can follow a provider's file list on a timer.** A stack feed row with **Into stack** set
+  reads a URL list rather than another node's recipes, and keeps the named stack level with it.
+  Mapterhorn's index has grown through several versions, and a node that imported it once is a node
+  serving whenever that was. The row says which of the two it is by whether **Into stack** is filled
+  in — a feed of recipes names its own stacks and an index cannot, being a list of files with no
+  opinion about what they are for, so the row supplies the stack and the encoding as well.
+
+  It reconciles exactly as **Re-import** does: hand-written sources untouched, the batch back where it
+  was, a withdrawn file dropped rather than left to 404 per tile. A poll where nothing changed writes
+  nothing at all — not the same recipe again, which would move its revision and with it every tile
+  cached against it. A stack that does not exist yet is created; one that does keeps everything it had.
+
+
+### 🐞 Bug fixes
+- **A stack reported no encoding unless its recipe stated one outright.** Reading `output.encoding`
+  alone reports null for the ordinary recipe — the one that re-encodes to nothing and writes whatever
+  its base source is written in, which is every imported stack, since an import sets the encoding per
+  source. Three places read it that way and all three were wrong about terrain: the console offered no
+  terrain preview, the TileJSON told clients nothing so terrarium heights rendered through the mapbox
+  formula, and a baked archive was written with no encoding metadata at all — an export that had to be
+  corrected by hand afterwards to be readable.
+
+- **A stack's TileJSON listed every source.** For a stack imported from a provider's index that is 458
+  addresses and 55 KB, in a document every map load fetches, describing files a client cannot use and
+  will never ask for — it reads tiles from the XYZ endpoint. It now names 25 with a count of the rest.
+  The extension it advertises is the one the endpoint actually serves, too: a stack whose sources state
+  no format has no coverage format to read, and the document said `.bin` for tiles answered as webp.
+
+- **Cancel asked you to fill the form in first.** A `<button>` in a form submits, and a submit is
+  checked against the form's required fields before it goes anywhere — so cancelling the import or
+  warm dialog answered "Please fill out this field" about a field that was about to be discarded.
 
 
 ## 0.89.0

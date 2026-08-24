@@ -730,6 +730,67 @@ export function stackEtag(resolved, z, x, y) {
 }
 
 /**
+ * What a stack's tiles are actually encoded as.
+ *
+ * A recipe that says nothing re-encodes to whatever its base source is written
+ * in, which is the ordinary case -- so reading only `output.encoding` reports
+ * null for most terrain stacks, and anything deciding whether to offer a
+ * hillshade from that decides wrongly.
+ * @param {object} resolved - The resolved stack.
+ * @returns {object} - `{encoding, encodingFactors}`, either possibly null.
+ */
+export function stackEncoding(resolved) {
+  // Imagery has none, whatever its sources happen to be written in: the
+  // channels are a colour, and a page told otherwise would offer a hillshade
+  // of a photograph.
+  if (resolved.stack.space === 'rgba') {
+    return { encoding: null, encodingFactors: null };
+  }
+  const output = resolved.stack.output ?? {};
+  if (output.encoding) {
+    const factors = {};
+    for (const name of [
+      'redFactor',
+      'greenFactor',
+      'blueFactor',
+      'baseShift',
+    ]) {
+      const value = Number(output[name]);
+      if (Number.isFinite(value)) factors[name] = value;
+    }
+    return {
+      encoding: output.encoding,
+      encodingFactors: Object.keys(factors).length ? factors : null,
+    };
+  }
+
+  // Unstated, so the merge writes what the base source is written in. The
+  // base rather than whichever source says something first, because that is
+  // what the merge does -- and they have to agree, or the document describes
+  // tiles in one encoding and the tiles arrive in another.
+  const base = resolved.sources[0];
+  const said = base?.source?.encoding ?? base?.entry?.pmtiles?.encoding;
+  if (!said) return { encoding: null, encodingFactors: null };
+
+  const factors =
+    base.source?.encoding === 'custom'
+      ? base.source
+      : base.entry?.pmtiles?.encodingFactors;
+  return {
+    encoding: said,
+    encodingFactors:
+      said === 'custom' && factors
+        ? {
+            redFactor: Number(factors.redFactor),
+            greenFactor: Number(factors.greenFactor),
+            blueFactor: Number(factors.blueFactor),
+            baseShift: Number(factors.baseShift),
+          }
+        : null,
+  };
+}
+
+/**
  * Whether every source pins content, which is what makes a stack cacheable.
  * @param {object} resolved - Output of resolveStack.
  * @returns {boolean} - True when nothing here can move.
