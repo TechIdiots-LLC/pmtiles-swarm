@@ -176,3 +176,18 @@ describe('what a stack re-encodes to when the recipe does not say', () => {
     assert.equal(said, written);
   });
 });
+
+describe('the addresses at the foot of the public page', () => {
+  it('offers both feeds, and says which is which', async () => {
+    // One "RSS feed" was unambiguous while there was one. With a second, a
+    // reader following the old name would have got archives when they wanted
+    // recipes and had nothing on the page to tell them otherwise.
+    const { readFile } = await import('node:fs/promises');
+    const page = await readFile(
+      new URL('../src/web/public.html', import.meta.url),
+      'utf8',
+    );
+    assert.match(page, /href="\/feed\.xml">archive RSS feed</);
+    assert.match(page, /href="\/stacks\.xml">stack RSS feed</);
+  });
+});

@@ -2,7 +2,11 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **Both feeds are linked at the foot of the public page.** `RSS feed` is `archive RSS feed` now and
+  `stack RSS feed` is beside it. One name was unambiguous while there was one feed; with a second, a
+  reader following the old name would have got archives when they wanted recipes and had nothing on
+  the page to tell them otherwise.
+
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
