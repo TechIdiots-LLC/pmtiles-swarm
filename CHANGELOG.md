@@ -5,6 +5,10 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.94.0
+### 🐞 Bug fixes
 - **Saving settings rewrote a proxy list nobody had touched.** A trusted-proxy list may be stored as
   a string — `"loopback, 10.0.0.0/8"` is what the documentation shows — and the box rendered that as
   one line while reading it back as an array. The two never compared equal, so the field was sent on
