@@ -2,10 +2,29 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **An archive card is built like a category's.** Copy buttons for the addresses that belong
+  somewhere else — TileJSON, magnet, and a **source URL** of its own, the TileJSON URL with the
+  `.torrent` and magnet in its fragment, pinned to that build rather than following the category.
+  The preview, `.torrent` and download stay links, because a page is followed and a file is saved.
+  The printed TileJSON row went with the button that replaced it: an address in full beside a button
+  that copies it is the same fact twice, and it was the longest line on the card.
+
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A terrain stack was offered no hillshade preview on the public page.** The listing reported its
+  encoding as whatever `output.encoding` restated, which for a recipe saying "same as the sources" —
+  the ordinary case — is nothing. So the page could not tell a terrain stack from an imagery one and
+  offered neither the raw preview nor the terrain one. It reports what the stack actually serves now,
+  and reports nothing for imagery, where a guess would have offered a hillshade of a photograph.
+
+- **A stack whose sources disagreed about their encoding wrote tiles in more than one of them.** With
+  no `output.encoding`, the merge took the encoding of whichever source answered first — and which
+  source answers varies by tile, since the base is sparse in one place and the layer above covers in
+  another. One stack wrote one tile as mapbox and the next as terrarium, with the TileJSON in front
+  describing neither: correct in one place, a cliff face in another, for no reason the recipe showed.
+  It follows the base source now, which is a property of the recipe rather than of the tile, and the
+  listing and the merge are held to the same answer by a test.
+
 
 ## 0.87.0
 ### ✨ Features and improvements

@@ -116,6 +116,24 @@ carries. **Terrain-RGB must never be resized as RGB.** Any implementation that
 hands a terrain tile to an image library's `resize` is wrong even though it
 runs.
 
+### What it re-encodes to
+
+`output.encoding` where the recipe says. Where it does not, the **base source's**
+— the bottom one, which is the layer that covers everything.
+
+The base rather than whichever source happened to answer, which is what this
+used to read. Which source answers varies by tile: the base is sparse here, the
+one above covers there. So a stack whose sources disagreed about their encoding
+wrote one tile as mapbox and the next as terrarium, with the TileJSON in front
+describing neither — a map that renders correctly in one place and as a cliff
+face in another, for no reason the recipe shows. The base is a property of the
+recipe and the same for every tile it serves.
+
+It is worked out in two places — the merge, which writes the bytes, and the
+listing, which describes them — and a test holds them together, because two
+files deciding one fact is how a document comes to disagree with the tiles it
+describes.
+
 **`"space": "rgba"`** treats each tile as ordinary imagery: `opacity` scales the
 source alpha, `blend` picks the operator, and the result is composited in
 premultiplied RGBA. This is the Photoshop case — hillshade over satellite, a

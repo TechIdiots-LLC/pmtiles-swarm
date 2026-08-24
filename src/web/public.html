@@ -444,12 +444,20 @@
             links.append(a);
           };
 
+          // The same rule the categories below are built by: an address that
+          // belongs somewhere else -- a style, a torrent client, a feed reader
+          // -- is copied, and a page or a file is followed. An archive was the
+          // odd one out, offering its TileJSON as a link that opens a document
+          // nobody reads and then printing the same URL underneath.
+          const copy = (href, text, fetched) =>
+            copyButton(links, href, text, fetched);
+
           // Only PMTiles and a completed MBTiles have a tile endpoint, and the
           // catalogue says which kind this is — so a link that would answer 415
           // is not offered at all.
           const servable = !archive.kind || archive.kind !== 'unknown';
           if (servable) {
-            add(`${root}/tiles.json`, 'TileJSON');
+            copy(`${root}/tiles.json`, 'TileJSON');
             if (drawsAsTerrain(archive.pmtiles)) {
               // The raster keeps the plain name: it is the one that shows a
               // hole, since a missing DEM tile hillshades as flat ground.
@@ -459,8 +467,12 @@
               add(`${root}/preview`, 'preview');
             }
           }
-          add(`${root}/archive.torrent`, '.torrent');
-          if (archive.magnet) add(archive.magnet, 'magnet');
+          // A file, so a link the browser saves rather than renders.
+          const torrent = el('a', null, '.torrent');
+          torrent.href = `${root}/archive.torrent`;
+          torrent.download = '';
+          links.append(torrent);
+          if (archive.magnet) copy(archive.magnet, 'magnet');
           // Only where the node offers this archive as a download. The
           // catalogue names it rather than the page deciding, because whether
           // a 700 GiB file is advertised to every visitor is the operator's
@@ -473,12 +485,18 @@
             download.download = archive.name ?? '';
             links.append(download);
           }
+          // Last, as it is on a category: the one worth copying and the one
+          // nobody wants to read. A TileJSON URL carrying the .torrent URL and
+          // a percent-encoded magnet in its fragment is several hundred
+          // characters, and it is never read, only pasted.
+          if (archive.sourceUrl) copy(archive.sourceUrl, 'source URL');
           card.append(links);
 
+          // The TileJSON row that used to head this went with the button that
+          // replaced it: printing an address in full beside a button that
+          // copies it is the same fact twice, and it was the longest line on
+          // the card. What is left has no button of its own.
           const urls = el('div', 'urls');
-          if (servable) {
-            urls.append(urlRow('TileJSON', new URL(`${root}/tiles.json`, location.href).href));
-          }
           if (archive.archive) {
             urls.append(urlRow('archive', archive.archive));
           }

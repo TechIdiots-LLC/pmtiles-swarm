@@ -169,6 +169,86 @@ function withSwarmHandles(url, { torrent, magnet }) {
 }
 
 /**
+ * What a stack's tiles are actually encoded as.
+ *
+ * A recipe that says nothing re-encodes to whatever its base source is written
+ * in, which is the ordinary case -- so reading only `output.encoding` reports
+ * null for most terrain stacks, and anything deciding whether to offer a
+ * hillshade from that decides wrongly.
+ * @param {object} resolved - The resolved stack.
+ * @returns {object} - `{encoding, encodingFactors}`, either possibly null.
+ */
+function stackEncoding(resolved) {
+  // Imagery has none, whatever its sources happen to be written in: the
+  // channels are a colour, and a page told otherwise would offer a hillshade
+  // of a photograph.
+  if (resolved.stack.space === 'rgba') {
+    return { encoding: null, encodingFactors: null };
+  }
+  const output = resolved.stack.output ?? {};
+  if (output.encoding) {
+    const factors = {};
+    for (const name of [
+      'redFactor',
+      'greenFactor',
+      'blueFactor',
+      'baseShift',
+    ]) {
+      const value = Number(output[name]);
+      if (Number.isFinite(value)) factors[name] = value;
+    }
+    return {
+      encoding: output.encoding,
+      encodingFactors: Object.keys(factors).length ? factors : null,
+    };
+  }
+
+  // Unstated, so the merge writes what the base source is written in. The
+  // base rather than whichever source says something first, because that is
+  // what the merge does -- and they have to agree, or the document describes
+  // tiles in one encoding and the tiles arrive in another.
+  const base = resolved.sources[0];
+  const said = base?.source?.encoding ?? base?.entry?.pmtiles?.encoding;
+  if (!said) return { encoding: null, encodingFactors: null };
+
+  const factors =
+    base.source?.encoding === 'custom'
+      ? base.source
+      : base.entry?.pmtiles?.encodingFactors;
+  return {
+    encoding: said,
+    encodingFactors:
+      said === 'custom' && factors
+        ? {
+            redFactor: Number(factors.redFactor),
+            greenFactor: Number(factors.greenFactor),
+            blueFactor: Number(factors.blueFactor),
+            baseShift: Number(factors.baseShift),
+          }
+        : null,
+  };
+}
+
+/**
+ * What goes in a style's `sources` block for one archive.
+ *
+ * The same shape a category's has -- a TileJSON URL with the ways into the
+ * swarm in its fragment -- pinned to this build rather than following the
+ * category. Which is the point of copying an archive's rather than a
+ * category's: this exact map, and no rebuild moving underneath it.
+ * @param {object} archive - The catalogue entry.
+ * @param {string} base - The node's public base URL.
+ * @returns {string} - The URL.
+ */
+function archiveSourceUrl(archive, base) {
+  const root = `${base}/archives/${archive.infoHash}`;
+  return withSwarmHandles(`${root}/tiles.json`, {
+    torrent: `${root}/archive.torrent`,
+    magnet: archive.magnet,
+  });
+}
+
+/**
  * A TileJSON URL carrying the ways into the swarm in its fragment.
  *
  * A *source* URL, not a style one — it goes in a style's `sources` block, and
@@ -2096,6 +2176,14 @@ export function createApp({
           categories: normalizeCategories(entry),
           magnet: entry.magnet,
           torrent: `${baseUrl(req)}/archives/${entry.infoHash}/archive.torrent`,
+          // What goes in a style's `sources` block for this build, the same
+          // shape a category's has. Pinned rather than following the category,
+          // which is the reason to copy an archive's rather than a category's:
+          // this exact map, with no rebuild moving underneath it.
+          sourceUrl:
+            entry.kind && entry.kind === 'unknown'
+              ? null
+              : archiveSourceUrl(entry, baseUrl(req)),
           webSeeds: entry.webSeeds ?? [],
           // Absent rather than null where it is not on offer.
           ...(publishingFor(entry, config).publicDownload
@@ -2340,7 +2428,13 @@ export function createApp({
           maxzoom: coverage.maxzoom,
           bounds: coverage.bounds,
           format,
-          encoding: stack.output?.encoding ?? null,
+          // What it actually serves, not only what the recipe restates. A
+          // recipe that says nothing re-encodes to whatever its sources use,
+          // which is the ordinary case -- and reporting null for it left the
+          // public page unable to tell a terrain stack from an imagery one,
+          // so it offered no hillshade preview for the very stacks that are
+          // nothing but terrain.
+          ...stackEncoding(resolved),
           sparse: stack.sparse ?? true,
           sources: resolved.sources.length,
           endpoints: {

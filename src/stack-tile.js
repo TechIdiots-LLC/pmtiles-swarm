@@ -647,6 +647,21 @@ async function readMaskEdges({
 }
 
 /**
+ * What a stack re-encodes to when the recipe does not say.
+ *
+ * The bottom source's, because a stack is written bottom-first and the base is
+ * the layer that covers everything -- and because it has to be a property of
+ * the recipe rather than of the tile. See docs/tile-stacks.md -- "The two
+ * pixel spaces".
+ * @param {object} resolved - The resolved stack.
+ * @returns {string|undefined} - The encoding, or undefined to take the default.
+ */
+export function baseEncoding(resolved) {
+  const base = resolved?.sources?.[0];
+  return base?.source?.encoding ?? base?.entry?.pmtiles?.encoding ?? undefined;
+}
+
+/**
  * Turns each clip into the weight its source is painted with.
  *
  * Rasterised at the grid the layers are painted on, and only for the tiles the
@@ -789,7 +804,7 @@ async function merge({
       contributions,
       options: merging,
       output,
-      encoding: output.encoding ?? first.source?.encoding,
+      encoding: output.encoding ?? baseEncoding(resolved),
     });
     if (!off) return { contributors, format, empty: true };
     const body = await codec.encode(off, {
@@ -837,7 +852,13 @@ async function merge({
       ...output,
       width: grid,
       height: grid,
-      encoding: output.encoding ?? first.source?.encoding,
+      // The base source's, not the first one that happened to contribute.
+      // Which source answers first varies by tile -- the base is sparse here,
+      // the second one covers there -- so reading it off the contribution
+      // encoded one tile as mapbox and the next as terrarium, from one stack,
+      // with the document in front describing neither. The base is a property
+      // of the recipe and the same for every tile it serves.
+      encoding: output.encoding ?? baseEncoding(resolved),
     });
   }
 
