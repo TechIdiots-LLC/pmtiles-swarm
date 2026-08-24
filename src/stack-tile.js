@@ -69,7 +69,7 @@ export function parentLimitFor(resolved) {
     .map((source) =>
       source.nested
         ? stackCoverage(source.nested).maxzoom
-        : source.entry?.pmtiles?.maxZoom,
+        : (source.entry?.pmtiles?.maxZoom ?? source.source?.maxzoom),
     )
     .filter((zoom) => Number.isFinite(zoom));
   if (!shallowest.length || !Number.isFinite(maxzoom)) return PARENT_LIMIT;
@@ -179,17 +179,44 @@ export function clipsFor(resolved, cutlines, z, x, y, size = 256) {
  * @param {object} options - Source, coordinates, the tile store and whether to climb.
  * @returns {Promise<object|null>} - The tile and the zoom it came from.
  */
+/**
+ * Whether a request at this zoom could possibly land inside a source's stated
+ * range, once climbing to a parent is taken into account.
+ *
+ * A range with neither bound stated answers yes to everything -- there is
+ * nothing here to skip on, and the source's own header settles it once read.
+ * Where one is stated, this is what lets hundreds of them be named in one
+ * stack without hundreds of reads on every tile: `minzoom` refuses a request
+ * shallower than the source ever has, and `maxzoom` refuses one so deep that
+ * even climbing to the parent floor cannot reach shallow enough ground to
+ * still be within it.
+ * @param {object} recipe - The source's recipe, for `minzoom`/`maxzoom`.
+ * @param {number} z - The zoom being requested.
+ * @param {number} limit - How far climbing is allowed to reach.
+ * @returns {boolean} - False only when no climb could possibly find a tile.
+ */
+function inZoomRange(recipe, z, limit) {
+  if (recipe?.minzoom !== undefined && z < recipe.minzoom) return false;
+  if (recipe?.maxzoom !== undefined && z - limit > recipe.maxzoom) {
+    return false;
+  }
+  return true;
+}
+
 async function readFrom({ source, z, x, y, tiles, climb, signal, limit }) {
+  // The one line that differs between a catalog archive and one read straight
+  // from a URL: which store method answers, and what it is asked for. Every
+  // other part of climbing to a parent is the same question either way.
+  const fetch = source.remote
+    ? (at, gx, gy, options) =>
+        tiles.getRemoteTile(source.remote, at, gx, gy, options)
+    : (at, gx, gy, options) =>
+        tiles.getTile(source.entry.infoHash, at, gx, gy, options);
+
   const floor = climb ? Math.max(0, z - (limit ?? PARENT_LIMIT)) : z;
   for (let at = z; at >= floor; at -= 1) {
     const shift = z - at;
-    const tile = await tiles.getTile(
-      source.entry.infoHash,
-      at,
-      x >> shift,
-      y >> shift,
-      { signal },
-    );
+    const tile = await fetch(at, x >> shift, y >> shift, { signal });
     if (tile?.data) return { tile, parentZ: at };
   }
   return null;
@@ -312,6 +339,11 @@ export function passThroughRead({
   // A nested stack has no stored bytes at all, so there is nothing this could
   // hand back even when it is the only thing answering.
   if (reads.some((read) => read.nested)) return null;
+  // A URL source has no infohash to answer the byte-for-byte question with
+  // -- there is nothing here to name it by. `needsCodec` already says a
+  // stack carrying one always decodes; this is the same answer, asked before
+  // that path is reached.
+  if (reads.some((read) => read.source.remote)) return null;
 
   const answered = reads.filter((read) => read.found);
   // More than one and they have to be painted; none and there is nothing to
@@ -378,11 +410,19 @@ async function readAll({ resolved, z, x, y, tiles, signal, clips }) {
         if (clips?.[index]?.where === OUTSIDE) return { source, found: null };
         return { source, nested: true };
       }
-      if (!source.entry) return { source, found: null };
+      if (!source.entry && !source.remote) return { source, found: null };
       // Nothing of this source is in the shape, so there is nothing to fetch.
       // Decided before the read, which is where the saving is: no swarm round
       // trip, no decode, no merge.
       if (clips?.[index]?.where === OUTSIDE) return { source, found: null };
+      // The other half of the same saving, for a URL source: a stated zoom
+      // range this tile falls outside of is settled from the recipe alone.
+      // With hundreds of these in one stack -- a global base plus regional
+      // patches, say -- this is most of them, most tiles, and it is the
+      // difference between "cheap to have many" and not.
+      if (source.remote && !inZoomRange(source.source, z, limit)) {
+        return { source, found: null };
+      }
       try {
         return {
           source,
@@ -489,7 +529,7 @@ async function gather({
     }
     contributors.push(
       read.found.parentZ === z
-        ? `${read.source.name}=${read.source.entry.infoHash}`
+        ? `${read.source.name}=${read.source.entry?.infoHash ?? 'url'}`
         : `${read.source.name}=z${read.found.parentZ}`,
     );
 
@@ -514,13 +554,21 @@ async function gather({
       const span = 2 ** offset;
       const children = await Promise.all(
         Array.from({ length: span * span }, async (_unused, index) => {
-          const child = await tiles.getTile(
-            read.source.entry.infoHash,
-            z + offset,
-            x * span + (index % span),
-            y * span + Math.floor(index / span),
-            { signal },
-          );
+          const child = read.source.remote
+            ? await tiles.getRemoteTile(
+                read.source.remote,
+                z + offset,
+                x * span + (index % span),
+                y * span + Math.floor(index / span),
+                { signal },
+              )
+            : await tiles.getTile(
+                read.source.entry.infoHash,
+                z + offset,
+                x * span + (index % span),
+                y * span + Math.floor(index / span),
+                { signal },
+              );
           if (!child?.data) return null;
           return codec.decode(Buffer.from(child.data), {
             channels: rgba ? 4 : 3,
@@ -544,6 +592,7 @@ async function gather({
       // Carried so a feathered source can go back for its parents, which is
       // the one thing the merge needs that is not already in this raster.
       infoHash: read.source.entry?.infoHash,
+      remote: read.source.remote,
       parentZ: read.found.parentZ,
       raster,
     });
@@ -609,11 +658,23 @@ async function readMaskEdges({
       let parentSize = grid;
       await Promise.all(
         layout.tiles.map(async (parent) => {
-          const tile = await tiles
-            .getTile(contribution.infoHash, parent.z, parent.x, parent.y, {
-              signal,
-            })
-            .catch(() => null);
+          const tile = await (
+            contribution.remote
+              ? tiles.getRemoteTile(
+                  contribution.remote,
+                  parent.z,
+                  parent.x,
+                  parent.y,
+                  { signal },
+                )
+              : tiles.getTile(
+                  contribution.infoHash,
+                  parent.z,
+                  parent.x,
+                  parent.y,
+                  { signal },
+                )
+          ).catch(() => null);
           if (!tile?.data) return;
           const raster = await codec
             .decode(Buffer.from(tile.data), { channels: 3 })

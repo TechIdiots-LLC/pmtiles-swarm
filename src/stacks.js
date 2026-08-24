@@ -75,6 +75,23 @@ const SPACES = new Set(['elevation', 'rgba']);
 const ID = /^[a-z0-9][a-z0-9._-]*$/i;
 
 /**
+ * Whether a source's `url` is one worth trying.
+ *
+ * Only the scheme, because the operator typing this is the same person who
+ * could already point a scheduled source or a subscription at any address --
+ * it is not new trust, only a new place the recipe carries a URL.
+ * @param {string} value - What the recipe said.
+ * @returns {boolean} - True for a parseable http or https address.
+ */
+function isHttpUrl(value) {
+  try {
+    return ['http:', 'https:'].includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * How many stacks deep a recipe may reach.
  *
  * A loop is caught by name and refused outright; this is for the chain that
@@ -128,15 +145,37 @@ export function validateStack(stack) {
   }
 
   stack.sources.forEach((source, index) => {
-    const named = [source?.category, source?.archive, source?.stack].filter(
-      Boolean,
-    ).length;
+    const named = [
+      source?.category,
+      source?.archive,
+      source?.stack,
+      source?.url,
+    ].filter(Boolean).length;
     // Both is worse than neither: it looks deliberate, and whichever one the
     // implementation happened to prefer would be a silent choice.
     if (named !== 1) {
       problems.push(
-        `sources[${index}] needs exactly one of category, archive, stack`,
+        `sources[${index}] needs exactly one of category, archive, stack, url`,
       );
+    }
+    if (source?.url !== undefined) {
+      if (typeof source.url !== 'string' || !isHttpUrl(source.url)) {
+        problems.push(`sources[${index}].url must be an http(s) address`);
+      }
+    }
+    for (const key of ['minzoom', 'maxzoom']) {
+      if (source?.[key] === undefined) continue;
+      const value = Number(source[key]);
+      if (!Number.isInteger(value) || value < 0 || value > 24) {
+        problems.push(`sources[${index}].${key} must be a whole number 0-24`);
+      }
+    }
+    if (
+      source?.minzoom !== undefined &&
+      source?.maxzoom !== undefined &&
+      Number(source.minzoom) > Number(source.maxzoom)
+    ) {
+      problems.push(`sources[${index}].minzoom must not exceed maxzoom`);
     }
     if (source?.stack) {
       if (typeof source.stack !== 'string' || !ID.test(source.stack)) {
@@ -349,6 +388,12 @@ export function needsCodec(stack) {
     // Always: a nested stack is evaluated rather than read, and evaluating it
     // means decoding everything underneath.
     if (source.stack) return `sources[${index}].stack`;
+    // Always, for now: a URL source has no catalog entry, and the
+    // byte-for-byte short-circuit is built around one -- an infohash to name
+    // in the answer, a content type to serve it as. Decoding it like any other
+    // source works today; passing its bytes straight through is a faster path
+    // this does not take yet.
+    if (source.url) return `sources[${index}].url`;
     if (source.maskValues?.length) return `sources[${index}].maskValues`;
     if (source.maskColors?.length) return `sources[${index}].maskColors`;
     if (source.maskRange?.length) return `sources[${index}].maskRange`;
@@ -445,6 +490,27 @@ export function resolveStack(stack, resolvers, chain = []) {
       };
     }
 
+    if (source.url) {
+      // An archive read straight from where it is published, with no torrent
+      // and no catalog entry -- it is never seeded, never rebuilt, never
+      // retired by this node. What it covers and what zoom it reaches are
+      // asked of the URL itself when a tile actually needs it, not resolved
+      // here: resolving 458 headers synchronously for a stack nobody has
+      // asked a tile of yet is work spent on sources most tiles will never
+      // touch.
+      return {
+        ...common,
+        entry: null,
+        name: source.url,
+        // Not content-addressed, so not safe to cache as though it can never
+        // change -- the same reasoning a category gets, for a different
+        // reason: a category moves because the build underneath it does, a
+        // URL moves because whoever owns it edited the file in place.
+        pinned: false,
+        remote: source.url,
+      };
+    }
+
     const entry = source.category
       ? resolvers.category(source.category)
       : resolvers.archive(source.archive);
@@ -456,7 +522,9 @@ export function resolveStack(stack, resolvers, chain = []) {
     };
   });
 
-  const missing = sources.filter((s) => s.required && !s.entry && !s.nested);
+  const missing = sources.filter(
+    (s) => s.required && !s.entry && !s.nested && !s.remote,
+  );
   return { stack, sources, missing };
 }
 
@@ -535,6 +603,25 @@ export function stackCoverage(resolved) {
   const nested = resolved.sources
     .filter((s) => s.nested)
     .map((s) => stackCoverage(s.nested));
+  // A URL source has no catalog entry to read a zoom or an extent from, so
+  // there is nothing here unless the recipe stated one itself. Worth folding
+  // in even so: a stack built from dozens of imported patches would otherwise
+  // need its own minzoom, maxzoom and bounds set by hand to match whatever the
+  // deepest and widest of them happen to be.
+  const remote = resolved.sources
+    .filter(
+      (s) =>
+        s.remote &&
+        (s.source?.minzoom !== undefined ||
+          s.source?.maxzoom !== undefined ||
+          Array.isArray(s.source?.bounds)),
+    )
+    .map((s) => ({
+      minZoom: s.source?.minzoom,
+      maxZoom: s.source?.maxzoom,
+      bounds: Array.isArray(s.source?.bounds) ? s.source.bounds : undefined,
+    }));
+
   const summaries = [
     ...present.map((s) => s.entry.pmtiles),
     ...nested.map((cover) => ({
@@ -544,6 +631,7 @@ export function stackCoverage(resolved) {
       format: cover.format,
       attribution: cover.attribution,
     })),
+    ...remote,
   ];
 
   const minzoom =

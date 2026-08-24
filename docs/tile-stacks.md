@@ -53,6 +53,7 @@ of its parts.
 - [What a mask has to match](#what-a-mask-has-to-match)
 - [Feathering a seam](#feathering-a-seam)
 - [A stack as a source](#a-stack-as-a-source)
+- [A source read straight from a URL](#a-source-read-straight-from-a-url)
   - [Exporting on a schedule](#exporting-on-a-schedule)
 - [Finding a stack](#finding-a-stack)
 - [Syncing a stack to another node](#syncing-a-stack-to-another-node)
@@ -255,20 +256,23 @@ it differs from the snake_case rio-rgbify-merge uses.
 
 ### Source fields
 
-| Field                  | Meaning                                                                                                      |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `category`             | Resolve to the newest build in this category.                                                                |
-| `archive`              | Or pin one infohash. Exactly one of the two.                                                                 |
-| `required`             | A tile fails rather than being served without this source. Defaults true for the bottom-most, false above.   |
-| `encoding`             | `mapbox` or `terrarium`. Elevation space only.                                                               |
-| `baseVal` / `interval` | Mapbox decode offset and step. Default `-10000` and `0.1`.                                                   |
-| `maskValues`           | Decoded heights meaning "no data here". Elevation space only.                                                |
-| `maskRange`            | `[low, high]` in metres, or a list of them. Everything inside is nodata. Elevation space only.               |
-| `heightAdjustment`     | Metres, added **after** masking. Elevation space only.                                                       |
-| `feather`              | Pixels to fade in over wherever the source stops: a `cutline`, `bounds`, or the holes a mask leaves. Max 64. |
-| `featherMetres`        | The same fade written as metres of ground, worked out per tile. Usually the one to reach for.                |
-| `opacity`              | `0`–`1`, scales the source alpha. RGBA space only.                                                           |
-| `blend`                | `normal`, `multiply`, `screen`, `overlay`, `darken`, `lighten`. RGBA space only.                             |
+| Field                  | Meaning                                                                                                        |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `category`             | Resolve to the newest build in this category.                                                                  |
+| `archive`              | Or pin one infohash.                                                                                           |
+| `stack`                | Or another stack, merged as heights. See "A stack as a source".                                                |
+| `url`                  | Or an archive read straight from an http(s) address, no torrent involved. Exactly one of the four.             |
+| `minzoom` / `maxzoom`  | Skip a `url` source outside this zoom range before opening it. Optional; the header answers anyway without it. |
+| `required`             | A tile fails rather than being served without this source. Defaults true for the bottom-most, false above.     |
+| `encoding`             | `mapbox` or `terrarium`. Elevation space only.                                                                 |
+| `baseVal` / `interval` | Mapbox decode offset and step. Default `-10000` and `0.1`.                                                     |
+| `maskValues`           | Decoded heights meaning "no data here". Elevation space only.                                                  |
+| `maskRange`            | `[low, high]` in metres, or a list of them. Everything inside is nodata. Elevation space only.                 |
+| `heightAdjustment`     | Metres, added **after** masking. Elevation space only.                                                         |
+| `feather`              | Pixels to fade in over wherever the source stops: a `cutline`, `bounds`, or the holes a mask leaves. Max 64.   |
+| `featherMetres`        | The same fade written as metres of ground, worked out per tile. Usually the one to reach for.                  |
+| `opacity`              | `0`–`1`, scales the source alpha. RGBA space only.                                                             |
+| `blend`                | `normal`, `multiply`, `screen`, `overlay`, `darken`, `lighten`. RGBA space only.                               |
 
 `attribution` is not optional in practice. A stack is a derived work of every
 source in it, and the thing that reliably gets lost when tiles are combined is
@@ -1630,6 +1634,89 @@ would wait a day before showing it had ever run.
 `stacks.scheduledExports: false`, beside the rows, turns the whole thing off.
 That is what a second node serving the same stacks wants: only one of them
 should be the node that bakes.
+
+## A source read straight from a URL
+
+A source may name a URL instead of a category, an archive or a stack:
+
+```json
+{
+  "id": "mapterhorn",
+  "sources": [
+    {
+      "url": "https://download.mapterhorn.com/planet.pmtiles",
+      "encoding": "terrarium",
+      "minzoom": 0,
+      "maxzoom": 12
+    },
+    {
+      "url": "https://download.mapterhorn.com/6-32-31.pmtiles",
+      "encoding": "terrarium",
+      "bounds": [0, 0, 5.625, 5.625],
+      "minzoom": 13,
+      "maxzoom": 13
+    }
+  ]
+}
+```
+
+Mapterhorn publishes terrain this way: a global base to about z12 and several
+hundred regional patches reaching higher, each one a plain HTTPS download and
+none of it in a swarm this node is part of. Downloading 11.8 TiB of it first,
+to get it into a category the ordinary way, is not a step anybody wants — the
+whole point is to read a tile at a time, from wherever it already is.
+
+### Read the same way a swarm archive is
+
+`FetchSource`, from the `pmtiles` package this project already depends on,
+asks for byte ranges the way `TorrentSource` does — a request for a tile costs
+the header once, the directory once, and the tile itself, not the file. A URL
+source keeps its own small cache of open readers, separate from the one
+catalog archives share, so a stack naming hundreds of them is not competing
+with the archives this node actually seeds for the same budget.
+
+Parent climbing works the same way it does for a category source: a shallow
+archive — Mapterhorn's own base stops at z12 — is upscaled for a deeper
+request exactly as GEBCO is, through the same code, because reading one is now
+a question of which store method answers and nothing else.
+
+### Cheap to have hundreds of
+
+The one thing that makes hundreds of these practical rather than merely
+possible: `bounds` and the two new per-source fields, `minzoom` and `maxzoom`,
+are checked **before** anything is opened. A tile request outside a source's
+stated box, or at a zoom no climb from here could reach into its stated range,
+skips that source without a request leaving this node. For a stack built from
+Mapterhorn's own file list — one tile mostly intersects a global base and one
+or two regional patches — that is most of several hundred sources, on every
+tile, settled from the recipe alone.
+
+Without a stated zoom range this still works, just later: `FetchSource`'s own
+header read answers "no tile" cheaply once opened, the same way a catalog
+archive's does. The static check is what avoids opening most of them at all,
+not what makes opening one safe.
+
+### What it does not do
+
+**Never passed through raw.** A URL source has no infohash to answer the
+byte-for-byte question with, so a stack containing one always decodes —
+`needsCodec` says so from the recipe, the same answer a nested stack gets and
+for the same reason.
+
+**Not seeded, not retired, not rebuilt.** This node does not hold a copy, so
+none of the mechanisms that apply to an archive apply here. The URL is not
+content-addressed either — nothing stops whoever publishes it editing the file
+in place — so it is treated as unstable for caching, the same as a category
+and for a related reason: a category is unstable because the build under it
+moves, a URL because the operator does not control what is at the other end
+of it.
+
+**Feathering a mask edge only partly.** A URL source that both masks and fades
+needs its parents read to measure the ramp, exactly as a catalog source does —
+and that path is wired up. What is not: a parent read that fails is caught and
+skipped silently, the same forgiving rule `readMaskEdges` already applies to a
+catalog source whose parent cannot be reached, so a patchy host degrades the
+ramp rather than failing the tile.
 
 ## Finding a stack
 

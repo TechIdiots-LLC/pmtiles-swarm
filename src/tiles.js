@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { PMTiles, SharedPromiseCache } from 'pmtiles';
+import { FetchSource, PMTiles, SharedPromiseCache } from 'pmtiles';
 import { TorrentSource } from 'pmtiles-torrent';
 import { NodeFileSource } from './file-source.js';
 import { onDiskPath } from './incomplete.js';
@@ -53,6 +53,12 @@ export class TileReadError extends Error {
  */
 export class TileStore {
   #catalog;
+  // Archives read straight over HTTP rather than through the swarm, keyed by
+  // URL rather than by infohash. A stack source naming a URL instead of a
+  // category is not this node's to seed -- it stays wherever it is, and this
+  // is a second, smaller cache beside `#open` for exactly that case. See
+  // docs/tile-stacks.md -- "A source read straight from a URL".
+  #remote = new Map();
   #engine;
   #config;
   #open = new Map();
@@ -117,6 +123,105 @@ export class TileStore {
       zlib.gzip(data, (error, out) => (error ? reject(error) : resolve(out))),
     );
     return { data: gzipped, encoding: 'gzip' };
+  }
+
+  /**
+   * Reads one tile out of an archive that lives at a URL rather than in the
+   * swarm.
+   *
+   * The same shape `getTile` answers in, so a stack merge does not have to
+   * know which kind of source it just read. Gzipping follows the same rule --
+   * PMTiles decompresses on the way out, so a vector tile needs it put back --
+   * decided from the header this reads once and keeps, rather than from a
+   * catalog entry that does not exist for a source like this.
+   * @param {string} url - Where the archive is.
+   * @param {number} z - Zoom.
+   * @param {number} x - Column.
+   * @param {number} y - Row.
+   * @param {object} [options] - Abort signal.
+   * @returns {Promise<{data: Buffer, encoding?: string} | null>} - The tile, or null when absent.
+   */
+  async getRemoteTile(url, z, x, y, options = {}) {
+    const handle = await this.#acquireRemote(url);
+    let tile;
+    try {
+      tile = await handle.archive.getZxy(z, x, y, options.signal);
+    } catch (error) {
+      if (error?.name === 'AbortError') throw error;
+      throw new TileReadError(
+        `${url} could not be read: ${error.message}`,
+        502,
+      );
+    }
+    if (!tile?.data) return null;
+
+    const data = Buffer.from(tile.data);
+    const summary = await this.summarizeRemote(url, options).catch(() => null);
+    const format = summary?.format;
+    if (!format || PRECOMPRESSED.has(format)) return { data };
+
+    const gzipped = await new Promise((resolve, reject) =>
+      zlib.gzip(data, (error, out) => (error ? reject(error) : resolve(out))),
+    );
+    return { data: gzipped, encoding: 'gzip' };
+  }
+
+  /**
+   * A URL source's header and metadata, read once and kept on the handle.
+   *
+   * Read on every tile it would cost a directory-cache lookup per request for
+   * no reason -- the header of a file at a fixed URL does not change under a
+   * running process, and a stack that has just been edited to point somewhere
+   * else gets a new handle rather than this one.
+   * @param {string} url - Where the archive is.
+   * @param {object} [options] - Abort signal.
+   * @returns {Promise<object>} - The same summary shape the prober produces.
+   */
+  async summarizeRemote(url, options = {}) {
+    const handle = await this.#acquireRemote(url);
+    if (handle.summary) return handle.summary;
+
+    const header = await handle.archive.getHeader(options.signal);
+    const metadata = await handle.archive
+      .getMetadata(options.signal)
+      .catch(() => ({}));
+    const summary = summarize(header, metadata ?? {});
+    handle.summary = summary;
+    return summary;
+  }
+
+  /**
+   * Opens (or reuses) a reader for an archive at a URL.
+   *
+   * The same LRU shape `#acquire` keeps for catalog archives, over a separate
+   * map: a URL source and a catalog entry are different resources and neither
+   * should evict the other out of one shared budget.
+   * @param {string} url - Where the archive is.
+   * @returns {Promise<object>} - The open handle.
+   */
+  async #acquireRemote(url) {
+    const existing = this.#remote.get(url);
+    if (existing) {
+      this.#remote.delete(url);
+      this.#remote.set(url, existing);
+      return existing;
+    }
+
+    const source = new FetchSource(url);
+    const handle = {
+      mode: 'remote',
+      source,
+      archive: new PMTiles(source, this.#directoryCache),
+      openedAt: new Date().toISOString(),
+    };
+    this.#remote.set(url, handle);
+
+    const limit = this.#config.tiles?.maxOpenRemoteArchives ?? 16;
+    while (this.#remote.size > limit) {
+      const [oldest] = this.#remote.keys();
+      this.#remote.delete(oldest);
+    }
+    return handle;
   }
 
   /**
@@ -248,6 +353,9 @@ export class TileStore {
     const handles = [...this.#open.values()];
     this.#open.clear();
     for (const handle of handles) await this.#release(handle);
+    // A FetchSource holds no file descriptor and no swarm state to release --
+    // there is nothing here to close, only to forget.
+    this.#remote.clear();
   }
 
   /**

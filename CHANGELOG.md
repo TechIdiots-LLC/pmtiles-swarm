@@ -2,7 +2,22 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **A stack source may name a URL instead of a category, archive or stack.** `{ "url": "https://…" }`,
+  read straight over HTTP with no torrent involved — for an archive published as a plain download,
+  like Mapterhorn's terrain: a global base plus hundreds of regional patches, 11.8 TiB in total and
+  never meant to be downloaded whole. `FetchSource`, from the `pmtiles` package this project already
+  depends on, asks for byte ranges the way a swarm-backed source does; a tile costs the header once,
+  the directory once, and the tile itself.
+
+  Parent climbing works the same way it does for a category source — a shallow archive upscales for a
+  deeper request through the same code, since reading one is now only a question of which store method
+  answers. New per-source `minzoom` and `maxzoom` fields, checked before anything is opened, are what
+  make hundreds of these practical: a tile request outside a source's stated box or zoom range skips it
+  without a request leaving this node, which for a stack built from a provider's whole file list is
+  most of them, on every tile. A URL source always decodes rather than passing through raw, having no
+  infohash to answer that question with, and is not seeded, retired or rebuilt — none of the mechanisms
+  built for an archive this node actually holds apply to one it does not.
+
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
