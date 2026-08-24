@@ -5,6 +5,10 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.92.0
+### 🐞 Bug fixes
 - **A stack's TileJSON published the addresses its sources are read from.** A URL source is named by
   its URL and an S3 source by its bucket and key, and the document naming them is served to anybody
   who can load the map — while the archives at the other end are read with credentials nobody else
