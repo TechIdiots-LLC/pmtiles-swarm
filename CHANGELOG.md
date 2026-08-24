@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.87.0
+### ✨ Features and improvements
 - **A feed per stack, and an address to copy for it.** `/stacks/<id>.xml` carries one recipe, for
   following a single map out of somebody's several rather than everything they publish. An **RSS**
   button on the stack's row in the console and beside TileJSON and XYZ on the public page. Copied
