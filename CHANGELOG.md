@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.88.0
+### ✨ Features and improvements
 - **An archive card is built like a category's.** Copy buttons for the addresses that belong
   somewhere else — TileJSON, magnet, and a **source URL** of its own, the TileJSON URL with the
   `.torrent` and magnet in its fragment, pinned to that build rather than following the category.
