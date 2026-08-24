@@ -2,12 +2,19 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.91.0
+### ✨ Features and improvements
 - **A source at a URL can be added by hand, not only imported.** **Add source → an address you
   type…** in the stack editor, writing the same source the importer does. The card asks for the
   address and for the zoom range the archive holds — a catalog archive states its range in its own
   header and this has no header anybody has read, so leaving it empty means every tile asks it.
-  Anything published as a plain HTTPS download works, an S3 object or presigned URL included; a
-  private `s3://` bucket does not, having no request this can make without credentials to sign it.
+  Anything published as a plain HTTPS download works, an S3 object or presigned URL included, and so
+  does `s3://bucket/key.pmtiles` for a private bucket — see below.
 
 - **A stack's source list folds up past five sources.** An imported list is several hundred rows,
   which buried every other stack on the page under one of them. The fold says how many there are and
