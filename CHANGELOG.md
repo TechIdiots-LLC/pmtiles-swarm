@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.90.0
+### ✨ Features and improvements
 - **A stack source may name a URL instead of a category, archive or stack.** `{ "url": "https://…" }`,
   read straight over HTTP with no torrent involved — for an archive published as a plain download,
   like Mapterhorn's terrain: a global base plus hundreds of regional patches, 11.8 TiB in total and
