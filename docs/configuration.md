@@ -82,8 +82,17 @@ Takes effect on the next request; no restart. See
 ### `trustProxy`
 
 Takes anything Express accepts: `true`, a hop count, or a subnet list such as
-`"loopback, 10.0.0.0/8"`. Off by default, because trusting these headers from an
-untrusted client lets it claim any protocol or address it likes.
+`"loopback, 10.0.0.0/8"`. A list may be written as one string or as an array,
+and either may separate its entries with commas, spaces or newlines — all four
+shapes mean the same thing here. Off by default, because trusting these headers
+from an untrusted client lets it claim any protocol or address it likes.
+
+An entry that is not an address, a subnet, or one of `loopback`, `linklocal`
+and `uniquelocal` is **ignored and logged**, and a value that cannot be read at
+all leaves the node trusting nobody. Deliberately not fatal: Express compiles
+this the moment it is set, which is before the listener binds, so a value it
+refuses used to be a node that would not start, could not be reached, and could
+not be corrected from the console that wrote it.
 
 Set it when a proxy terminates TLS, or the TileJSON will advertise `http://` tile
 URLs that browsers block as mixed content. Setting `publicUrl` instead sidesteps

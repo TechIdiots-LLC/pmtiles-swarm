@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import net from 'node:net';
 import { hashPassword } from './auth.js';
 import path from 'node:path';
 
@@ -10,6 +11,79 @@ import path from 'node:path';
  * Every setting is documented in docs/configuration.md. Comments here say only
  * what a value is; why it is what it is belongs in the document.
  */
+/** What proxy-addr accepts as a name for a group of addresses. */
+const TRUST_KEYWORDS = new Set(['loopback', 'linklocal', 'uniquelocal']);
+
+/**
+ * Whether one entry of a trust list is something proxy-addr can compile.
+ * @param {string} entry - One address, subnet or keyword.
+ * @returns {boolean} - True if it is usable.
+ */
+function isTrustEntry(entry) {
+  if (TRUST_KEYWORDS.has(entry)) return true;
+  const [address, mask, ...rest] = entry.split('/');
+  if (rest.length > 0) return false;
+  if (!net.isIP(address)) return false;
+  if (mask === undefined) return true;
+  if (net.isIP(mask)) return true;
+  const bits = Number(mask);
+  if (!Number.isInteger(bits) || bits < 0) return false;
+  return bits <= (net.isIP(address) === 6 ? 128 : 32);
+}
+
+/**
+ * What to hand Express as `trust proxy`, from what the config says.
+ *
+ * Express takes four different things here and means something different by
+ * each, and it splits a comma-separated list only when it is handed a bare
+ * string -- never inside an array. So `["10.0.0.1, 10.0.0.2"]`, which is what
+ * a settings field split on newlines alone produces from one line with a
+ * comma in it, reaches proxy-addr as a single address, and proxy-addr throws.
+ *
+ * That throw happened while the app was being built, before the listener
+ * bound: a node that could not start, could not be reached, and could not be
+ * corrected from the console that wrote the value. So every shape is
+ * flattened here, and anything left that is not an address is dropped with a
+ * warning rather than carried into Express.
+ * @param {boolean|number|string|string[]} value - `config.trustProxy`.
+ * @returns {boolean|number|string[]} - Something Express can compile.
+ */
+export function trustProxyFor(value) {
+  if (
+    value === true ||
+    value === false ||
+    value === undefined ||
+    value === null
+  ) {
+    return value === true;
+  }
+  if (typeof value === 'number') return Number.isFinite(value) ? value : false;
+
+  const entries = (Array.isArray(value) ? value : [value])
+    .flatMap((one) => String(one).split(/[\s,]+/))
+    .map((one) => one.trim())
+    .filter(Boolean);
+  if (!entries.length) return false;
+
+  // A lone number is a hop count, and a lone `true` trusts everybody. Both
+  // are things somebody may type into a field that mostly takes addresses.
+  if (entries.length === 1) {
+    if (entries[0] === 'true') return true;
+    if (entries[0] === 'false') return false;
+    if (!Number.isNaN(Number(entries[0]))) return Number(entries[0]);
+  }
+
+  const usable = entries.filter((entry) => isTrustEntry(entry));
+  for (const entry of entries) {
+    if (usable.includes(entry)) continue;
+    console.warn(
+      `[config] trustProxy: ignoring "${entry}", which is not an address, ` +
+        'a subnet, or one of loopback, linklocal, uniquelocal.',
+    );
+  }
+  return usable.length ? usable : false;
+}
+
 const DEFAULTS = {
   port: 8090,
   host: '0.0.0.0',

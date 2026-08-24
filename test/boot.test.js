@@ -124,6 +124,34 @@ describe('starting the node the way the service does', () => {
   });
 });
 
+describe('a start with a trustProxy nobody could compile', () => {
+  it('comes up anyway, so the setting can be corrected', async () => {
+    // The exact value that took a real node down 155 times: a settings field
+    // split on newlines alone turned one line holding a comma into a
+    // one-element array holding both addresses. Express compiles this while
+    // the app is being built, before the listener binds, so the node would
+    // not start, could not be reached, and could not be corrected from the
+    // console that had written it.
+    const node = await boot({ trustProxy: ['172.16.1.2, 172.16.1.3'] });
+    try {
+      const res = await fetch(`${node.base}/api/status`);
+      assert.equal(res.status, 200);
+    } finally {
+      await node.stop();
+    }
+  });
+
+  it('comes up with a value that is not addresses at all', async () => {
+    const node = await boot({ trustProxy: ['proxy.internal'] });
+    try {
+      assert.equal((await fetch(`${node.base}/api/status`)).status, 200);
+      assert.match(node.output(), /trustProxy: ignoring "proxy.internal"/);
+    } finally {
+      await node.stop();
+    }
+  });
+});
+
 describe('a start that cannot hand the library back to the engine', () => {
   it('does not take the node down with it', () => {
     // Restore already tolerates a failure per archive. What this guards is the

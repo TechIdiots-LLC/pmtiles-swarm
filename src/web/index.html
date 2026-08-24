@@ -5579,11 +5579,15 @@ Every piece is hashed against the ` +
               type: 'addresses',
               placeholder: 'off — or one address or subnet per line',
               help:
-                'One per line: 172.16.1.49, or 172.16.1.0/24, or several. A ' +
-                'lone number is read as a hop count instead, and a lone `true` ' +
-                'trusts any caller at all — worth avoiding, since this header ' +
-                'is what decides which address the node believes a request ' +
-                'came from.',
+                'An address or a subnet — <code>172.16.1.49</code>, ' +
+                '<code>172.16.1.0/24</code>, <code>loopback</code> — one ' +
+                'per line, or separated by commas. A lone number is read ' +
+                'as a hop count instead, and a lone <code>true</code> ' +
+                'trusts any caller at all, which is worth avoiding: this ' +
+                'header is what decides which address the node believes a ' +
+                'request came from. Anything that is not an address is ' +
+                'ignored and said so in the log, rather than stopping the ' +
+                'node from starting.',
             },
             {
               key: 'publicIndex',
@@ -6371,10 +6375,18 @@ Every piece is hashed against the ` +
           else if (type === 'addresses') {
             // Express takes four things here and means something different by
             // each: `true` trusts any caller, a number is a hop count, and a
-            // string or an array of them names the proxies. One per line, and
-            // what was typed decides which of the four it is.
+            // string or an array of them names the proxies. What was typed
+            // decides which of the four it is.
+            //
+            // Split on commas as well as newlines. Express splits a comma
+            // list only when it is handed a bare string and never inside an
+            // array, so one line reading `10.0.0.1, 10.0.0.2` became a
+            // one-element array holding both -- which is not an address, and
+            // which Express rejects while the app is being built, before the
+            // listener binds. The node then would not start, and could not be
+            // corrected from the console that wrote the value.
             const lines = String(element.value)
-              .split('\n')
+              .split(/[\n,]/)
               .map((line) => line.trim())
               .filter(Boolean);
             if (!lines.length) value = null;

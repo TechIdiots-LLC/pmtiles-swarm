@@ -5,6 +5,20 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- **A trusted-proxy list typed with commas stopped the node from starting.** The settings field
+  split what was typed on newlines only, so one line reading `172.16.1.2, 172.16.1.3` was saved as
+  an array holding both addresses in one string. Express splits a comma list when it is handed a
+  bare string and never inside an array, so proxy-addr was given `172.16.1.2, 172.16.1.3` as a
+  single address and threw -- while the app was being built, before the listener binds. The node
+  would not start, could not be reached, and could not be corrected from the console that had
+  written the value; on the node that found this it was 155 restarts.
+
+  Three things were wrong and all three are fixed. The field now splits on commas as well as
+  newlines. Every shape the setting can be written in -- a string, an array, commas, spaces,
+  newlines -- is flattened to what Express wants. And an entry that is not an address is ignored
+  and logged rather than thrown: this setting is not worth a node that will not boot, and trusting
+  nobody is the safe end of being wrong about it.
+
 - **A failed restore took the whole node down, console included.** Handing the library back to the
   engine at startup already tolerates a failure per archive; the call coming apart as a whole was
   unguarded, and it happens before the listener binds — so under `Restart=always` the result is a

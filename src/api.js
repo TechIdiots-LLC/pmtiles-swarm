@@ -22,7 +22,12 @@ import {
 import { mutableMagnet, trackersFromMagnet } from './mutable.js';
 import { guessKind } from './library.js';
 import { QBittorrentEngine } from './engines/qbittorrent.js';
-import { RESTART_REQUIRED, redactConfig, saveConfig } from './config.js';
+import {
+  RESTART_REQUIRED,
+  redactConfig,
+  saveConfig,
+  trustProxyFor,
+} from './config.js';
 import { freeSpace, listLocations } from './locations.js';
 import { restart, restartMode } from './restart.js';
 import { parseFeed, renderFeed } from './feed.js';
@@ -260,7 +265,26 @@ export function createApp({
   // the TileJSON advertises http:// tile URLs. A browser that loaded the map
   // over https then blocks every one of them as mixed content, which looks
   // like an empty map rather than like a configuration mistake.
-  if (config.trustProxy) app.set('trust proxy', config.trustProxy);
+  //
+  // Normalised first, and then guarded anyway. Express compiles this value
+  // the moment it is set, which is before the listener binds -- so a value it
+  // cannot compile is not a setting that fails to apply, it is a node that
+  // will not start, cannot be reached, and cannot be corrected from the
+  // console that wrote it. Nothing about which addresses to trust is worth
+  // that: an unparseable one is reported and the node comes up trusting
+  // nobody, which is the safe end of being wrong.
+  const trustProxy = trustProxyFor(config.trustProxy);
+  if (trustProxy !== false) {
+    try {
+      app.set('trust proxy', trustProxy);
+    } catch (error) {
+      console.error(
+        `[config] trustProxy could not be applied (${error.message}). ` +
+          'X-Forwarded-* headers are being ignored; the node is starting ' +
+          'anyway so this can be corrected from Settings.',
+      );
+    }
+  }
   app.use(express.json({ limit: '1mb' }));
 
   // Tiles, TileJSON and the feed stay public — serving them is the point.
