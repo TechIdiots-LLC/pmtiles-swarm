@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.96.0
+### ✨ Features and improvements
 - **The swarm-read limit is memory now, not a count.** `tiles.maxOpenSwarmArchives: 16` becomes
   `tiles.swarmCacheBytes: 1 GiB`, because a count was the wrong unit for it. What is expensive about
   a cache-mode reader is its piece cache, which is **RAM** — a map of whole pieces in the node's own
