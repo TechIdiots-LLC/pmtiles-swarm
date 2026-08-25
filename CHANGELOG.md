@@ -12,7 +12,11 @@
   and a path added to the installed unit by hand will not be in the new one.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **The unit's `ReadWritePaths` left out where an export writes.** `stackExports[].savePath` and
+  `.publishDir`, and a watched folder's `publishDir`, were not among the directories derived from
+  the configuration — so a nightly bake to a directory named nowhere else ran for an hour and was
+  refused the write at the end, with that directory's permissions perfect. Which is the exact
+  failure the derived list exists to prevent. Re-run `init --systemd` to pick them up.
 
 ## 0.95.0
 ### ✨ Features and improvements

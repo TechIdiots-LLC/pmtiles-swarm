@@ -268,3 +268,47 @@ describe('how long systemd is told to allow for a stop', () => {
     assert.match(unit, /TimeoutStopSec=300/);
   });
 });
+
+describe('the directories an export needs to be able to write', () => {
+  it('names where a scheduled bake puts its archive', () => {
+    // Missed for as long as this list existed. A nightly bake to a directory
+    // named nowhere else ran for an hour and was refused the write at the
+    // end, with that directory's permissions perfect -- which is the exact
+    // failure the list exists to prevent.
+    const paths = writablePaths(
+      {
+        dataDir: '/var/lib/pmtiles-swarm/data',
+        stackExports: [
+          { stack: 'terrain', savePath: '/mnt/fast/bakes' },
+          { stack: 'terrain', publishDir: '/srv/maps/published' },
+          { stack: 'other' },
+        ],
+      },
+      '/etc/pmtiles-swarm/swarm.config.json',
+    );
+    assert.ok(
+      paths.some((one) => one.endsWith(path.join('mnt', 'fast', 'bakes'))),
+    );
+    assert.ok(
+      paths.some((one) => one.endsWith(path.join('srv', 'maps', 'published'))),
+    );
+  });
+
+  it('names where a watched folder publishes what it finds', () => {
+    const paths = writablePaths(
+      { watch: [{ path: '/srv/incoming', publishDir: '/srv/www/pmtiles' }] },
+      '/etc/pmtiles-swarm/swarm.config.json',
+    );
+    assert.ok(
+      paths.some((one) => one.endsWith(path.join('srv', 'www', 'pmtiles'))),
+    );
+  });
+
+  it('is unbothered by a row that names neither', () => {
+    const paths = writablePaths(
+      { stackExports: [{ stack: 'terrain' }], watch: [{}] },
+      '/etc/pmtiles-swarm/swarm.config.json',
+    );
+    assert.ok(paths.length >= 1);
+  });
+});

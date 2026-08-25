@@ -764,8 +764,16 @@ export function writablePaths(config, configPath) {
     // directory holding it is written to as surely as any of the above.
     configPath ? path.dirname(path.resolve(configPath)) : undefined,
     ...(config?.watch ?? []).map((entry) => entry?.path),
+    ...(config?.watch ?? []).map((entry) => entry?.publishDir),
     ...(config?.locations ?? []).map((entry) => entry?.path),
     ...(config?.subscriptions ?? []).map((entry) => entry?.savePath),
+    // Where a scheduled export puts the archive it just built, and where it
+    // publishes a copy of it. Missed for as long as this list has existed:
+    // a nightly bake to a directory named nowhere else ran for an hour and
+    // was refused the write at the end, with the directory's permissions
+    // perfect -- which is the exact failure this list exists to prevent.
+    ...(config?.stackExports ?? []).map((entry) => entry?.savePath),
+    ...(config?.stackExports ?? []).map((entry) => entry?.publishDir),
   ].filter((value) => typeof value === 'string' && value);
 
   // Deduplicated but deliberately not collapsed into common ancestors. A
