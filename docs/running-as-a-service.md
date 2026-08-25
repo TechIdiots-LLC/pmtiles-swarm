@@ -189,6 +189,39 @@ The unit below is what it generates, with your paths in it. Worth reading
 either way — a generated file you do not understand is a hand-written one you
 have not written yet.
 
+## `status=226/NAMESPACE`
+
+The unit exits in six milliseconds, having produced nothing at all:
+
+```
+Process: 991182 ExecStart=... (code=exited, status=226/NAMESPACE)
+```
+
+Nothing is wrong with the program; it never ran. With `ProtectSystem=strict`,
+systemd builds a mount namespace before starting anything, and a directory
+named in `ReadWritePaths=` that **does not exist** makes that fail. There is no
+log from the node because there was no node.
+
+Find it:
+
+```
+systemctl show -p ReadWritePaths --value pmtiles-swarm | tr ' ' '
+'   | sed 's/^-//' | while read -r p; do [ -d "$p" ] || echo "missing: $p"; done
+```
+
+Then create what is missing and restart:
+
+```
+sudo install -d -o pmtiles-swarm -g pmtiles-swarm -m 0775 /the/missing/path
+sudo systemctl restart pmtiles-swarm
+```
+
+Units generated from version 0.97.0 onwards prefix every path with `-`, which
+is systemd for "ignore this if it does not exist" — so a missing directory
+becomes a write that fails later, naming the path, rather than a unit that will
+not start and says nothing about why. `init --systemd` also lists the
+directories the configuration names that are not there yet.
+
 ## Regenerating the unit on a node that already runs
 
 The unit is derived from two things that move: the configuration, and how many

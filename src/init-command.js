@@ -181,6 +181,33 @@ export async function runInit(options = {}, write = console.log) {
     write('  added to the installed unit by hand is not in this one. Move it');
     write('  into the configuration — as a save location, a watched folder or');
     write('  a cache path — and it will be derived from now on.');
+
+    // A directory the configuration names and nobody has made is the one way
+    // a correct unit still fails: systemd cannot mount what is not there, so
+    // it refuses the whole unit before the process runs.
+    const absent = [];
+    for (const dir of writablePaths(held, configPath)) {
+      const there = await fs
+        .access(dir)
+        .then(() => true)
+        .catch(() => false);
+      if (!there) absent.push(dir);
+    }
+    if (absent.length > 0) {
+      write('');
+      write(`  ${absent.length} of those directories do not exist yet:`);
+      write('');
+      for (const dir of absent) {
+        write(
+          `    sudo install -d -o ${options.user ?? 'pmtiles-swarm'} ` +
+            `-g ${options.user ?? 'pmtiles-swarm'} -m 0775 ${dir}`,
+        );
+      }
+      write('');
+      write('  The unit ignores a directory that is not there rather than');
+      write('  refusing to start, so what you would see instead is a write');
+      write('  failing later, naming the path.');
+    }
     return 0;
   }
 

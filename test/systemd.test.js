@@ -163,7 +163,8 @@ describe('the generated unit', () => {
         .replace(/^ReadWritePaths=/, '')
         .replace(/\s*\\$/, '')
         .trim();
-      if (value) granted.push(value);
+      // The dash is systemd's "ignore if missing", not part of the path.
+      if (value) granted.push(value.replace(/^-/, ''));
       if (!lines[index].endsWith('\\')) break;
     }
     granted.sort();
@@ -310,5 +311,33 @@ describe('the directories an export needs to be able to write', () => {
       '/etc/pmtiles-swarm/swarm.config.json',
     );
     assert.ok(paths.length >= 1);
+  });
+});
+
+describe('a directory the configuration names and nobody has made', () => {
+  it('is ignored by the unit rather than stopping it', () => {
+    // With ProtectSystem=strict, a ReadWritePaths entry that does not exist
+    // stops the unit before the process runs: status=226/NAMESPACE, six
+    // milliseconds of CPU, and nothing in the journal from a program that
+    // never started. A missing directory should be a message, not a silence.
+    const unit = unitFor({ config: config(), configPath: CONFIG_PATH });
+    const listed = unit
+      .slice(unit.indexOf('ReadWritePaths='))
+      .split('\n')
+      .filter((line) => line.includes(path.sep) || line.includes('/'))
+      .map((line) => line.replace('ReadWritePaths=', '').trim());
+
+    assert.ok(listed.length > 0, 'no paths were listed');
+    assert.deepEqual(
+      listed.filter((one) => !one.startsWith('-')),
+      [],
+      'these would stop the unit if they did not exist',
+    );
+  });
+
+  it('says what the dash is for, since it looks like a typo', () => {
+    const unit = unitFor({ config: config(), configPath: CONFIG_PATH });
+    assert.match(unit, /ignore this if it/);
+    assert.match(unit, /226\/NAMESPACE/);
   });
 });

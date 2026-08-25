@@ -5,7 +5,17 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A directory the configuration named but nobody had made stopped the unit dead.**
+  `status=226/NAMESPACE`, six milliseconds of CPU, and nothing in the journal — because the program
+  never ran: with `ProtectSystem=strict`, systemd builds the mount namespace first, and a
+  `ReadWritePaths=` entry that does not exist makes that fail. Every path is now prefixed with `-`,
+  systemd's "ignore this if it does not exist", so the node starts and a write that has nowhere to
+  go fails where it is attempted, naming the path. A missing directory should be a message, not a
+  silence.
+
+  `init --systemd` also lists the directories the configuration names that are not there yet, with
+  the `install -d` line for each. See [running-as-a-service.md](docs/running-as-a-service.md) —
+  "status=226/NAMESPACE".
 
 ## 0.96.0
 ### ✨ Features and improvements

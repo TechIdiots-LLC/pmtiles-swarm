@@ -284,3 +284,39 @@ describe('regenerating the unit for a node that already exists', () => {
     assert.match(again.said, /added to the installed unit by hand/);
   });
 });
+
+describe('directories the configuration names but nobody has made', () => {
+  it('names them, with the command that makes each one', async () => {
+    // The one way a correct unit still fails: systemd cannot mount what is
+    // not there, so it refuses the unit before the process runs.
+    const first = await init({ systemd: true });
+    const config = await loadConfig(first.config);
+    await fs.writeFile(
+      first.config,
+      JSON.stringify({
+        ...JSON.parse(await fs.readFile(first.config, 'utf8')),
+        stackExports: [
+          { stack: 'terrain', publishDir: path.join(first.dir, 'not-made') },
+        ],
+      }),
+    );
+
+    const again = await init({ config: first.config, systemd: true });
+    assert.match(again.said, /do not exist yet/);
+    assert.match(again.said, /install -d/);
+    assert.ok(again.said.includes(path.join(first.dir, 'not-made')));
+    assert.ok(config.dataDir);
+  });
+
+  it('says nothing when they are all there', async () => {
+    const first = await init({ systemd: true });
+    const config = await loadConfig(first.config);
+    for (const dir of [config.dataDir, config.savePath]) {
+      await fs.mkdir(dir, { recursive: true });
+    }
+    await fs.mkdir(config.libtorrent.resumeDir, { recursive: true });
+
+    const again = await init({ config: first.config, systemd: true });
+    assert.doesNotMatch(again.said, /do not exist yet/);
+  });
+});
