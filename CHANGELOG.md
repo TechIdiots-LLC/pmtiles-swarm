@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.95.0
+### ✨ Features and improvements
 - **The defaults now assume a library of hundreds, not a handful.** `tiles.maxOpenArchives` goes
   from 16 to 128 and `tiles.directoryCacheEntries` from 200 to 2000. Sixteen was set for the most
   expensive kind of open archive and then applied to every kind, which is wrong for the node this is
