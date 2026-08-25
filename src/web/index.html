@@ -5289,16 +5289,21 @@ Every piece is hashed against the ` +
                 'stops doing anything.',
             },
             {
-              key: 'tiles.maxOpenSwarmArchives',
-              label: 'Cache-mode archives kept open',
+              key: 'tiles.swarmCacheBytes',
+              label: 'Piece cache memory, all swarm reads',
               type: 'number',
-              placeholder: '16',
+              placeholder: '1073741824',
               help:
-                'Counted apart from the limit above, because this is the ' +
-                'expensive kind: a cache-mode reader holds a piece cache ' +
-                'sized from the torrent’s piece length, so with 16 MiB pieces ' +
-                'a hundred of them is gigabytes. That is why the one limit ' +
-                'above could not simply be raised.',
+                'RAM, not disk. An archive read through the swarm keeps whole ' +
+                'pieces in memory, because the swarm hands out pieces and a ' +
+                'tile is a few kilobytes of one — without it, every tile pays ' +
+                'for a 4 or 16 MiB fetch. Each reader allows itself ' +
+                '<code>max(64 MiB, 8 × piece length)</code>, so this is the ' +
+                'number that decides how many stay open: lower ' +
+                '<b>Piece cache bytes</b> below and more of them fit. A ' +
+                'budget, not an allocation — a reader that has served three ' +
+                'tiles holds three pieces. Complete archives are unaffected: ' +
+                'they hold a file descriptor and no cache.',
             },
             {
               key: 'tiles.maxOpenRemoteArchives',

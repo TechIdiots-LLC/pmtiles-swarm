@@ -7,7 +7,7 @@ import { after, describe, it } from 'node:test';
 import { TileType, zxyToTileId } from 'pmtiles';
 import { loadConfig } from '../src/config.js';
 import { PMTilesWriter } from '../src/pmtiles-write.js';
-import { TileStore } from '../src/tiles.js';
+import { TileStore, overSwarmBudget } from '../src/tiles.js';
 
 /**
  * How many archives a node keeps open at once.
@@ -63,12 +63,19 @@ describe('the defaults, for a library of hundreds', () => {
     );
   });
 
-  it('holds the expensive kind where it was', async () => {
+  it('bounds the expensive kind by memory rather than by count', async () => {
+    // A count is the wrong unit for it. What is expensive about a cache-mode
+    // reader is its piece cache, and how big that is depends on the torrent:
+    // max(64 MiB, 8 x pieceLength). Sixteen readers is a gigabyte for the
+    // 4 MiB pieces this project creates and two for a planet torrent's 16 MiB
+    // ones, which is not a limit anybody chose.
     const tiles = await settings();
-    // A cache-mode reader carries a piece cache sized from the torrent's
-    // piece length. With 16 MiB pieces a hundred of them is gigabytes, which
-    // is the reason the single old limit could not simply be raised.
-    assert.equal(tiles.maxOpenSwarmArchives, 16);
+    assert.equal(tiles.swarmCacheBytes, 1024 * 1024 * 1024);
+    assert.equal(
+      tiles.maxOpenSwarmArchives,
+      undefined,
+      'a count as well would be two limits saying different things',
+    );
   });
 
   it('keeps more readers for archives that are expensive to reopen', async () => {
@@ -139,5 +146,75 @@ describe('closing archives when the budget is met', () => {
     });
     assert.equal(open(), 30);
     await store.close();
+  });
+});
+
+describe('the memory the swarm readers may hold between them', () => {
+  /**
+   * `count` open readers, oldest first, each reporting the same cache budget.
+   * @param {number} count - How many.
+   * @param {number} each - Bytes its piece cache is allowed.
+   * @returns {Array} - `[key, handle]` pairs.
+   */
+  const readers = (count, each) =>
+    Array.from({ length: count }, (_unused, at) => [
+      `hash-${at}`,
+      { mode: 'swarm', source: { stats: { cacheBudget: each } } },
+    ]);
+
+  it('keeps four times as many small-piece readers as large-piece ones', async () => {
+    // The arithmetic an operator would otherwise do by hand, with the piece
+    // length of every archive in front of them: a reader's cache is
+    // max(64 MiB, 8 x pieceLength), so 4 MiB pieces cost 64 MiB and a planet
+    // torrent's 16 MiB pieces cost 128.
+    const budget = 512 * 1024 * 1024;
+    const small = overSwarmBudget(readers(40, 64 * 1024 * 1024), budget);
+    const large = overSwarmBudget(readers(40, 256 * 1024 * 1024), budget);
+
+    assert.equal(40 - small.length, 8);
+    assert.equal(40 - large.length, 2);
+  });
+
+  it('closes the least recently used first', async () => {
+    const closing = overSwarmBudget(
+      readers(4, 64 * 1024 * 1024),
+      128 * 1024 * 1024,
+    );
+    assert.deepEqual(
+      closing.map(([key]) => key),
+      ['hash-0', 'hash-1'],
+    );
+  });
+
+  it('never closes the last one, whatever the budget says', async () => {
+    // A budget smaller than a single reader is a configuration to report, not
+    // one to enforce into serving no tile at all: the archive just opened is
+    // the one being read.
+    const closing = overSwarmBudget(readers(4, 256 * 1024 * 1024), 1024);
+    assert.equal(closing.length, 3);
+  });
+
+  it('leaves complete local archives alone', async () => {
+    // They hold a file descriptor, not a piece cache, and are bounded by
+    // their own limit.
+    const held = [
+      ...readers(2, 512 * 1024 * 1024),
+      ['local', { mode: 'local' }],
+    ];
+    const closing = overSwarmBudget(held, 64 * 1024 * 1024);
+    assert.ok(closing.every(([key]) => key !== 'local'));
+  });
+
+  it('counts a reader that has not seen its torrent yet at the floor', async () => {
+    // 64 MiB, which is where a piece cache starts before the piece length is
+    // known. Guessing zero would let a hundred of them open at once.
+    const closing = overSwarmBudget(
+      [
+        ['a', { mode: 'swarm', source: { stats: {} } }],
+        ['b', { mode: 'swarm' }],
+      ],
+      64 * 1024 * 1024,
+    );
+    assert.equal(closing.length, 1);
   });
 });

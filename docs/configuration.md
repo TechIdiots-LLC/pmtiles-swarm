@@ -727,7 +727,8 @@ what lets a machine with 10 GiB free serve a 700 GiB planet. See
 | setting                       | default  |                                                              |
 | ----------------------------- | -------- | ------------------------------------------------------------ |
 | `tiles.maxOpenArchives`       | `128`    | complete archives kept open; each is a file descriptor       |
-| `tiles.maxOpenSwarmArchives`  | `16`     | cache-mode readers, counted apart: each holds a piece cache  |
+| `tiles.swarmCacheBytes`       | `1 GiB`  | **memory** the piece caches of swarm reads share             |
+| `tiles.maxOpenSwarmArchives`  | unset    | a hard count of swarm readers as well, if you want one       |
 | `tiles.maxOpenRemoteArchives` | `64`     | readers for a URL or a bucket; cheap to hold, dear to reopen |
 | `tiles.directoryCacheEntries` | `2000`   | header and directory cache, shared across archives           |
 | `tiles.pieceCacheBytes`       | unset    | sized from the torrent's piece length when unset             |
@@ -738,8 +739,31 @@ what lets a machine with 10 GiB free serve a 700 GiB planet. See
 | `tiles.headerTimeoutMs`       | `12000`  | how long a TileJSON request waits for a header               |
 | `tiles.sparse`                | unset    | `true` for 404 on a missing tile, `false` for 204            |
 
-Leave `pieceCacheBytes` unset unless you have a reason. A fixed budget is a trap
-with 16 MiB pieces, since 64 MiB holds only four.
+### Why a swarm read caches pieces in memory at all
+
+The swarm's unit is a **piece** — 4 MiB for archives this project creates,
+commonly 16 MiB for a planet torrent. A tile is a few kilobytes inside one. So
+fetching a piece to serve one tile and throwing it away means the next tile
+pays for the whole piece again, and PMTiles guarantees there will be a next
+tile in the same piece: its tiles are laid out in Hilbert order, so tiles that
+are neighbours on the map are neighbours in the file. A tile lookup also reads
+the header and a directory before the tile itself, and those live in pieces
+that every single request would otherwise re-fetch.
+
+Not on disk, because a disk copy of the pieces is what cache mode exists to
+avoid: the point is a machine with 10 GiB free serving a 700 GiB planet. The
+engine keeps whatever it keeps; this is the layer above it, and evicting from
+it costs nothing.
+
+**Trading cache size for open archives.** The two settings multiply. Halving
+`pieceCacheBytes` doubles how many archives stay open within the same
+`swarmCacheBytes`, at the cost of a lower hit rate on each. `16 MiB × 64
+archives` and `64 MiB × 16 archives` are the same gigabyte spent differently:
+the first suits a node reading a tile here and a tile there across many
+archives, the second a node serving a region of a few.
+
+Leave `pieceCacheBytes` unset unless you have such a reason. A fixed budget is
+a trap with 16 MiB pieces, since 64 MiB holds only four.
 
 ### Three limits, because the handles cost different things
 
@@ -752,9 +776,13 @@ directory.
 
 - **A complete archive** is a file descriptor and its share of the directory
   cache. The unit allows 65535 descriptors, so hundreds of these are nothing.
-- **A cache-mode archive** carries a piece cache sized from the torrent's piece
-  length. At 16 MiB pieces a hundred of them is gigabytes, which is why this
-  one keeps the old ceiling and is counted separately.
+- **A cache-mode archive** carries a piece cache, and it is **memory** — a map
+  of whole pieces in the node's own heap, not a directory on disk. Bounded by
+  `swarmCacheBytes` rather than by a count, because a count is the wrong unit:
+  a reader allows itself `max(64 MiB, 8 × pieceLength)`, so sixteen of them is
+  1 GiB against the 4 MiB pieces this project creates and 2 GiB against the
+  16 MiB pieces a planet torrent usually has. Stated as memory, the number
+  means what an operator cares about and the count follows from it.
 - **A URL or bucket archive** holds an HTTP reader and the summary it has
   already read. Cheap to keep, and expensive to reopen: a reopen costs a header
   and a directory fetch over the network rather than off a disk.

@@ -379,14 +379,29 @@ const DEFAULTS = {
      */
     maxOpenArchives: 128,
     /**
-     * Open archives read through the swarm, which is the expensive kind.
+     * Memory the piece caches of swarm-read archives may hold between them.
      *
-     * Counted apart from the limit above and kept where that limit used to
-     * be. A cache-mode reader holds a piece cache sized from the torrent's
-     * piece length, so with 16 MiB pieces a hundred of them is gigabytes --
-     * the reason the single old limit could not simply be raised.
+     * A count would be the wrong unit. What is expensive about a cache-mode
+     * reader is its piece cache, and how big that is depends on the torrent:
+     * `max(64 MiB, 8 x pieceLength)`, so 64 MiB for the 4 MiB pieces this
+     * project creates and 128 MiB for the 16 MiB pieces a planet torrent
+     * usually has. Sixteen readers is a gigabyte in one case and two in the
+     * other, which is not a limit anybody chose.
+     *
+     * Stated as memory, the number means what an operator actually cares
+     * about, and the count follows from it: lower `pieceCacheBytes` and more
+     * archives stay open, at the same ceiling. A budget rather than an
+     * allocation -- an archive that has served three tiles holds three
+     * pieces.
      */
-    maxOpenSwarmArchives: 16,
+    swarmCacheBytes: 1024 * 1024 * 1024,
+    /**
+     * A hard count of swarm-read archives, for a node that wants one.
+     *
+     * Unset by default: the budget above is the better limit, because it is
+     * the thing that runs out. Set this as well and the smaller wins.
+     */
+    maxOpenSwarmArchives: undefined,
     /**
      * Open archives read straight from a URL or a bucket.
      *

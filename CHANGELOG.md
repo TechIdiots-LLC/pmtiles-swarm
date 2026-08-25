@@ -2,6 +2,20 @@
 
 ## master
 ### ✨ Features and improvements
+- **The swarm-read limit is memory now, not a count.** `tiles.maxOpenSwarmArchives: 16` becomes
+  `tiles.swarmCacheBytes: 1 GiB`, because a count was the wrong unit for it. What is expensive about
+  a cache-mode reader is its piece cache, which is **RAM** — a map of whole pieces in the node's own
+  heap — and how big it is depends on the torrent: `max(64 MiB, 8 × pieceLength)`. Sixteen readers
+  is a gigabyte against the 4 MiB pieces this project creates and two against the 16 MiB pieces a
+  planet torrent usually has, which is not a limit anybody chose.
+
+  Each reader is asked what its cache costs rather than assumed, so the count now follows from the
+  memory: halve `pieceCacheBytes` and twice as many archives stay open for the same gigabyte. The
+  last reader is never closed, whatever the budget says — the archive just opened is the one being
+  read. `maxOpenSwarmArchives` remains for a node that wants a hard count as well; unset by default.
+
+  Complete archives are unaffected: they hold a file descriptor and no piece cache, and are bounded
+  by `maxOpenArchives`.
 - **`init --systemd` regenerates the unit without touching the configuration.** The unit is derived
   from the configuration and from how many archives the library holds, and both move — a watched
   folder added later belongs in `ReadWritePaths`, and a grown library needs longer to write its

@@ -49,6 +49,42 @@ export class TileReadError extends Error {
   }
 }
 
+/** What a reader's piece cache holds before it has seen the torrent. */
+const STARTING_CACHE_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Which swarm-read archives to close for their piece caches to fit a budget.
+ *
+ * Each reader is asked what its cache costs rather than assumed, because only
+ * it knows: the budget it sets for itself is `max(64 MiB, 8 x pieceLength)`,
+ * and the piece length is the torrent's. So a node reading 4 MiB-piece
+ * archives keeps four times as many open as one reading 16 MiB-piece
+ * archives, for the same memory -- which is the arithmetic an operator would
+ * otherwise have to do by hand with every piece length in front of them.
+ *
+ * Least recently used first, and never the last one: the archive just opened
+ * is the one being read, and closing it to meet a budget it alone exceeds
+ * would serve no tile at all.
+ * @param {Array} held - `[key, handle]` pairs, least recently used first.
+ * @param {number} budget - Bytes the piece caches may hold between them.
+ * @returns {Array} - The pairs to close, in the order to close them.
+ */
+export function overSwarmBudget(held, budget) {
+  if (!Number.isFinite(budget) || budget <= 0) return [];
+  const swarm = held.filter(([, one]) => one?.mode === 'swarm');
+  const cost = (one) => one.source?.stats?.cacheBudget ?? STARTING_CACHE_BYTES;
+
+  let total = swarm.reduce((sum, [, one]) => sum + cost(one), 0);
+  const closing = [];
+  for (const pair of swarm) {
+    if (total <= budget) break;
+    if (swarm.length - closing.length <= 1) break;
+    closing.push(pair);
+    total -= cost(pair[1]);
+  }
+  return closing;
+}
+
 /**
  * Opens archives on demand and reads tiles out of them.
  */
@@ -439,10 +475,13 @@ export class TileStore {
     // local archives reopening files it had just closed.
     const tiles = this.#config.tiles ?? {};
     await this.#evict(() => true, tiles.maxOpenArchives ?? 128);
-    await this.#evict(
-      (one) => one.mode === 'swarm',
-      tiles.maxOpenSwarmArchives ?? 16,
-    );
+    if (tiles.maxOpenSwarmArchives !== undefined) {
+      await this.#evict(
+        (one) => one.mode === 'swarm',
+        tiles.maxOpenSwarmArchives,
+      );
+    }
+    await this.#evictSwarmMemory(tiles.swarmCacheBytes ?? 1024 * 1024 * 1024);
     return handle;
   }
 
@@ -460,6 +499,19 @@ export class TileStore {
     const held = [...this.#open].filter(([, one]) => counts(one));
     while (held.length > limit) {
       const [key, victim] = held.shift();
+      this.#open.delete(key);
+      await this.#release(victim);
+    }
+  }
+
+  /**
+   * Closes swarm-read archives until their piece caches fit a byte budget.
+   * @param {number} budget - Bytes the piece caches may hold between them.
+   * @returns {Promise<void>} - When the closing is done.
+   */
+  async #evictSwarmMemory(budget) {
+    for (const [key] of overSwarmBudget([...this.#open], budget)) {
+      const victim = this.#open.get(key);
       this.#open.delete(key);
       await this.#release(victim);
     }
