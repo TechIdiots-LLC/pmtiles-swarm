@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
@@ -27,6 +28,122 @@ function resolveSidecar() {
       { cause: error },
     );
   }
+}
+
+/**
+ * Ends a child process, politely and then not.
+ * @param {object} child - The process.
+ * @param {number} graceMs - How long the polite request gets.
+ * @returns {Promise<void>} - When it has gone.
+ */
+export async function stopChild(child, graceMs) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  const gone = new Promise((resolve) => child.once('exit', resolve));
+  child.kill();
+  const settled = await Promise.race([
+    gone.then(() => true),
+    new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), graceMs);
+      timer.unref?.();
+    }),
+  ]);
+  if (settled) return;
+  console.warn(
+    '[libtorrent] the sidecar did not stop when asked -- it is usually ' +
+      'hashing, which cannot be interrupted -- so it is being killed. Its ' +
+      'resume data was already saved.',
+  );
+  child.kill('SIGKILL');
+  await gone;
+}
+
+/**
+ * Where the pid of the running sidecar is written.
+ * @param {string} [resumeDir] - Where resume data is kept.
+ * @returns {string|null} - The path, or null when there is nowhere to put it.
+ */
+function sidecarPidPath(resumeDir) {
+  return resumeDir ? path.join(resumeDir, 'sidecar.pid') : null;
+}
+
+/**
+ * Records which process is the sidecar, so a later start can recognise it.
+ * @param {string} [resumeDir] - Where resume data is kept.
+ * @param {number} pid - The sidecar.
+ * @returns {Promise<void>} - When written.
+ */
+async function rememberSidecarPid(resumeDir, pid) {
+  const file = sidecarPidPath(resumeDir);
+  if (!file) return;
+  await fs.writeFile(file, String(pid)).catch(() => {});
+}
+
+/**
+ * Forgets the recorded pid.
+ * @param {string} [resumeDir] - Where resume data is kept.
+ * @returns {Promise<void>} - When removed.
+ */
+async function forgetSidecarPid(resumeDir) {
+  const file = sidecarPidPath(resumeDir);
+  if (!file) return;
+  await fs.rm(file, { force: true }).catch(() => {});
+}
+
+/**
+ * Kills a sidecar left behind by a previous run.
+ *
+ * A node killed outright -- SIGKILL, an OOM, a power cut -- takes no part in
+ * stopping its sidecar, and a sidecar mid-hash does not notice its pipe close.
+ * It goes on holding the listen port and the resume directory, and the next
+ * start fails against it. Reaped here rather than lived with, because the
+ * alternative is the operator restarting the service until it takes.
+ *
+ * Identified by its command line, not by the pid alone: pids are reused, and
+ * killing whatever inherited one would be far worse than the problem.
+ * @param {string} [resumeDir] - Where resume data is kept.
+ * @returns {Promise<boolean>} - Whether one was killed.
+ */
+export async function reapStaleSidecar(resumeDir) {
+  const file = sidecarPidPath(resumeDir);
+  if (!file) return false;
+  let pid;
+  try {
+    pid = Number(await fs.readFile(file, 'utf8'));
+  } catch {
+    return false;
+  }
+  if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) {
+    await forgetSidecarPid(resumeDir);
+    return false;
+  }
+
+  // Only where the process table can be read as files, which is where this
+  // runs as a service. Elsewhere a stale pid is left alone: guessing is worse.
+  let cmdline;
+  try {
+    cmdline = await fs.readFile(`/proc/${pid}/cmdline`, 'utf8');
+  } catch {
+    await forgetSidecarPid(resumeDir);
+    return false;
+  }
+  if (!cmdline.includes('libtorrent_sidecar')) {
+    await forgetSidecarPid(resumeDir);
+    return false;
+  }
+
+  console.warn(
+    `[libtorrent] a sidecar from a previous run is still running (pid ${pid}). ` +
+      'It holds the listen port and the resume directory this one needs, so ' +
+      'it is being killed. This is what a start that has to be repeated ' +
+      'two or three times looks like.',
+  );
+  try {
+    process.kill(pid, 'SIGKILL');
+  } catch {
+    // Gone between reading and killing, which is the good outcome.
+  }
+  await forgetSidecarPid(resumeDir);
+  return true;
 }
 
 /**
@@ -117,6 +234,9 @@ export class LibtorrentEngine {
 
     this.#ready = new Promise((resolve, reject) => {
       const script = this.#options.script ?? resolveSidecar();
+      // Before the spawn, not after: a sidecar from a previous run holds the
+      // port this one is about to ask for.
+      const reaped = reapStaleSidecar(this.#options.resumeDir);
 
       const child = spawn(this.#options.python, [script], {
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -140,6 +260,7 @@ export class LibtorrentEngine {
         },
       });
       this.#child = child;
+      reaped.then(() => rememberSidecarPid(this.#options.resumeDir, child.pid));
 
       // Nothing of the last sidecar's is carried into this one. Being killed
       // does not wait for a newline, so a sidecar that died partway through a
@@ -802,9 +923,19 @@ export class LibtorrentEngine {
     await this.#call('shutdown', {}, options.timeoutMs ?? 15000).catch(
       () => {},
     );
-    this.#child?.kill();
+
+    // Asked, then insisted. A sidecar in the middle of hashing is not reading
+    // its pipe and does not act on a signal until libtorrent hands control
+    // back, which on a large archive is minutes -- so a plain SIGTERM left it
+    // running after the node had gone. systemd then reports a unit process
+    // that remains after the unit stopped, the next start finds the old one
+    // still holding the listen port, and the library comes back holding
+    // nothing. That is the restart that has to be done two or three times.
+    const child = this.#child;
     this.#child = null;
     this.#ready = null;
+    await stopChild(child, options.killGraceMs ?? 5000);
+    await forgetSidecarPid(this.#options.resumeDir);
   }
 
   /**

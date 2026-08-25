@@ -724,20 +724,42 @@ through the swarm, pulling only the pieces a requested tile lives in — which i
 what lets a machine with 10 GiB free serve a 700 GiB planet. See
 [serving-tiles.md](serving-tiles.md).
 
-| setting                       | default  |                                                                  |
-| ----------------------------- | -------- | ---------------------------------------------------------------- |
-| `tiles.maxOpenArchives`       | `16`     | each holds a descriptor or a torrent reader plus its piece cache |
-| `tiles.directoryCacheEntries` | `200`    | header and directory cache, shared across archives               |
-| `tiles.pieceCacheBytes`       | unset    | sized from the torrent's piece length when unset                 |
-| `tiles.hydrateIdleMs`         | unset    | idle time before background hydration resumes                    |
-| `tiles.pieceTimeoutMs`        | `120000` | how long to wait for one piece                                   |
-| `tiles.readyTimeoutMs`        | `60000`  | how long to wait for torrent metadata                            |
-| `tiles.metadataTimeoutMs`     | `120000` | how long a background metadata read may take                     |
-| `tiles.headerTimeoutMs`       | `12000`  | how long a TileJSON request waits for a header                   |
-| `tiles.sparse`                | unset    | `true` for 404 on a missing tile, `false` for 204                |
+| setting                       | default  |                                                              |
+| ----------------------------- | -------- | ------------------------------------------------------------ |
+| `tiles.maxOpenArchives`       | `128`    | complete archives kept open; each is a file descriptor       |
+| `tiles.maxOpenSwarmArchives`  | `16`     | cache-mode readers, counted apart: each holds a piece cache  |
+| `tiles.maxOpenRemoteArchives` | `64`     | readers for a URL or a bucket; cheap to hold, dear to reopen |
+| `tiles.directoryCacheEntries` | `2000`   | header and directory cache, shared across archives           |
+| `tiles.pieceCacheBytes`       | unset    | sized from the torrent's piece length when unset             |
+| `tiles.hydrateIdleMs`         | unset    | idle time before background hydration resumes                |
+| `tiles.pieceTimeoutMs`        | `120000` | how long to wait for one piece                               |
+| `tiles.readyTimeoutMs`        | `60000`  | how long to wait for torrent metadata                        |
+| `tiles.metadataTimeoutMs`     | `120000` | how long a background metadata read may take                 |
+| `tiles.headerTimeoutMs`       | `12000`  | how long a TileJSON request waits for a header               |
+| `tiles.sparse`                | unset    | `true` for 404 on a missing tile, `false` for 204            |
 
 Leave `pieceCacheBytes` unset unless you have a reason. A fixed budget is a trap
 with 16 MiB pieces, since 64 MiB holds only four.
+
+### Three limits, because the handles cost different things
+
+They were one limit, set at sixteen for the most expensive kind and applied to
+every kind. That is wrong for the node this is increasingly used to build: a
+stack assembled from a provider's file index names several hundred sources, and
+a bake walks every one of them. At sixteen such a run spends most of its time
+reopening archives it has just closed, and each reopen re-reads a header and a
+directory.
+
+- **A complete archive** is a file descriptor and its share of the directory
+  cache. The unit allows 65535 descriptors, so hundreds of these are nothing.
+- **A cache-mode archive** carries a piece cache sized from the torrent's piece
+  length. At 16 MiB pieces a hundred of them is gigabytes, which is why this
+  one keeps the old ceiling and is counted separately.
+- **A URL or bucket archive** holds an HTTP reader and the summary it has
+  already read. Cheap to keep, and expensive to reopen: a reopen costs a header
+  and a directory fetch over the network rather than off a disk.
+
+A node serving nothing but cache-mode archives behaves exactly as it did.
 
 `headerTimeoutMs` is shorter than the others on purpose: somebody is waiting on
 it. A cache-mode archive with no web seed and no peers has nothing to read a

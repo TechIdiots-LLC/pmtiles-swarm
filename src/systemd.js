@@ -1,5 +1,6 @@
 import os from 'node:os';
 import path from 'node:path';
+import { engineStopMs } from './shutdown.js';
 import { writablePaths } from './config.js';
 
 /**
@@ -26,7 +27,29 @@ import { writablePaths } from './config.js';
  */
 
 /** What the resume save can want, before the library has grown into it. */
-const TIMEOUT_STOP_SECONDS = 300;
+export const TIMEOUT_STOP_SECONDS = 300;
+
+/**
+ * How long systemd should allow a stop, for a library of this size.
+ *
+ * The node gives its engine two seconds an archive to write resume data, and
+ * systemd's allowance has to outlast that or the save is cut off partway --
+ * which is exactly the library that returns at 0% and re-hashes for hours.
+ * A fixed five minutes covered a library of 145 and no more, silently, so
+ * this is derived the same way `ReadWritePaths` and the thread pool are.
+ *
+ * Rounded up to whole minutes, with a wide margin over the node's own budget:
+ * being generous here costs nothing, since systemd stops waiting the moment
+ * the process is gone.
+ * @param {object} config - The resolved configuration.
+ * @param {number} [archives] - How many the catalog holds.
+ * @returns {number} - Seconds for `TimeoutStopSec`.
+ */
+export function stopTimeoutFor(config, archives = 0) {
+  const budget = engineStopMs(archives) / 1000;
+  const wanted = Math.ceil((budget * 1.5 + 60) / 60) * 60;
+  return Math.max(TIMEOUT_STOP_SECONDS, wanted);
+}
 
 /** libuv's own, which is what a unit that says nothing gets. */
 const DEFAULT_THREADPOOL = 4;
@@ -68,11 +91,13 @@ export function unitFor({
   user = 'pmtiles-swarm',
   execStart,
   workingDirectory,
+  archives = 0,
 }) {
   const home = workingDirectory ?? `/var/lib/${user}`;
   const binary = execStart ?? `${home}/node_modules/.bin/pmtiles-swarm`;
   const paths = writablePaths(config, configPath);
   const threadPool = threadPoolFor(config);
+  const stopSeconds = stopTimeoutFor(config, archives);
 
   // Wrapped the way systemd's own examples are, because this list grows with
   // every watched folder and a single line of them is unreadable in a diff.
@@ -128,9 +153,14 @@ RestartSec=5
 # Stopping writes resume data for every archive, and the node allows its engine
 # two seconds per torrent to do it. This has to outlast that: killed mid-save,
 # every archive that had not been written re-hashes its whole store on the way
-# back up, which for a 700 GiB archive is hours. Raise it as the library grows
-# — tools/resume-doctor.py prints the arithmetic for yours.
-TimeoutStopSec=${TIMEOUT_STOP_SECONDS}
+# back up, which for a 700 GiB archive is hours.
+#
+# Derived from the ${archives} archive(s) this node holds, with room to grow.
+# A fixed five minutes covered a library of 145 and no more, and covered it
+# silently — the symptom of outgrowing it is not an error but a library that
+# comes back at 0%. Re-running init --systemd recomputes this;
+# tools/resume-doctor.py prints the arithmetic for yours.
+TimeoutStopSec=${stopSeconds}
 
 # The node stops the sidecar itself, and needs it alive to do so. The default,
 # control-group, signals both at once and the sidecar dies before it can write

@@ -3,7 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { writablePaths } from '../src/config.js';
-import { directoryCommands, unitFor } from '../src/systemd.js';
+import { engineStopMs } from '../src/shutdown.js';
+import { directoryCommands, stopTimeoutFor, unitFor } from '../src/systemd.js';
 
 /**
  * A path as this platform would resolve it.
@@ -226,5 +227,44 @@ describe('the directory commands', () => {
     }).join('\n');
     const directory = path.dirname(p(CONFIG_PATH));
     assert.ok(commands.includes(`${directory} ${p(CONFIG_PATH)}`));
+  });
+});
+
+describe('how long systemd is told to allow for a stop', () => {
+  it('outlasts the budget the node gives its own engine', () => {
+    // The node allows two seconds an archive to write resume data. Cut off
+    // partway, every archive it had not saved re-hashes its whole store on
+    // the way back up, which for a 700 GiB archive is hours -- and nothing
+    // reports it, because a library at 0% is not an error.
+    for (const archives of [200, 500, 1000]) {
+      const allowed = stopTimeoutFor({}, archives) * 1000;
+      assert.ok(
+        allowed > engineStopMs(archives),
+        `${archives} archives: ${allowed}ms allowed, ${engineStopMs(archives)}ms needed`,
+      );
+    }
+  });
+
+  it('keeps the old five minutes for a library that fits in it', () => {
+    // Which is most of them. This only has to grow for the node that has
+    // outgrown the default, and a fresh install should not read as if
+    // something had been tuned.
+    assert.equal(stopTimeoutFor({}, 0), 300);
+    assert.equal(stopTimeoutFor({}, 21), 300);
+  });
+
+  it('writes the derived value into the unit', () => {
+    const unit = unitFor({
+      config: config(),
+      configPath: CONFIG_PATH,
+      archives: 500,
+    });
+    assert.match(unit, /TimeoutStopSec=1620/);
+    assert.match(unit, /Derived from the 500 archive/);
+  });
+
+  it('says five minutes for a node with nothing in it yet', () => {
+    const unit = unitFor({ config: config(), configPath: CONFIG_PATH });
+    assert.match(unit, /TimeoutStopSec=300/);
   });
 });

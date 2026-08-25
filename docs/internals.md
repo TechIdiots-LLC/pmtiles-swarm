@@ -25,6 +25,7 @@ Operator-facing documentation is elsewhere — see [publishing](publishing.md),
 - [Scheduled sources](#scheduled-sources)
 - [Running two engines at once](#running-two-engines-at-once)
 - [Why libtorrent runs as a sidecar](#why-libtorrent-runs-as-a-sidecar)
+  - [A sidecar that outlives the node](#a-sidecar-that-outlives-the-node)
 - [Making a torrent out of a map](#making-a-torrent-out-of-a-map)
 - [Resuming a partial download](#resuming-a-partial-download)
 - [Retiring and pruning a subscription](#retiring-and-pruning-a-subscription)
@@ -578,6 +579,40 @@ sidecar, which ships with pmtiles-torrent rather than here, so a download sits
 under its final name until it finishes. Do not point a web server at a libtorrent
 save path that is also serving web seeds. Completion is still recorded correctly
 — the watcher finds no marked file and notes that the archive is whole.
+
+### A sidecar that outlives the node
+
+The one failure mode of running libtorrent in another process, and the reason a
+service can need starting two or three times before it takes.
+
+The sidecar exits when its pipe closes, which covers an orderly stop and most
+crashes. It does not cover a sidecar in the middle of **hashing**: libtorrent
+does not hand control back until a check finishes, so the process notices
+neither the closed pipe nor a signal until it does — minutes on a large
+archive, hours on a planet. Nor does it cover a node killed outright, which
+takes no part in stopping anything.
+
+What is left behind still holds the listen port and the resume directory. The
+next start fails against it, and since a failed start leaves its own sidecar,
+they accumulate. In the journal it reads as:
+
+```
+pmtiles-swarm.service: Unit process 102573 (python) remains running after unit stopped.
+pmtiles-swarm.service: Failed to kill control group ...: Invalid argument
+```
+
+Two things prevent it. Stopping **insists**: the shutdown request goes first,
+so resume data is saved either way, and a sidecar that has not gone within a
+few seconds is killed rather than left. And a start **reaps** what a previous
+run left, before it spawns anything — the sidecar's pid is recorded beside its
+resume data, and a recorded pid is killed only when `/proc` says that process
+is really a sidecar. Pids are reused, and killing whatever inherited one would
+be worse than the problem.
+
+Neither is a substitute for `KillMode=mixed` in the unit. That is what stops
+systemd signalling the sidecar at the same moment as the node, which kills it
+before it can write anything down — see
+[running-as-a-service.md](running-as-a-service.md).
 
 ## Making a torrent out of a map
 

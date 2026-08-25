@@ -5279,17 +5279,42 @@ Every piece is hashed against the ` +
               key: 'tiles.maxOpenArchives',
               label: 'Archives kept open',
               type: 'number',
+              placeholder: '128',
+              help:
+                'A complete archive open is a file descriptor and its share ' +
+                'of the directory cache, so this can be large — the unit ' +
+                'allows 65535 of them. Sized for a node that merges layers, ' +
+                'where one stack names hundreds of sources and a bake walks ' +
+                'every one. Past the number of archives this node serves it ' +
+                'stops doing anything.',
+            },
+            {
+              key: 'tiles.maxOpenSwarmArchives',
+              label: 'Cache-mode archives kept open',
+              type: 'number',
               placeholder: '16',
               help:
-                'Each holds a file descriptor, and in cache mode a piece ' +
-                'cache as well. Past the number of archives this node serves ' +
-                'it stops doing anything.',
+                'Counted apart from the limit above, because this is the ' +
+                'expensive kind: a cache-mode reader holds a piece cache ' +
+                'sized from the torrent’s piece length, so with 16 MiB pieces ' +
+                'a hundred of them is gigabytes. That is why the one limit ' +
+                'above could not simply be raised.',
+            },
+            {
+              key: 'tiles.maxOpenRemoteArchives',
+              label: 'URL and bucket archives kept open',
+              type: 'number',
+              placeholder: '64',
+              help:
+                'Cheap to hold — an HTTP reader and the summary it has ' +
+                'already read — and expensive to reopen, since a reopen costs ' +
+                'a header and a directory fetch over the network.',
             },
             {
               key: 'tiles.directoryCacheEntries',
               label: 'Directory cache entries',
               type: 'number',
-              placeholder: '200',
+              placeholder: '2000',
               restart: true,
               help:
                 'PMTiles finds a tile through a root directory and then a ' +

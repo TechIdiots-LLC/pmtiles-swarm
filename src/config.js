@@ -364,12 +364,47 @@ const DEFAULTS = {
    */
   tiles: {
     /**
-     * Open archives kept alive at once. Each holds a file descriptor or a
-     * torrent reader plus its piece cache, so this bounds both.
+     * Open archives kept alive at once.
+     *
+     * Sized for a library of hundreds, because that is what a node that
+     * merges layers holds: a stack built from a provider's file index names
+     * four hundred sources and a bake walks every one of them. At sixteen,
+     * such a run spent most of its time reopening archives it had just
+     * closed, and each reopen re-reads a header and a directory.
+     *
+     * A complete archive open is a file descriptor and its share of the
+     * directory cache, which is why this can be large -- the unit allows
+     * 65535 of them. An archive read through the swarm is not: it carries a
+     * piece cache, and those are bounded separately below.
      */
-    maxOpenArchives: 16,
-    /** Header and directory cache entries, shared across every archive. */
-    directoryCacheEntries: 200,
+    maxOpenArchives: 128,
+    /**
+     * Open archives read through the swarm, which is the expensive kind.
+     *
+     * Counted apart from the limit above and kept where that limit used to
+     * be. A cache-mode reader holds a piece cache sized from the torrent's
+     * piece length, so with 16 MiB pieces a hundred of them is gigabytes --
+     * the reason the single old limit could not simply be raised.
+     */
+    maxOpenSwarmArchives: 16,
+    /**
+     * Open archives read straight from a URL or a bucket.
+     *
+     * Cheap in memory -- an HTTP reader and the summary it has already read
+     * -- and expensive to reopen, since a reopen costs a header and a
+     * directory fetch over the network. So this sits well above the swarm
+     * limit and below the local one.
+     */
+    maxOpenRemoteArchives: 64,
+    /**
+     * Header and directory cache entries, shared across every archive.
+     *
+     * One archive contributes several: a header, a root directory, and a leaf
+     * per region being read. Two hundred was a handful of archives' worth, so
+     * a stack over hundreds of sources evicted its own directories between
+     * one tile and the next.
+     */
+    directoryCacheEntries: 2000,
     /**
      * Byte budget for the piece cache of one swarm-read archive. Unset sizes
      * it from the torrent's piece length, which is safer than a fixed budget.

@@ -79,6 +79,25 @@ function firstConfig({ dataDir, savePath, passwordHash }) {
 }
 
 /**
+ * How many archives the catalog holds, if there is one to read.
+ *
+ * Best effort by design: this runs before the node does, on a machine that
+ * may have no data directory at all, and a missing or unreadable catalog is
+ * an install rather than an error.
+ * @param {object} config - The resolved configuration.
+ * @returns {Promise<number>} - The count, or zero.
+ */
+async function countCatalog(config) {
+  try {
+    const file = path.join(config.dataDir, 'catalog.json');
+    const held = JSON.parse(await fs.readFile(file, 'utf8'));
+    return Array.isArray(held.entries) ? held.entries.length : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Writes a first configuration file.
  *
  * Everything it writes is absolute. A path that resolves against the config
@@ -164,6 +183,10 @@ export async function runInit(options = {}, write = console.log) {
         configPath,
         user: options.user,
         execStart: options.execStart,
+        // So the stop timeout fits the library this node already holds. On a
+        // fresh install there is none and the default stands; re-running this
+        // after the library has grown is what keeps the two together.
+        archives: await countCatalog(config),
       }),
     );
     write(`Wrote ${unitPath}`);

@@ -2,10 +2,40 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **The defaults now assume a library of hundreds, not a handful.** `tiles.maxOpenArchives` goes
+  from 16 to 128 and `tiles.directoryCacheEntries` from 200 to 2000. Sixteen was set for the most
+  expensive kind of open archive and then applied to every kind, which is wrong for the node this is
+  increasingly used to build: a stack assembled from a provider's file index names several hundred
+  sources, and a bake walks every one of them. At sixteen such a run spent most of its time
+  reopening archives it had just closed, and each reopen re-reads a header and a directory.
+
+  So the limit is now three limits, because the handles cost different things. A complete archive is
+  a file descriptor and the unit allows 65535 of them. A **cache-mode** archive carries a piece cache
+  sized from the torrent's piece length — at 16 MiB pieces a hundred of them is gigabytes — so
+  `tiles.maxOpenSwarmArchives` keeps the old ceiling of 16 and is counted separately. A **URL or
+  bucket** archive holds an HTTP reader and nothing else, and costs a network round trip to reopen,
+  so `tiles.maxOpenRemoteArchives` is 64. A node serving only cache-mode archives behaves as before.
+
+- **The unit's stop timeout is derived from the library it was written for.** Stopping writes resume
+  data for every archive and the node allows two seconds apiece, so a fixed five minutes covered a
+  library of 145 and no more — silently, because outgrowing it produces no error, just a library
+  that comes back at 0% and re-hashes for hours. `init --systemd` now counts the catalog and sizes
+  `TimeoutStopSec` to fit, and a node whose library has outgrown a default unit says so at startup.
+
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A sidecar left running by a previous start is now killed rather than fought.** This is the
+  restart that has to be done two or three times before it takes. The sidecar exits when its pipe
+  closes, which covers an orderly stop — but not one in the middle of hashing, since libtorrent does
+  not hand control back until the check finishes, and not a node killed outright. What is left holds
+  the listen port and the resume directory, the next start fails against it, and since a failed
+  start leaves its own sidecar they accumulate.
+
+  Stopping now insists: the shutdown request goes first so resume data is still saved, and a sidecar
+  that has not gone within a few seconds is killed rather than left behind. And a start reaps what a
+  previous run left before spawning anything — by pid, but only where `/proc` confirms that pid is
+  really a sidecar, since pids are reused and killing whatever inherited one would be worse than the
+  problem.
 
 ## 0.94.0
 ### 🐞 Bug fixes

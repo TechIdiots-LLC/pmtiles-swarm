@@ -76,7 +76,7 @@ export class TileStore {
     this.#engine = engine;
     this.#config = config;
     this.#directoryCache = new SharedPromiseCache(
-      config.tiles?.directoryCacheEntries ?? 200,
+      config.tiles?.directoryCacheEntries ?? 2000,
     );
   }
 
@@ -240,7 +240,7 @@ export class TileStore {
     };
     this.#remote.set(url, handle);
 
-    const limit = this.#config.tiles?.maxOpenRemoteArchives ?? 16;
+    const limit = this.#config.tiles?.maxOpenRemoteArchives ?? 64;
     while (this.#remote.size > limit) {
       const [oldest] = this.#remote.keys();
       this.#remote.delete(oldest);
@@ -431,13 +431,38 @@ export class TileStore {
     const handle = await this.#openArchive(entry);
     this.#open.set(entry.infoHash, handle);
 
-    const limit = this.#config.tiles?.maxOpenArchives ?? 16;
-    while (this.#open.size > limit) {
-      const [oldest, victim] = this.#open.entries().next().value;
-      this.#open.delete(oldest);
+    // Two budgets, because the two kinds of handle cost quite different
+    // things. A complete archive is a file descriptor; one read through the
+    // swarm carries a piece cache sized from the torrent's piece length,
+    // which with 16 MiB pieces is tens of megabytes each. A single limit had
+    // to be set for the expensive kind, which left a library of hundreds of
+    // local archives reopening files it had just closed.
+    const tiles = this.#config.tiles ?? {};
+    await this.#evict(() => true, tiles.maxOpenArchives ?? 128);
+    await this.#evict(
+      (one) => one.mode === 'swarm',
+      tiles.maxOpenSwarmArchives ?? 16,
+    );
+    return handle;
+  }
+
+  /**
+   * Closes the least recently used handles until a budget is met.
+   *
+   * Least recently used first, which a Map gives for nothing: reading one
+   * moves it to the end, so iteration order is oldest first.
+   * @param {Function} counts - Whether a handle counts against this budget.
+   * @param {number} limit - How many of them to keep.
+   * @returns {Promise<void>} - When the closing is done.
+   */
+  async #evict(counts, limit) {
+    if (!Number.isFinite(limit) || limit < 1) return;
+    const held = [...this.#open].filter(([, one]) => counts(one));
+    while (held.length > limit) {
+      const [key, victim] = held.shift();
+      this.#open.delete(key);
       await this.#release(victim);
     }
-    return handle;
   }
 
   /**

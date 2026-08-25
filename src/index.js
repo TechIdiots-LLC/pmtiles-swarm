@@ -28,6 +28,7 @@ import {
   installSignalHandlers,
   runStoppers,
 } from './shutdown.js';
+import { TIMEOUT_STOP_SECONDS } from './systemd.js';
 import { ScheduledSourceManager } from './sources.js';
 import { StackExportScheduler } from './stack-exports.js';
 import { StackFeedSubscriber } from './stack-feed.js';
@@ -338,6 +339,23 @@ PMTILES_SWARM_PUBLIC_URL
     );
 
   const catalogued = catalog.list().length;
+  // Said once at startup, because the way this fails is silent. Stopping
+  // writes resume data for every archive and the engine is given two seconds
+  // apiece; a unit that allows less than that is killed partway through, and
+  // what comes back re-hashes every archive whose resume data never landed.
+  // There is no error at that moment -- only a library at 0% and hours of
+  // disk. The generated unit derives its allowance from the library it was
+  // written for, so this is really "your library has grown since then".
+  const stopNeeds = Math.ceil(engineStopMs(catalogued) / 1000);
+  if (stopNeeds > TIMEOUT_STOP_SECONDS) {
+    console.warn(
+      `[shutdown] stopping this library needs about ${stopNeeds}s to write ` +
+        `resume data, which is more than the ${TIMEOUT_STOP_SECONDS}s ` +
+        'a default systemd unit allows. Re-run `pmtiles-swarm init --systemd` ' +
+        'to regenerate the unit, or raise TimeoutStopSec by hand -- a stop cut ' +
+        'short re-hashes every archive it had not saved.',
+    );
+  }
   if (catalogued > 0) {
     // Reported, never fatal. Restore already tolerates a failure per archive;
     // what this catches is the whole call coming apart -- and the node it
