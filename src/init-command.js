@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { hashPassword } from './auth.js';
-import { writablePaths } from './config.js';
+import { loadConfig, writablePaths } from './config.js';
 import { directoryCommands, unitFor } from './systemd.js';
 
 /**
@@ -147,10 +147,49 @@ export async function runInit(options = {}, write = console.log) {
     .access(configPath)
     .then(() => true)
     .catch(() => false);
+
+  // A node that already has a configuration and wants the unit is the
+  // ordinary reason to run this a second time: the unit is derived from the
+  // configuration and from how many archives the library holds, and both move.
+  // Refusing sent people to --force, which replaces the configuration --
+  // tokens, stacks, feeds and all -- to regenerate a file beside it.
+  if (exists && options.systemd && !options.force) {
+    const held = await loadConfig(configPath);
+    const unitPath = path.join(
+      path.dirname(configPath),
+      'pmtiles-swarm.service',
+    );
+    await fs.writeFile(
+      unitPath,
+      unitFor({
+        config: held,
+        configPath,
+        user: options.user,
+        execStart: options.execStart,
+        archives: await countCatalog(held),
+      }),
+    );
+    write(`Wrote ${unitPath}`);
+    write('');
+    write(`  ${configPath} was read, not written.`);
+    write('');
+    write('  Compare it with the one that is installed before replacing it:');
+    write('');
+    write(`    diff /etc/systemd/system/pmtiles-swarm.service ${unitPath}`);
+    write('');
+    write('  ReadWritePaths is derived from the configuration, so a path');
+    write('  added to the installed unit by hand is not in this one. Move it');
+    write('  into the configuration — as a save location, a watched folder or');
+    write('  a cache path — and it will be derived from now on.');
+    return 0;
+  }
+
   if (exists && !options.force) {
     write(
       `${configPath} already exists. Pass --force to replace it — and take a ` +
-        'copy first, since the tokens in it are not recoverable.',
+        'copy first, since the tokens in it are not recoverable. To write ' +
+        'just the unit from the configuration that is there, pass --systemd ' +
+        'without --force.',
     );
     return 1;
   }

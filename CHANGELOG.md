@@ -2,7 +2,14 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **`init --systemd` regenerates the unit without touching the configuration.** The unit is derived
+  from the configuration and from how many archives the library holds, and both move — a watched
+  folder added later belongs in `ReadWritePaths`, and a grown library needs longer to write its
+  resume data than the unit allows. Running it again used to be refused, which sent people to
+  `--force`, which replaces `swarm.config.json` outright: tokens, stacks, feeds and all, to
+  regenerate a file beside it. It now reads the configuration, writes only the unit, and says so —
+  along with the `diff` to run before replacing what is installed, since `ReadWritePaths` is derived
+  and a path added to the installed unit by hand will not be in the new one.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._

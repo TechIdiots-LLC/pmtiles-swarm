@@ -189,6 +189,50 @@ The unit below is what it generates, with your paths in it. Worth reading
 either way — a generated file you do not understand is a hand-written one you
 have not written yet.
 
+## Regenerating the unit on a node that already runs
+
+The unit is derived from two things that move: the configuration, and how many
+archives the library holds. A watched folder added six months ago belongs in
+`ReadWritePaths`, and a library that has grown needs longer to write its resume
+data than the unit allows. So running this again is ordinary:
+
+```
+sudo pmtiles-swarm init --systemd --config /etc/pmtiles-swarm/swarm.config.json
+```
+
+**It reads the configuration and writes only the unit**, next to that
+configuration — never into `/etc/systemd/system`, and never over
+`swarm.config.json`. Installing it is your step, and worth a look first:
+
+```
+diff /etc/systemd/system/pmtiles-swarm.service \
+     /etc/pmtiles-swarm/pmtiles-swarm.service
+sudo cp /etc/pmtiles-swarm/pmtiles-swarm.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl restart pmtiles-swarm
+```
+
+**`--force` is a different command.** It replaces `swarm.config.json` with a
+fresh one — tokens, stacks, feeds and all — and it is for starting over, not
+for regenerating a unit. Nothing about writing the unit needs it.
+
+**Run it as root, not as the service account.** It writes into `/etc`, which
+the service account cannot do and should not be able to do. What decides the
+`User=` line is `--user`, which defaults to `pmtiles-swarm`; pass it if the
+account is called something else:
+
+```
+sudo pmtiles-swarm init --systemd \
+  --config /etc/pmtiles-swarm/swarm.config.json \
+  --user maps
+```
+
+`ReadWritePaths` is derived from the configuration, so **a path added to the
+installed unit by hand is not in the generated one**. That is what the diff is
+for. The durable fix is to move such a path into the configuration — as a save
+location, a watched folder, or a cache directory — after which it is derived
+like the rest.
+
 ## The unit
 
 Annotated, because every directive here has cost somebody a diagnosis.

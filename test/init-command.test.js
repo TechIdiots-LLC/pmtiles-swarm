@@ -215,3 +215,72 @@ describe('generating a unit alongside', () => {
     }
   });
 });
+
+describe('regenerating the unit for a node that already exists', () => {
+  it('writes the unit and leaves the configuration alone', async () => {
+    // The ordinary reason to run this twice: the unit is derived from the
+    // configuration and from how many archives the library holds, and both
+    // move. Refusing sent people to --force, which replaces the configuration
+    // -- tokens, stacks, feeds and all -- to regenerate a file beside it.
+    const first = await init({ systemd: true });
+    assert.equal(first.code, 0);
+    const before = await fs.readFile(first.config, 'utf8');
+
+    const again = await init({ config: first.config, systemd: true });
+    assert.equal(again.code, 0);
+    assert.equal(
+      await fs.readFile(first.config, 'utf8'),
+      before,
+      'the configuration was rewritten',
+    );
+    assert.match(again.said, /was read, not written/);
+
+    const unit = await fs.readFile(
+      path.join(path.dirname(first.config), 'pmtiles-swarm.service'),
+      'utf8',
+    );
+    assert.match(unit, /TimeoutStopSec=/);
+  });
+
+  it('sizes the stop timeout to the library it can see', async () => {
+    // Two seconds an archive to write resume data, and a stop cut short
+    // re-hashes every archive it had not saved.
+    const first = await init({ systemd: true });
+    const config = await loadConfig(first.config);
+    await fs.mkdir(config.dataDir, { recursive: true });
+    await fs.writeFile(
+      path.join(config.dataDir, 'catalog.json'),
+      JSON.stringify({
+        entries: Array.from({ length: 400 }, (_unused, at) => ({
+          infoHash: String(at).padStart(40, '0'),
+        })),
+      }),
+    );
+
+    await init({ config: first.config, systemd: true });
+    const unit = await fs.readFile(
+      path.join(path.dirname(first.config), 'pmtiles-swarm.service'),
+      'utf8',
+    );
+    const seconds = Number(/TimeoutStopSec=(\d+)/.exec(unit)[1]);
+    assert.ok(seconds > 810, `TimeoutStopSec is ${seconds}s for 400 archives`);
+    assert.match(unit, /Derived from the 400 archive/);
+  });
+
+  it('still refuses to replace a configuration without being asked', async () => {
+    const first = await init();
+    const again = await init({ config: first.config });
+    assert.equal(again.code, 1);
+    assert.match(again.said, /already exists/);
+    assert.match(again.said, /just the unit/);
+  });
+
+  it('says to compare before replacing what is installed', async () => {
+    // ReadWritePaths is derived, so a path added to the installed unit by
+    // hand is not in this one.
+    const first = await init({ systemd: true });
+    const again = await init({ config: first.config, systemd: true });
+    assert.match(again.said, /diff \/etc\/systemd\/system/);
+    assert.match(again.said, /added to the installed unit by hand/);
+  });
+});
