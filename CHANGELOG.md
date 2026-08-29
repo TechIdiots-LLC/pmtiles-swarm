@@ -2,7 +2,31 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **A stack can be told to forget what it has merged, and forgets it by itself when its recipe
+  changes.** Editing a stack never served a stale tile — the cache key covers the recipe's revision,
+  so the old tiles simply stop being asked for — but they stayed on the disk, spending the budget
+  until eviction happened to reach them. Under a stack nobody is actively panning, that is a long
+  time, and a node whose stacks are edited often could end up holding mostly tiles no request can
+  reach.
+
+  Merged tiles now carry the stack they belong to in their filename, after the digest so the
+  sharding still spreads and in the name so it survives a restart. `StackStore` compares revisions
+  on every reload and says which recipes are no longer what they were; the node clears those. It
+  covers every way a recipe moves — the console's Save, `PUT /api/stacks/<id>`, an import, a delete,
+  a stack feed, and an operator editing `stacks.json` by hand — and announces nothing when a
+  rewrite leaves the recipes the same, so a restart does not read as an edit and throw away the last
+  run's work.
+
+  Alongside it, a **Clear cache** button on each stack in the console, showing what it would free,
+  and `DELETE /api/stacks/<id>/cache` behind it. That is for what a revision cannot see: an archive
+  rewritten under an address that did not change, a cutline redrawn, a codec upgraded, or simply
+  wanting the disk back now. `/api/stacks` reports `cache: {entries, bytes}` per stack.
+
+  Both take the stacks **nesting** the cleared one with them, however many levels up. An outer
+  stack's tiles were merged from the inner one's, so clearing one level and not the other leaves the
+  older answer being served from above. Tiles written by an earlier version have no stack in their
+  name; they are evicted as before and `DELETE /api/storage/merged-tiles` still empties everything.
+  See [tile-stacks.md](docs/tile-stacks.md) — "Clearing what a stack has merged".
 
 ### 🐞 Bug fixes
 - **A directory the configuration named but nobody had made stopped the unit dead.**

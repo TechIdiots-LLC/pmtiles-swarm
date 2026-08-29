@@ -54,6 +54,7 @@ import {
   resolveStack,
   stackCoverage,
   stackEtag,
+  stacksAffectedBy,
 } from './stacks.js';
 import { bakeRevision } from './bake.js';
 
@@ -3394,6 +3395,11 @@ export function createApp({
           // draws progress on the row, and one poll is what keeps that
           // honest while a bake is running.
           bake: bakes?.get(stack.id) ?? null,
+          // What this stack has already merged and kept. Null rather than
+          // zeroes where the cache is off, so a row can tell "nothing kept
+          // yet" from "nothing is ever kept here" and offer the button only
+          // where it would do something.
+          cache: stackCache?.enabled ? stackCache.usage(stack.id) : null,
           // The schedules aimed at this stack, so its row can say it
           // exports itself without anybody going to look. Several is normal:
           // a nightly build to the fast disk and a weekly one published
@@ -3749,6 +3755,45 @@ export function createApp({
       const removed = await stacks.remove(req.params.id);
       if (!removed) return res.status(404).json({ error: 'no such stack' });
       res.json({ ok: true });
+    }),
+  );
+
+  /**
+   * Throws away the tiles this stack has already merged.
+   *
+   * Editing the recipe does this by itself — the key covers the revision, so
+   * the store drops them as it saves. This is for what a revision cannot see:
+   * an archive rewritten under an address that did not change, a cutline
+   * redrawn, a codec upgraded, or simply wanting the disk back now rather than
+   * when eviction reaches it.
+   *
+   * Takes the stacks nesting this one with it. Their tiles were merged from
+   * this one's, so clearing here and not there would leave the older answer
+   * being served one level up.
+   */
+  app.delete(
+    '/api/stacks/:id/cache',
+    route(async (req, res) => {
+      await stacks?.refresh();
+      if (!stacks?.get(req.params.id)) {
+        return res.status(404).json({ error: 'no such stack' });
+      }
+      if (!stackCache?.enabled) {
+        // 409 rather than 404: the stack is there and the request makes
+        // sense, the node is simply not keeping anything to clear.
+        return res.status(409).json({
+          error: 'nothing is cached: stacks.cacheBytes is 0 on this node',
+        });
+      }
+
+      const affected = [...stacksAffectedBy(stacks.list(), [req.params.id])];
+      let cleared = 0;
+      let bytes = 0;
+      for (const id of affected) {
+        bytes += stackCache.usage(id).bytes;
+        cleared += await stackCache.clear(id);
+      }
+      res.json({ ok: true, cleared, bytes, stacks: affected });
     }),
   );
 
