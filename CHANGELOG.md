@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.97.0
+### ✨ Features and improvements
 - **A stack can be told to forget what it has merged, and forgets it by itself when its recipe
   changes.** Editing a stack never served a stale tile — the cache key covers the recipe's revision,
   so the old tiles simply stop being asked for — but they stayed on the disk, spending the budget
