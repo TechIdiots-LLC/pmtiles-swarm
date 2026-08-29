@@ -254,22 +254,34 @@ PMTILES_SWARM_PUBLIC_URL
 
   const catalog = new Catalog(config.dataDir);
   await catalog.load();
-  // Recipes rather than archives, so this is its own file and its own
-  // store. A missing stacks.json is simply no stacks.
-  const stacks = new StackStore(config.dataDir);
-  await stacks.load();
-  // Merged tiles only -- see the route. Indexed from disk at startup so a
+  // Merged tiles only — see the route. Indexed from disk at startup so a
   // restart does not throw away work the node has already paid for.
-  // Shapes a recipe can clip a source to. A missing one is a problem reported
-  // on the stack that names it, not a reason for this to fail.
-  const cutlines = new CutlineStore(config.dataDir);
-  await cutlines.load();
-
   const stackCache = new StackCache({
     dir: config.stacks?.cacheDir ?? path.join(config.dataDir, 'stack-cache'),
     maxBytes: config.stacks?.cacheBytes,
   });
   await stackCache.load();
+
+  // Recipes rather than archives, so this is its own file and its own
+  // store. A missing stacks.json is simply no stacks.
+  //
+  // Built after the cache so it can drop what a changed recipe has already
+  // merged. The key covers the revision, so those tiles are never served —
+  // this is about the disk they would otherwise sit on until eviction reached
+  // them, which under a stack nobody is panning is a long time. Not awaited:
+  // a save should not wait on unlinking files nothing is going to read, and a
+  // clear that fails leaves entries that were already unreachable.
+  const stacks = new StackStore(config.dataDir, {
+    onChanged: (ids) => {
+      for (const id of ids) stackCache.clear(id).catch(() => {});
+    },
+  });
+  await stacks.load();
+
+  // Shapes a recipe can clip a source to. A missing one is a problem reported
+  // on the stack that names it, not a reason for this to fail.
+  const cutlines = new CutlineStore(config.dataDir);
+  await cutlines.load();
 
   const engine = createEngine(config);
   // The slowest, because it announces "stopped" to every tracker, and an

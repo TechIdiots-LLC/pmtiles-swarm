@@ -38,6 +38,7 @@ of its parts.
 - [The codec problem](#the-codec-problem)
 - [Cost, and the caches that make it bearable](#cost-and-the-caches-that-make-it-bearable)
 - [Caching headers and ETags](#caching-headers-and-etags)
+  - [Clearing what a stack has merged](#clearing-what-a-stack-has-merged)
 - [TileJSON for a stack](#tilejson-for-a-stack)
 - [When a source will not answer](#when-a-source-will-not-answer)
 - [Baking a stack into an archive](#baking-a-stack-into-an-archive)
@@ -523,6 +524,50 @@ etag = H(stackId, stackRevision, resolvedInfoHashes[], z, x, y)
 
 `stackRevision` bumps whenever the recipe is edited, which invalidates every
 cached tile without anything having to remember to.
+
+### Clearing what a stack has merged
+
+Invalidation and clearing are two different problems, and the ETag only solves
+the first. An edited recipe is never served from the old tiles — the key
+changed — but those tiles are still on the disk, spending the budget until
+eviction reaches them. Under a stack nobody is panning, that is a long time.
+
+So the cache filename carries the stack as well as the digest:
+
+```
+<sha1(etag:ext)>.<sha1(stackId)[0:12]>.<ext>
+```
+
+The stack tag goes **after** the digest, because the first two characters of
+the name are the shard directory: putting the stack first would file every
+tile of a busy stack in one directory. It is in the name rather than in an
+index beside the tiles for the reason `load()` gives — a name survives a
+restart and cannot disagree with the file it is on.
+
+Two things use it:
+
+- **`StackStore` announces recipes that changed**, and the node clears them.
+  This covers every way a recipe moves: the console's Save, `PUT
+/api/stacks/<id>`, an import, a delete, a stack feed, and an operator with an
+  editor open on `stacks.json`. It compares revisions rather than timestamps,
+  so rewriting the file with the same recipes in it announces nothing — which
+  is what makes it safe to run on every reload, and what stops a restart from
+  reading as an edit and discarding the last run's work.
+- **`DELETE /api/stacks/<id>/cache`**, behind a per-stack button in the
+  console, for what a revision cannot see: an archive rewritten under an
+  address that did not change, a cutline redrawn, a codec upgraded, or simply
+  wanting the disk back now. `/api/stacks` reports `cache: {entries, bytes}`
+  per stack so the button can say what it would free, and `null` there means
+  the node keeps nothing at all (`stacks.cacheBytes` is 0).
+
+Both take the stacks **nesting** the changed one with them, transitively. An
+outer stack's tiles were merged from the inner one's, so clearing one level and
+not the other leaves the older answer being served from above.
+
+Tiles written before the tag existed have no stack in their name. They are
+indexed and evicted like any other, and a per-stack clear does not match them;
+they age out on their own. `DELETE /api/storage/merged-tiles` still empties the
+lot.
 
 Cache-control follows the split the tile routes already make: a stack whose
 sources are **all** pinned by `archive` can never change, so

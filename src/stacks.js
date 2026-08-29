@@ -604,6 +604,43 @@ export function stacksUsing(stacks, entry, categoryInfo) {
 }
 
 /**
+ * Every stack that would be affected by these ones changing.
+ *
+ * A stack can be a source of another, and the outer one's tiles are built from
+ * the inner one's — so a recipe that changed takes its dependents with it,
+ * however many levels up they are. Followed over both the recipes as they were
+ * and as they are, because a stack that has just stopped nesting another still
+ * holds tiles that were merged while it did.
+ * @param {Stack[]} stacks - Every stack, in any order and with duplicates.
+ * @param {Iterable<string>} ids - The stacks that changed.
+ * @returns {Set<string>} - Those ids and everything above them.
+ */
+export function stacksAffectedBy(stacks, ids) {
+  const above = new Map();
+  for (const stack of stacks ?? []) {
+    for (const source of stack.sources ?? []) {
+      if (!source?.stack) continue;
+      const users = above.get(source.stack) ?? new Set();
+      users.add(stack.id);
+      above.set(source.stack, users);
+    }
+  }
+
+  const affected = new Set();
+  const queue = [...ids];
+  while (queue.length) {
+    const id = queue.pop();
+    // A stack may name another twice, and two stacks may name the same one.
+    // Stopping at what has been seen is also what stops a loop, which the
+    // resolver refuses but the file on disk can still contain.
+    if (!id || affected.has(id)) continue;
+    affected.add(id);
+    for (const user of above.get(id) ?? []) queue.push(user);
+  }
+  return affected;
+}
+
+/**
  * Derives the zoom range, bounds and attribution a resolved stack advertises.
  *
  * `maxzoom` is the maximum over sources rather than the minimum, which is the
@@ -839,13 +876,20 @@ export class StackStore {
   #mtime = null;
   #size = null;
   #checkedAt = 0;
+  #revisions = new Map();
+  #onChanged;
 
   /**
    * Creates a store backed by a file.
    * @param {string} dataDir - Directory holding stacks.json.
+   * @param {object} [options] - `onChanged(ids)`, called with the stacks whose
+   *   recipe is no longer what it was — by an edit here, by a feed, or by
+   *   somebody writing the file. Anything holding work derived from a recipe
+   *   hears about it here rather than having to watch the file itself.
    */
-  constructor(dataDir) {
+  constructor(dataDir, { onChanged } = {}) {
     this.#file = path.join(dataDir, 'stacks.json');
+    this.#onChanged = onChanged ?? null;
   }
 
   /**
@@ -857,6 +901,8 @@ export class StackStore {
    * @returns {Promise<void>} - Resolves once loaded.
    */
   async load() {
+    const were = this.#revisions;
+    const before = this.list();
     this.#stacks.clear();
     this.#problems.clear();
     let raw;
@@ -869,6 +915,9 @@ export class StackStore {
       if (error.code === 'ENOENT') {
         this.#mtime = null;
         this.#size = null;
+        // A file that has been deleted is every stack in it removed, which is
+        // as much a change as an edit.
+        this.#settle(were, before);
         return;
       }
       throw error;
@@ -881,6 +930,38 @@ export class StackStore {
       this.#stacks.set(stack.id, stack);
       if (problems.length) this.#problems.set(stack.id, problems);
     }
+    this.#settle(were, before);
+  }
+
+  /**
+   * Takes the revisions again and says which stacks are not what they were.
+   *
+   * A revision rather than a timestamp or a flag, so this is the same answer
+   * whichever way the change arrived — the console's Save, a stack feed, or
+   * an operator with an editor open on stacks.json. Rewriting the file with
+   * the same recipes in it announces nothing, which is what makes it safe to
+   * call this on every reload.
+   *
+   * The first load announces nothing either: there is no earlier revision for
+   * anything to differ from, so a restart does not read as an edit and throw
+   * away the merged tiles the last run paid for.
+   * @param {Map<string, string>} were - The revisions before.
+   * @param {Stack[]} before - The recipes before, for what nested what.
+   * @returns {void}
+   */
+  #settle(were, before) {
+    this.#revisions = new Map(
+      [...this.#stacks].map(([id, stack]) => [id, stackRevision(stack)]),
+    );
+    // Removed stacks are in here too: their revision is now undefined, which
+    // is not what it was. Added ones are not, and have nothing to clear.
+    const changed = [...were.keys()].filter(
+      (id) => this.#revisions.get(id) !== were.get(id),
+    );
+    if (!changed.length || !this.#onChanged) return;
+    this.#onChanged([
+      ...stacksAffectedBy([...before, ...this.list()], changed),
+    ]);
   }
 
   /**
@@ -958,9 +1039,12 @@ export class StackStore {
       error.problems = problems;
       throw error;
     }
+    const were = this.#revisions;
+    const before = this.list();
     this.#stacks.set(stack.id, stack);
     this.#problems.delete(stack.id);
     await this.#flush();
+    this.#settle(were, before);
     return stack;
   }
 
@@ -970,9 +1054,12 @@ export class StackStore {
    * @returns {Promise<boolean>} - Whether anything was there.
    */
   async remove(id) {
+    const were = this.#revisions;
+    const before = this.list();
     if (!this.#stacks.delete(id)) return false;
     this.#problems.delete(id);
     await this.#flush();
+    this.#settle(were, before);
     return true;
   }
 

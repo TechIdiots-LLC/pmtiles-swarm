@@ -974,9 +974,11 @@ export async function answerStackTile(options) {
   // Keyed by the ETag, which already covers the recipe's revision and what its
   // sources resolved to -- so an edited stack or a rebuilt source produces a
   // different key rather than needing anything to remember to invalidate the
-  // old one.
+  // old one. The stack's id goes in beside it, which the digest cannot be read
+  // back out of, so a stack's tiles can also be cleared on purpose.
   const cacheKey = stackCache?.enabled
     ? StackCache.key(
+        resolved.stack.id,
         `${stackEtag(resolved, z, x, y)}:${size ?? 'auto'}`,
         format,
       )

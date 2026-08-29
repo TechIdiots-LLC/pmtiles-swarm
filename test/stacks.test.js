@@ -67,7 +67,16 @@ async function serve(entries, stackList, tileData = {}, options = {}) {
     path.join(dir, 'stacks.json'),
     JSON.stringify({ stacks: stackList }),
   );
-  const stacks = new StackStore(dir);
+  // The wiring index.js does: a recipe that is no longer what it was takes the
+  // tiles it has already merged with it. Kept here so a test can save a stack
+  // and then ask the cache what happened, rather than trusting the two-line
+  // adapter in the entry point on sight.
+  const clearing = [];
+  const stacks = new StackStore(dir, {
+    onChanged: (ids) => {
+      for (const id of ids) clearing.push(options.stackCache?.clear(id));
+    },
+  });
   await stacks.load();
 
   const app = createApp({
@@ -103,6 +112,10 @@ async function serve(entries, stackList, tileData = {}, options = {}) {
     base,
     dir,
     get: (url) => fetch(`${base}${url}`),
+    // Clearing is not awaited in the entry point either -- a save should not
+    // wait on unlinking files nothing is going to read. This is how a test
+    // waits for what the save set going.
+    settled: () => Promise.all(clearing),
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }
@@ -327,6 +340,115 @@ describe('noticing that the file changed', () => {
     await store.load();
     await new Promise((resolve) => setTimeout(resolve, 1100));
     assert.equal(await store.refresh(), false);
+  });
+});
+
+describe('saying which recipes are no longer what they were', () => {
+  /**
+   * A store over a written file, watching what it announces.
+   * @param {object[]} stacks - What to write first.
+   * @returns {Promise<object>} - `{store, file, changed}`.
+   */
+  const watching = async (stacks) => {
+    const dir = await fs.mkdtemp(path.join(workspace, 'changed-'));
+    const file = path.join(dir, 'stacks.json');
+    await fs.writeFile(file, JSON.stringify({ stacks }));
+    const changed = [];
+    const store = new StackStore(dir, {
+      onChanged: (ids) => changed.push([...ids].sort()),
+    });
+    await store.load();
+    return { store, file, changed };
+  };
+
+  it('says nothing on the first load', async () => {
+    // Or a restart would read as an edit and throw away the merged tiles the
+    // last run paid for.
+    const { changed } = await watching([
+      { id: 'one', sources: [{ category: 'a' }] },
+    ]);
+    assert.deepEqual(changed, []);
+  });
+
+  it('names a stack whose recipe was saved over', async () => {
+    const { store, changed } = await watching([
+      { id: 'one', sources: [{ category: 'a' }] },
+    ]);
+    await store.put({
+      id: 'one',
+      sources: [{ category: 'a', heightAdjustment: 12 }],
+    });
+    assert.deepEqual(changed, [['one']]);
+  });
+
+  it('says nothing for a stack that was only added', async () => {
+    const { store, changed } = await watching([
+      { id: 'one', sources: [{ category: 'a' }] },
+    ]);
+    await store.put({ id: 'two', sources: [{ category: 'b' }] });
+    assert.deepEqual(changed, [], 'a new stack has nothing cached');
+  });
+
+  it('says nothing when a save leaves the recipe as it was', async () => {
+    const { store, changed } = await watching([
+      { id: 'one', sources: [{ category: 'a' }] },
+    ]);
+    await store.put({ id: 'one', sources: [{ category: 'a' }] });
+    assert.deepEqual(changed, []);
+  });
+
+  it('names a stack that was deleted', async () => {
+    const { store, changed } = await watching([
+      { id: 'one', sources: [{ category: 'a' }] },
+    ]);
+    assert.equal(await store.remove('one'), true);
+    assert.deepEqual(changed, [['one']]);
+  });
+
+  it('takes the stacks built on it along', async () => {
+    // The outer stack's tiles were merged from the inner one's, so leaving
+    // them would serve the older answer one level up.
+    const { store, changed } = await watching([
+      { id: 'base', sources: [{ category: 'a' }] },
+      { id: 'middle', sources: [{ stack: 'base' }] },
+      { id: 'top', sources: [{ stack: 'middle' }] },
+      { id: 'elsewhere', sources: [{ category: 'b' }] },
+    ]);
+    await store.put({
+      id: 'base',
+      sources: [{ category: 'a', heightAdjustment: 5 }],
+    });
+    assert.deepEqual(changed, [['base', 'middle', 'top']]);
+  });
+
+  it('names a stack edited in the file rather than in the console', async () => {
+    const { store, file, changed } = await watching([
+      { id: 'one', sources: [{ category: 'a' }] },
+    ]);
+    await fs.writeFile(
+      file,
+      JSON.stringify({
+        stacks: [{ id: 'one', sources: [{ category: 'a', opacity: 0.5 }] }],
+      }),
+    );
+    const later = new Date(Date.now() + 10_000);
+    await fs.utimes(file, later, later);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    assert.equal(await store.refresh(), true);
+    assert.deepEqual(changed, [['one']]);
+  });
+
+  it('names every stack when the file is deleted', async () => {
+    const { store, file, changed } = await watching([
+      { id: 'one', sources: [{ category: 'a' }] },
+      { id: 'two', sources: [{ category: 'b' }] },
+    ]);
+    await fs.rm(file);
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+
+    assert.equal(await store.refresh(), true);
+    assert.deepEqual(changed, [['one', 'two']]);
   });
 });
 
@@ -1020,6 +1142,168 @@ describe('caching what a merge produced', { skip: !codec }, () => {
       !before.equals(afterEdit),
       'the edit must not serve a stale tile',
     );
+  });
+
+  it('drops what a stack had merged when its recipe is saved over', async () => {
+    // Serving the right tile is the ETag's doing and was true before any of
+    // this. What the key cannot do is get the disk back: the old tiles are
+    // unreachable but still occupy the budget until eviction reaches them,
+    // which under a stack nobody is panning is a long time.
+    const one = archive('b4'.repeat(20), 'one.pmtiles', ['one']);
+    const dir = await fs.mkdtemp(path.join(workspace, 'resave-'));
+    const stackCache = new StackCache({ dir, maxBytes: 1024 * 1024 });
+    await stackCache.load();
+
+    const node = await serve(
+      [one],
+      [
+        {
+          id: 'shift',
+          sources: [{ category: 'one', heightAdjustment: 10 }],
+          output: { format: 'webp' },
+        },
+      ],
+      { [one.infoHash]: { '1/0/0': await terrainTile(100) } },
+      { stackCache },
+    );
+    after(() => node.close());
+
+    assert.equal((await node.get('/stacks/shift/1/0/0.webp')).status, 200);
+    assert.equal(stackCache.usage('shift').entries, 1);
+
+    await fetch(`${node.base}/api/stacks/shift`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        sources: [{ category: 'one', heightAdjustment: 900 }],
+        output: { format: 'webp' },
+      }),
+    });
+    await node.settled();
+
+    assert.deepEqual(stackCache.usage('shift'), { entries: 0, bytes: 0 });
+  });
+
+  it('clears one stack on request, and the stacks built on it', async () => {
+    // For what a revision cannot see: an archive rewritten under an address
+    // that did not change, or simply wanting the disk back now.
+    const one = archive('b5'.repeat(20), 'one.pmtiles', ['one']);
+    const dir = await fs.mkdtemp(path.join(workspace, 'unc-'));
+    const stackCache = new StackCache({ dir, maxBytes: 1024 * 1024 });
+    await stackCache.load();
+
+    const node = await serve(
+      [one],
+      [
+        {
+          id: 'base',
+          sources: [{ category: 'one', heightAdjustment: 10 }],
+          output: { format: 'webp' },
+        },
+        {
+          id: 'over',
+          sources: [{ stack: 'base' }, { category: 'one', opacity: 0.5 }],
+          output: { format: 'webp' },
+        },
+        {
+          id: 'apart',
+          sources: [{ category: 'one', heightAdjustment: 20 }],
+          output: { format: 'webp' },
+        },
+      ],
+      { [one.infoHash]: { '1/0/0': await terrainTile(100) } },
+      { stackCache },
+    );
+    after(() => node.close());
+
+    for (const id of ['base', 'over', 'apart']) {
+      assert.equal((await node.get(`/stacks/${id}/1/0/0.webp`)).status, 200);
+      assert.equal(stackCache.usage(id).entries, 1, `${id} should be cached`);
+    }
+
+    const res = await fetch(`${node.base}/api/stacks/base/cache`, {
+      method: 'DELETE',
+    });
+    assert.equal(res.status, 200);
+    const gone = await res.json();
+    assert.equal(gone.cleared, 2);
+    assert.ok(gone.bytes > 0);
+    assert.deepEqual(gone.stacks.sort(), ['base', 'over']);
+
+    assert.equal(stackCache.usage('base').entries, 0);
+    // Its tiles were merged from base's, so leaving them would serve the older
+    // answer one level up.
+    assert.equal(stackCache.usage('over').entries, 0);
+    assert.equal(stackCache.usage('apart').entries, 1, 'a bystander');
+  });
+
+  it('has nothing to clear for a stack that is not there', async () => {
+    const one = archive('b6'.repeat(20), 'one.pmtiles', ['one']);
+    const dir = await fs.mkdtemp(path.join(workspace, 'unc404-'));
+    const stackCache = new StackCache({ dir, maxBytes: 1024 * 1024 });
+    await stackCache.load();
+    const node = await serve(
+      [one],
+      [{ id: 'here', sources: [{ category: 'one' }] }],
+      {},
+      { stackCache },
+    );
+    after(() => node.close());
+
+    const res = await fetch(`${node.base}/api/stacks/absent/cache`, {
+      method: 'DELETE',
+    });
+    assert.equal(res.status, 404);
+  });
+
+  it('says the cache is off rather than pretending to clear it', async () => {
+    // 409 rather than 404: the stack is there and the request makes sense,
+    // the node is simply not keeping anything.
+    const one = archive('b7'.repeat(20), 'one.pmtiles', ['one']);
+    const dir = await fs.mkdtemp(path.join(workspace, 'unc409-'));
+    const stackCache = new StackCache({ dir, maxBytes: 0 });
+    await stackCache.load();
+    const node = await serve(
+      [one],
+      [{ id: 'here', sources: [{ category: 'one' }] }],
+      {},
+      { stackCache },
+    );
+    after(() => node.close());
+
+    const res = await fetch(`${node.base}/api/stacks/here/cache`, {
+      method: 'DELETE',
+    });
+    assert.equal(res.status, 409);
+    assert.match((await res.json()).error, /cacheBytes/);
+  });
+
+  it('says what each stack is holding on the list the console reads', async () => {
+    const one = archive('b8'.repeat(20), 'one.pmtiles', ['one']);
+    const dir = await fs.mkdtemp(path.join(workspace, 'usage-'));
+    const stackCache = new StackCache({ dir, maxBytes: 1024 * 1024 });
+    await stackCache.load();
+    const node = await serve(
+      [one],
+      [
+        {
+          id: 'shift',
+          sources: [{ category: 'one', heightAdjustment: 10 }],
+          output: { format: 'webp' },
+        },
+      ],
+      { [one.infoHash]: { '1/0/0': await terrainTile(100) } },
+      { stackCache },
+    );
+    after(() => node.close());
+
+    const empty = await (await node.get('/api/stacks')).json();
+    assert.deepEqual(empty.stacks[0].cache, { entries: 0, bytes: 0 });
+
+    await node.get('/stacks/shift/1/0/0.webp');
+    const held = await (await node.get('/api/stacks')).json();
+    assert.equal(held.stacks[0].cache.entries, 1);
+    assert.ok(held.stacks[0].cache.bytes > 0);
   });
 });
 

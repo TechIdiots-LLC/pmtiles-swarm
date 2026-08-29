@@ -7774,6 +7774,12 @@ Every piece is hashed against the ` +
               : `<button type="button" data-stack-feed="${escapeHtml(stack.id)}"
                          title="The address another node follows to keep its copy of this recipe level with this one. Add it there under Settings → Feeds → Stack feeds.">RSS</button>`
           }
+          ${
+            stack.cache && stack.cache.bytes > 0
+              ? `<button type="button" data-stack-uncache="${escapeHtml(stack.id)}"
+                         title="Throws away the ${stack.cache.entries.toLocaleString()} tiles this stack has already merged, so the next request for each merges it again. Saving an edit does this by itself — this is for a source whose bytes changed under an address that did not.">Clear cache (${bytes(stack.cache.bytes)})</button>`
+              : ''
+          }
           <button type="button" data-stack-edit="${escapeHtml(stack.id)}">Edit</button>
           <button type="button" data-stack-copy="${escapeHtml(stack.id)}"
                   title="Opens the editor on a copy of this recipe, under a name of its own. Nothing is saved until you save it.">Duplicate</button>
@@ -9173,6 +9179,7 @@ Every piece is hashed against the ` +
         const drop = event.target.dataset.stackDelete;
         const bake = event.target.dataset.stackBake;
         const stopBake = event.target.dataset.stackBakeStop;
+        const uncache = event.target.dataset.stackUncache;
         if (bake !== undefined) {
           const { stacks } = await api('/api/stacks');
           await openBakeDialog(
@@ -9224,6 +9231,31 @@ Every piece is hashed against the ` +
             },
             { copy: true, taken },
           );
+        } else if (uncache !== undefined) {
+          // No confirmation, for the reason the Storage panel gives: a merged
+          // tile can be merged again. What it costs is the merge, and the row
+          // says how much disk it is getting back.
+          try {
+            const gone = await api(
+              `/api/stacks/${encodeURIComponent(uncache)}/cache`,
+              { method: 'DELETE' },
+            );
+            // The others are named rather than counted: pressing one
+            // button and clearing three stacks is surprising until you can
+            // see that the other two are built on this one.
+            const also = gone.stacks.filter((id) => id !== uncache);
+            // Nothing to free is a real answer, not a failure: eviction may
+            // have reached these tiles between the row being drawn and the
+            // button being pressed.
+            toast(
+              `${gone.bytes > 0 ? `Freed ${bytes(gone.bytes)} from` : 'Cleared'} ${uncache}${
+                also.length ? ` and ${also.join(', ')}` : ''
+              }`,
+            );
+            loadStacks().catch((e) => toast(e.message));
+          } catch (error) {
+            toast(error.message);
+          }
         } else if (drop !== undefined) {
           if (!confirm(`Delete the stack "${drop}"?`)) return;
           try {
