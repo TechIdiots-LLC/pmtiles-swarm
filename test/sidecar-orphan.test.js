@@ -47,6 +47,30 @@ async function deafProcess(name) {
   return { child, script };
 }
 
+/**
+ * Waits for a child to be gone, without waiting on an event that has been and
+ * gone.
+ *
+ * `once('exit')` on a process that has already exited never fires: the event
+ * was emitted before there was a listener for it, so the promise stays pending
+ * for ever. By then nothing is keeping the loop alive -- the child is what was
+ * holding it -- so the runner ends the file with "Promise resolution is still
+ * pending but the event loop has already resolved" and reports every test in
+ * it as cancelled, over a race in one of them.
+ *
+ * reapStaleSidecar makes that the likely order rather than the unlikely one:
+ * it SIGKILLs the process and then awaits a file unlink, which is time enough
+ * for the exit to be delivered before this line is reached.
+ * @param {object} child - The spawned process.
+ * @returns {Promise<void>} - Resolves once it has exited.
+ */
+function exited(child) {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => child.once('exit', resolve));
+}
+
 describe('a sidecar left behind by a previous run', () => {
   it('is killed before a new one is started', async (t) => {
     const resumeDir = await fs.mkdtemp(path.join(workspace, 'resume-'));
@@ -73,7 +97,7 @@ describe('a sidecar left behind by a previous run', () => {
     }
 
     assert.equal(killed, true, 'the orphan was not recognised');
-    await new Promise((resolve) => orphan.child.once('exit', resolve));
+    await exited(orphan.child);
     assert.notEqual(orphan.child.signalCode, null, 'it is still running');
 
     // And the record is cleared, so the next start does not go looking for a
@@ -148,7 +172,7 @@ describe('stopping a sidecar that will not stop', () => {
 
   it('does nothing to a process that has already gone', async () => {
     const child = spawn(process.execPath, ['-e', '']);
-    await new Promise((resolve) => child.once('exit', resolve));
+    await exited(child);
     await stopChild(child, 5000);
   });
 });
