@@ -69,21 +69,32 @@ async function boot(extra = {}) {
     });
   }
 
+  let timer;
+  let watch;
   const listening = new Promise((resolve, reject) => {
-    const timer = setTimeout(
-      () => reject(new Error(`never listened. It said:\n${output}`)),
+    // Every path clears both, which only the success path used to do. A node
+    // that never listens rejected and left the interval running, and an
+    // interval nothing clears keeps the event loop alive for ever -- so a boot
+    // failure became a test process that never exited, and `node --test`
+    // waited on it instead of reporting anything. The stall hid the error that
+    // would have explained it, which is the worst way to fail.
+    const settle = (fn) => (value) => {
+      clearTimeout(timer);
+      clearInterval(watch);
+      fn(value);
+    };
+    const started = settle(resolve);
+    const failed = settle(reject);
+
+    timer = setTimeout(
+      () => failed(new Error(`never listened. It said:\n${output}`)),
       25000,
     );
-    child.on('exit', (code) => {
-      clearTimeout(timer);
-      reject(new Error(`exited ${code} before listening. It said:\n${output}`));
-    });
-    const watch = setInterval(() => {
-      if (output.includes('[http] listening')) {
-        clearInterval(watch);
-        clearTimeout(timer);
-        resolve();
-      }
+    child.on('exit', (code) =>
+      failed(new Error(`exited ${code} before listening. It said:\n${output}`)),
+    );
+    watch = setInterval(() => {
+      if (output.includes('[http] listening')) started();
     }, 100);
   });
 
