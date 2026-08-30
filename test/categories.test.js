@@ -67,20 +67,28 @@ function entry(overrides) {
 
 describe('category endpoints', () => {
   it('lists every tag with the endpoints that resolve to its newest build', async () => {
+    // Dated by buildDate, not createdAt. `Catalog.put` stamps createdAt itself
+    // and ignores what the caller passed -- it means "when this node first saw
+    // it", which is not the caller's to state. So two entries put back to back
+    // are both stamped with the same moment, and if the two writes land inside
+    // one millisecond `newerFirst` has nothing left to separate them: it
+    // returns 0, the sort is stable, and the newest comes back as whichever
+    // was inserted first. That made this a coin toss on how fast the disk was,
+    // and on CI it lost.
     const server = await serve([
       entry({
         infoHash: 'a'.repeat(40),
         name: 'planet-old.pmtiles',
         categories: ['basemaps'],
         pmtiles: { format: 'pbf', minZoom: 0, maxZoom: 14 },
-        createdAt: '2026-01-01T00:00:00.000Z',
+        buildDate: '2026-01-01T00:00:00.000Z',
       }),
       entry({
         infoHash: 'b'.repeat(40),
         name: 'planet-new.pmtiles',
         categories: ['basemaps', 'weekly'],
         pmtiles: { format: 'pbf', minZoom: 0, maxZoom: 14 },
-        createdAt: '2026-06-01T00:00:00.000Z',
+        buildDate: '2026-06-01T00:00:00.000Z',
       }),
     ]);
 
