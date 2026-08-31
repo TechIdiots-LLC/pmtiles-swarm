@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.98.0
+### ✨ Features and improvements
 - **A finished MBTiles archive works as a stack layer, and now says what it holds.** It always read:
   the tile store opens one from a complete local copy, and a stack asks the store for tiles like
   anything else. What it could not do was describe itself. Only PMTiles was ever probed for a
@@ -28,7 +35,6 @@
   MBTiles archive as a source".
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.97.0
 ### ✨ Features and improvements
