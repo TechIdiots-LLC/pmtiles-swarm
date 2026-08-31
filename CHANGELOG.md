@@ -5,6 +5,12 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.98.2
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
 - **The console called a complete MBTiles archive "not servable".** It is, and has been since the
   tile store learned to open one: PMTiles always, MBTiles from a complete local copy. The console
   never followed. It tested `kind === 'pmtiles'` in two places, so an MBTiles that had finished
