@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.98.1
+### ✨ Features and improvements
 - **The two archive readers no longer import each other.** Summarising an MBTiles archive reached
   into `pmtiles-probe.js` for `summarize`, which put one format's reader inside the other's module
   and dragged the `pmtiles` package in behind it. The half neither format owns — the summary shape,
@@ -10,12 +17,15 @@
   summary. `pmtiles-probe.js` keeps the PMTiles half and `mbtiles.js` the SQLite half, and neither
   reaches the other.
 
-  The tile-type table had been written twice, in opposite directions, and the MBTiles copy was
-  missing `mlt` — so an archive declaring that format summarised as `unknown`. One table with a
-  derived reverse lookup now, so the halves cannot drift apart again.
+  Nothing about what the node serves changes; this is where the code lives.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **An MBTiles archive holding MLT tiles was summarised as an unknown format.** The table mapping a
+  format name onto a tile type had been written twice, in opposite directions, and the copy beside
+  the MBTiles reader was written by hand and had no entry for `mlt` — so an archive declaring it
+  came back as `unknown`, which is what the catalog then reported and what a stack over it read.
+  There is one table now, with the reverse lookup derived from it, so the two halves cannot drift
+  apart again.
 
 ## 0.98.0
 ### ✨ Features and improvements
