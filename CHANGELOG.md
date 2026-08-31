@@ -5,7 +5,22 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **An archive the engine took and then did not keep is handed back, rather than only reported.**
+  The seeding check has been able to spot this for a while and its own message admitted the rest:
+  "nothing will start it before the next restart". It was right, which is why the cure was always
+  another restart. The usual cause is a sidecar that dies partway through a restore — the
+  replacement holds nothing, so the archives handed over before it died are absent while the ones
+  after it are fine, and `add` resolving is no evidence that anything was kept.
+
+  Those are now handed back once and re-checked, and the log says whether it took. Once, not in a
+  loop: an engine that refuses twice will not be talked round by a third try. And only when the
+  engine is holding *some* of the library — one holding none of it, or one that could not be listed
+  at all, is not suffering a per-archive fault, and re-adding everything on the strength of that
+  answer is how a node spends its start hashing what it already had.
+- **A pinned archive in a stack was listed by its infohash.** Forty characters of hex, where the
+  picker that offered it had shown a filename. The row leads with the archive's name now and shows
+  the infohash as what it resolves to, which for a pinned source is exactly what it means: this
+  build and no later one.
 
 ## 0.98.3
 ### ✨ Features and improvements

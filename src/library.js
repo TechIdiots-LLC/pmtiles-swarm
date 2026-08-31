@@ -2154,16 +2154,46 @@ export class Library {
    * @param {object[]} entries - The entries restore worked through.
    * @returns {Promise<void>} - Resolves once every claim has been checked.
    */
+  /**
+   * Whether the engine is holding this archive right now.
+   *
+   * Asked of one archive rather than by re-listing the library: this runs only
+   * for an archive that has just been handed back, which on a healthy node is
+   * never.
+   * @param {string} infoHash - The archive.
+   * @returns {Promise<boolean>} - Whether the engine has it.
+   */
+  async #engineHolds(infoHash) {
+    const status = await this.#engine.get?.(infoHash).catch(() => null);
+    return Boolean(status);
+  }
+
   async #verifySeeding(entries) {
     if (entries.length === 0) return;
 
     // One listing rather than a status call each: this runs over the whole
     // library on every start, and a round trip per archive is a cost paid by
     // every node to catch a fault most of them do not have.
-    const held = new Map();
-    for (const status of await this.#engine.list().catch(() => [])) {
-      held.set(status.infoHash, status);
-    }
+    // Whether the listing worked is a separate fact from what it contained,
+    // and collapsing the two into an empty map is what made this only ever
+    // able to report. A repair has to know the difference: an engine that
+    // could not be asked is not an engine holding nothing.
+    const listing = await this.#engine.list().then(
+      (all) => ({ answered: true, all }),
+      () => ({ answered: false, all: [] }),
+    );
+    const held = new Map(
+      listing.all.map((status) => [status.infoHash, status]),
+    );
+
+    // Handing archives back one at a time only makes sense against an engine
+    // that is holding some of them. One holding none of what it was just given
+    // is not suffering a per-archive fault -- it is a replacement that came up
+    // empty, or a listing that cannot be trusted -- and re-adding the whole
+    // library on the strength of a bad answer is how a node spends its start
+    // hashing everything it already had. That case is the reconnect handler's,
+    // and it is reported here rather than acted on.
+    const repairable = listing.answered && held.size > 0;
 
     let wrong = 0;
     for (const entry of entries) {
@@ -2178,11 +2208,50 @@ export class Library {
       // it absent from the engine and unreported by the very check meant to
       // notice. Absent is absent — it is neither seeding nor downloading.
       if (!status) {
+        // Handed back rather than only reported. This is the one fault here
+        // with an obvious remedy -- the archive was restorable a moment ago,
+        // since restore did it without complaint -- and the usual cause is a
+        // sidecar that died partway through and was replaced by one holding
+        // nothing. The replacement is up by the time this runs, so the second
+        // attempt is against a working engine.
+        //
+        // Once, not in a loop. An engine that refuses twice is not going to be
+        // talked round by a third try, and a restore that retried for ever
+        // would keep a node busy instead of letting it say what is wrong.
+        if (!repairable) {
+          wrong += 1;
+          console.error(
+            `${label}: restore handed this to the engine and the engine is ` +
+              'not holding it. It is neither seeding nor downloading, and ' +
+              'nothing will start it before the next restart.',
+          );
+          continue;
+        }
+
+        const again = await this.#readd(entry).then(
+          () => true,
+          (error) => {
+            console.error(
+              `${label}: could not be handed back: ${error.message}`,
+            );
+            return false;
+          },
+        );
+        const recovered = again && (await this.#engineHolds(entry.infoHash));
+        if (recovered) {
+          console.warn(
+            `${label}: the engine was not holding this after restore, so it ` +
+              'was handed back. It is loaded now.',
+          );
+          continue;
+        }
+
         wrong += 1;
         console.error(
-          `${label}: restore handed this to the engine and the engine is not ` +
-            'holding it. It is neither seeding nor downloading, and nothing ' +
-            'will start it before the next restart.',
+          `${label}: restore handed this to the engine, the engine is not ` +
+            'holding it, and handing it back did not take either. It is ' +
+            'neither seeding nor downloading. The log above this says what ' +
+            'the engine has been doing; a restart is the next thing to try.',
         );
         continue;
       }

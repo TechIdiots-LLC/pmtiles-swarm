@@ -7963,6 +7963,17 @@ Every piece is hashed against the ` +
           ? source.bounds.map((n) => Number(n).toFixed(2)).join(', ')
           : null;
 
+        // A pinned archive is named in the recipe by its infohash, which is
+        // forty characters of hex and tells nobody which archive it is. The
+        // filename is what the picker offered and what an operator recognises,
+        // so lead with that and let the infohash be what it resolves to --
+        // which for a pinned source is exactly what it means: this build, and
+        // no later one. Falls back to the hash for an archive that has been
+        // removed, where the name is all that is gone.
+        const pinnedArchive = kind === 'archive';
+        const label =
+          pinnedArchive && source.archiveName ? source.archiveName : source.name;
+
         const notes = [];
         if (index === all.length - 1 && all.length > 1) {
           notes.push('<span class="pill">wins</span>');
@@ -7975,7 +7986,7 @@ Every piece is hashed against the ` +
         return `
           <tr${source.resolved ? '' : ' class="bad"'}>
             <td class="muted">${index}</td>
-            <td><code>${escapeHtml(source.name)}</code>
+            <td><code>${escapeHtml(label)}</code>
                 <span class="muted">${kind}</span></td>
             <td>${
               source.resolved
@@ -7985,7 +7996,13 @@ Every piece is hashed against the ` +
                     ? `<span class="muted" title="Another recipe, evaluated for this tile and merged as one layer. It follows every later change to that stack.">recipe of ${
                         source.nested ?? 0
                       } source${source.nested === 1 ? '' : 's'}</span>`
-                    : `<code class="muted">${escapeHtml(source.archiveName ?? '')}</code>`
+                    : pinnedArchive
+                      ? `<code class="muted" title="${escapeHtml(
+                          source.infohash ?? source.name,
+                        )}">${escapeHtml(
+                          (source.infohash ?? source.name).slice(0, 12),
+                        )}…</code>`
+                      : `<code class="muted">${escapeHtml(source.archiveName ?? '')}</code>`
                 : '<span class="bad">does not resolve</span>'
             }</td>
             <td>${zooms}${

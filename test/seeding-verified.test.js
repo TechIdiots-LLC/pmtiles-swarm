@@ -216,3 +216,134 @@ describe('checking that a restored archive is really being seeded', () => {
     assert.deepEqual(said, []);
   });
 });
+
+describe('an archive the engine took and then did not keep', () => {
+  /**
+   * A library of two archives over an engine that keeps one and drops the
+   * other, until it does not.
+   *
+   * The real shape of this is a sidecar that dies partway through a restore.
+   * The replacement holds nothing, so what was handed over before it died is
+   * gone while what came after is fine -- which is why the engine is holding
+   * some of the library and not all of it. `add` resolving is no evidence that
+   * anything was kept.
+   * @param {number} keepFrom - Which add of the dropped one sticks; Infinity for never.
+   * @param {object} [options] - `holdKept: false` for an engine holding none of it.
+   * @returns {Promise<object>} - The library, the log and the per-archive add counts.
+   */
+  async function dropping(keepFrom, { holdKept = true } = {}) {
+    const dir = await fs.mkdtemp(path.join(workspace, 'drop-'));
+    const lost = { infoHash: 'b'.repeat(40), name: 'planet-260819.pmtiles' };
+    const kept = { infoHash: 'c'.repeat(40), name: 'planet-260820.pmtiles' };
+
+    const catalog = new Catalog(dir);
+    await catalog.load();
+    for (const one of [lost, kept]) {
+      await fs.writeFile(path.join(dir, one.name), Buffer.alloc(8, 1));
+      await catalog.put({
+        ...one,
+        size: 8,
+        mode: 'mirror',
+        complete: true,
+        savePath: dir,
+        magnet: `magnet:?xt=urn:btih:${one.infoHash}`,
+      });
+    }
+
+    const adds = new Map();
+    let holdingLost = false;
+    const said = [];
+    const statusOf = (one) => ({ ...one, progress: 1, state: 'seeding' });
+
+    return {
+      said,
+      lost,
+      addsFor: (infoHash) => adds.get(infoHash) ?? 0,
+      capture:
+        (stream) =>
+        (...parts) =>
+          said.push(`${stream}:${parts.join(' ')}`),
+      library: new Library({
+        catalog,
+        engine: {
+          name: 'libtorrent',
+          add: async (request) => {
+            // The magnet is the only thing here that names which archive it
+            // is, since these are added from metainfo-less entries.
+            const which = String(request.magnet ?? '').slice(-40);
+            const count = (adds.get(which) ?? 0) + 1;
+            adds.set(which, count);
+            if (which === lost.infoHash && count >= keepFrom) {
+              holdingLost = true;
+            }
+          },
+          remove: async () => {},
+          get: async (infoHash) => {
+            if (infoHash === kept.infoHash)
+              return holdKept ? statusOf(kept) : null;
+            return holdingLost ? statusOf(lost) : null;
+          },
+          list: async () => [
+            ...(holdKept ? [statusOf(kept)] : []),
+            ...(holdingLost ? [statusOf(lost)] : []),
+          ],
+        },
+        config: { dataDir: dir, webtorrent: { savePath: dir } },
+      }),
+    };
+  }
+
+  it('hands back the one the engine dropped', async () => {
+    // What used to happen: the check noticed, said nothing would start it
+    // before the next restart, and was right.
+    const harness = await dropping(2);
+    const said = await restoreQuietly(harness);
+
+    assert.equal(
+      harness.addsFor(harness.lost.infoHash),
+      2,
+      'the dropped archive should have been handed back once',
+    );
+    assert.ok(
+      said.some((line) => line.includes('It is loaded now')),
+      said.join('\n'),
+    );
+  });
+
+  it('tries once, not in a loop', async () => {
+    // An engine that refuses twice will not be talked round by a third try,
+    // and a restore that retried for ever would keep the node busy instead of
+    // letting it say what is wrong.
+    const harness = await dropping(Infinity);
+    const said = await restoreQuietly(harness);
+
+    assert.equal(harness.addsFor(harness.lost.infoHash), 2);
+    assert.ok(
+      said.some((line) => line.includes('handing it back did not take')),
+      said.join('\n'),
+    );
+    assert.ok(
+      said.some((line) => line.includes('a restart is the next thing to try')),
+      said.join('\n'),
+    );
+  });
+
+  it('does not re-add the library when the engine is holding none of it', async () => {
+    // An engine that came up empty, or one that could not be listed at all, is
+    // not suffering a per-archive fault. Re-adding everything on the strength
+    // of that answer is how a node spends its start hashing what it already
+    // had, and the reconnect handler owns that case. So this reports and stops.
+    const harness = await dropping(Infinity, { holdKept: false });
+    const said = await restoreQuietly(harness);
+
+    assert.equal(
+      harness.addsFor(harness.lost.infoHash),
+      1,
+      'nothing should have been handed back',
+    );
+    assert.ok(
+      said.some((line) => line.includes('nothing will start it before')),
+      said.join('\n'),
+    );
+  });
+});
