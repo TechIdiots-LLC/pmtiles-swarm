@@ -8152,6 +8152,25 @@ Every piece is hashed against the ` +
        * one over an infohash pins to a build that will eventually be retired.
        * @returns {Promise<void>} - Resolves once filled.
        */
+      /**
+       * Archive names by infohash, learned while filling the source menu.
+       *
+       * The editor works on the recipe, and a pinned source in a recipe is an
+       * infohash and nothing else -- so a row drawn from the draft alone can
+       * only show forty characters of hex, which is what it used to do. The
+       * menu that offered the archive had its name a moment earlier; this is
+       * where that is kept so the row can use it.
+       */
+      const archiveNames = new Map();
+
+      /**
+       * What to call a pinned archive in the editor.
+       * @param {string} infoHash - The archive the recipe names.
+       * @returns {string} - Its name, or the short hash where none is known.
+       */
+      const archiveLabel = (infoHash) =>
+        archiveNames.get(infoHash) ?? shortHash(infoHash) ?? '';
+
       const fillStackSourceChoices = async () => {
         const select = $('stack-add-source');
         const taken = new Set(
@@ -8212,6 +8231,14 @@ Every piece is hashed against the ` +
           // missing from a menu the operator is looking at. This is the same
           // endpoint the Archives view reads, and it answers a bare array.
           const held = await api('/api/torrents');
+          // Every archive, before the menu is filtered down. The one the
+          // editor most needs a name for is the one already in the draft,
+          // which is exactly what `taken` removes below.
+          for (const entry of held ?? []) {
+            if (entry.infoHash && entry.name) {
+              archiveNames.set(entry.infoHash, entry.name);
+            }
+          }
           // The same rule the tile route enforces, because a stack source is
           // read through exactly that path: a complete MBTiles belongs here,
           // and one still arriving does not -- a stack naming it would answer
@@ -8549,12 +8576,16 @@ Every piece is hashed against the ` +
           <div class="card tight">
             <div class="row">
               <span class="muted">${index}</span>
-              <code>${escapeHtml(
+              <code${
+                source.archive
+                  ? ` title="${escapeHtml(source.archive)}"`
+                  : ''
+              }>${escapeHtml(
                 remote
                   ? (source.url || 'an address').replace(/^https?:\/\//, '')
                   : (source.stack ??
                       source.category ??
-                      shortHash(source.archive) ??
+                      (source.archive ? archiveLabel(source.archive) : '') ??
                       ''),
               )}</code>
               <span class="sub" title="${

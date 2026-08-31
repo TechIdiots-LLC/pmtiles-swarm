@@ -5,7 +5,11 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **The stack editor named a pinned archive by its infohash.** The list of saved stacks was fixed in
+  0.98.3, but the editor has its own row and kept showing `33394361a935…` — where the menu that
+  offered the archive a moment earlier had shown its filename. The editor works on the recipe, and
+  a pinned source in a recipe is an infohash and nothing else, so the row had nothing else to
+  print. It remembers the names the source menu already fetched now, and the infohash is on hover.
 
 ## 0.99.1
 ### ✨ Features and improvements
