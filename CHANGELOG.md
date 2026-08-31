@@ -2,7 +2,14 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **A sidecar crash now names the frame it happened in.** `pmtiles-torrent` 0.11.0 arms
+  `faulthandler` in the sidecar, so a segfault writes a Python traceback to stderr on its way out
+  and this node forwards it into the log line by line, beside the `sidecar killed by SIGSEGV` that
+  used to be the whole story. Nothing to configure; it costs nothing until the process faults.
+
+  Worth having because that signal is otherwise the only evidence. On the node this came from it
+  appeared several times per start for eleven days, and each crash takes the archives handed over
+  before it — which is what leaves a library reading `not loaded` after a restart.
 
 ### 🐞 Bug fixes
 - **An archive the engine took and then did not keep is handed back, rather than only reported.**

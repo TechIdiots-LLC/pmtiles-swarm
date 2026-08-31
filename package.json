@@ -49,7 +49,7 @@
     "maplibre-gl": "^6.2.0",
     "parse-torrent": "^11.0.24",
     "pmtiles": "^4.4.1",
-    "pmtiles-torrent": "^0.10.2",
+    "pmtiles-torrent": "^0.11.0",
     "webtorrent": "^3.0.21"
   },
   "engines": {
