@@ -5,6 +5,12 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.99.1
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
 - **The sidecar stops segfaulting, which is what left a library half loaded after a restart.**
   `pmtiles-torrent` 0.11.1. The traceback 0.99.0 made possible named the same frame every time: the
   alert pump, inside `session.wait_for_alert()`. That call hands back a borrowed pointer to an
