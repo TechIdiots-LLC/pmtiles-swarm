@@ -5,7 +5,19 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **The sidecar stops segfaulting, which is what left a library half loaded after a restart.**
+  `pmtiles-torrent` 0.11.1. The traceback 0.99.0 made possible named the same frame every time: the
+  alert pump, inside `session.wait_for_alert()`. That call hands back a borrowed pointer to an
+  alert which the next `pop_alerts()` — the following statement — invalidates, and nothing ever
+  read the return value; it was only a way to sleep. The pump waits on its own stop event now.
+
+  This is the cause behind the `not loaded` archives, not another symptom of them. Each crash took
+  whatever restore had handed over before it, because the replacement sidecar holds none of it, so
+  the archives restored first were the ones that came back missing. The node stops that leaving a
+  mark either way — it hands them back — but they should now not be dropped in the first place.
+
+  Sidecar shutdown is quicker too: the pump answers the stop at once, where the old wait had to be
+  sat through to the end of its timeout.
 
 ## 0.99.0
 ### ✨ Features and improvements
