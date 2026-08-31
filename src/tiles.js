@@ -7,7 +7,7 @@ import { TorrentSource } from 'pmtiles-torrent';
 import { NodeFileSource } from './file-source.js';
 import { onDiskPath } from './incomplete.js';
 import { MbtilesArchive, isMbtiles } from './mbtiles.js';
-import { summarize } from './pmtiles-probe.js';
+import { summarize } from './archive-summary.js';
 import { LibtorrentReadEngine } from './read-engine.js';
 
 /**

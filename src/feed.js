@@ -18,7 +18,7 @@
  */
 
 import { mutableMagnet } from './mutable.js';
-import { metadataEncoding } from './pmtiles-probe.js';
+import { metadataEncoding } from './archive-summary.js';
 
 const PMTILES_NS = 'https://github.com/TechIdiots-LLC/pmtiles-swarm/ns/1.0';
 

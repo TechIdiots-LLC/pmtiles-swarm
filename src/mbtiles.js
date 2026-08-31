@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { summarize } from './pmtiles-probe.js';
+import { summarize, tileTypeFor } from './archive-summary.js';
 
 /**
  * Reading tiles out of a completed MBTiles archive.
@@ -20,17 +20,6 @@ import { summarize } from './pmtiles-probe.js';
  *
  * MBTiles 1.3: https://github.com/mapbox/mbtiles-spec/blob/master/1.3/spec.md
  */
-
-/** Maps an MBTiles `format` onto the PMTiles tile-type number summarize expects. */
-const TILE_TYPES = {
-  pbf: 1,
-  mvt: 1,
-  png: 2,
-  jpg: 3,
-  jpeg: 3,
-  webp: 4,
-  avif: 5,
-};
 
 /** The whole world, for an archive that declares no bounds. */
 const WHOLE_WORLD = [-180, -85.051129, 180, 85.051129];
@@ -166,7 +155,7 @@ export class MbtilesArchive {
     return {
       // MBTiles has no equivalent, and nothing reads this except to report it.
       specVersion: 3,
-      tileType: TILE_TYPES[format] ?? 0,
+      tileType: tileTypeFor(format),
       minZoom,
       maxZoom,
       minLon: bounds[0],

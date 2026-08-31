@@ -5,7 +5,7 @@ import path from 'node:path';
 import { after, describe, it } from 'node:test';
 import { Catalog } from '../src/catalog.js';
 import { formatBytes, parseFeed, renderFeed } from '../src/feed.js';
-import { metadataFlag } from '../src/pmtiles-probe.js';
+import { metadataFlag } from '../src/archive-summary.js';
 import {
   generatePublisherKey,
   mutableMagnet,

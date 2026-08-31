@@ -38,7 +38,7 @@ import {
 } from './sources.js';
 import { limitFor, remaining } from './seeding.js';
 import { buildTileJson, extensionMatches, tileExtension } from './tilejson.js';
-import { SUMMARY_VERSION } from './pmtiles-probe.js';
+import { SUMMARY_VERSION } from './archive-summary.js';
 import { TileReadError } from './tiles.js';
 import { loadCodec } from './codec.js';
 import { answerStackTile, outputFormat, outputSize } from './stack-tile.js';

@@ -2,7 +2,17 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **The two archive readers no longer import each other.** Summarising an MBTiles archive reached
+  into `pmtiles-probe.js` for `summarize`, which put one format's reader inside the other's module
+  and dragged the `pmtiles` package in behind it. The half neither format owns — the summary shape,
+  its version, the metadata readers and the tile-type table — is now `archive-summary.js`, which
+  imports nothing and opens nothing: it takes a header and a metadata document and returns a
+  summary. `pmtiles-probe.js` keeps the PMTiles half and `mbtiles.js` the SQLite half, and neither
+  reaches the other.
+
+  The tile-type table had been written twice, in opposite directions, and the MBTiles copy was
+  missing `mlt` — so an archive declaring that format summarised as `unknown`. One table with a
+  derived reverse lookup now, so the halves cannot drift apart again.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._

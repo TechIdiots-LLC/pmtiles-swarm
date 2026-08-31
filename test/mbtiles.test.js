@@ -5,7 +5,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { after, describe, it } from 'node:test';
 import { MbtilesArchive, isMbtiles, probeMbtiles } from '../src/mbtiles.js';
-import { summarize } from '../src/pmtiles-probe.js';
+import { summarize } from '../src/archive-summary.js';
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-mbtiles-'));
 after(() => fs.rm(workspace, { recursive: true, force: true }));

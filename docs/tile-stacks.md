@@ -469,9 +469,11 @@ This is the one thing that stops a stack being a small feature, and it is
 narrower than "the node cannot handle tiles". It already does, in most of the
 ways a stack needs:
 
-- `identify.js` reads an archive's magic bytes; the prober reads PMTiles
-  headers, directories and metadata; `mbtiles.js` queries tile rows out of
-  SQLite.
+- `identify.js` reads an archive's magic bytes; `pmtiles-probe.js` reads PMTiles
+  headers, directories and metadata; `mbtiles.js` queries tile rows and the
+  metadata table out of SQLite. Neither format's reader imports the other's:
+  what they share is `archive-summary.js`, which turns a header and a metadata
+  document into the summary the catalog keeps and opens nothing itself.
 - `TileStore.getTile` resolves an archive, reads a tile through the local file
   or the swarm, and knows its format from the header rather than by guessing.
 - The tile route already gzips vector tiles through `node:zlib`, abandons a

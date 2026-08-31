@@ -9,7 +9,7 @@ import {
   customEncodingFactors,
   metadataEncoding,
   summarize,
-} from '../src/pmtiles-probe.js';
+} from '../src/archive-summary.js';
 import { createApp } from '../src/api.js';
 import { Catalog } from '../src/catalog.js';
 import { buildTileJson } from '../src/tilejson.js';
