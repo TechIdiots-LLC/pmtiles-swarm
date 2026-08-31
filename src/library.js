@@ -14,6 +14,7 @@ import {
 import { publishingBase, publishingFor, reachability } from './catalog.js';
 import { linkLatest } from './latest-link.js';
 import { checkOrigin, fingerprintOrigin } from './origin.js';
+import { probeMbtiles } from './mbtiles.js';
 import { probePMTiles } from './pmtiles-probe.js';
 import { archiveDirName } from './savepath.js';
 import {
@@ -303,11 +304,12 @@ export class Library {
     });
 
     try {
-      // Only PMTiles can have its tiles served, so only PMTiles gets probed.
-      const summary =
-        identified.kind === 'pmtiles'
-          ? await probePMTiles(absolute).catch(() => undefined)
-          : undefined;
+      // Both formats that can be served get read for one. The kind comes from
+      // the content rather than the extension, which is what identify exists
+      // for.
+      const summary = await probeArchive(absolute, identified.kind).catch(
+        () => undefined,
+      );
 
       const created = await createTorrentFromFile(absolute, {
         creator: this.#creator(),
@@ -967,6 +969,11 @@ export class Library {
     // progress through runningAdds() and says "watch the log" as it closes.
     options.onValidated?.({ url, kind: identified.kind });
 
+    // PMTiles only, and not an oversight: this reads the archive over range
+    // requests before anything has been downloaded, and there is no partial
+    // read of a SQLite file that answers anything. An MBTiles mirrored from a
+    // URL is summarised by the warmer once the download finishes, which is the
+    // first moment it can be.
     const summary =
       identified.kind === 'pmtiles'
         ? await probePMTiles(url).catch(() => undefined)
@@ -1605,8 +1612,9 @@ export class Library {
     // facts, and probing on the second one's behalf would hang.
     let summary;
     if (readable && torrent.progress === 1 && torrent.savePath) {
-      summary = await probePMTiles(
+      summary = await probeArchive(
         path.join(torrent.savePath, torrent.name),
+        guessKind(torrent.name ?? ''),
       ).catch(() => undefined);
     }
 
@@ -3380,6 +3388,30 @@ export function carriesCredentials(url) {
 export function guessKind(name) {
   if (/\.pmtiles$/i.test(name)) return 'pmtiles';
   if (/\.mbtiles$/i.test(name)) return 'mbtiles';
+  return undefined;
+}
+
+/**
+ * Reads the summary out of whichever kind of archive this is.
+ *
+ * Only PMTiles was ever probed, which was right when only PMTiles could be
+ * served. MBTiles became servable from a complete local copy and this did not
+ * follow, so those entries carried no summary at all -- and a summary is what
+ * everything downstream reads coverage from. A stack naming one advertised the
+ * fallbacks in its TileJSON, z0-z14 over the whole world, rather than the zoom
+ * range and bounds the archive states about itself.
+ *
+ * Anything else is left alone rather than guessed at. A .osm.pbf being mirrored
+ * has no summary to read and asking for one is how it ends up reported as a
+ * broken map instead of a file being distributed.
+ * @param {string} location - Local path, or a URL for PMTiles.
+ * @param {string} [kind] - What it was identified as; the name decides if not.
+ * @returns {Promise<object|undefined>} - The summary, where there is one.
+ */
+export async function probeArchive(location, kind) {
+  const format = kind ?? guessKind(location);
+  if (format === 'mbtiles') return probeMbtiles(location);
+  if (format === 'pmtiles') return probePMTiles(location);
   return undefined;
 }
 

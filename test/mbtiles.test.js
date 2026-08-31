@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { after, describe, it } from 'node:test';
-import { MbtilesArchive, isMbtiles } from '../src/mbtiles.js';
+import { MbtilesArchive, isMbtiles, probeMbtiles } from '../src/mbtiles.js';
 import { summarize } from '../src/pmtiles-probe.js';
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-mbtiles-'));
@@ -356,5 +356,95 @@ describe('serving an MBTiles archive over HTTP', () => {
 
     assert.equal(response.status, 503);
     assert.match(body.error, /once the download finishes/);
+  });
+});
+
+describe('summarising an MBTiles archive for the catalog', () => {
+  it('reads the coverage a stack needs off the metadata table', async () => {
+    // Only PMTiles used to be probed, so an MBTiles entry carried no summary
+    // at all -- and a summary is what stackCoverage reads. A stack naming one
+    // advertised z0-z14 over the whole world however narrow the archive was.
+    const summary = await probeMbtiles(
+      await makeArchive({
+        metadata: {
+          name: 'GEBCO bathymetry',
+          format: 'webp',
+          minzoom: '0',
+          maxzoom: '8',
+          bounds: '-180,-85.05,180,85.05',
+          attribution: 'GEBCO',
+        },
+      }),
+    );
+
+    assert.equal(summary.format, 'webp');
+    assert.equal(summary.contentType, 'image/webp');
+    assert.equal(summary.minZoom, 0);
+    assert.equal(summary.maxZoom, 8);
+    assert.deepEqual(summary.bounds, [-180, -85.05, 180, 85.05]);
+    assert.equal(summary.attribution, 'GEBCO');
+    // The version matters: an entry summarised by an older prober is re-read
+    // once, and one written without it would never be.
+    assert.ok(summary.summaryVersion >= 3);
+  });
+
+  it('carries the height packing through, which a terrain stack cannot work without', async () => {
+    // Not a tile that fails: a tile of wrong heights, which is worse. The
+    // metadata reader used to hand back a fixed handful of keys and this was
+    // not among them.
+    const terrarium = await probeMbtiles(
+      await makeArchive({
+        metadata: { format: 'webp', encoding: 'terrarium' },
+      }),
+    );
+    assert.equal(terrarium.encoding, 'terrarium');
+
+    const custom = await probeMbtiles(
+      await makeArchive({
+        metadata: {
+          format: 'webp',
+          encoding: 'custom',
+          redFactor: '256',
+          greenFactor: '1',
+          blueFactor: '0.00390625',
+          baseShift: '-32768',
+        },
+      }),
+    );
+    assert.equal(custom.encoding, 'custom');
+    assert.deepEqual(custom.encodingFactors, {
+      redFactor: 256,
+      greenFactor: 1,
+      blueFactor: 0.00390625,
+      baseShift: -32768,
+    });
+  });
+
+  it('falls back to the tiles table for a zoom range nobody declared', async () => {
+    // Most of the MBTiles spec is optional, and an archive that states none of
+    // it is still perfectly readable. getHeader asks the tiles themselves.
+    const summary = await probeMbtiles(
+      await makeArchive({
+        metadata: { format: 'png' },
+        tiles: [
+          [3, 1, 1, Buffer.from('a')],
+          [6, 2, 2, Buffer.from('b')],
+        ],
+      }),
+    );
+    assert.equal(summary.minZoom, 3);
+    assert.equal(summary.maxZoom, 6);
+    // Nothing said, so nothing claimed -- rather than a default that would
+    // cost a client its own.
+    assert.equal(summary.encoding, undefined);
+  });
+
+  it('never claims the clustering that swarm reading would need', async () => {
+    // Reporting true would claim the spatial locality PMTiles has and SQLite
+    // does not, which is the whole reason this is served only once complete.
+    const summary = await probeMbtiles(
+      await makeArchive({ metadata: { format: 'webp' } }),
+    );
+    assert.equal(summary.clustered, false);
   });
 });

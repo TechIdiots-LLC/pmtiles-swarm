@@ -17,6 +17,7 @@ import {
   needsCodec,
   resolveStack,
   stackCoverage,
+  stackEncoding,
   stackEtag,
   stackRevision,
   validateStack,
@@ -1871,5 +1872,71 @@ describe('the public list of stacks', () => {
     } finally {
       await node.close();
     }
+  });
+});
+
+describe('an MBTiles archive as a layer', () => {
+  // It has always read: the tile store opens one from a complete local copy,
+  // and a stack asks the store for tiles like anything else. What it had no
+  // way to do was say what it covered, because only PMTiles was ever probed
+  // for a summary and stackCoverage reads exactly that.
+  const summary = {
+    summaryVersion: 3,
+    format: 'webp',
+    contentType: 'image/webp',
+    minZoom: 0,
+    maxZoom: 8,
+    bounds: [-180, -85.05, 180, 85.05],
+    attribution: 'GEBCO',
+    encoding: 'terrarium',
+    clustered: false,
+  };
+
+  const mbtiles = (pmtiles) => ({
+    infoHash: 'f1'.repeat(20),
+    name: 'bathymetry.mbtiles',
+    kind: 'mbtiles',
+    categories: ['bathy'],
+    complete: true,
+    pmtiles,
+  });
+
+  const over = (entry) =>
+    resolveStack(
+      { id: 'seafloor', space: 'elevation', sources: [{ category: 'bathy' }] },
+      { category: () => entry, archive: () => entry },
+    );
+
+  it('resolves as a source like any other archive', () => {
+    const resolved = over(mbtiles(summary));
+    assert.equal(resolved.missing.length, 0);
+    assert.equal(resolved.sources[0].entry.name, 'bathymetry.mbtiles');
+  });
+
+  it('answers for the ground it covers', () => {
+    const coverage = stackCoverage(over(mbtiles(summary)));
+    assert.equal(coverage.minzoom, 0);
+    assert.equal(coverage.maxzoom, 8);
+    assert.deepEqual(coverage.bounds, [-180, -85.05, 180, 85.05]);
+    assert.equal(coverage.format, 'webp');
+    assert.equal(coverage.attribution, 'GEBCO');
+  });
+
+  it('advertised the fallbacks when it had no summary', () => {
+    // What this looked like before: not an error anywhere, just a TileJSON
+    // quietly claiming twice the zoom range and a wider extent than the
+    // archive has. Kept as a test because nothing refuses a summaryless entry
+    // -- the recipe is valid and the console flags nothing -- so the only
+    // thing standing between that and a stack is the probe.
+    const coverage = stackCoverage(over(mbtiles(undefined)));
+    assert.equal(coverage.maxzoom, 14);
+    assert.deepEqual(coverage.bounds, [-180, -85.051129, 180, 85.051129]);
+  });
+
+  it('tells the stack how its heights are packed', () => {
+    // A raster stack would merge either way. An elevation one decodes the
+    // pixels, so losing this is not a tile that fails but a tile of wrong
+    // heights.
+    assert.equal(stackEncoding(over(mbtiles(summary))).encoding, 'terrarium');
   });
 });

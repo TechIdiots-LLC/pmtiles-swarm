@@ -2,7 +2,30 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **A finished MBTiles archive works as a stack layer, and now says what it holds.** It always read:
+  the tile store opens one from a complete local copy, and a stack asks the store for tiles like
+  anything else. What it could not do was describe itself. Only PMTiles was ever probed for a
+  summary — right when only PMTiles could be served, and never revisited once MBTiles became
+  servable — so those entries carried none, and a summary is what `stackCoverage` reads. A stack
+  naming one advertised the fallbacks in its TileJSON, z0–z14 over the whole world, however narrow
+  the archive actually was. Nothing refused it and nothing warned: the recipe was valid, the tiles
+  were right, and only the coverage was a fiction.
+
+  Both formats that can be served are read for a summary now, through the same summariser —
+  `probeMbtiles` off the adapter's `getHeader` and `getMetadata`, which is what that adapter exists
+  for. Most of the MBTiles spec is optional, so where an archive states nothing the reader derives
+  what it can: the zoom range comes from the tiles table when `minzoom` and `maxzoom` are absent.
+
+  The metadata reader also carries `encoding` through, with the four factors a custom packing is
+  unreadable without. An elevation stack decodes the pixels rather than passing them through, so an
+  archive that lost its encoding was not a tile that failed but a tile of wrong heights.
+
+  Archives already in the catalog are summarised by the head warmer on its next pass, once complete
+  — an MBTiles has no head to pull out of a swarm, so there is nothing to be due until the file is
+  whole, and then the read is local and instant. Unchanged: `/latest/<category>` still offers no
+  tile endpoint for an MBTiles, because a category is a promise to every node and this one is only
+  keepable on a node holding the whole file. See [tile-stacks.md](docs/tile-stacks.md) — "An
+  MBTiles archive as a source".
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._

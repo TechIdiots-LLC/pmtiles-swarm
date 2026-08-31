@@ -156,7 +156,14 @@ export class HeadWarmer {
     // not, since an archive joined by magnet has no kind until its metadata
     // arrives.
     const kind = entry.kind ?? guessKind(entry.name ?? '');
-    if (kind !== 'pmtiles') return false;
+    if (kind !== 'pmtiles' && kind !== 'mbtiles') return false;
+
+    // MBTiles has no head to pull out of the swarm -- it is SQLite, read whole
+    // or not at all -- so there is nothing here to be due until the file is.
+    // Once it is, the read is local and instant, and it is the only thing that
+    // gives an archive already in the catalog the summary this did not use to
+    // record for it.
+    if (kind === 'mbtiles' && entry.complete !== true) return false;
 
     // A summary is only an answer about *this disk* if a header on this disk
     // produced it. `format` was standing in for that and does not mean it.
@@ -289,6 +296,11 @@ export class HeadWarmer {
           `[warm] ${entry.name}: header read; its metadata is at the far end ` +
             'of the archive and has not arrived yet',
         );
+      } else if ((entry.kind ?? guessKind(entry.name ?? '')) === 'mbtiles') {
+        // Not a header: MBTiles keeps in a metadata table what PMTiles keeps
+        // in a fixed header, and a log saying otherwise sends whoever reads it
+        // looking for the wrong thing.
+        console.log(`[warm] ${entry.name}: metadata read`);
       } else {
         console.log(`[warm] ${entry.name}: header read`);
       }

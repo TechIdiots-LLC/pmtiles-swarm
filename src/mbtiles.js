@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { summarize } from './pmtiles-probe.js';
 
 /**
  * Reading tiles out of a completed MBTiles archive.
@@ -199,6 +200,17 @@ export class MbtilesArchive {
       // Same key tileserver-gl reads, carried through so an MBTiles archive
       // gets the same treatment a PMTiles one does.
       sparse: meta.sparse,
+      // How heights are packed into the pixels, and the four factors a custom
+      // packing is unreadable without. Not in the MBTiles spec -- neither is
+      // `sparse` -- but this is where every tool that needs it puts it, and a
+      // terrain archive that loses it is decoded as whatever the reader
+      // assumes. That is not a tile that fails; it is a tile of wrong heights,
+      // which is worse.
+      encoding: meta.encoding,
+      redFactor: meta.redFactor,
+      greenFactor: meta.greenFactor,
+      blueFactor: meta.blueFactor,
+      baseShift: meta.baseShift,
     };
   }
 
@@ -252,5 +264,34 @@ export class MbtilesArchive {
       // Already closed, or never opened. Nothing here is worth failing a
       // shutdown over.
     }
+  }
+}
+
+/**
+ * Reads an MBTiles archive's summary, the way probePMTiles reads a PMTiles one.
+ *
+ * The same summariser, off the same two methods -- which is the whole point of
+ * the adapter above: MBTiles keeps in a metadata table what PMTiles keeps in a
+ * fixed header, and everything upstream of `summarize` should not have to know
+ * which it was reading. `getHeader` even derives the zoom range from the tiles
+ * table where the metadata omits it, so a summary comes back for an archive
+ * that declares almost nothing about itself.
+ *
+ * Local paths only, and not by oversight. probePMTiles takes a URL because
+ * PMTiles is read a byte range at a time, and SQLite is not: there is no
+ * partial read of an MBTiles that answers anything, which is the same reason
+ * it is served only from a complete local copy.
+ * @param {string} file - Path to the .mbtiles file.
+ * @returns {Promise<object>} - The summary, in the shape the catalog keeps.
+ */
+export async function probeMbtiles(file) {
+  const archive = await MbtilesArchive.open(file);
+  try {
+    return summarize(
+      await archive.getHeader(),
+      (await archive.getMetadata()) ?? {},
+    );
+  } finally {
+    archive.close();
   }
 }

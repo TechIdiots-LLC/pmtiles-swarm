@@ -52,6 +52,34 @@ describe('deciding whose head to read', () => {
     assert.equal(warmer([entry]).due(entry), true);
   });
 
+  it('waits for an MBTiles to be whole before summarising it', () => {
+    // There is no head to pull out of the swarm: SQLite is read whole or not
+    // at all, which is the same reason it is served only from a complete local
+    // copy. Once the file is here the read is local and instant.
+    const arriving = {
+      infoHash: 'e'.repeat(40),
+      name: 'bathymetry.mbtiles',
+      kind: 'mbtiles',
+      complete: false,
+    };
+    assert.equal(warmer([arriving]).due(arriving), false);
+
+    const whole = { ...arriving, complete: true };
+    assert.equal(warmer([whole]).due(whole), true);
+  });
+
+  it('leaves an MBTiles alone once it has been summarised', () => {
+    const entry = {
+      infoHash: 'f'.repeat(40),
+      name: 'bathymetry.mbtiles',
+      kind: 'mbtiles',
+      complete: true,
+      pmtiles: { format: 'webp' },
+      summarySource: 'header',
+    };
+    assert.equal(warmer([entry]).due(entry), false);
+  });
+
   it('leaves a raster archive alone once it has been read', () => {
     const entry = {
       infoHash: 'b'.repeat(40),

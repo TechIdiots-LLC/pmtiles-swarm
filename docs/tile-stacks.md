@@ -29,6 +29,7 @@ of its parts.
 - [Painting order](#painting-order)
 - [The two pixel spaces](#the-two-pixel-spaces)
 - [Naming a source](#naming-a-source)
+  - [An MBTiles archive as a source](#an-mbtiles-archive-as-a-source)
 - [The config file](#the-config-file)
 - [Translating a rio-rgbify-merge config](#translating-a-rio-rgbify-merge-config)
 - [Evaluating one tile](#evaluating-one-tile)
@@ -173,6 +174,35 @@ something else.
 
 A stack may mix the two. Whether _any_ source is category-resolved decides the
 whole stack's caching headers, below.
+
+### An MBTiles archive as a source
+
+Either form may name an MBTiles archive, with one condition: **this node must
+hold the complete file.** MBTiles is SQLite, whose pages are scattered rather
+than spatially clustered, so it cannot be read a byte range at a time out of a
+swarm the way PMTiles can — a source still arriving answers 503, and no amount
+of waiting for the right pieces changes that. A stack with an MBTiles source is
+therefore only servable on nodes that have finished downloading it.
+
+Everything else is the same. It resolves, merges, clips, feathers and bakes
+like any other source, because the tile store presents it through the same
+three methods a PMTiles archive answers.
+
+What it covers comes from the metadata table, read at import by `probeMbtiles`
+and summarised by the same `summarize` the PMTiles path uses. Most of the
+MBTiles spec is optional, so where an archive states nothing the reader derives
+what it can — the zoom range comes from the tiles table itself when `minzoom`
+and `maxzoom` are absent, and bounds default to the whole world.
+
+Two keys outside the spec are read, both because this is where every tool that
+needs them puts them: `sparse`, which tileserver-gl reads the same way, and
+`encoding` — with `redFactor`, `greenFactor`, `blueFactor` and `baseShift` for
+a custom packing. An elevation stack decodes the pixels rather than passing
+them through, so an archive that loses its encoding is not a tile that fails but
+a tile of wrong heights.
+
+An archive already in the catalog from before any of this was probed is
+summarised by the head warmer on its next pass, once it is complete.
 
 ## The config file
 
