@@ -5,6 +5,12 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.99.2
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
 - **The stack editor named a pinned archive by its infohash.** The list of saved stacks was fixed in
   0.98.3, but the editor has its own row and kept showing `33394361a935…` — where the menu that
   offered the archive a moment earlier had shown its filename. The editor works on the recipe, and
