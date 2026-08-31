@@ -5,6 +5,12 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.98.3
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
 - **A stack could not be pointed at a completed MBTiles archive.** The source picker offered only
   PMTiles, so an MBTiles the node was perfectly able to serve tiles from was simply absent from the
   menu. It offers a complete one now, by the same rule the tile route enforces — and still hides one
