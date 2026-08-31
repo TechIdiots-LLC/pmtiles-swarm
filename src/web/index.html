@@ -1824,6 +1824,43 @@
       };
 
       /**
+       * Whether this archive has a tile endpoint at all.
+       *
+       * The same rule the tile route applies, rather than a second opinion
+       * about it: PMTiles always, MBTiles once the file is whole. MBTiles is
+       * SQLite, so it cannot be read a byte range at a time out of the swarm —
+       * but a complete one on local disk is an ordinary database holding the
+       * same tiles, and refusing to serve it is refusing something that works.
+       * See docs/internals.md — "Serving an MBTiles archive".
+       * @param {object} entry - A catalog entry.
+       * @returns {boolean} - Whether to offer the tile endpoints.
+       */
+      const isServable = (entry) => {
+        const kind = entry.kind ?? 'pmtiles';
+        if (kind === 'pmtiles') return true;
+        return kind === 'mbtiles' && entry.complete === true;
+      };
+
+      /**
+       * What to say under the size about an archive that is not PMTiles.
+       *
+       * An MBTiles that is here in full is servable, and saying "not servable"
+       * beside a finished file was simply wrong. One that is still arriving is
+       * not servable *yet*, which is a different thing to tell somebody: it
+       * becomes one by waiting, where an .osm.pbf never will.
+       * @param {object} entry - A catalog entry.
+       * @returns {string} - The note, or empty for a PMTiles archive.
+       */
+      const kindNote = (entry) => {
+        const kind = entry.kind ?? 'pmtiles';
+        if (kind === 'pmtiles') return '';
+        if (kind !== 'mbtiles') return `${escapeHtml(kind)} · not servable`;
+        return entry.complete === true
+          ? escapeHtml(kind)
+          : `${escapeHtml(kind)} · servable once complete`;
+      };
+
+      /**
        * Closes the details, panel and row together.
        *
        * Two elements have to agree now that the panel sits in the table: the
@@ -1891,8 +1928,8 @@
                 .join(' · ')}</div>
             </td>
             <td>${bytes(entry.size)}${
-              (entry.kind ?? 'pmtiles') !== 'pmtiles'
-                ? `<div class="sub">${escapeHtml(entry.kind)} · not servable</div>`
+              kindNote(entry)
+                ? `<div class="sub">${kindNote(entry)}</div>`
                 : ''
             }</td>
             <td>${added(entry.createdAt)}</td>
@@ -2518,10 +2555,15 @@
 
         const base = location.origin;
         const tileJson = `${base}/archives/${entry.infoHash}/tiles.json`;
-        // Only PMTiles can be a tile endpoint. Offering the URL for anything
-        // else hands out a link that will never work and reads as a fault in
-        // the server rather than a fact about the archive.
-        const servable = (entry.kind ?? 'pmtiles') === 'pmtiles';
+        // Offering the URL for something that cannot serve tiles hands out a
+        // link that will never work and reads as a fault in the server rather
+        // than a fact about the archive.
+        const servable = isServable(entry);
+        // Warming pulls the pieces a region's tiles live in, so it only means
+        // anything for an archive read out of the swarm. An MBTiles is read
+        // whole or not at all — once it is here there is nothing left to
+        // fetch, and before that there is no tile to warm.
+        const warmable = (entry.kind ?? 'pmtiles') === 'pmtiles';
         const torrentUrl = `${base}/archives/${entry.infoHash}/archive.torrent`;
         const summary = entry.pmtiles ?? {};
         const mode = entry.mode ?? 'mirror';
@@ -2606,11 +2648,18 @@
           ${
             servable
               ? `<div class="sub" style="margin-bottom:1rem"><code>${escapeHtml(tileJson)}</code></div>`
-              : `<div class="sub" style="margin-bottom:1rem">
-                   This is ${escapeHtml(entry.kind ?? 'not a PMTiles')} archive, so it has no tile
-                   endpoint — only PMTiles can be read a byte range at a time, which is what
-                   serving tiles from a swarm needs. It is still distributed and seeded normally.
-                 </div>`
+              : (entry.kind ?? 'pmtiles') === 'mbtiles'
+                ? `<div class="sub" style="margin-bottom:1rem">
+                     This MBTiles archive is still arriving, so it has no tile endpoint yet. It is
+                     SQLite, which cannot be read a byte range at a time out of the swarm the way
+                     PMTiles can — so it becomes servable when the download finishes rather than as
+                     pieces land. It is distributed and seeded normally in the meantime.
+                   </div>`
+                : `<div class="sub" style="margin-bottom:1rem">
+                     This is ${escapeHtml(entry.kind ?? 'not a PMTiles')} archive, so it has no tile
+                     endpoint — only PMTiles and MBTiles can be served as tiles. It is still
+                     distributed and seeded normally.
+                   </div>`
           }
 
           <h2>Completion hook</h2>
@@ -2665,7 +2714,7 @@
 
           <h2>Actions</h2>
           <div class="actions">
-            ${servable ? '<button id="warm">Warm region</button>' : ''}
+            ${warmable ? '<button id="warm">Warm region</button>' : ''}
             <button id="set-location">Set location…</button>
             <button id="clear-cache" ${mode === 'cache' ? '' : 'disabled title="only cache-mode archives have a cache to clear"'}>Clear cache</button>
             <button id="recheck" title="Hash the files on disk again and believe the result. For an archive that reads 0% next to a file that is plainly there, or one that claims to be complete and is not — every other figure comes from something written down earlier, and this is the only thing that goes and looks.">Recheck files</button>
@@ -2895,7 +2944,7 @@
         }
         $('copy-hash').onclick = () => copy(entry.infoHash, 'Infohash');
 
-        if (servable) {
+        if (warmable) {
           $('warm').onclick = () => openWarmDialog(entry);
         }
 

@@ -5,7 +5,16 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **The console called a complete MBTiles archive "not servable".** It is, and has been since the
+  tile store learned to open one: PMTiles always, MBTiles from a complete local copy. The console
+  never followed. It tested `kind === 'pmtiles'` in two places, so an MBTiles that had finished
+  hashing was labelled `mbtiles · not servable` in the list and had its TileJSON, preview and tile
+  endpoint hidden in the panel — all of which the node was answering perfectly well.
+
+  One rule now, matching what the tile route actually enforces, and an archive still arriving reads
+  as `servable once complete` rather than as one that never will be. Warming stays PMTiles-only: it
+  fetches the pieces a region's tiles live in, and an MBTiles is read whole or not at all, so there
+  is never a region of one to warm.
 
 ## 0.98.1
 ### ✨ Features and improvements
