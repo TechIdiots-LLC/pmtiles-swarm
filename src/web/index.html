@@ -1836,9 +1836,29 @@
        * @returns {boolean} - Whether to offer the tile endpoints.
        */
       const isServable = (entry) => {
-        const kind = entry.kind ?? 'pmtiles';
+        const kind = kindOf(entry);
         if (kind === 'pmtiles') return true;
         return kind === 'mbtiles' && entry.complete === true;
+      };
+
+      /**
+       * What kind of archive this is, from the record or failing that the name.
+       *
+       * An entry from before the kind was recorded carries none, and reading
+       * that as PMTiles is not a harmless default: it is how a planet dump ends
+       * up labelled servable and offered as a stack source, where naming it
+       * would produce a recipe that fails at its first tile. `prewarm.js`
+       * resolves it exactly this way, after the same mistake sent every
+       * mirrored .osm.pbf round the header-read backoff for ever.
+       * @param {object} entry - A catalog entry.
+       * @returns {string} - 'pmtiles', 'mbtiles', or 'unknown'.
+       */
+      const kindOf = (entry) => {
+        if (entry.kind) return entry.kind;
+        const name = entry.name ?? '';
+        if (/\.pmtiles$/i.test(name)) return 'pmtiles';
+        if (/\.mbtiles$/i.test(name)) return 'mbtiles';
+        return 'unknown';
       };
 
       /**
@@ -1852,7 +1872,7 @@
        * @returns {string} - The note, or empty for a PMTiles archive.
        */
       const kindNote = (entry) => {
-        const kind = entry.kind ?? 'pmtiles';
+        const kind = kindOf(entry);
         if (kind === 'pmtiles') return '';
         if (kind !== 'mbtiles') return `${escapeHtml(kind)} · not servable`;
         return entry.complete === true
@@ -2563,7 +2583,7 @@
         // anything for an archive read out of the swarm. An MBTiles is read
         // whole or not at all — once it is here there is nothing left to
         // fetch, and before that there is no tile to warm.
-        const warmable = (entry.kind ?? 'pmtiles') === 'pmtiles';
+        const warmable = kindOf(entry) === 'pmtiles';
         const torrentUrl = `${base}/archives/${entry.infoHash}/archive.torrent`;
         const summary = entry.pmtiles ?? {};
         const mode = entry.mode ?? 'mirror';
@@ -2648,7 +2668,7 @@
           ${
             servable
               ? `<div class="sub" style="margin-bottom:1rem"><code>${escapeHtml(tileJson)}</code></div>`
-              : (entry.kind ?? 'pmtiles') === 'mbtiles'
+              : kindOf(entry) === 'mbtiles'
                 ? `<div class="sub" style="margin-bottom:1rem">
                      This MBTiles archive is still arriving, so it has no tile endpoint yet. It is
                      SQLite, which cannot be read a byte range at a time out of the swarm the way
@@ -8175,10 +8195,12 @@ Every piece is hashed against the ` +
           // missing from a menu the operator is looking at. This is the same
           // endpoint the Archives view reads, and it answers a bare array.
           const held = await api('/api/torrents');
+          // The same rule the tile route enforces, because a stack source is
+          // read through exactly that path: a complete MBTiles belongs here,
+          // and one still arriving does not -- a stack naming it would answer
+          // 503 for every tile until the download finished.
           const free = (held ?? []).filter(
-            (entry) =>
-              !taken.has(entry.infoHash) &&
-              (entry.kind ?? 'pmtiles') === 'pmtiles',
+            (entry) => !taken.has(entry.infoHash) && isServable(entry),
           );
           if (free.length) {
             groups.push(

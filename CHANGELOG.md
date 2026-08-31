@@ -5,7 +5,17 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A stack could not be pointed at a completed MBTiles archive.** The source picker offered only
+  PMTiles, so an MBTiles the node was perfectly able to serve tiles from was simply absent from the
+  menu. It offers a complete one now, by the same rule the tile route enforces — and still hides one
+  that is arriving, since a stack naming that would answer 503 for every tile until the download
+  finished.
+- **A planet dump was offered as a stack source.** The same filter read an archive with no recorded
+  kind as PMTiles, which is not a harmless default: a mirrored `.osm.pbf` appeared in the menu, and
+  naming it would have produced a recipe that failed at its first tile. The kind now falls back to
+  the filename before anything is assumed, which is how `prewarm.js` resolves it after the identical
+  mistake sent every mirrored dump round the header-read backoff for ever. Such an archive is also
+  labelled `unknown · not servable` in the list, where it previously said nothing at all.
 
 ## 0.98.2
 ### ✨ Features and improvements
