@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.99.0
+### ✨ Features and improvements
 - **A sidecar crash now names the frame it happened in.** `pmtiles-torrent` 0.11.0 arms
   `faulthandler` in the sidecar, so a segfault writes a Python traceback to stderr on its way out
   and this node forwards it into the log line by line, beside the `sidecar killed by SIGSEGV` that
