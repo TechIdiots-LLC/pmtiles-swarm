@@ -7,6 +7,26 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.105.0
+### ✨ Features and improvements
+- **The built-in contour intervals are contour-generator's now.** They were maplibre-contour's
+  README example with the gaps filled in, which drew far coarser lines and nothing at all below
+  z9. The table is adopted whole — `1:[600,3000]` through `16:[1,5]` — so a pyramid baked by
+  contour-generator and a stack traced live draw the same lines at the same heights, the same
+  reason the merge maths is kept in step with the offline merger.
+
+  Two consequences. Contours are drawn from **z1** rather than z9, and a contour tile is nine
+  merged terrain tiles — at low zoom each covering most of the world — so the merged-heights
+  cache is doing more work than before. And the lines are finer everywhere: z14 draws every 5 m
+  where it drew every 50 m. A recipe naming only the deep end, `{"12": [10, 50]}`, declines the
+  shallow zooms and the cost of tracing them.
+
+  A bare `?interval=` follows the same zooms, so it too now draws from z1 — which is what
+  contour-generator's `--increment` does.
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
 ## 0.104.0
 ### ✨ Features and improvements
 - **An MBTiles archive is served under its own name.** `/archives/<infohash>/archive.mbtiles`,
