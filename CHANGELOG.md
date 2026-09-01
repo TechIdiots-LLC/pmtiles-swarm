@@ -22,6 +22,13 @@
   neighbours**, because a line crossing an edge has to be traced from the ground on both sides or it
   will not meet the line next door. Roughly nine merged terrain tiles each. See
   [tile-stacks.md](docs/tile-stacks.md) — "Contours from a stack".
+
+  A **Contours** button sits beside Preview and Terrain on any stack that draws as terrain, and the
+  preview draws the lines over the hillshade rather than instead of it — a contour on its own says
+  nothing about which side of it is uphill. Major lines draw themselves thicker from `level`, with
+  no second layer and no filter. There are no labels: text needs a glyph server, and a preview that
+  fetched fonts from elsewhere would be a preview of that as much as of the archive. `ele` is on
+  every feature for a style that has fonts to spend.
 - **An export can write part of a stack.** A zoom range, an area, or both, from the export dialog or
   as `minzoom` / `maxzoom` / `bounds` on `POST /api/stacks/<id>/bake`. Absent still means all of it.
   An export reads every tile its sources hold, which for a planet is hours and a file nobody wanted

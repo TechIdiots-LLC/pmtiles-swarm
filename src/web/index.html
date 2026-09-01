@@ -5357,10 +5357,12 @@ Every piece is hashed against the ` +
         const open = (href, text) =>
           `<a href="${href}" target="_blank" rel="noreferrer"><button type="button">${text}</button></a>`;
         if (!drawsAsTerrain(summary)) return open(base, label);
-        return (
-          open(`${base}?raw=1`, label) +
-          open(base, 'Terrain')
-        );
+        // Contours only for a stack, because only a stack has an endpoint to
+        // draw them from. An archive gets the button when it gets one.
+        const contours = base.startsWith('/stacks/')
+          ? open(`${base}?contours=1`, 'Contours')
+          : '';
+        return open(`${base}?raw=1`, label) + open(base, 'Terrain') + contours;
       }
 
       const SETTINGS_GROUPS = [

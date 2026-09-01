@@ -236,11 +236,25 @@ describe('the terrain preview', () => {
   });
 
   it('keeps the map position across the switch', () => {
-    // The position lives in the hash, and the switch is a reload.
-    assert.match(
-      preview,
-      /location\.pathname \+ \(terrain \? '\?raw=1' : ''\) \+ location\.hash/,
+    // The position lives in the hash, and the switch is a reload. Asserted as
+    // the property rather than as the line that used to carry it: the switch
+    // now assembles more than one flag, and a test pinned to the old string
+    // would have failed for the mode surviving as well as the position.
+    const handler = preview.slice(preview.indexOf('toggle.addEventListener'));
+    const assignment = handler.slice(
+      handler.indexOf('location.href ='),
+      handler.indexOf(';', handler.indexOf('location.href =')),
     );
+    assert.match(assignment, /location\.pathname/);
+    assert.match(assignment, /location\.hash/);
+  });
+
+  it('keeps the contour lines across it too', () => {
+    // Contours are drawn over the terrain rather than instead of it, so
+    // switching to the raw tiles and silently losing them would answer a
+    // different question than the one that was asked.
+    const handler = preview.slice(preview.indexOf('toggle.addEventListener'));
+    assert.match(handler.slice(0, 600), /contours \? 'contours=1'/);
   });
 });
 

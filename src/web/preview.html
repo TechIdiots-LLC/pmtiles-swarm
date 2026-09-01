@@ -146,7 +146,14 @@
       // as an ordinary raster is a psychedelic mess that says nothing about the
       // ground. The raw tiles stay one click away, because they are what shows
       // a hole in the data -- a missing tile reads as flat, not as missing.
-      const raw = new URLSearchParams(location.search).has('raw');
+      const asked = new URLSearchParams(location.search);
+      const raw = asked.has('raw');
+      // Contours are only drawn for a stack, because only a stack has an
+      // endpoint to draw them from. An archive gets them when it gets one.
+      const contours =
+        asked.has('contours') &&
+        terrainReady &&
+        location.pathname.startsWith('/stacks/');
       const terrain = terrainReady && !raw;
 
       $('name').textContent = tilejson.name ?? tileJsonUrl;
@@ -227,6 +234,40 @@
         style.layers.push({ id: 'archive', type: 'raster', source: 'archive' });
       }
 
+      // Over whatever is underneath, rather than instead of it: a contour on
+      // its own says nothing about which side of it is uphill, and the point
+      // of drawing them here is to see them against the ground they came from.
+      if (contours) {
+        const source = location.pathname.replace(
+          /\/preview$/,
+          '/contours/{z}/{x}/{y}.pbf',
+        );
+        style.sources.contours = {
+          type: 'vector',
+          tiles: [new URL(source, location.href).href],
+          // The endpoint answers 404 above and below what its thresholds draw
+          // at, which MapLibre reads as an empty tile rather than an error.
+          minzoom: 0,
+          maxzoom: 16,
+        };
+        style.layers.push({
+          id: 'contours',
+          type: 'line',
+          source: 'contours',
+          'source-layer': 'contours',
+          paint: {
+            'line-color': 'rgba(255,255,255,0.45)',
+            // `level` counts the intervals a height divides by, so the major
+            // lines draw themselves without a second layer or a filter.
+            'line-width': ['match', ['get', 'level'], 0, 0.6, 1.4],
+          },
+        });
+        // No labels, deliberately. Text needs a glyph server, and a preview
+        // that fetched fonts from somewhere else would be a preview of that
+        // as much as of the archive. `ele` is on every feature for a style
+        // that has fonts to spend.
+      }
+
       // Offered rather than assumed, both ways round. Reading heights off the
       // raw pixels is the only way to see that a tile is present but wrong.
       if (terrainReady) {
@@ -237,8 +278,16 @@
           event.preventDefault();
           // Assembled at click time so the hash, which is where the map keeps
           // the position it is currently showing, survives the reload.
+          //
+          // The contour flag rides along, because it is a thing drawn *over*
+          // the terrain rather than a mode instead of it -- switching to raw
+          // tiles and losing the lines would be answering a different question
+          // than the one that was asked.
+          const flags = [terrain ? 'raw=1' : '', contours ? 'contours=1' : '']
+            .filter(Boolean)
+            .join('&');
           location.href =
-            location.pathname + (terrain ? '?raw=1' : '') + location.hash;
+            location.pathname + (flags ? `?${flags}` : '') + location.hash;
         });
       }
 
