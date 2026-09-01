@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.101.0
+### ✨ Features and improvements
 - **Contours, traced from what a stack merges.** `GET /stacks/<id>/contours/{z}/{x}/{y}.pbf` returns
   a gzipped vector tile of contour lines. The interval comes from the recipe's `contours.thresholds`
   or from `?interval=` on the request — contours are a view of a stack rather than a property of one,
@@ -92,7 +99,6 @@
   zooms are still read off the tiles actually written, which is more honest than the request.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.100.0
 ### ✨ Features and improvements
