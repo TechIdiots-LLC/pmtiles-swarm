@@ -59,11 +59,13 @@ import {
 import { bakeRevision } from './bake.js';
 import zlib from 'node:zlib';
 import {
+  contourCoverage,
   contourTile,
   heightsFromArchive,
   heightsFromStack,
 } from './contour-tile.js';
 import { contourProblems } from './contour-options.js';
+import { elevationsAt, pointProblems } from './elevation-lookup.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -4175,7 +4177,7 @@ export function createApp({
    * nine merges a tile rather than one. Sharing a route would mean one set of
    * headers describing two things.
    *
-   * See docs/tile-stacks.md -- "Contours from a stack".
+   * See docs/terrain.md -- "Contours".
    */
   /**
    * Answers one contour tile, for whatever produced the resolution.
@@ -4288,7 +4290,7 @@ export function createApp({
    * nine merges a tile rather than one. Sharing a route would mean one set of
    * headers describing two things.
    *
-   * See docs/tile-stacks.md -- "Contours from a stack".
+   * See docs/terrain.md -- "Contours".
    */
   const serveStackContours = route(async (req, res) => {
     await stacks?.refresh();
@@ -4361,6 +4363,265 @@ export function createApp({
         heightsFromArchive({ entry, tiles, codec, signal, heightsCache }),
     });
   });
+
+  /**
+   * The height under a coordinate, from whatever provides the heights.
+   *
+   * The same `heightsAt` the contour routes are built on, for the same reason:
+   * a stack's merged `Float32Array` carries `NaN` where nothing covered the
+   * ground, so this can answer "no data" rather than inventing a height the
+   * way anything reading encoded pixels has to.
+   * @param {object} req - The request.
+   * @param {object} res - The response.
+   * @param {object} options - `points`, `coverage` and `heightsAt`.
+   * @returns {Promise<void>}
+   */
+  const answerElevation = async (req, res, options) => {
+    const codec = await loadCodec();
+    if (!codec) {
+      return res.status(501).json({
+        error:
+          'reading a height means decoding pixels, and this node has no codec',
+        hint: 'npm install sharp',
+      });
+    }
+
+    const wrong = pointProblems(options.points);
+    if (wrong.length) return res.status(400).json({ error: wrong.join('; ') });
+
+    const controller = new AbortController();
+    res.on('close', () => {
+      if (!res.writableEnded) controller.abort();
+    });
+
+    let found;
+    try {
+      found = await elevationsAt({
+        heightsAt: options.heightsAt(codec, controller.signal),
+        points: options.points,
+        minzoom: options.coverage.minzoom ?? 0,
+        maxzoom: options.coverage.maxzoom ?? 14,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+      throw error;
+    }
+
+    res.setHeader('access-control-allow-origin', '*');
+    // Short-lived rather than immutable even for pinned content: this is a
+    // reading rather than a tile, and it is cheap to take again.
+    res.setHeader('cache-control', 'public, max-age=300');
+    return res.json(elevationBody(req, found));
+  };
+
+  /**
+   * The points one request is asking about.
+   *
+   * Two shapes, because there are two callers. A batch POSTs `{points: [...]}`
+   * -- a track, a route, a set of markers. A single reading is a GET with the
+   * coordinate in the query, which is what a browser's address bar and `curl`
+   * can both produce.
+   * @param {object} req - The request.
+   * @returns {unknown} - Whatever was asked for, for `pointProblems` to judge.
+   */
+  const pointsOf = (req) => {
+    if (req.method === 'POST') return req.body?.points;
+    const { lon, long, lat, zoom, z } = req.query;
+    return [{ lon: lon ?? long, lat, zoom: zoom ?? z }];
+  };
+
+  /**
+   * A single reading answers one object; a batch answers an array.
+   *
+   * The batch keeps tileserver-gl's shape, which is a plain array in the order
+   * asked -- see NOTICE.md. A GET for one point answering a one-element array
+   * would make every caller unwrap it.
+   * @param {object} req - The request.
+   * @param {object[]} found - What was read.
+   * @returns {object|object[]} - The body to send.
+   */
+  const elevationBody = (req, found) =>
+    req.method === 'POST' ? found : found[0];
+
+  /**
+   * What a contour endpoint covers, as a TileJSON.
+   *
+   * Worth serving rather than leaving a client to guess, because the zoom
+   * range is the thresholds' and not the source's: a stack with ground from z0
+   * draws its first line at z9 under the default table. A client told the
+   * source's range instead fetches nothing but 404s all the way down, and a
+   * map showing only contours looks broken rather than empty.
+   * @param {object} where - `root` for the URL, `name`, `coverage`, and the
+   *   `thresholds` that decide which zooms are drawn.
+   * @returns {object} - A TileJSON document.
+   */
+  const contourTileJson = ({ root, name, coverage, thresholds }) => {
+    const drawn = contourCoverage(coverage, thresholds);
+    return {
+      tilejson: '3.0.0',
+      scheme: 'xyz',
+      tiles: [`${root}/contours/{z}/{x}/{y}.pbf`],
+      name,
+      minzoom: drawn.minzoom,
+      maxzoom: drawn.maxzoom,
+      bounds: drawn.bounds,
+      // Named here because a vector source is unusable without them: a style
+      // needs the `source-layer`, and `level` is what draws the major lines
+      // thicker without a second layer.
+      vector_layers: [
+        {
+          id: 'contours',
+          fields: { ele: 'Number', level: 'Number' },
+        },
+      ],
+    };
+  };
+
+  app.get(
+    '/stacks/:id/contours/tiles.json',
+    route(async (req, res) => {
+      await stacks?.refresh();
+      const resolved = stackOr404(req, res);
+      if (!resolved) return;
+      if (resolved.stack.space === 'rgba') {
+        return res.status(400).json({
+          error: 'this stack is imagery, and a colour has no contours to trace',
+        });
+      }
+      res.setHeader('access-control-allow-origin', '*');
+      return res.json(
+        contourTileJson({
+          root: `${baseUrl(req)}/stacks/${encodeURIComponent(req.params.id)}`,
+          name: `${resolved.stack.title ?? resolved.stack.id} contours`,
+          coverage: stackCoverage(resolved),
+          thresholds: contourThresholdsFor(resolved.stack, req.query),
+        }),
+      );
+    }),
+  );
+
+  app.get(
+    '/archives/:infoHash/contours/tiles.json',
+    route(async (req, res) => {
+      const entry = catalog.get(req.params.infoHash);
+      if (!entry) return res.status(404).json({ error: 'unknown archive' });
+      if (!tracesAsTerrain(entry)) {
+        return res.status(400).json({
+          error: 'this archive is not terrain, so it has no heights to trace',
+        });
+      }
+      const doc = buildTileJson(entry, baseUrl(req));
+      res.setHeader('access-control-allow-origin', '*');
+      return res.json(
+        contourTileJson({
+          root: `${baseUrl(req)}/archives/${encodeURIComponent(entry.infoHash)}`,
+          name: `${doc.name ?? entry.name} contours`,
+          coverage: doc,
+          thresholds: contourThresholdsFor({}, req.query),
+        }),
+      );
+    }),
+  );
+
+  app.get(
+    '/latest/:category/contours/tiles.json',
+    route(async (req, res) => {
+      const entry = newestIn(req.params.category, req);
+      if (!entry) return res.status(404).json({ error: 'no such category' });
+      if (!tracesAsTerrain(entry)) {
+        return res.status(400).json({
+          error: 'this archive is not terrain, so it has no heights to trace',
+        });
+      }
+      const doc = buildTileJson(entry, baseUrl(req));
+      res.setHeader('access-control-allow-origin', '*');
+      return res.json(
+        contourTileJson({
+          root: `${baseUrl(req)}/latest/${encodeURIComponent(req.params.category)}`,
+          name: `${req.params.category} contours`,
+          coverage: doc,
+          thresholds: contourThresholdsFor({}, req.query),
+        }),
+      );
+    }),
+  );
+
+  const serveStackElevation = route(async (req, res) => {
+    await stacks?.refresh();
+    const resolved = stackOr404(req, res);
+    if (!resolved) return;
+    if (resolved.stack.space === 'rgba') {
+      return res.status(400).json({
+        error: 'this stack is imagery, and a colour has no height to read',
+      });
+    }
+    const points = pointsOf(req);
+    return answerElevation(req, res, {
+      points,
+      coverage: stackCoverage(resolved),
+      heightsAt: (codec, signal) =>
+        heightsFromStack({
+          resolved,
+          tiles,
+          codec,
+          cutlines,
+          signal,
+          heightsCache,
+        }),
+    });
+  });
+
+  const serveArchiveElevation = route(async (req, res) => {
+    const entry = catalog.get(req.params.infoHash);
+    if (!entry) return res.status(404).json({ error: 'unknown archive' });
+    if (!tracesAsTerrain(entry)) {
+      return res.status(400).json({
+        error: 'this archive is not terrain, so it has no heights to read',
+      });
+    }
+    return answerElevation(req, res, {
+      points: pointsOf(req),
+      // The summary spells these `minZoom`/`maxZoom`; everything downstream
+      // reads the TileJSON spelling. Passed straight through they were both
+      // undefined, so every reading clamped to 0-14 whatever the archive held.
+      coverage: {
+        minzoom: entry.pmtiles?.minZoom,
+        maxzoom: entry.pmtiles?.maxZoom,
+      },
+      heightsAt: (codec, signal) =>
+        heightsFromArchive({ entry, tiles, codec, signal, heightsCache }),
+    });
+  });
+
+  const serveCategoryElevation = route(async (req, res) => {
+    const entry = newestIn(req.params.category, req);
+    if (!entry) return res.status(404).json({ error: 'no such category' });
+    if (!tracesAsTerrain(entry)) {
+      return res.status(400).json({
+        error: 'this archive is not terrain, so it has no heights to read',
+      });
+    }
+    return answerElevation(req, res, {
+      points: pointsOf(req),
+      // The summary spells these `minZoom`/`maxZoom`; everything downstream
+      // reads the TileJSON spelling. Passed straight through they were both
+      // undefined, so every reading clamped to 0-14 whatever the archive held.
+      coverage: {
+        minzoom: entry.pmtiles?.minZoom,
+        maxzoom: entry.pmtiles?.maxZoom,
+      },
+      heightsAt: (codec, signal) =>
+        heightsFromArchive({ entry, tiles, codec, signal, heightsCache }),
+    });
+  });
+
+  app.get('/stacks/:id/elevation', serveStackElevation);
+  app.post('/stacks/:id/elevation', serveStackElevation);
+  app.get('/archives/:infoHash/elevation', serveArchiveElevation);
+  app.post('/archives/:infoHash/elevation', serveArchiveElevation);
+  app.get('/latest/:category/elevation', serveCategoryElevation);
+  app.post('/latest/:category/elevation', serveCategoryElevation);
 
   /**
    * The three ways in. A contour tile is a vector tile whatever produced it,

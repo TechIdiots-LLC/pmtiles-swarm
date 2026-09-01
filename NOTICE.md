@@ -80,6 +80,30 @@ Mapbox's.
 No code is copied either way. `src/elevation.js` and `src/rgba.js` are JavaScript written against
 the same rules, and `docs/tile-stacks.md` records where those rules differ from the fork's and why.
 
+## TileServer GL — BSD-2-Clause
+
+> Copyright (c) 2023, MapTiler.com
+> Copyright (c) 2016, Klokan Technologies GmbH
+> https://github.com/maptiler/tileserver-gl
+
+The elevation endpoints follow tileserver-gl's. `src/elevation-lookup.js` implements the same
+Web Mercator projection as its `lonLatToTilePixel` — including the `±0.9999` clamp on `sin(lat)`,
+which is where it cuts a projection that sends the poles to infinity — and the endpoints keep its
+request and response shapes: a `GET` for one reading, a `POST` of `{points: [...]}` answered by a
+plain array in the order asked, and `long`/`lat`/`elevation`/`z`/`x`/`y`/`pixelX`/`pixelY` in the
+body. That is deliberate, so a client written against tileserver-gl keeps working.
+
+Two things are ours and differ. The height is read from the `Float32Array` a stack merges rather
+than from one archive's pixels, so masks, clips and layer priority all apply — and a hole is
+`NaN`, which is reported as `"elevation": null`. Anything reading encoded pixels has to return a
+height for every coordinate, because every triple of bytes in a terrain tile is one; this can say
+there is no data. Following from that, a point with no data answers `200` with a null elevation
+rather than tileserver-gl's `204`, since the tile and pixel it looked at are still worth reporting
+and a `204` has no body to put them in.
+
+No code is copied: `src/elevation-lookup.js` is written against the same rules. See
+[docs/terrain.md](docs/terrain.md) — "Elevation at a point".
+
 ## qBittorrent — GPL-2.0-or-later
 
 > https://github.com/qbittorrent/qBittorrent

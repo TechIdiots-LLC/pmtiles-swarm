@@ -113,6 +113,12 @@ async function serve(entries, stackList, tileData = {}, options = {}) {
     base,
     dir,
     get: (url) => fetch(`${base}${url}`),
+    post: (url, body) =>
+      fetch(`${base}${url}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
     // Clearing is not awaited in the entry point either -- a save should not
     // wait on unlinking files nothing is going to read. This is how a test
     // waits for what the save set going.
@@ -1947,8 +1953,8 @@ describe('serving contours from a stack', { skip: !codec }, () => {
    * @param {object} [stack] - Extra recipe fields.
    * @returns {Promise<object>} - The node.
    */
-  async function overASlope(stack = {}) {
-    const one = archive('d1'.repeat(20), 'one.pmtiles', ['one']);
+  async function overASlope(stack = {}, pmtiles = {}) {
+    const one = archive('d1'.repeat(20), 'one.pmtiles', ['one'], pmtiles);
     const size = 64;
     const heights = new Float32Array(size * size);
     for (let i = 0; i < heights.length; i += 1) heights[i] = (i % size) * 20;
@@ -1983,6 +1989,177 @@ describe('serving contours from a stack', { skip: !codec }, () => {
     assert.equal(res.headers.get('content-encoding'), 'gzip');
     const body = Buffer.from(await res.arrayBuffer());
     assert.ok(body.length > 0);
+  });
+
+  it('says which zooms it draws at, not the ones the stack has', async () => {
+    // The whole point of serving this. The stack has ground from z0, and the
+    // default thresholds draw their first line at z9 -- so a client given the
+    // stack's range spends eight zooms of requests on tiles that can only ever
+    // answer 404, and a map showing nothing but contours looks broken rather
+    // than empty.
+    const node = await overASlope();
+    after(() => node.close());
+
+    const res = await node.get('/stacks/slope/contours/tiles.json');
+    assert.equal(res.status, 200);
+    const doc = await res.json();
+    assert.equal(doc.minzoom, 9);
+    assert.ok(
+      doc.tiles[0].endsWith('/stacks/slope/contours/{z}/{x}/{y}.pbf'),
+      doc.tiles[0],
+    );
+    // A vector source is unusable without the source-layer name.
+    assert.deepEqual(
+      doc.vector_layers.map((layer) => layer.id),
+      ['contours'],
+    );
+  });
+
+  it('moves the range when the request names the zooms', async () => {
+    // The document has to describe the tiles the same request would get back,
+    // so a threshold table asking for lines at z5 has to be a document saying
+    // z5 -- otherwise the source is told not to ask for the tiles it wants.
+    const node = await overASlope();
+    after(() => node.close());
+
+    const doc = await (
+      await node.get(
+        `/stacks/slope/contours/tiles.json?thresholds=${encodeURIComponent(
+          JSON.stringify({ 5: [1000] }),
+        )}`,
+      )
+    ).json();
+    assert.equal(doc.minzoom, 5);
+  });
+
+  it('keeps the floor when the request names a flat interval', async () => {
+    // A bare `?interval=` reuses the default table's zooms rather than drawing
+    // everywhere, deliberately: a contour every 20 m at z2 is a black tile
+    // that took nine merges to compute. The document has to agree with that.
+    const node = await overASlope();
+    after(() => node.close());
+
+    const doc = await (
+      await node.get('/stacks/slope/contours/tiles.json?interval=20')
+    ).json();
+    assert.equal(doc.minzoom, 9);
+  });
+
+  it('never claims a zoom the stack has no ground for', async () => {
+    const node = await overASlope();
+    after(() => node.close());
+    const doc = await (
+      await node.get('/stacks/slope/contours/tiles.json')
+    ).json();
+    const stack = await (await node.get('/stacks/slope/tiles.json')).json();
+    assert.ok(
+      doc.maxzoom <= stack.maxzoom,
+      `contours to z${doc.maxzoom} over ground to z${stack.maxzoom}`,
+    );
+  });
+
+  it('reads the height under a coordinate', async () => {
+    // The slope is 20 m a pixel across the tile, so the height depends on
+    // where in the tile the coordinate lands -- which is the whole thing being
+    // tested. A reading that ignored the pixel would answer the same
+    // everywhere.
+    const node = await overASlope();
+    after(() => node.close());
+
+    const at = async (lon) =>
+      (
+        await (
+          await node.get(`/stacks/slope/elevation?lon=${lon}&lat=0&zoom=12`)
+        ).json()
+      ).elevation;
+
+    // Two coordinates in the same tile, a good fraction of it apart.
+    const west = await at(0.01);
+    const east = await at(0.06);
+    assert.ok(Number.isFinite(west), `west was ${west}`);
+    assert.ok(Number.isFinite(east), `east was ${east}`);
+    assert.ok(
+      east > west,
+      `${east} should be higher up the slope than ${west}`,
+    );
+  });
+
+  it('says where it read, not just what', async () => {
+    const node = await overASlope();
+    after(() => node.close());
+    const body = await (
+      await node.get('/stacks/slope/elevation?lon=0.01&lat=0&zoom=12')
+    ).json();
+    // The zoom answered from is the stack's deepest, not the one asked for:
+    // past that there is no more ground, only a parent upscaled.
+    const stack = await (await node.get('/stacks/slope/tiles.json')).json();
+    assert.equal(body.z, stack.maxzoom);
+    assert.equal(typeof body.x, 'number');
+    assert.equal(typeof body.y, 'number');
+    assert.equal(typeof body.pixelX, 'number');
+    assert.equal(typeof body.pixelY, 'number');
+    assert.equal(body.lat, 0);
+  });
+
+  it('reads a batch in one request, in the order asked', async () => {
+    const node = await overASlope();
+    after(() => node.close());
+
+    const res = await node.post('/stacks/slope/elevation', {
+      points: [
+        { lon: 0.06, lat: 0, zoom: 12 },
+        { lon: 0.01, lat: 0, zoom: 12 },
+      ],
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.length, 2);
+    // Asked high-then-low, so answered high-then-low.
+    assert.ok(
+      body[0].elevation > body[1].elevation,
+      `${body[0].elevation} then ${body[1].elevation}`,
+    );
+  });
+
+  it('clamps a zoom the stack does not reach rather than refusing', async () => {
+    // A client asking for z18 over a stack that stops shallower wants the best
+    // height available there, not an error.
+    const node = await overASlope();
+    after(() => node.close());
+    const body = await (
+      await node.get('/stacks/slope/elevation?lon=0.01&lat=0&zoom=22')
+    ).json();
+    assert.ok(body.z <= 12, `answered from z${body.z}`);
+    assert.ok(Number.isFinite(body.elevation));
+  });
+
+  it('reads an archive at the zooms the archive declares', async () => {
+    // The summary spells the range `minZoom`/`maxZoom` and everything below
+    // reads the TileJSON spelling. Passed straight through, both were
+    // undefined and every reading clamped to a hardcoded 0-14 -- so an archive
+    // stopping at z8 was read at z14, where it has no tile, and answered null
+    // for ground it covers.
+    // The archive has to say it is terrain before it has heights to read.
+    const node = await overASlope({}, { encoding: 'mapbox' });
+    after(() => node.close());
+
+    const hash = 'd1'.repeat(20);
+    const body = await (
+      await node.get(`/archives/${hash}/elevation?lon=0.01&lat=0`)
+    ).json();
+    assert.equal(body.z, 8, 'should have read at the archive maxZoom');
+    assert.ok(
+      Number.isFinite(body.elevation),
+      `covered ground answered ${body.elevation}`,
+    );
+  });
+
+  it('refuses a coordinate that is not on the earth', async () => {
+    const node = await overASlope();
+    after(() => node.close());
+    const res = await node.get('/stacks/slope/elevation?lon=200&lat=0');
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /lon/);
   });
 
   it('draws nothing at a zoom no threshold covers', async () => {
