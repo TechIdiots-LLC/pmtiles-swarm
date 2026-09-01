@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { tileIdToZxy } from 'pmtiles';
+import { idSpanOf, selectionSlug, selects } from './bake-selection.js';
 import { unionOfTileIds } from './pmtiles-scan.js';
 import crypto from 'node:crypto';
 import { safeSegment } from './savepath.js';
@@ -276,15 +277,22 @@ export async function clearCheckpoint(workDir) {
  * different bake -- and resuming across that produces an archive that is half
  * one map and half another, which nothing downstream could tell.
  * @param {object} resolved - The resolved stack.
+ * @param {object|null} [selection] - Which part of it is being written.
  * @returns {string} - A short, stable identifier.
  */
-export function bakeRevision(resolved) {
+export function bakeRevision(resolved, selection = null) {
   const sources = resolved.sources
     .map((source) => source.entry?.infoHash ?? 'unresolved')
     .join(',');
+  // The selection is part of it. A checkpoint records how far along one stream
+  // of tile ids the job had got, and narrowing or widening the selection makes
+  // a different stream -- resuming across that would skip whatever the new
+  // selection adds below the mark, silently and only in the archive.
   return crypto
     .createHash('sha256')
-    .update(`${stackRevision(resolved.stack)}|${sources}`)
+    .update(
+      `${stackRevision(resolved.stack)}|${sources}|${selectionSlug(selection)}`,
+    )
     .digest('hex')
     .slice(0, 16);
 }
@@ -321,7 +329,12 @@ export function bakedName(resolved, options = {}) {
 
   const title = resolved.stack.title ?? resolved.stack.id;
   const slug = safeSegment(title) || 'stack';
-  return `${slug}-${stamp(options.when)}.pmtiles`;
+  // Where only part of the stack was written, the part is in the name. Dating
+  // alone would leave two archives of one recipe over different ground
+  // indistinguishable in a directory listing.
+  const part = safeSegment(selectionSlug(options.selection));
+  const region = part ? `-${part}` : '';
+  return `${slug}${region}-${stamp(options.when)}.pmtiles`;
 }
 
 /**
@@ -339,7 +352,8 @@ export function bakedArchiveName(resolved, options = {}) {
   const explicit = String(options.name ?? '').trim();
   if (explicit) return explicit;
   const title = resolved.stack.title ?? resolved.stack.id;
-  return `${title} ${stamp(options.when)}`;
+  const part = selectionSlug(options.selection);
+  return `${title}${part ? ` ${part}` : ''} ${stamp(options.when)}`;
 }
 
 /**
@@ -527,6 +541,9 @@ export async function bakeStack(options) {
     checkpointSeconds = DEFAULT_CHECKPOINT_SECONDS,
     pauseMs = 0,
     concurrency = DEFAULT_CONCURRENCY,
+    // Which part of the stack to write. Null is all of it, which is what an
+    // export has always done. See src/bake-selection.js.
+    selection = null,
     // Written into the checkpoint and handed back by `readCheckpoint`. A
     // resumed export has to reproduce the one somebody asked for -- its name,
     // where it was going, what it was filed under -- and none of that can be
@@ -662,12 +679,25 @@ export async function bakeStack(options) {
       }
     };
 
+    const span = idSpanOf(selection);
     for await (const tileId of unionOfTileIds(sources, { signal })) {
       // Everything up to and including the checkpoint has been dealt with.
       // Skipped rather than sought, because the union is a stream and seeking
       // it would mean holding an index of every source.
       if (tileId <= lastTileId) continue;
+      // Past the deepest zoom asked for. Ids ascend by zoom, so there is
+      // nothing after this worth looking at -- the one place a selection can
+      // end the scan rather than filter it.
+      if (tileId >= span.to) break;
+      if (tileId < span.from) continue;
       signal?.throwIfAborted();
+      // A box is not a run of ids: the curve leaves and re-enters it many
+      // times, so this is per tile. It is arithmetic against three numbers,
+      // against a merge it saves.
+      if (!selects(selection, tileId)) {
+        skipped += 1;
+        continue;
+      }
 
       batch.push(tileId);
       if (batch.length >= batchSize) await flush();

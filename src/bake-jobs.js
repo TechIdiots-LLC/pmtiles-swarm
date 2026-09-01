@@ -13,6 +13,11 @@ import {
   mergeTileFor,
   wasStopped,
 } from './bake.js';
+import {
+  coverageOf,
+  selectionFrom,
+  selectionProblems,
+} from './bake-selection.js';
 import { PixelWorker } from './pixels.js';
 import { retains, retire } from './retention.js';
 import { stackCoverage, stackEncoding } from './stacks.js';
@@ -120,6 +125,22 @@ export function sayIfThreadStarved(
       `Set UV_THREADPOOL_SIZE=${wanted} in the environment the node starts ` +
       'in — it cannot be set from inside the process.',
   );
+}
+
+/**
+ * The extent an export should say it covers.
+ *
+ * The stack's own coverage where the run writes all of it, and the part where
+ * it does not. Never wider than either: an archive claiming ground it does not
+ * hold is one a client keeps asking for tiles that were never written.
+ * @param {object} resolved - The resolved stack.
+ * @param {object|null} selection - Which part is being written.
+ * @returns {object} - `minLon`, `minLat`, `maxLon`, `maxLat`.
+ */
+function boundsHeader(resolved, selection) {
+  const { bounds } = coverageOf(stackCoverage(resolved), selection);
+  const [minLon, minLat, maxLon, maxLat] = bounds;
+  return { minLon, minLat, maxLon, maxLat };
 }
 
 /** The exports a node is running, and the ones it has just finished. */
@@ -411,6 +432,17 @@ export class BakeManager {
     // presses the button rather than an hour in.
     assertBakeable(resolved, codec);
 
+    // Which part of the stack this run writes. Refused here rather than at the
+    // first tile: an export is hours, and a box the wrong way round should
+    // cost a message rather than an archive of nothing.
+    const wrong = selectionProblems(options);
+    if (wrong.length) {
+      const error = new Error(wrong.join('; '));
+      error.status = 400;
+      throw error;
+    }
+    const selection = selectionFrom(options);
+
     // A source this node can read: an archive it holds, a recipe it can
     // evaluate, or an address it can fetch. The last was missing, which
     // refused exactly the bake worth having -- a stack of remote sources
@@ -443,6 +475,7 @@ export class BakeManager {
     const archiveName = bakedArchiveName(resolved, {
       name: options.name,
       when,
+      selection,
     });
 
     const job = {
@@ -459,15 +492,26 @@ export class BakeManager {
       finishedAt: null,
       error: null,
       infoHash: null,
-      name: bakedName(resolved, { filename: options.filename, when }),
+      name: bakedName(resolved, {
+        filename: options.filename,
+        when,
+        selection,
+      }),
       publishDir,
+      // Reported so the console can say what a running export is covering,
+      // and so a finished one says what it was rather than leaving the name
+      // to be read for it.
+      selection,
     };
     this.#jobs.set(stackId, job);
 
     // Deliberately not awaited: the point of a job is that the caller does not
     // wait for it. Failures land on the job rather than as an unhandled
     // rejection, which is what `catch` is doing here.
-    job.promise = this.#run(job, resolved, codec, options).catch((error) => {
+    job.promise = this.#run(job, resolved, codec, {
+      ...options,
+      selection,
+    }).catch((error) => {
       job.phase = job.cancelling ? 'cancelled' : 'failed';
       job.error = error.message;
       job.finishedAt = new Date().toISOString();
@@ -633,7 +677,7 @@ export class BakeManager {
       sources,
       workDir,
       destination,
-      revision: bakeRevision(resolved),
+      revision: bakeRevision(resolved, options.selection ?? null),
       signal: job.controller.signal,
       mergeTile: mergeTileFor({
         resolved,
@@ -644,7 +688,14 @@ export class BakeManager {
         signal: job.controller.signal,
         format,
       }),
-      header: { format },
+      // The zooms are left to the writer, which reads them off the tiles it
+      // actually wrote -- more honest than the selection, since a request for
+      // z0-16 over sources that stop at z14 wrote fourteen. Bounds are not
+      // derived there and default to the whole world, so a regional export
+      // would claim the planet and hold one country: a client would go on
+      // asking for tiles that were never written.
+      header: { format, ...boundsHeader(resolved, options.selection ?? null) },
+      selection: options.selection ?? null,
       pauseMs: this.#config.stacks?.bakePauseMs ?? 0,
       concurrency: this.#concurrency(),
       // Written into the checkpoint in the shape `start` takes, so picking one

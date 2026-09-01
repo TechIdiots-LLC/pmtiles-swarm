@@ -196,8 +196,12 @@ describe('masking a nested stack by colour', { skip: !codec }, () => {
     return merged.heights;
   }
 
-  /** @param {Float32Array} h - Merged heights. @returns {number} - The western pixel. */
-  const west = (h) => h[Math.floor(SIZE / 2) * SIZE];
+  /**
+   * The western end of the middle row, which the patch has no data for.
+   * @param {Float32Array} heights - Merged heights.
+   * @returns {number} - That pixel.
+   */
+  const west = (heights) => heights[Math.floor(SIZE / 2) * SIZE];
 
   it('reads a colour as the height it stands for', async () => {
     // The patch writes its nodata as 0 m, which under mapbox is #0186a0. A

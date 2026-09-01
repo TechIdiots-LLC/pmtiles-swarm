@@ -3528,6 +3528,11 @@ export function createApp({
           publicDownload: req.body?.publicDownload,
           keep: req.body?.keep,
           keepDays: req.body?.keepDays,
+          // Which part of the stack to write. Absent is all of it, which is
+          // what an export has always meant. See src/bake-selection.js.
+          minzoom: req.body?.minzoom,
+          maxzoom: req.body?.maxzoom,
+          bounds: req.body?.bounds,
         });
         return res.status(202).json({ bake: job });
       } catch (error) {

@@ -13,6 +13,7 @@ import {
   readCheckpoint,
   tileTypeFor,
 } from '../src/bake.js';
+import { selectionFrom } from '../src/bake-selection.js';
 import { NodeFileSource } from '../src/file-source.js';
 import { probePMTiles } from '../src/pmtiles-probe.js';
 import { PMTilesWriter, TileType } from '../src/pmtiles-write.js';
@@ -129,6 +130,87 @@ describe('what a baked archive says about itself', () => {
     assert.equal(tileTypeFor('PNG'), TileType.Png);
     assert.equal(tileTypeFor('pbf'), TileType.Mvt);
     assert.equal(tileTypeFor(undefined), TileType.Unknown);
+  });
+});
+
+describe('baking part of a stack', () => {
+  it('writes only the zooms asked for, and stops at the last', async () => {
+    // Zoom is the one narrowing that can end the scan rather than filter it:
+    // ids ascend by level, so past the deepest zoom wanted there is nothing
+    // after worth looking at.
+    const ids = [
+      zxyToTileId(2, 0, 0),
+      zxyToTileId(4, 3, 3),
+      zxyToTileId(4, 4, 4),
+      zxyToTileId(7, 60, 40),
+    ];
+    const source = await sourceOf(ids);
+
+    const result = await bakeStack({
+      sources: [source],
+      workDir: await scratch(),
+      destination: path.join(await scratch(), 'zoomed.pmtiles'),
+      revision: 'r1',
+      selection: selectionFrom({ minzoom: 3, maxzoom: 5 }),
+      mergeTile: async (z, x, y) => Buffer.from(`t-${zxyToTileId(z, x, y)}`),
+      header: { format: 'png' },
+    });
+
+    assert.equal(result.written, 2, 'only the two z4 tiles');
+  });
+
+  it('writes only the tiles a box covers', async () => {
+    // A box is not a run of ids -- the curve leaves and re-enters it -- so
+    // this one is a test per tile rather than a span.
+    const inside = zxyToTileId(6, 31, 24);
+    const outside = zxyToTileId(6, 10, 24);
+    const source = await sourceOf([inside, outside].sort((a, b) => a - b));
+
+    const result = await bakeStack({
+      sources: [source],
+      workDir: await scratch(),
+      destination: path.join(await scratch(), 'boxed.pmtiles'),
+      revision: 'r1',
+      selection: selectionFrom({ bounds: [-9.5, 36, 3.3, 43.8] }),
+      mergeTile: async (z, x, y) => Buffer.from(`t-${zxyToTileId(z, x, y)}`),
+      header: { format: 'png' },
+    });
+
+    assert.equal(result.written, 1);
+    assert.equal(result.skipped, 1, 'the other was skipped, not merged');
+  });
+
+  it('writes all of it when nothing was selected', async () => {
+    const ids = [zxyToTileId(2, 0, 0), zxyToTileId(6, 31, 24)];
+    const result = await bakeStack({
+      sources: [await sourceOf(ids)],
+      workDir: await scratch(),
+      destination: path.join(await scratch(), 'whole.pmtiles'),
+      revision: 'r1',
+      selection: null,
+      mergeTile: async (z, x, y) => Buffer.from(`t-${zxyToTileId(z, x, y)}`),
+      header: { format: 'png' },
+    });
+    assert.equal(result.written, 2);
+  });
+
+  it('does not merge a tile it is going to skip', async () => {
+    // The saving is the merge, not the write. A selection that filtered after
+    // merging would cost the whole job and produce a smaller archive.
+    const merged = [];
+    await bakeStack({
+      sources: [await sourceOf([zxyToTileId(2, 0, 0), zxyToTileId(6, 31, 24)])],
+      workDir: await scratch(),
+      destination: path.join(await scratch(), 'lazy.pmtiles'),
+      revision: 'r1',
+      selection: selectionFrom({ minzoom: 6 }),
+      mergeTile: async (z, x, y) => {
+        merged.push(zxyToTileId(z, x, y));
+        return Buffer.from('t');
+      },
+      header: { format: 'png' },
+    });
+    assert.deepEqual(merged, [zxyToTileId(6, 31, 24)]);
   });
 });
 
