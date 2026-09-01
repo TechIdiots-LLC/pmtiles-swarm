@@ -5,7 +5,21 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A touchpad without separate buttons spun the map instead of panning it.** MapLibre binds
+  rotate and pitch to the right mouse button, and a clickpad reports a press with a second finger
+  resting on it as exactly that — so pressing down to drag rotated rather than panned. Every map
+  this node draws now drops button 2 before MapLibre sees it, in the capture phase on the
+  container. Rotation stays on ctrl-drag and on shift with the arrow keys; `dragRotate: false`
+  would have fixed the accident and taken the deliberate gesture with it, since one handler
+  covers both.
+- **Contour tiles wrote one protobuf field out of order.** A feature carried `type` (tag 3) ahead
+  of `tags` (tag 2). Protobuf allows any order and most readers do not care, but
+  maplibre-native's rejects it — the same defect maplibre-contour#412 fixed in that project's own
+  writer, one message further up. Our layer already ascended; the feature did not.
+
+  The bytes change, and `bakeRevision` does not hash the encoder, so a contour export resumed
+  across this upgrade would splice both orders into one archive. Both decode the same, but start
+  a stopped contour export fresh rather than resuming it.
 
 ## 0.106.0
 ### ✨ Features and improvements

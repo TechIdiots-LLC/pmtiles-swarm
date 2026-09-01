@@ -182,3 +182,84 @@ describe('writing contours as a vector tile', () => {
     assert.equal(layer.extent, 2048);
   });
 });
+
+describe('the order the fields are written in', () => {
+  /**
+   * Every field tag in one message, in the order the bytes carry them.
+   * @param {object} pbf - A reader positioned at the start of a message.
+   * @param {number} end - Where the message ends.
+   * @param {Function} [into] - Called with `(tag, pbf, end)` to recurse.
+   * @returns {number[]} - The tags, in order.
+   */
+  function tagsIn(pbf, end, into) {
+    const seen = [];
+    while (pbf.pos < end) {
+      const key = pbf.readVarint();
+      const tag = key >> 3;
+      seen.push(tag);
+      if (into) {
+        const inner = pbf.readVarint() + pbf.pos;
+        into(tag, pbf, inner);
+        pbf.pos = inner;
+      } else {
+        pbf.skip(key);
+      }
+    }
+    return seen;
+  }
+
+  /**
+   * @param {number[]} tags - Field tags in write order.
+   * @returns {boolean} - Whether they never go backwards.
+   */
+  const ascends = (tags) =>
+    tags.every((tag, at) => at === 0 || tag >= tags[at - 1]);
+
+  it('never writes a field tag lower than the one before it', () => {
+    // Protobuf does not require ascending tags and most readers do not care.
+    // maplibre-native's does: it rejected tiles that broke it, which is what
+    // maplibre-contour#412 fixed for that project's own writer. This encoder
+    // is ours, so it has to hold the property on its own.
+    const bytes = encodeContourTile(
+      { 100: [[0, 0, 10, 10, 20, 5]], 200: [[5, 5, 15, 15]] },
+      { extent: 4096, levelOf: (height) => (height === 200 ? 1 : 0) },
+    );
+    assert.ok(bytes, 'nothing to check');
+
+    const layers = [];
+    const features = [];
+    const tile = new PbfReader(bytes);
+    const tileTags = tagsIn(tile, bytes.length, (tag, pbf, end) => {
+      if (tag !== 3) return;
+      layers.push(
+        tagsIn(pbf, end, (inner, innerPbf, innerEnd) => {
+          if (inner === 2) features.push(tagsIn(innerPbf, innerEnd));
+        }),
+      );
+    });
+
+    assert.ok(ascends(tileTags), `tile: ${tileTags}`);
+    for (const layer of layers) assert.ok(ascends(layer), `layer: ${layer}`);
+    assert.ok(features.length > 0, 'no features to check');
+    for (const feature of features) {
+      assert.ok(ascends(feature), `feature: ${feature}`);
+    }
+  });
+
+  it('puts the layer fields where a reader expects them', () => {
+    // Named rather than only checked for ascent, so the intent survives a
+    // refactor that happens to keep the order by accident.
+    const bytes = encodeContourTile(
+      { 100: [[0, 0, 10, 10]] },
+      { extent: 4096, levelOf: () => 0 },
+    );
+    const tile = new PbfReader(bytes);
+    const key = tile.readVarint();
+    assert.equal(key >> 3, 3, 'layers are field 3 of a tile');
+    const end = tile.readVarint() + tile.pos;
+    const tags = tagsIn(tile, end);
+    // name, features, keys, values, extent, version.
+    assert.equal(tags[0], 1, `layer starts with the name: ${tags}`);
+    assert.equal(tags.at(-1), 15, `layer ends with the version: ${tags}`);
+  });
+});

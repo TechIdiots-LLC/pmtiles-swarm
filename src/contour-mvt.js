@@ -99,8 +99,11 @@ function writeGeometry(line, pbf) {
  * @returns {void}
  */
 function writeFeature(context, pbf) {
-  pbf.writeVarintField(FEATURE.type, LINESTRING);
+  // Ascending field order, here and in the layer. Protobuf does not require
+  // it, but maplibre-native's reader rejects a tile that breaks it -- see
+  // maplibre-contour#412, which fixed the same thing one message up.
   pbf.writePackedVarint(FEATURE.tags, context.tags);
+  pbf.writeVarintField(FEATURE.type, LINESTRING);
   writeGeometry(context.line, pbf);
 }
 
