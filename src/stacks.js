@@ -132,7 +132,6 @@ const NOT_ON_A_NESTED_SOURCE = Object.freeze([
   'greenFactor',
   'blueFactor',
   'baseShift',
-  'maskColors',
 ]);
 
 /**

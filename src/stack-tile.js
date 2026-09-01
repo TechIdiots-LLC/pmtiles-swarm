@@ -3,6 +3,7 @@ import {
   decodeHeights,
   encodeHeights,
   fillNodata,
+  heightsForColors,
   maskColors,
   maskHeights,
   maskRanges,
@@ -509,6 +510,14 @@ async function gather({
         // question only the parent can answer, and for a stack that means
         // evaluating it again rather than reading bytes.
         nested: read.source.nested,
+        // A colour named against something that was never stored as pixels.
+        // Read as the height it stands for, under the encoding the inner
+        // stack packs its own output in -- which is the encoding those bytes
+        // would have been, had there been any.
+        colorHeights: heightsForColors(
+          read.source.source?.maskColors,
+          read.source.nested?.stack?.output ?? {},
+        ),
       });
       continue;
     }
@@ -700,9 +709,10 @@ async function readMaskEdges({
             // The masks the recipe above applies to it, on a copy: the ramp
             // has to be measured against the same idea of a hole the merge
             // will use, and stackHeights hands back an array we do not own.
-            // No colours -- a stack was never pixels.
+            // Colours included, as the heights they were read into.
             const heights = Float32Array.from(inner.heights);
             maskHeights(heights, recipe.maskValues);
+            maskHeights(heights, contribution.colorHeights);
             maskRanges(heights, recipe.maskRange);
 
             const flags = new Uint8Array(heights.length);

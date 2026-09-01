@@ -55,6 +55,7 @@ of its parts.
 - [What a mask has to match](#what-a-mask-has-to-match)
 - [Feathering a seam](#feathering-a-seam)
 - [A stack as a source](#a-stack-as-a-source)
+  - [A colour is a height said another way](#a-colour-is-a-height-said-another-way)
 - [A source read straight from a URL](#a-source-read-straight-from-a-url)
 - [Importing a list of URLs](#importing-a-list-of-urls)
   - [Exporting on a schedule](#exporting-on-a-schedule)
@@ -1538,6 +1539,27 @@ three channels as the archive stored them, which is what makes it exact where a
 height mask has to round; a stack that was never stored has no such channels to
 compare, and masking the heights it decoded to would be a different operation
 wearing the same name.
+
+### A colour is a height said another way
+
+`maskColors` compares the bytes a source was stored as, and a nested stack has
+none — it is evaluated, so what arrives is already metres. Refusing the field
+there would leave one kind of source unable to say a thing every other kind can,
+for a reason that is about storage rather than about meaning.
+
+So the colour is decoded into the height it names, under the encoding the inner
+stack packs its own output in, and masked as a height. Through `decodeHeights`
+rather than arithmetic written a second time: it is the same question the merge
+asks of every pixel, and a second copy of it is a second thing to keep in step
+with `terrarium` and the custom factors.
+
+`maskColors: ["#0186a0"]` and `maskValues: [0]` therefore say the same thing to
+a mapbox-encoded stack, which is what lets a source keep its mask when it is
+swapped between an archive and a stack.
+
+What stays refused is the rest of that family — `encoding`, `baseVal`,
+`interval` and the custom factors. Those describe how to unpack channels into a
+number, and there are no channels: the number arrived already made.
 
 ### Nothing passes through
 

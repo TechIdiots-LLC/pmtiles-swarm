@@ -188,6 +188,42 @@ export function rangesOf(maskRange) {
 }
 
 /**
+ * The heights a list of colours stands for, under one encoding.
+ *
+ * `maskColors` compares the bytes a source was stored as, which a nested stack
+ * has none of: it is evaluated, so what arrives is already metres. Rather than
+ * refuse the field there -- leaving one kind of source unable to say a thing
+ * every other kind can -- the colour is decoded into the height it names, and
+ * the mask is applied as a height like any other.
+ *
+ * Through `decodeHeights` rather than arithmetic written again here. It is the
+ * same question the merge asks of every pixel, and a second implementation of
+ * it is a second thing to keep in step with `terrarium` and the custom factors.
+ * @param {Array<string|number[]>} [colours] - What the recipe named.
+ * @param {object} [encoding] - `encoding`, and the factors a custom one needs.
+ * @returns {number[]|undefined} - Those heights, or undefined for no colours.
+ */
+export function heightsForColors(colours, encoding = {}) {
+  const packed = (colours ?? [])
+    .map((colour) => parseColor(colour))
+    .filter((value) => value !== null);
+  if (!packed.length) return undefined;
+
+  const data = new Uint8Array(packed.length * 3);
+  packed.forEach((value, i) => {
+    data[i * 3] = (value >> 16) & 255;
+    data[i * 3 + 1] = (value >> 8) & 255;
+    data[i * 3 + 2] = value & 255;
+  });
+  return [
+    ...decodeHeights(
+      { data, channels: 3, width: packed.length, height: 1 },
+      encoding,
+    ),
+  ];
+}
+
+/**
  * Blanks every height inside a band.
  *
  * The shape nodata actually has. An archive resampled on its way to being
@@ -719,6 +755,11 @@ export function mergeElevation(contributions, options) {
     maskHeights(heights, source.maskValues);
     if (contribution.raster) {
       maskColors(heights, contribution.raster, source.maskColors);
+    } else {
+      // A nested stack has no bytes to compare a colour against, so the
+      // colours it named were decoded into the heights they stand for before
+      // this. Same field, same meaning, asked of what there is.
+      maskHeights(heights, contribution.colorHeights);
     }
     // A band as well as, not instead of: a source may have a sentinel it names
     // exactly and a range of ground it does not want either.

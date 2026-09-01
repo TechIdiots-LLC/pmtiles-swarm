@@ -2,7 +2,27 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **A nested stack takes `maskColors`, and fades into what is under it.** Two things a stack could
+  not do that every other kind of source could, both for the same reason: it is evaluated rather
+  than stored, so it has no bytes. That is a fact about storage, not about meaning, and it was
+  showing up in the recipe as a source with a different set of options.
+
+  A colour is now decoded into the height it names, under the encoding the inner stack packs its
+  own output in, and masked as a height — through `decodeHeights` rather than arithmetic written a
+  second time. `maskColors: ["#0186a0"]` and `maskValues: [0]` say the same thing to a
+  mapbox-encoded stack, so a source keeps its mask when it is swapped between an archive and a
+  stack. `encoding`, `baseVal`, `interval` and the custom factors stay refused: those describe how
+  to unpack channels into a number, and the number arrived already made.
+
+  Feathering a nested source now works rather than silently doing nothing. A ramp is measured in
+  pixels and the pixels that say how far a hole reaches are partly in the next tile — which for an
+  archive means reading its parent and for a stack means evaluating it again, which was never
+  implemented. Validation also stopped asking a nested source for a mask before it would accept a
+  feather: its holes are already an edge, and the mask being demanded would have made a second one.
+
+  The representation is unchanged. A nested stack is still merged as heights, because a hole is
+  `NaN` and no encoding has one — encoding it would turn every hole into a sentinel the recipe
+  above had to mask back out, which is the problem nesting avoids by construction.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._

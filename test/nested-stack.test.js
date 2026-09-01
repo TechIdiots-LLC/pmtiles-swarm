@@ -162,11 +162,21 @@ describe('what a recipe may say about a nested stack', () => {
 
   it('refuses what describes bytes it never had', () => {
     // It is merged as heights: nothing was stored, so there is no encoding to
-    // read it with and no channels to compare a colour against.
-    for (const key of ['encoding', 'baseVal', 'interval', 'maskColors']) {
+    // read it with. These say how to unpack channels into a number, and there
+    // are no channels -- the number arrived already made.
+    for (const key of ['encoding', 'baseVal', 'interval']) {
       const said = problems({ stack: 'base', [key]: 'x' }).join();
       assert.ok(said.includes(`${key} does not apply to a stack`), said || key);
     }
+  });
+
+  it('takes a colour, which is a height said another way', () => {
+    // The one field in that family that survives, because it names something
+    // rather than describing how to read it. A colour under the inner stack's
+    // own output encoding is a height, so it is decoded into one and masked as
+    // one -- which is what keeps a source's mask meaning the same thing when
+    // it is swapped between an archive and a stack.
+    assert.deepEqual(problems({ stack: 'base', maskColors: ['#000000'] }), []);
   });
 });
 

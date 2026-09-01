@@ -148,3 +148,76 @@ describe(
     });
   },
 );
+
+describe('masking a nested stack by colour', { skip: !codec }, () => {
+  /**
+   * The patch stack over the floor, masked however the caller asks.
+   *
+   * The inner stack does no masking of its own here: its nodata arrives as
+   * ground, exactly as an unmasked archive's would, so what is being tested is
+   * the outer recipe's ability to remove it.
+   * @param {object} nestedSource - The recipe for the nested source.
+   * @returns {Promise<Float32Array>} - The merged heights.
+   */
+  async function merge(nestedSource) {
+    const patch = await patchTile();
+    const floor = await floorTile();
+    const tiles = {
+      getTile: async (infoHash) => ({
+        data: infoHash === 'patch' ? patch : floor,
+      }),
+    };
+    const inner = {
+      id: 'patch',
+      space: 'elevation',
+      sources: [{ archive: 'patch' }],
+      output: { encoding: 'mapbox' },
+    };
+    const resolved = resolveStack(
+      {
+        id: 'outer',
+        space: 'elevation',
+        sources: [{ archive: 'floor' }, nestedSource],
+      },
+      {
+        archive: (hash) => ({ infoHash: hash, name: hash }),
+        stack: () => inner,
+      },
+    );
+    const merged = await stackHeights({
+      resolved,
+      z: Z,
+      x: 8,
+      y: 6,
+      tiles,
+      codec,
+      size: SIZE,
+    });
+    return merged.heights;
+  }
+
+  /** @param {Float32Array} h - Merged heights. @returns {number} - The western pixel. */
+  const west = (h) => h[Math.floor(SIZE / 2) * SIZE];
+
+  it('reads a colour as the height it stands for', async () => {
+    // The patch writes its nodata as 0 m, which under mapbox is #0186a0. A
+    // stack has no bytes to compare that against, so the colour is decoded
+    // into the height it names and masked as one.
+    const heights = await merge({ stack: 'patch', maskColors: ['#0186a0'] });
+    assert.equal(west(heights), FLOOR, 'the floor should show through');
+  });
+
+  it('says the same thing as the height form', async () => {
+    // The point of accepting the field at all: one recipe, two spellings, one
+    // answer -- so a source can be swapped between an archive and a stack
+    // without its mask changing meaning.
+    const byColour = await merge({ stack: 'patch', maskColors: ['#0186a0'] });
+    const byHeight = await merge({ stack: 'patch', maskValues: [0] });
+    assert.deepEqual([...byColour], [...byHeight]);
+  });
+
+  it('leaves a colour that names no height in it alone', async () => {
+    const heights = await merge({ stack: 'patch', maskColors: ['#000000'] });
+    assert.equal(west(heights), 0, 'nothing in the patch is -10000 m');
+  });
+});
