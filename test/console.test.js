@@ -2850,3 +2850,52 @@ describe('the two answers about where a tile is', () => {
     }
   });
 });
+
+describe('a right-button drag on a map', () => {
+  // MapLibre binds rotate and pitch to the right button. A touchpad without
+  // separate buttons reports a press with a second finger resting on it as
+  // exactly that, so trying to pan spins the map -- which is the documented
+  // binding working as intended on a gesture the hardware produced by
+  // accident. Every map this node draws blocks it.
+  const pages = ['index.html', 'preview.html'];
+
+  for (const name of pages) {
+    const page = fsSync.readFileSync(
+      path.join(here, '..', 'src', 'web', name),
+      'utf8',
+    );
+
+    it(`${name} refuses button 2 before the map sees it`, () => {
+      const at = page.indexOf('function ignoreRightDrag');
+      assert.ok(at > 0, 'no guard on this page');
+      const body = page.slice(at, page.indexOf('\n      }', at));
+      assert.match(body, /button === 2/);
+      assert.match(body, /stopPropagation/);
+    });
+
+    it(`${name} listens in the capture phase, on the container`, () => {
+      // MapLibre listens on the canvas container *inside* the container, in
+      // the bubble phase, so it only sees what gets that far. A bubble-phase
+      // listener here would fire after it had already started rotating.
+      const at = page.indexOf('function ignoreRightDrag');
+      const body = page.slice(at, page.indexOf('\n      }', at));
+      assert.match(body, /getContainer\(\)/);
+      assert.match(body, /capture: true/);
+    });
+
+    it(`${name} keeps the deliberate way to rotate`, () => {
+      // `dragRotate: false` would have stopped the accident too, and would
+      // have taken ctrl-drag with it -- one handler covers both. Blocking the
+      // one button leaves the gesture somebody means on purpose.
+      assert.doesNotMatch(page, /dragRotate:\s*false/);
+      assert.doesNotMatch(page, /dragRotate\.disable\(\)/);
+    });
+
+    it(`${name} guards every map it makes`, () => {
+      const maps = (page.match(/new maplibregl\.Map\(/g) ?? []).length;
+      const guarded = (page.match(/ignoreRightDrag\(/g) ?? []).length;
+      // One definition plus one call per map.
+      assert.equal(guarded, maps + 1, `${maps} maps, ${guarded - 1} guarded`);
+    });
+  }
+});

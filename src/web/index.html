@@ -3730,6 +3730,36 @@ Every piece is hashed against the ` +
           attributionControl: false,
         });
         if (style.note) $('warm-map-note').textContent = style.note;
+        /**
+         * Stops a right-button drag from reaching the map.
+         *
+         * MapLibre binds rotate and pitch to the right button, and a touchpad
+         * without separate buttons reports a press with a second finger resting
+         * on it as exactly that -- so trying to pan spins the map instead. It is
+         * the documented binding rather than a fault, but it is a gesture that
+         * hardware produces by accident, and nothing here wants it.
+         *
+         * Blocked in the capture phase on the container: MapLibre listens on the
+         * canvas container inside it, in the bubble phase, so it only ever sees
+         * what gets that far. Disabling `dragRotate` would have done it too, and
+         * would also have taken ctrl-drag, which is the deliberate way to ask.
+         *
+         * Rotation stays on ctrl-drag, and on shift with the arrow keys.
+         * @param {object} instance - The map to guard.
+         * @returns {void}
+         */
+        function ignoreRightDrag(instance) {
+          instance.getContainer().addEventListener(
+            'mousedown',
+            (event) => {
+              if (event.button === 2) event.stopPropagation();
+            },
+            { capture: true },
+          );
+        }
+
+        ignoreRightDrag(warmMap);
+
         warmMap.addControl(new maplibregl.NavigationControl(), 'top-left');
         // Shift-drag is box-zoom by default, and dragging is wanted for
         // drawing instead.
