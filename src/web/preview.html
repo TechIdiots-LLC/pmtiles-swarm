@@ -148,12 +148,11 @@
       // a hole in the data -- a missing tile reads as flat, not as missing.
       const asked = new URLSearchParams(location.search);
       const raw = asked.has('raw');
-      // Contours are only drawn for a stack, because only a stack has an
-      // endpoint to draw them from. An archive gets them when it gets one.
-      const contours =
-        asked.has('contours') &&
-        terrainReady &&
-        location.pathname.startsWith('/stacks/');
+      // Offered wherever there is terrain. The endpoint sits beside the
+      // preview for all three -- a stack, one archive, and whichever build a
+      // category points at -- so the source URL below is the same rewrite in
+      // every case.
+      const contours = asked.has('contours') && terrainReady;
       const terrain = terrainReady && !raw;
 
       $('name').textContent = tilejson.name ?? tileJsonUrl;

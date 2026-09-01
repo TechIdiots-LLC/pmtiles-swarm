@@ -63,6 +63,10 @@
   the parent's line drawn twice as thick rather than detail the zoom has. An infohash is immutable
   and cached as such; a category revalidates, and is tagged by the build it resolved to so a
   rebuild lands as a new tag rather than the same one with different lines behind it.
+
+  The **Contours** button now appears anywhere terrain does — a stack's row, an archive's panel, and
+  the public catalogue — rather than on stacks alone. The preview rewrites its own path into the
+  contour endpoint, which is the same rewrite for all three.
 - **An export can write part of a stack.** A zoom range, an area, or both, from the export dialog or
   as `minzoom` / `maxzoom` / `bounds` on `POST /api/stacks/<id>/bake`. Absent still means all of it.
   An export reads every tile its sources hold, which for a planet is hours and a file nobody wanted
