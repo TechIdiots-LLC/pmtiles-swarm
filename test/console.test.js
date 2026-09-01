@@ -267,8 +267,36 @@ describe('the terrain preview', () => {
     // Contours are drawn over the terrain rather than instead of it, so
     // switching to the raw tiles and silently losing them would answer a
     // different question than the one that was asked.
+    //
+    // Read off the address bar rather than off the flag the page loaded with,
+    // because the checkbox writes there as it is ticked -- so the value this
+    // page started from goes stale the moment anybody uses the box.
     const handler = preview.slice(preview.indexOf('toggle.addEventListener'));
-    assert.match(handler.slice(0, 600), /contours \? 'contours=1'/);
+    const flags = handler.slice(0, 900);
+    assert.match(flags, /location\.search/);
+    assert.match(flags, /'contours=1'/);
+  });
+
+  it('ticking contours puts them in the address bar', () => {
+    // Which is what makes the state survive the raw/terrain switch, since that
+    // reloads -- and what makes a preview with the lines on a link that can be
+    // sent to somebody.
+    const toggle = preview.slice(preview.indexOf('function layerToggle'));
+    const body = toggle.slice(0, toggle.indexOf('\n      }\n'));
+    assert.match(body, /history\.replaceState/);
+    assert.doesNotMatch(body, /history\.pushState/);
+  });
+
+  it('asks the endpoint which zooms it draws at', () => {
+    // A stack with ground from z0 draws its first contour at z9 under the
+    // default thresholds. A source declaring the stack's range instead spends
+    // eight zooms of requests on tiles that can only answer 404, and a map
+    // showing nothing but contours looks broken rather than empty.
+    assert.match(preview, /\/contours\/tiles\.json/);
+    const block = preview.slice(preview.indexOf('style.sources.contours'));
+    const source = block.slice(0, block.indexOf('};'));
+    assert.match(source, /contourJson\.minzoom/);
+    assert.doesNotMatch(source, /minzoom: 0/);
   });
 });
 

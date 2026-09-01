@@ -5368,13 +5368,10 @@ Every piece is hashed against the ` +
         const open = (href, text) =>
           `<a href="${href}" target="_blank" rel="noreferrer"><button type="button">${text}</button></a>`;
         if (!drawsAsTerrain(summary)) return open(base, label);
-        // Anything that draws as terrain can be traced, whether the heights
-        // are merged out of a recipe or read straight out of one archive.
-        return (
-          open(`${base}?raw=1`, label) +
-          open(base, 'Terrain') +
-          open(`${base}?contours=1`, 'Contours')
-        );
+        // No contour button: the preview carries a checkbox for them, and a
+        // hidden layer never asks its source for a tile, so there is nothing
+        // to be saved by keeping them behind a page of their own.
+        return open(`${base}?raw=1`, label) + open(base, 'Terrain');
       }
 
       const SETTINGS_GROUPS = [

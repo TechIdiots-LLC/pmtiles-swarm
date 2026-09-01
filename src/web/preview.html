@@ -160,12 +160,31 @@
       // a hole in the data -- a missing tile reads as flat, not as missing.
       const asked = new URLSearchParams(location.search);
       const raw = asked.has('raw');
-      // Offered wherever there is terrain. The endpoint sits beside the
-      // preview for all three -- a stack, one archive, and whichever build a
-      // category points at -- so the source URL below is the same rewrite in
-      // every case.
-      const contours = asked.has('contours') && terrainReady;
+      // Built wherever there is terrain, and switched on by the checkbox in
+      // the header rather than by opening a different page. A hidden layer
+      // leaves its source unused -- `isHidden()` is true for any layer whose
+      // evaluated visibility is `none`, however it got that way -- so the
+      // layer costs nothing at all until it is ticked, which is what makes it
+      // a checkbox rather than a second link.
+      //
+      // The endpoint sits beside the preview for all three -- a stack, one
+      // archive, and whichever build a category points at -- so the rewrite
+      // below is the same in every case.
+      const contours = terrainReady;
+      const contoursOn = contours && asked.has('contours');
       const terrain = terrainReady && !raw;
+
+      // Fetched rather than assumed, because the zooms a stack draws lines at
+      // are its recipe's and not this page's to know. Failing is not fatal:
+      // the layer still works, it is only the range beside the box that goes.
+      let contourJson = null;
+      if (contours) {
+        contourJson = await fetch(
+          location.pathname.replace(/\/preview\/?$/, '/contours/tiles.json'),
+        )
+          .then((response) => (response.ok ? response.json() : null))
+          .catch(() => null);
+      }
 
       $('name').textContent = tilejson.name ?? tileJsonUrl;
       $('summary').textContent =
@@ -255,22 +274,28 @@
         );
         style.sources.contours = {
           type: 'vector',
+          // The thresholds' range, not the stack's. A stack with ground from
+          // z0 draws its first line at z9 by default, and a source claiming z0
+          // asks for eight zooms of tiles that can only ever answer 404.
+          ...(contourJson
+            ? {
+                minzoom: contourJson.minzoom,
+                maxzoom: contourJson.maxzoom,
+              }
+            : {}),
           // Joined to the origin rather than run through `new URL()`, which
           // percent-encodes the braces: `{z}` becomes `%7Bz%7D`, MapLibre
           // never substitutes it, and every request asks the server for a tile
           // at the literal coordinates "{z}". `source` is already an absolute
           // path, so there is nothing to resolve.
           tiles: [location.origin + source],
-          // The endpoint answers 404 above and below what its thresholds draw
-          // at, which MapLibre reads as an empty tile rather than an error.
-          minzoom: 0,
-          maxzoom: 16,
         };
         style.layers.push({
           id: 'contours',
           type: 'line',
           source: 'contours',
           'source-layer': 'contours',
+          layout: { visibility: contoursOn ? 'visible' : 'none' },
           paint: {
             'line-color': 'rgba(255,255,255,0.45)',
             // `level` counts the intervals a height divides by, so the major
@@ -295,11 +320,17 @@
           // Assembled at click time so the hash, which is where the map keeps
           // the position it is currently showing, survives the reload.
           //
-          // The contour flag rides along, because it is a thing drawn *over*
-          // the terrain rather than a mode instead of it -- switching to raw
-          // tiles and losing the lines would be answering a different question
-          // than the one that was asked.
-          const flags = [terrain ? 'raw=1' : '', contours ? 'contours=1' : '']
+          // Read off the address bar rather than off the value this page
+          // loaded with, because the contour box writes there as it is
+          // ticked. The lines are drawn *over* the terrain rather than being a
+          // mode instead of it, so switching to raw tiles and losing them
+          // would answer a different question than the one that was asked.
+          const flags = [
+            terrain ? 'raw=1' : '',
+            new URLSearchParams(location.search).has('contours')
+              ? 'contours=1'
+              : '',
+          ]
             .filter(Boolean)
             .join('&');
           location.href =
@@ -374,13 +405,15 @@
        * already on the map, one row up on the left.
        * @param {string} id - The layer to show and hide.
        * @param {string} label - What to call it.
+       * @param {object} [options] - `on` for the starting state, and `flag` to
+       *   mirror that state into the query string.
        * @returns {void}
        */
-      function layerToggle(id, label) {
+      function layerToggle(id, label, { on = true, flag = '' } = {}) {
         const box = document.createElement('label');
         const input = document.createElement('input');
         input.type = 'checkbox';
-        input.checked = true;
+        input.checked = on;
         // `setLayoutProperty` calls `_checkLoaded()`, which throws before the
         // style has finished loading, so the box is not offered until it has.
         input.disabled = true;
@@ -393,6 +426,20 @@
             'visibility',
             input.checked ? 'visible' : 'none',
           );
+          if (!flag) return;
+          // Replaced rather than pushed: this is what the page is showing, not
+          // somewhere the back button should return to. It makes the state
+          // survive the raw/terrain switch, which reloads, and makes a preview
+          // with the lines on a link that can be sent to somebody.
+          const query = new URLSearchParams(location.search);
+          if (input.checked) query.set(flag, '1');
+          else query.delete(flag);
+          const search = query.toString();
+          history.replaceState(
+            null,
+            '',
+            location.pathname + (search ? `?${search}` : '') + location.hash,
+          );
         });
         box.append(input, document.createTextNode(label));
         $('layers').append(box);
@@ -401,7 +448,19 @@
       // Only for the layers this page actually put in the style. A checkbox
       // for a layer that is not there is a control that does nothing.
       if (terrain) layerToggle('hillshade', 'hillshade');
-      if (contours) layerToggle('contours', 'contours');
+      if (contours) {
+        // The range is in the label because without it an empty map is
+        // indistinguishable from a broken one: contours start at z9 under the
+        // default thresholds, so a preview opened at z4 with the hillshade off
+        // draws nothing at all and says nothing about why.
+        const range = contourJson
+          ? ` z${contourJson.minzoom}–${contourJson.maxzoom}`
+          : '';
+        layerToggle('contours', `contours${range}`, {
+          on: contoursOn,
+          flag: 'contours',
+        });
+      }
 
       if (vector) {
         // MapLibre's own inspect control, rather than something equivalent
