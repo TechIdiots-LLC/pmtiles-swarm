@@ -504,6 +504,11 @@ async function gather({
         source: read.source.source,
         heights: inner.heights,
         width: inner.width,
+        // Kept so a feather can measure its ramp past this tile's border. The
+        // heights above are this tile only; where the hole continues is a
+        // question only the parent can answer, and for a stack that means
+        // evaluating it again rather than reading bytes.
+        nested: read.source.nested,
       });
       continue;
     }
@@ -598,7 +603,17 @@ async function gather({
     });
   }
 
-  await readMaskEdges({ contributions, z, x, y, size, tiles, codec, signal });
+  await readMaskEdges({
+    contributions,
+    z,
+    x,
+    y,
+    size,
+    tiles,
+    codec,
+    signal,
+    cutlines,
+  });
   return { contributors, contributions };
 }
 
@@ -640,6 +655,7 @@ async function readMaskEdges({
   tiles,
   codec,
   signal,
+  cutlines,
 }) {
   if (!codec) return;
   await Promise.all(
@@ -648,9 +664,13 @@ async function readMaskEdges({
       const recipe = contribution.source ?? {};
       // On the source's own grid rather than the output's, because that is
       // what the ramp will be measured on.
-      const grid = contribution.raster?.width ?? size;
+      const grid = contribution.raster?.width ?? contribution.width ?? size;
       const feather = featherFor(recipe, { z, y, size: grid });
-      if (!feather || !masksAnything(recipe)) return;
+      if (!feather) return;
+      // A nested stack arrives with its holes already in it -- they are where
+      // its own sources stopped -- so it has an edge whether or not the recipe
+      // above it masks anything. Everything else needs a mask to have made one.
+      if (!contribution.nested && !masksAnything(recipe)) return;
       const layout = parentsFor({ z, x, y }, grid, feather);
       if (!layout) return;
 
@@ -658,6 +678,42 @@ async function readMaskEdges({
       let parentSize = grid;
       await Promise.all(
         layout.tiles.map(async (parent) => {
+          // A nested stack has no bytes to read: what its holes are is the
+          // answer to evaluating it, so it is evaluated. One level up and at
+          // most four tiles, and only for a source that actually fades --
+          // which is what keeps this from being the whole recipe again on
+          // every tile.
+          if (contribution.nested) {
+            const inner = await stackHeights({
+              resolved: contribution.nested,
+              z: parent.z,
+              x: parent.x,
+              y: parent.y,
+              tiles,
+              codec,
+              signal,
+              size: grid,
+              cutlines,
+            }).catch(() => null);
+            if (!inner?.heights) return;
+
+            // The masks the recipe above applies to it, on a copy: the ramp
+            // has to be measured against the same idea of a hole the merge
+            // will use, and stackHeights hands back an array we do not own.
+            // No colours -- a stack was never pixels.
+            const heights = Float32Array.from(inner.heights);
+            maskHeights(heights, recipe.maskValues);
+            maskRanges(heights, recipe.maskRange);
+
+            const flags = new Uint8Array(heights.length);
+            for (let i = 0; i < flags.length; i += 1) {
+              flags[i] = Number.isNaN(heights[i]) ? 0 : 1;
+            }
+            parentSize = inner.width;
+            known.set(`${parent.column},${parent.row}`, flags);
+            return;
+          }
+
           const tile = await (
             contribution.remote
               ? tiles.getRemoteTile(

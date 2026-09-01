@@ -292,7 +292,13 @@ export function validateStack(stack) {
     // a source that blends into what is under it, and it does nothing at all.
     // A mask is an edge as much as a cutline is -- the hole it leaves is where
     // most of these recipes actually stop.
+    //
+    // A nested stack always has one. Its holes are where its own sources
+    // stopped, and it hands them up unfilled precisely so the recipe above can
+    // show through -- so requiring a mask here asked for a second edge on top
+    // of the one it already brought.
     const fades =
+      source?.stack ||
       source?.cutline ||
       source?.bounds ||
       source?.maskValues?.length ||
