@@ -7,6 +7,30 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.104.0
+### ✨ Features and improvements
+- **An MBTiles archive is served under its own name.** `/archives/<infohash>/archive.mbtiles`,
+  and `/latest/<category>/archive.mbtiles`, rather than `.pmtiles` for everything. It is the same
+  endpoint and the same bytes — a web seed hands over the file on disk, which is all the piece
+  hashes care about — but a URL is read by people too, and `.pmtiles` on a SQLite file says it is
+  something it is not. Asking for the wrong extension answers 404 and names the right one.
+
+  An MBTiles archive still answers to `archive.pmtiles`, unadvertised. That is the URL every
+  torrent published before this distinction existed carries in its `url-list`, and nothing
+  rewrites a web seed once it is in one — withdrawing it would strand those swarms.
+
+### 🐞 Bug fixes
+- **A hand-added web seed was checked for its scheme and nothing else.** The self-published seed
+  got the full reachability judgement; one added through the console or
+  `POST /api/torrents/<infohash>/webseeds` did not, so a loopback address went into the .torrent
+  unremarked — and nothing rewrites a web seed once it is in one. Both paths now run the same
+  check, before anything is written, so a bad URL in a batch does not leave half of it published.
+
+  The check also notices a URL ending in a slash. BEP 19 reads that as a directory and appends the
+  torrent name, which works only where the host serves the file that way — and webtorrent does
+  not implement the rule for single-file torrents, so it requests the directory and fails every
+  piece. Allowed, since it is legitimate against a host arranged for it, but reported as a warning.
+
 ## 0.103.0
 ### ✨ Features and improvements
 - **Elevation at a coordinate.** `GET /stacks/<id>/elevation?lon=&lat=&zoom=` answers the height
