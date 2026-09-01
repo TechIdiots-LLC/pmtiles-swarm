@@ -7,6 +7,25 @@
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
 
+## 0.106.0
+### ✨ Features and improvements
+- **Contours are drawn past where the ground stops.** A raster endpoint should not do this; a
+  contour one should. The interval gets finer as the zoom does, so z16 over a z12 DEM draws 1 m
+  lines that z12's own level never drew — traced from the z12 tiles split down to the square and
+  scaled back up before tracing, which is what `maplibre-contour` does when it overzooms.
+
+  The endpoint used to stop at the source's maxzoom and under-advertise even that: a stack over a
+  z8 archive served contours to z14 while its `tiles.json` claimed z8. Now the document says how
+  far the intervals actually reach, and the archive and category endpoints overzoom too — before
+  this they answered 404 one level past the DEM.
+
+  It stops where the intervals stop changing, since past the deepest level a table names the lines
+  would be the same ones smoothed, and is capped at what splitting can carry. The deep end is also
+  cheaper than the middle: nine squares out of a few parent tiles rather than nine merges.
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
 ## 0.105.0
 ### ✨ Features and improvements
 - **The built-in contour intervals are contour-generator's now.** They were maplibre-contour's
