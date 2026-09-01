@@ -5,6 +5,13 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.106.2
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
 - **A restart forgot when a watched location was last polled.** The schedule lived in memory, so
   every start began with none — `isDue` saw no last run and said yes, and every source polled at
   once whatever interval it asked for.
