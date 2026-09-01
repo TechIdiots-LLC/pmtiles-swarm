@@ -5,7 +5,23 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A restart forgot when a watched location was last polled.** The schedule lived in memory, so
+  every start began with none — `isDue` saw no last run and said yes, and every source polled at
+  once whatever interval it asked for.
+
+  Usually that costs one wasted HEAD, because a poll finds the URL it already holds and stops. It
+  is not usually for a date template: the URL moves with the date, so the poll does not recognise
+  what it has — it finds the next build and fetches it. A node restarted daily downloaded a
+  weekly planet daily.
+
+  Now written to `<dataDir>/source-schedule.json`, the same write-then-rename the export schedule
+  uses, and read before the first poll. A record that will not parse is discarded rather than
+  kept: it would compare as `NaN`, which reads as *never* due, and would stop a source being
+  polled at all.
+
+  The first start after upgrading still polls once, having nothing to read yet. To skip even that,
+  write the file before starting — `{"<source name>": "<ISO date>"}`, keyed by the name in the
+  config.
 
 ## 0.106.1
 ### ✨ Features and improvements

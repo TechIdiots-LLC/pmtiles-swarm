@@ -320,7 +320,9 @@ PMTILES_SWARM_PUBLIC_URL
   const library = new Library({ catalog, engine, config });
   const subscriptions = new SubscriptionManager(library, config);
   const watch = new WatchManager(library);
-  const sources = new ScheduledSourceManager(library, catalog, config);
+  const sources = new ScheduledSourceManager(library, catalog, config, {
+    dataDir: config.dataDir,
+  });
   const seeding = new SeedingLimits(library, config);
   const speed = new SpeedLimits(engine, config);
   const hooks = new ProgramHooks(library, config);
@@ -738,6 +740,9 @@ PMTILES_SWARM_PUBLIC_URL
 
   watch.start(config.watch);
   subscriptions.start();
+  // Loaded before start(), which polls straight away: without the schedule in
+  // hand that first poll is the restart-forgets-everything case itself.
+  await sources.load();
   sources.start();
   stackFeeds.start();
   // After the resume above, so a bake this node was already in the middle of

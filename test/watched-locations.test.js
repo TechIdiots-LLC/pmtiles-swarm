@@ -1146,3 +1146,117 @@ describe('a watched folder can describe what it produces', () => {
     assert.match(watch, /field: 'comment'/);
   });
 });
+
+describe('what a restart remembers about the schedule', () => {
+  /**
+   * A poller over one weekly template, counting what it asks the network for.
+   * @param {string} dataDir - Where the schedule is remembered.
+   * @param {Function} now - Reads the clock.
+   * @returns {object} - The manager.
+   */
+  function pollerOver(dataDir, now) {
+    const config = {
+      sources: [
+        {
+          name: 'protomaps weekly',
+          url: 'https://build.example/{YYYYMMDD}.pmtiles',
+          everyHours: 168,
+        },
+      ],
+    };
+    const library = {
+      addRemoteArchive: async () => ({ infoHash: 'a'.repeat(40) }),
+    };
+    // Never already held, which is the case that costs: a template resolves a
+    // different URL as the date moves, so the poll does not recognise what it
+    // has and stop -- it finds the next build and fetches it.
+    const catalog = { findBySource: () => null, list: () => [] };
+    const manager = new ScheduledSourceManager(library, catalog, config, {
+      now,
+      dataDir,
+    });
+    return manager;
+  }
+
+  /**
+   * Counts what the poller asks the network about, and answers "not there".
+   * @param {object} counted - `{polls}` to increment.
+   * @returns {Function} - Restores the real fetch.
+   */
+  function countingFetch(counted) {
+    const real = globalThis.fetch;
+    globalThis.fetch = async () => {
+      counted.polls += 1;
+      return { ok: false, status: 404 };
+    };
+    return () => {
+      globalThis.fetch = real;
+    };
+  }
+
+  it('does not poll again on a restart inside the interval', async () => {
+    // The bug this exists for. The schedule lived in memory, so a restart
+    // began with no memory at all, `isDue` saw no last run and said yes, and
+    // a node restarted daily fetched a weekly planet daily.
+    const dataDir = await fs.mkdtemp(path.join(workspace, 'sched-'));
+    const counted = { polls: 0 };
+    const restore = countingFetch(counted);
+    after(restore);
+    const start = new Date('2026-09-01T00:00:00Z');
+
+    const first = pollerOver(dataDir, () => start);
+    await first.load();
+    await first.sweep(start);
+    const afterFirst = counted.polls;
+    assert.ok(afterFirst > 0, 'the first sweep should have polled');
+
+    const soon = new Date(start.getTime() + 3600 * 1000);
+    const restarted = pollerOver(dataDir, () => soon);
+    await restarted.load();
+    await restarted.sweep(soon);
+
+    assert.equal(counted.polls, afterFirst, 'it polled again an hour later');
+  });
+
+  it('polls once the interval has actually passed', async () => {
+    // The other half: remembering must not mean never running again.
+    const dataDir = await fs.mkdtemp(path.join(workspace, 'sched-'));
+    const counted = { polls: 0 };
+    const restore = countingFetch(counted);
+    after(restore);
+    const start = new Date('2026-09-01T00:00:00Z');
+
+    const first = pollerOver(dataDir, () => start);
+    await first.load();
+    await first.sweep(start);
+    const afterFirst = counted.polls;
+
+    const later = new Date(start.getTime() + 8 * 24 * 3600 * 1000);
+    const restarted = pollerOver(dataDir, () => later);
+    await restarted.load();
+    await restarted.sweep(later);
+
+    assert.ok(counted.polls > afterFirst, 'a week later it should have polled');
+  });
+
+  it('treats an unreadable record as no record, not as never due', async () => {
+    // A date that will not parse compares as NaN, which reads as never due --
+    // so a corrupt file would stop a source being polled at all. That is a
+    // worse failure than the one being fixed, and silent.
+    const dataDir = await fs.mkdtemp(path.join(workspace, 'sched-'));
+    await fs.writeFile(
+      path.join(dataDir, 'source-schedule.json'),
+      JSON.stringify({ 'protomaps weekly': 'not a date' }),
+    );
+    const counted = { polls: 0 };
+    const restore = countingFetch(counted);
+    after(restore);
+    const now = new Date('2026-09-01T00:00:00Z');
+
+    const poller = pollerOver(dataDir, () => now);
+    await poller.load();
+    await poller.sweep(now);
+
+    assert.ok(counted.polls > 0, 'a bad record stopped it polling');
+  });
+});

@@ -8,9 +8,14 @@
  * See docs/internals.md — "Scheduled sources".
  */
 
+import fs from 'node:fs/promises';
+
 import path from 'node:path';
 import { linkLatest } from './latest-link.js';
 import { retains, retire } from './retention.js';
+
+/** Where the poller remembers when each source last ran. */
+const STATE_FILE = 'source-schedule.json';
 
 /**
  * Expands date placeholders in a template.
@@ -224,6 +229,7 @@ export class ScheduledSourceManager {
   #timer;
   #running = false;
   #lastRun = new Map();
+  #file;
 
   /** Reads the clock. Injectable so a long import can be simulated. */
   #now;
@@ -233,13 +239,69 @@ export class ScheduledSourceManager {
    * @param {import('./library.js').Library} library - Where imports go.
    * @param {import('./catalog.js').Catalog} catalog - Used to skip what we already have.
    * @param {object} config - Resolved configuration.
-   * @param {object} [options] - `now` reads the clock.
+   * @param {object} [options] - `now` reads the clock, `dataDir` is where the
+   *   schedule is remembered.
    */
-  constructor(library, catalog, config, { now = () => new Date() } = {}) {
+  constructor(
+    library,
+    catalog,
+    config,
+    { now = () => new Date(), dataDir } = {},
+  ) {
     this.#library = library;
     this.#catalog = catalog;
     this.#config = config;
     this.#now = now;
+    this.#file = dataDir ? path.join(dataDir, STATE_FILE) : null;
+  }
+
+  /**
+   * Reads when each source was last polled.
+   *
+   * On disk, because a forgotten schedule is not the cheap mistake it looks
+   * like. A template source resolves a *different* URL as the date moves, so a
+   * poll on restart does not find what it already holds and skip -- it finds
+   * tomorrow's build and fetches it. A node restarted daily downloads a planet
+   * daily, whatever interval the schedule asked for.
+   * @returns {Promise<void>} - Resolves once it is loaded.
+   */
+  async load() {
+    if (!this.#file) return;
+    const held = await fs
+      .readFile(this.#file, 'utf8')
+      .then((text) => JSON.parse(text))
+      .catch(() => null);
+    if (!held || typeof held !== 'object') return;
+    for (const [key, at] of Object.entries(held)) {
+      const when = new Date(at);
+      // A record that will not parse is worse than none: it would compare as
+      // NaN and read as never due, so the source would stop being polled at
+      // all rather than being polled too often.
+      if (!Number.isNaN(when.getTime())) this.#lastRun.set(key, when);
+    }
+  }
+
+  /**
+   * Writes the schedule down, so a restart does not forget it.
+   * @returns {Promise<void>} - Resolves once written.
+   */
+  async #remember() {
+    if (!this.#file) return;
+    const body = JSON.stringify(
+      Object.fromEntries(
+        [...this.#lastRun].map(([key, at]) => [key, at.toISOString()]),
+      ),
+      null,
+      2,
+    );
+    // Written then renamed, the same as the export schedule: a crash mid-write
+    // must not leave a file the next start fails to read, since failing to
+    // read it is exactly the forgetting this exists to stop.
+    await fs
+      .mkdir(path.dirname(this.#file), { recursive: true })
+      .catch(() => {});
+    await fs.writeFile(`${this.#file}.tmp`, body);
+    await fs.rename(`${this.#file}.tmp`, this.#file);
   }
 
   /**
@@ -303,10 +365,20 @@ export class ScheduledSourceManager {
         // shape: a fetch that dies at 35% was immediately retried from zero,
         // for ever, which is how 49 GB got downloaded twice.
         this.#lastRun.set(key, now);
+        await this.#remember().catch((error) =>
+          console.warn(
+            `[source] could not write the schedule: ${error.message}`,
+          ),
+        );
         try {
           imported.push(...(await this.#pollSource(source)));
         } finally {
           this.#lastRun.set(key, this.#now());
+          await this.#remember().catch((error) =>
+            console.warn(
+              `[source] could not write the schedule: ${error.message}`,
+            ),
+          );
         }
       }
 
