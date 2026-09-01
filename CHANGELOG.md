@@ -2,10 +2,44 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **Elevation at a coordinate.** `GET /stacks/<id>/elevation?lon=&lat=&zoom=` answers the height
+  under a point, and `POST` of `{"points": [...]}` answers up to a thousand of them in the order
+  asked. The same two under `/archives/<infohash>/` and `/latest/<category>/`, since an archive of
+  terrain is already heights.
+
+  The shape follows tileserver-gl's endpoint deliberately, so a client written against that keeps
+  working — see [NOTICE.md](NOTICE.md). What differs is that `"elevation": null` is an answer: the
+  height is read from the `Float32Array` a stack merges, where a hole is `NaN`, so "there is no data
+  here" and "this is at sea level" stay different answers. Anything reading encoded pixels has to
+  invent a height for ground nothing covers, because every triple of bytes in a terrain tile is one.
+
+  Points are grouped by the tile they fall in and each tile is read once, so a track down one valley
+  costs the few merges its tiles are worth rather than one per point.
+
+- **Contour endpoints describe themselves.** `GET /stacks/<id>/contours/tiles.json`, and the same
+  under `/archives/` and `/latest/`. The zoom range is the thresholds' rather than the source's: a
+  stack with ground from z0 draws its first line at z9, and a client told otherwise spends eight
+  zooms of requests on tiles that can only answer 404.
+
+- **Hillshade and contours can be switched off in the preview.** Two boxes in the header, for the
+  layers that page actually drew. Not only cosmetic for the contours: MapLibre stops fetching from a
+  source once no visible layer draws from it, so unticking the box really does stop the nine merges
+  each contour tile costs. The contour link is gone from the console and the catalogue with it —
+  a hidden layer never asks its source for a tile, so there was nothing left for a separate page to
+  save. `?contours=1` still works, now as the box's starting state, and the box keeps it current so
+  the lines survive the raw/terrain switch.
+
+- **Terrain has its own document.** [docs/terrain.md](docs/terrain.md) covers the encodings,
+  contours and elevation across all three ways terrain is served. They were under tile stacks, which
+  stopped being true once the same endpoints answered for an archive and a category.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **An archive or category elevation reading ignored the archive's zoom range.** The summary
+  spells it `minZoom`/`maxZoom` and everything downstream reads the TileJSON spelling, so passing
+  the summary straight through left both undefined and every reading clamped to a hardcoded
+  0-14. An archive stopping at z8 was read at z14, where it has no tile, and answered `null` for
+  ground it covers. Caught before release; the stack path was never affected, since it takes its
+  range from the resolved recipe.
 
 ## 0.102.0
 ### ✨ Features and improvements
@@ -43,7 +77,7 @@
   Worth knowing what it costs: a contour tile is traced from its own tile **plus its eight
   neighbours**, because a line crossing an edge has to be traced from the ground on both sides or it
   will not meet the line next door. Roughly nine merged terrain tiles each. See
-  [tile-stacks.md](docs/tile-stacks.md) — "Contours from a stack".
+  [terrain.md](docs/terrain.md) — "Contours".
 
   A **Contours** button sits beside Preview and Terrain on any stack that draws as terrain, and the
   preview draws the lines over the hillshade rather than instead of it — a contour on its own says

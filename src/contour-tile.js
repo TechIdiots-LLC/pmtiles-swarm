@@ -26,7 +26,7 @@ import { stackHeights } from './stack-tile.js';
  * anywhere: where the stack has ground there are contours, and where it has a
  * hole the line simply stops.
  *
- * See docs/tile-stacks.md -- "Contours from a stack".
+ * See docs/terrain.md -- "Contours".
  */
 
 const require = createRequire(import.meta.url);
