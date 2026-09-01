@@ -1951,6 +1951,7 @@ describe('serving contours from a stack', { skip: !codec }, () => {
   /**
    * A node serving one stack over a slope, so there is something to trace.
    * @param {object} [stack] - Extra recipe fields.
+   * @param {object} [pmtiles] - Extra summary fields for the archive.
    * @returns {Promise<object>} - The node.
    */
   async function overASlope(stack = {}, pmtiles = {}) {

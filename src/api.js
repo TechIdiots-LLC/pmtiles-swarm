@@ -15,6 +15,7 @@ import {
   isPublicSurface,
 } from './auth.js';
 import {
+  archiveExtension,
   normalizeCategories,
   publishingBase,
   publishingFor,
@@ -1158,7 +1159,7 @@ export function createApp({
             `${publishingBase({
               config,
               requestBase: baseUrl(req),
-            })}/archives/${entry.infoHash}/archive.pmtiles`,
+            })}/archives/${entry.infoHash}/archive.${archiveExtension(entry)}`,
           // Worked out here: the console runs on the admin listener, whose port
           // no peer can reach.
           base: publishingBase({ config, requestBase: baseUrl(req) }),
@@ -2166,7 +2167,7 @@ export function createApp({
           // Absent rather than null where it is not on offer.
           ...(publishingFor(entry, config).publicDownload
             ? {
-                archive: `${baseUrl(req)}/archives/${entry.infoHash}/archive.pmtiles`,
+                archive: `${baseUrl(req)}/archives/${entry.infoHash}/archive.${archiveExtension(entry)}`,
               }
             : {}),
           pmtiles: entry.pmtiles,
@@ -2638,10 +2639,15 @@ export function createApp({
    *
    * `If-Range` is honoured so a rebuild landing mid-read cannot splice two
    * builds. See docs/serving-tiles.md — "How a client knows the build moved".
+   * @param {object} req - The request.
+   * @param {object} res - The response.
+   * @param {string} asked - The extension the URL used.
+   * @returns {object|undefined} - The response, where it answers directly.
    */
-  app.get('/latest/:category/archive.pmtiles', (req, res) => {
+  const serveLatestArchiveFile = (req, res, asked) => {
     const entry = newestIn(req.params.category, req);
     if (!entry) return res.status(404).json({ error: 'no such category' });
+    if (!answersTo(entry, asked)) return wrongExtension(entry, asked, res);
 
     if (!publishingFor(entry, config).serveArchive) {
       return res.status(403).json({
@@ -2693,7 +2699,16 @@ export function createApp({
         });
       },
     );
-  });
+  };
+
+  // Registered a name at a time rather than as `archive.:ext`, which would
+  // also match `archive.torrent` and shadow the route below it.
+  app.get('/latest/:category/archive.pmtiles', (req, res) =>
+    serveLatestArchiveFile(req, res, 'pmtiles'),
+  );
+  app.get('/latest/:category/archive.mbtiles', (req, res) =>
+    serveLatestArchiveFile(req, res, 'mbtiles'),
+  );
 
   // The newest item on its own, for a subscriber that only ever wants the
   // current build and should not have to parse a backlog to find it.
@@ -3059,9 +3074,41 @@ export function createApp({
    * happened to be at that offset, which for a torrent's sparse allocation is
    * zeroes: worse than a refusal, because it looks like data.
    */
-  app.get('/archives/:infoHash/archive.pmtiles', (req, res) => {
+  /**
+   * Whether `archive.<ext>` is a name this archive answers to.
+   *
+   * Its own extension, always. And `.pmtiles` for an MBTiles archive as well,
+   * because that is the URL every torrent published before this distinction
+   * existed carries in its `url-list` -- nothing rewrites a web seed once it is
+   * in one, so withdrawing it would strand those swarms. Nothing advertises it
+   * any more: a door left open rather than an address given out.
+   * @param {object} entry - The catalog entry.
+   * @param {string} asked - The extension requested.
+   * @returns {boolean} - Whether to answer.
+   */
+  const answersTo = (entry, asked) =>
+    asked === archiveExtension(entry) ||
+    (asked === 'pmtiles' && archiveExtension(entry) === 'mbtiles');
+
+  /**
+   * Says which name to ask for, rather than a bare 404.
+   * @param {object} entry - The catalog entry.
+   * @param {string} asked - What was requested.
+   * @param {object} res - The response.
+   * @returns {object} - The response.
+   */
+  const wrongExtension = (entry, asked, res) =>
+    res.status(404).json({
+      error:
+        `this archive is ${archiveExtension(entry)}, so it is not served as ` +
+        `archive.${asked}`,
+      hint: `ask for archive.${archiveExtension(entry)}`,
+    });
+
+  const serveArchiveFile = (req, res, asked) => {
     const entry = catalog.get(req.params.infoHash);
     if (!entry) return res.status(404).json({ error: 'not found' });
+    if (!answersTo(entry, asked)) return wrongExtension(entry, asked, res);
 
     if (!publishingFor(entry, config).serveArchive) {
       return res.status(403).json({
@@ -3116,7 +3163,14 @@ export function createApp({
         });
       },
     );
-  });
+  };
+
+  app.get('/archives/:infoHash/archive.pmtiles', (req, res) =>
+    serveArchiveFile(req, res, 'pmtiles'),
+  );
+  app.get('/archives/:infoHash/archive.mbtiles', (req, res) =>
+    serveArchiveFile(req, res, 'mbtiles'),
+  );
 
   app.get(
     '/archives/:infoHash/archive.torrent',

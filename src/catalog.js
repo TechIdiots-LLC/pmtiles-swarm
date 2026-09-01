@@ -251,6 +251,19 @@ export class Catalog {
   }
 }
 /**
+ * The extension an archive's own bytes are served under.
+ *
+ * The file on disk decides it, not the endpoint: an MBTiles archive is SQLite
+ * whatever it is asked for, and naming it `.pmtiles` tells a reader it is
+ * something it is not.
+ * @param {object} [entry] - The catalog entry.
+ * @returns {string} - `pmtiles` or `mbtiles`.
+ */
+export function archiveExtension(entry) {
+  return entry?.kind === 'mbtiles' ? 'mbtiles' : 'pmtiles';
+}
+
+/**
  * Whether a URL is one other peers could plausibly fetch.
  *
  * Loopback is refused; a private address is reported and allowed. See
@@ -260,12 +273,13 @@ export class Catalog {
  *   publish it, and what to say about it either way.
  */
 export function reachability(url) {
-  let host;
+  let parsed;
   try {
-    host = new URL(url).hostname.replace(/^\[|\]$/g, '').toLowerCase();
+    parsed = new URL(url);
   } catch {
     return { ok: false, why: `not a URL: ${url}` };
   }
+  const host = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
 
   if (host === 'localhost' || host === '::1' || /^127\./.test(host)) {
     return {
@@ -302,6 +316,29 @@ export function reachability(url) {
       warning:
         `${host} has no domain, so it resolves only on networks that already ` +
         'know the name. Peers elsewhere cannot use it.',
+    };
+  }
+
+  // A web seed addresses the file, not the directory it sits in. BEP 19 says
+  // a url-list entry ending in a slash is a directory, and the client appends
+  // the torrent's name to it -- so this only works where the host serves the
+  // file under that name, which is a different arrangement from the one a
+  // person usually means. Worse, webtorrent does not implement that rule for
+  // single-file torrents: it requests the URL exactly as written, so a
+  // directory URL fetches the directory and every piece fails to verify.
+  //
+  // A warning rather than a refusal, because pointing at a directory on a
+  // server that does serve the file by name is legitimate and someone may mean
+  // it. `pathname` rather than the raw string, so a bare origin -- which is a
+  // directory with the slash left off -- is caught too.
+  if (parsed.pathname.endsWith('/')) {
+    return {
+      ok: true,
+      warning:
+        `${url} names a directory rather than a file. A client following ` +
+        "BEP 19 will append the torrent's file name to it, and webtorrent " +
+        'will request it exactly as written and fail every piece. Give the ' +
+        'full URL of the file itself.',
     };
   }
 

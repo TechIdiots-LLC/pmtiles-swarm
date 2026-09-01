@@ -196,6 +196,70 @@ describe('publishing this node as a web seed for an archive', () => {
     );
   });
 
+  it('refuses a hand-added seed no peer could reach', async () => {
+    // Nothing rewrites a web seed once it is in a .torrent, so the check has
+    // to happen before it is written. This path used to test the scheme and
+    // nothing else, while the self-published seed got the full judgement.
+    const node = await holding({ publicUrl: 'https://swarm.example.org' });
+    const hash = node.entry.infoHash;
+
+    await assert.rejects(
+      () => node.library.addWebSeeds(hash, ['http://127.0.0.1:9/p.pmtiles']),
+      /names the machine asking/,
+    );
+    assert.deepEqual(
+      node.catalog.get(hash).webSeeds ?? [],
+      [],
+      'the refused seed was written anyway',
+    );
+  });
+
+  it('writes none of a batch when one of them is refused', async () => {
+    const node = await holding({ publicUrl: 'https://swarm.example.org' });
+    const hash = node.entry.infoHash;
+
+    await assert.rejects(() =>
+      node.library.addWebSeeds(hash, [
+        'https://mirror.example.net/p.pmtiles',
+        'http://localhost:8080/p.pmtiles',
+      ]),
+    );
+    assert.deepEqual(
+      node.catalog.get(hash).webSeeds ?? [],
+      [],
+      'half a batch was published',
+    );
+  });
+
+  it('warns about a seed that names a directory rather than a file', async () => {
+    // BEP 19 says a url-list entry ending in a slash is a directory and the
+    // client appends the torrent's name. Legitimate where the host serves the
+    // file by name, so it is allowed -- but webtorrent does not implement that
+    // rule for single-file torrents and requests the URL exactly as written,
+    // so every piece fails to verify and the seed looks simply broken.
+    const node = await holding({ publicUrl: 'https://swarm.example.org' });
+    const hash = node.entry.infoHash;
+
+    const result = await node.library.addWebSeeds(hash, [
+      'https://mirror.example.net/seeds/',
+    ]);
+    assert.match(result.warnings.join(' '), /directory rather than a file/);
+    assert.ok(
+      node.catalog
+        .get(hash)
+        .webSeeds.includes('https://mirror.example.net/seeds/'),
+      'a warning should not have stopped it being published',
+    );
+  });
+
+  it('says nothing about a seed that names the file', async () => {
+    const node = await holding({ publicUrl: 'https://swarm.example.org' });
+    const result = await node.library.addWebSeeds(node.entry.infoHash, [
+      'https://mirror.example.net/p.pmtiles',
+    ]);
+    assert.deepEqual(result.warnings, []);
+  });
+
   it('leaves other web seeds alone', async () => {
     // Someone else's seed is not this node's to withdraw.
     const node = await holding({ publicUrl: 'https://swarm.example.org' });

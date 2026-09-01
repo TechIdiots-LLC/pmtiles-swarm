@@ -2373,7 +2373,8 @@
             // does not send one.
             const archiveUrl =
               on.url ??
-              `${location.origin}/archives/${entry.infoHash}/archive.pmtiles`;
+              `${location.origin}/archives/${entry.infoHash}/archive.` +
+                (entry.kind === 'mbtiles' ? 'mbtiles' : 'pmtiles');
 
             // Three switches rather than one, because they are three separate
             // exposures. Serving the file to a reader that was handed the URL,

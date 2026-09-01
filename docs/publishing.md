@@ -159,10 +159,37 @@ An archive already in circulation can be given a web seed at any time, from the
 `url-list` sits outside the info dictionary, so the infohash does not change and
 every magnet, tracker and peer already relying on it keeps working.
 
-The URL has to serve the whole archive, byte for byte, under the name the torrent
-gives it. A seed that answers with anything else is not a faster path to the
-data — peers will fetch from it, fail the piece hash, and fall back to the swarm
-having wasted the transfer.
+The URL has to serve the whole archive, byte for byte, and honour `Range`. What
+it does **not** have to do is match the torrent's file name: every archive here
+is a single-file torrent, and BEP 19 says a `url-list` entry that does not end
+in a slash is the full URL of the file. Clients fetch it exactly as written and
+never compare it to anything.
+
+The endpoint is still named for what the file is, because a URL is read by
+people as well as by clients: an MBTiles archive is published as
+`/archives/<infohash>/archive.mbtiles`, and a PMTiles one as `archive.pmtiles`.
+Asking for the wrong one answers 404 and says which to use — except that an
+MBTiles archive also still answers to `archive.pmtiles`, unadvertised, because
+that is the URL torrents published before the distinction existed carry in their
+`url-list`. Withdrawing it would strand those swarms.
+
+The bytes are the whole contract, so nothing may be translated on the way out. A
+seed that answers with anything else is not a faster path to the data — peers
+will fetch from it, fail the piece hash, and fall back to the swarm having
+wasted the transfer.
+
+A URL **ending in a slash** is the one shape to avoid. BEP 19 reads that as a
+directory and appends the torrent's file name, which works only where the host
+serves the file under that name — and webtorrent does not implement the rule for
+single-file torrents at all: it requests the URL as written, fetches whatever the
+directory returns, and fails every piece. Adding one is allowed, since it is
+legitimate against a host arranged that way, but it is reported back as a
+warning. Give the full URL of the file.
+
+Seeds are checked before they are written, and one that no peer could reach — a
+loopback address, or anything that is not a URL — is refused outright rather than
+published. If a batch contains one, none of the batch is written: nothing
+rewrites a web seed once it is in a `.torrent`.
 
 Worth doing whenever an archive gets a public home after the fact: a swarm with
 one web seed starts cold in seconds rather than waiting for a peer to appear.

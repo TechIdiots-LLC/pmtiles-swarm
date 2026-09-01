@@ -11,7 +11,12 @@ import {
   promote,
   suffixFor,
 } from './incomplete.js';
-import { publishingBase, publishingFor, reachability } from './catalog.js';
+import {
+  archiveExtension,
+  publishingBase,
+  publishingFor,
+  reachability,
+} from './catalog.js';
 import { linkLatest } from './latest-link.js';
 import { checkOrigin, fingerprintOrigin } from './origin.js';
 import { probeMbtiles } from './mbtiles.js';
@@ -3040,9 +3045,22 @@ export class Library {
     const wanted = (Array.isArray(urls) ? urls : [urls]).filter(Boolean);
     if (wanted.length === 0) throw new Error('no web seeds given');
 
+    // The same judgement the self-published seed gets. Without this a hand-added
+    // seed was checked for its scheme and nothing else, so a loopback address
+    // went into the .torrent unremarked -- and nothing rewrites a web seed once
+    // it is in one.
+    const warnings = [];
     for (const url of wanted) {
       if (!/^https?:\/\//i.test(url)) {
         throw new Error(`web seed must be an http(s) URL: ${url}`);
+      }
+      const reach = reachability(url);
+      // Refused before anything is written, so a bad one in a list of good
+      // ones does not leave half of them published.
+      if (!reach.ok) throw new Error(reach.why);
+      if (reach.warning) {
+        console.warn(`[web seed] ${reach.warning}`);
+        warnings.push(reach.warning);
       }
     }
 
@@ -3064,7 +3082,7 @@ export class Library {
       live = results.every(Boolean);
     }
 
-    return { webSeeds, live };
+    return { webSeeds, live, warnings };
   }
 
   /**
@@ -3159,7 +3177,9 @@ export class Library {
             'URL: set publishingUrl, or give one with the request',
         );
       }
-      webSeed = `${base}/archives/${infoHash}/archive.pmtiles`;
+      // Named for what the file is. An MBTiles archive advertised under
+      // `.pmtiles` tells every peer that fetches it that it is something else.
+      webSeed = `${base}/archives/${infoHash}/archive.${archiveExtension(entry)}`;
       // Nothing rewrites a web seed once it is in a .torrent.
       const reach = reachability(webSeed);
       if (!reach.ok) throw new Error(reach.why);

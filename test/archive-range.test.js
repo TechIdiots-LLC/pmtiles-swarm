@@ -22,17 +22,19 @@ async function serve({
   onDisk = true,
   serving = true,
   override,
+  kind = 'pmtiles',
 } = {}) {
   const dir = await fs.mkdtemp(path.join(workspace, 'node-'));
-  if (onDisk) await fs.writeFile(path.join(dir, 'planet.pmtiles'), BODY);
+  const name = `planet.${kind}`;
+  if (onDisk) await fs.writeFile(path.join(dir, name), BODY);
 
   const catalog = new Catalog(dir);
   await catalog.load();
   await catalog.put({
     infoHash: INFOHASH,
-    name: 'planet.pmtiles',
+    name,
     size: BODY.length,
-    kind: 'pmtiles',
+    kind,
     complete,
     savePath: dir,
     serveArchive: override,
@@ -186,5 +188,61 @@ describe('reading an archive as a file', () => {
     } finally {
       await node.close();
     }
+  });
+});
+
+describe('the name the archive is served under', () => {
+  it('serves an MBTiles archive as archive.mbtiles', async () => {
+    // A URL is read by people as well as by clients, and `.pmtiles` on a
+    // SQLite file tells a reader it is something it is not.
+    const node = await serve({ kind: 'mbtiles' });
+    after(() => node.close());
+
+    const response = await node.get('archive.mbtiles');
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(
+      Buffer.from(await response.arrayBuffer()).compare(BODY),
+      0,
+    );
+  });
+
+  it('still answers an MBTiles archive at archive.pmtiles', async () => {
+    // Unadvertised, and kept on purpose: that is the URL every torrent
+    // published before this distinction existed carries in its url-list, and
+    // nothing rewrites a web seed once it is in one. Withdrawing it would
+    // strand those swarms.
+    const node = await serve({ kind: 'mbtiles' });
+    after(() => node.close());
+
+    const response = await node.get('archive.pmtiles');
+    assert.strictEqual(response.status, 200);
+    assert.strictEqual(
+      Buffer.from(await response.arrayBuffer()).compare(BODY),
+      0,
+    );
+  });
+
+  it('does not serve a PMTiles archive as archive.mbtiles', async () => {
+    // The alias runs one way only. Nothing ever published this name for a
+    // PMTiles archive, so there is no swarm to strand -- and answering would
+    // be the same lie in the other direction.
+    const node = await serve();
+    after(() => node.close());
+
+    const response = await node.get('archive.mbtiles');
+    assert.strictEqual(response.status, 404);
+    const body = await response.json();
+    assert.match(body.hint, /archive\.pmtiles/);
+  });
+
+  it('leaves the .torrent route reachable', async () => {
+    // Registered a name at a time rather than as `archive.:ext`, which would
+    // match `archive.torrent` too and shadow it.
+    const node = await serve();
+    after(() => node.close());
+
+    const response = await node.get('archive.torrent');
+    const body = await response.json();
+    assert.match(body.error, /torrent/);
   });
 });
