@@ -1061,6 +1061,10 @@ describe('exporting contours rather than terrain', () => {
     });
     assert.equal(job.kind, 'contours');
     assert.equal(job.selection.minzoom, 12);
+    // Started, and left running it would still be writing into the workspace
+    // while the suite tears it down -- which on Windows is an ENOTEMPTY on the
+    // directory rather than anything to do with what was being tested.
+    await manager.stopAll({ timeoutMs: 2000 });
   });
 
   it('keeps the interval in the revision, so two are not one job', async () => {

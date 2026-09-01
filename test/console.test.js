@@ -249,6 +249,20 @@ describe('the terrain preview', () => {
     assert.match(assignment, /location\.hash/);
   });
 
+  it('leaves the tile placeholders alone in the contour source', () => {
+    // `new URL()` percent-encodes braces, so a template put through it becomes
+    // `%7Bz%7D` and MapLibre never substitutes it -- every request then asks
+    // the server for a tile at the literal coordinates "{z}", which is what it
+    // did until this test existed.
+    const source = preview.slice(preview.indexOf('style.sources.contours'));
+    // From `tiles:` rather than from the top of the block, or this reads the
+    // comment above it -- which names the trap and would fail for saying so.
+    const from = source.indexOf('tiles:');
+    const tiles = source.slice(from, source.indexOf(']', from) + 1);
+    assert.doesNotMatch(tiles, /new URL\(/);
+    assert.match(tiles, /location\.origin/);
+  });
+
   it('keeps the contour lines across it too', () => {
     // Contours are drawn over the terrain rather than instead of it, so
     // switching to the raw tiles and silently losing them would answer a

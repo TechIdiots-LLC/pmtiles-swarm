@@ -243,7 +243,12 @@
         );
         style.sources.contours = {
           type: 'vector',
-          tiles: [new URL(source, location.href).href],
+          // Joined to the origin rather than run through `new URL()`, which
+          // percent-encodes the braces: `{z}` becomes `%7Bz%7D`, MapLibre
+          // never substitutes it, and every request asks the server for a tile
+          // at the literal coordinates "{z}". `source` is already an absolute
+          // path, so there is nothing to resolve.
+          tiles: [location.origin + source],
           // The endpoint answers 404 above and below what its thresholds draw
           // at, which MapLibre reads as an empty tile rather than an error.
           minzoom: 0,

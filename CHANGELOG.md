@@ -5,7 +5,11 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **The contour preview asked for a tile at the literal coordinates `{z}`.** Its source URL was
+  built with `new URL()`, which percent-encodes braces — so the template went out as
+  `contours/%7Bz%7D/%7Bx%7D/%7By%7D.pbf`, MapLibre never substituted it, and every request came back
+  `400: z, x and y must be integers`. Joined to the origin instead, since the path was already
+  absolute and there was nothing to resolve.
 
 ## 0.101.0
 ### ✨ Features and improvements
