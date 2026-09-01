@@ -789,6 +789,11 @@ export class BakeManager {
       publishDir: job.publishDir ?? null,
       infoHash: job.infoHash,
       error: job.error,
+      // What part of the stack this run is writing, where it is not writing
+      // all of it. On the row rather than left to be read out of the name: a
+      // job that has been running for an hour should say what it is covering
+      // without anybody parsing a filename for it.
+      selection: job.selection ?? null,
     };
   }
 

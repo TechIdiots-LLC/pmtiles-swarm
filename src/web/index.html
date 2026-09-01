@@ -719,6 +719,74 @@
         </div>
 
         <div class="field">
+          <label for="bake-kind">What to make</label>
+          <select id="bake-kind">
+            <option value="terrain">The tiles the stack serves</option>
+          </select>
+          <div class="sub" id="bake-kind-note">
+            The merged tiles, written as an archive of the same kind the stack
+            already answers with.
+          </div>
+        </div>
+
+        <div class="field">
+          <label>How much of it</label>
+          <label class="choice">
+            <input type="radio" name="bake-extent" value="all" checked />
+            <span>Everything the sources cover</span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="bake-extent" value="part" />
+            <span>A zoom range, an area, or both</span>
+          </label>
+          <div class="sub">
+            An export reads every tile its sources hold, which for a planet is
+            hours. Narrowing it is the difference between a run you wait for
+            and one you leave overnight.
+          </div>
+        </div>
+
+        <div id="bake-part" hidden>
+          <div class="field">
+            <label>Zooms</label>
+            <div class="bar">
+              <input id="bake-minzoom" type="number" min="0" max="24"
+                     placeholder="from" style="width:7rem" />
+              <input id="bake-maxzoom" type="number" min="0" max="24"
+                     placeholder="to" style="width:7rem" />
+            </div>
+            <div class="sub">
+              Left empty, whatever the sources hold. Levels are stored one
+              after another, so a zoom nobody asked for is skipped rather than
+              read — this is the cheaper of the two narrowings by far.
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="bake-bounds">Area</label>
+            <input id="bake-bounds" placeholder="west, south, east, north" />
+            <div class="sub" id="bake-bounds-note">
+              Degrees. A tile is written when it overlaps this box, so the
+              archive reaches its own edge rather than stopping a tile short.
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="bake-region">Or take the area from a tile</label>
+            <div class="bar">
+              <input id="bake-region" placeholder="z/x/y, e.g. 6/31/24"
+                     style="flex:1" />
+              <button type="button" id="bake-region-apply">Use it</button>
+            </div>
+            <div class="sub">
+              How a planet is usually split: a region is one tile at a low
+              zoom, so the pieces tile evenly, never overlap, and have a name
+              everybody agrees on. This fills the box in from one.
+            </div>
+          </div>
+        </div>
+
+        <div class="field">
           <label>Output</label>
           <div class="sub" id="bake-output"></div>
           <div class="sub">
@@ -7759,6 +7827,23 @@ Every piece is hashed against the ` +
        * @param {object} stack - A row from /api/stacks.
        * @returns {string} - HTML.
        */
+      /**
+       * What part of a stack an export is writing, in a few words.
+       * @param {object} selection - `minzoom`, `maxzoom` and `bounds`.
+       * @returns {string} - A phrase, or empty for all of it.
+       */
+      const describeSelection = (selection) => {
+        if (!selection) return '';
+        const said = [];
+        if (selection.minzoom !== undefined || selection.maxzoom !== undefined) {
+          said.push(`z${selection.minzoom ?? 0}–z${selection.maxzoom ?? 'max'}`);
+        }
+        if (selection.bounds) {
+          said.push(selection.bounds.map((n) => Number(n).toFixed(2)).join(', '));
+        }
+        return said.join(' · ');
+      };
+
       const renderStack = (stack) => {
         const broken = stack.problems.length > 0;
         const unresolved = stack.sources.filter((s) => !s.resolved);
@@ -7794,10 +7879,15 @@ Every piece is hashed against the ` +
         const bake = stack.bake;
         const baking =
           bake && (bake.phase === 'merging' || bake.phase === 'importing');
+        // Said on the row, because a partial export looks exactly like a whole
+        // one that is going slowly.
+        const part = bake?.selection
+          ? ` &middot; ${escapeHtml(describeSelection(bake.selection))}`
+          : '';
         const bakeLine = !bake
           ? ''
           : bake.phase === 'merging'
-            ? `<p class="muted">Exporting: <b>${bake.written.toLocaleString()}</b>
+            ? `<p class="muted">Exporting${part}: <b>${bake.written.toLocaleString()}</b>
                tiles written${bake.skipped ? `, ${bake.skipped.toLocaleString()} skipped` : ''}${
                  bake.zoom === null || bake.zoom === undefined
                    ? ''
@@ -9173,10 +9263,55 @@ Every piece is hashed against the ` +
         // about to write, not to the recipe writing it.
         $('bake-categories').value = '';
         $('bake-output').textContent = bakeOutputSummary(stack);
+        // Everything, unless this run is asked to be less. An export that
+        // silently remembered last time's box would be the wrong default in
+        // the one direction that matters: a partial archive nobody meant.
+        $('bake-kind').value = 'terrain';
+        document.querySelector(
+          'input[name="bake-extent"][value="all"]',
+        ).checked = true;
+        $('bake-minzoom').value = '';
+        $('bake-maxzoom').value = '';
+        $('bake-bounds').value = '';
+        $('bake-region').value = '';
+        showBakeExtent();
         showBakeFilename();
         $('bake-location').innerHTML = locationPicker('bake-loc');
         await fillLocations('bake-loc');
         $('bake-dialog').showModal();
+      }
+
+      /** Shows the zoom and area fields only when they are being asked for. */
+      function showBakeExtent() {
+        const part =
+          document.querySelector('input[name="bake-extent"]:checked')?.value ===
+          'part';
+        $('bake-part').hidden = !part;
+      }
+
+      /**
+       * The box one tile covers, so a region can be named rather than typed.
+       *
+       * The same arithmetic the node does in `boundsOfTile`. Written twice on
+       * purpose: this one fills a field in so it can be read and adjusted
+       * before anything runs, and a round trip to ask the server what a tile
+       * covers would make typing a region feel like waiting for one.
+       * @param {number} z - Zoom of the naming tile.
+       * @param {number} x - Its column.
+       * @param {number} y - Its row.
+       * @returns {number[]} - `[west, south, east, north]`.
+       */
+      function boundsOfTile(z, x, y) {
+        const span = 2 ** z;
+        const lon = (column) => (column / span) * 360 - 180;
+        const lat = (row) => {
+          const n = Math.PI - (2 * Math.PI * row) / span;
+          return (
+            (180 / Math.PI) *
+            Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)))
+          );
+        };
+        return [lon(x), lat(y + 1), lon(x + 1), lat(y)];
       }
 
       /**
@@ -9250,6 +9385,32 @@ Every piece is hashed against the ` +
 
       $('bake-file').addEventListener('input', showBakeFilename);
 
+      for (const radio of document.querySelectorAll(
+        'input[name="bake-extent"]',
+      )) {
+        radio.addEventListener('change', showBakeExtent);
+      }
+
+      $('bake-region-apply').addEventListener('click', () => {
+        const said = $('bake-region').value.trim();
+        const parts = said.split('/').map((part) => Number(part.trim()));
+        const note = $('bake-bounds-note');
+        if (parts.length !== 3 || parts.some((n) => !Number.isInteger(n))) {
+          note.textContent = `"${said}" is not a z/x/y tile.`;
+          return;
+        }
+        const [z, x, y] = parts;
+        const span = 2 ** z;
+        if (x < 0 || x >= span || y < 0 || y >= span) {
+          note.textContent = `z${z} has no tile ${x}/${y}.`;
+          return;
+        }
+        $('bake-bounds').value = boundsOfTile(z, x, y)
+          .map((n) => n.toFixed(6))
+          .join(', ');
+        note.textContent = `The area of tile ${z}/${x}/${y}.`;
+      });
+
       $('bake-form').addEventListener('submit', async (event) => {
         if (event.submitter?.value === 'cancel') return;
         event.preventDefault();
@@ -9264,6 +9425,34 @@ Every piece is hashed against the ` +
         const description = $('bake-description').value.trim();
         const attribution = $('bake-attribution').value.trim();
 
+        // Only where this run was asked to be partial. Sending an empty box
+        // or a zoom the fields happen to be holding would narrow an export
+        // nobody asked to narrow.
+        const part =
+          document.querySelector('input[name="bake-extent"]:checked')?.value ===
+          'part';
+        const zoomOf = (id) => {
+          const said = $(id).value.trim();
+          return said === '' ? undefined : Number(said);
+        };
+        const bounds = part
+          ? $('bake-bounds')
+              .value.split(',')
+              .map((one) => Number(one.trim()))
+              .filter((one) => Number.isFinite(one))
+          : [];
+        const extent = !part
+          ? {}
+          : {
+              ...(zoomOf('bake-minzoom') === undefined
+                ? {}
+                : { minzoom: zoomOf('bake-minzoom') }),
+              ...(zoomOf('bake-maxzoom') === undefined
+                ? {}
+                : { maxzoom: zoomOf('bake-maxzoom') }),
+              ...(bounds.length === 4 ? { bounds } : {}),
+            };
+
         try {
           await api(`/api/stacks/${encodeURIComponent(id)}/bake`, {
             method: 'POST',
@@ -9274,6 +9463,7 @@ Every piece is hashed against the ` +
               ...(filename ? { filename } : {}),
               ...(description ? { description } : {}),
               ...(attribution ? { attribution } : {}),
+              ...extent,
             },
           });
         } catch (error) {

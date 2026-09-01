@@ -2,7 +2,29 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **An export can write part of a stack.** A zoom range, an area, or both, from the export dialog or
+  as `minzoom` / `maxzoom` / `bounds` on `POST /api/stacks/<id>/bake`. Absent still means all of it.
+  An export reads every tile its sources hold, which for a planet is hours and a file nobody wanted
+  all of.
+
+  The two narrow differently. PMTiles orders tile ids by zoom and then along a Hilbert curve, so a
+  zoom range is a contiguous run of ids and the scan **ends** at the deepest zoom asked for rather
+  than filtering past it — which matters, because not enumerating unwanted zooms is why the export
+  iterates coverage in the first place. A box is not contiguous, so it is a test per tile; it runs
+  before the merge, so what it saves is the merge.
+
+  A tile is written when it **overlaps** the box, not when it sits inside it, so an archive reaches
+  its own edge instead of stopping up to a tile short. The dialog can also fill the box in from a
+  `z/x/y` tile, which is how a planet is usually split: regions that tile evenly, never overlap, and
+  have a name to agree on.
+
+  Three things move with the selection, each a silent fault otherwise. The **revision**, so a
+  checkpoint taken under one selection is not resumed under another — the stream of ids is different
+  and resuming would skip whatever the new selection adds below the mark. Both **names**, since two
+  exports of one recipe over different ground are two archives and a date does not tell them apart.
+  And the header's **bounds**, which the writer defaults to the whole world: an archive claiming a
+  planet and holding one country is one a client keeps asking for tiles that were never written. The
+  zooms are still read off the tiles actually written, which is more honest than the request.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._

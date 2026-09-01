@@ -10,6 +10,7 @@ import {
   useBeforeDeclaration,
 } from './helpers/js-scope.js';
 import { safeSegment } from '../src/savepath.js';
+import { boundsOfTile } from '../src/bake-selection.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const page = await fs.readFile(
@@ -2760,5 +2761,36 @@ describe('opening the settings page and pressing Save', () => {
       page,
       /data-initial="\$\{escapeHtml\(JSON\.stringify\(\s*parseAddresses\(addressText\(value\)\),?\s*\)\)\}"/,
     );
+  });
+});
+
+describe('the two answers about where a tile is', () => {
+  it('agree, because a region typed here is a region exported there', () => {
+    // boundsOfTile exists twice on purpose: the console fills the box in so it
+    // can be read and adjusted before an export runs, and asking the node
+    // would make typing a region feel like waiting for one. Deliberate
+    // duplication still has to be checked, or a region means one thing in the
+    // dialog and another in the archive -- which nothing downstream could see.
+    const source = page.slice(page.indexOf('function boundsOfTile(z, x, y) {'));
+    const body = source.slice(
+      source.indexOf('{') + 1,
+      source.indexOf('\n      }'),
+    );
+    const inConsole = new Function('z', 'x', 'y', body);
+
+    for (const [z, x, y] of [
+      [0, 0, 0],
+      [1, 1, 0],
+      [4, 8, 6],
+      [6, 31, 24],
+      [10, 511, 340],
+      [14, 8000, 6000],
+    ]) {
+      assert.deepEqual(
+        inConsole(z, x, y),
+        boundsOfTile(z, x, y),
+        `they disagree about ${z}/${x}/${y}`,
+      );
+    }
   });
 });
