@@ -254,6 +254,7 @@ export function createApp({
   tiles,
   stacks,
   stackCache,
+  heightsCache,
   cutlines,
   bakes,
   warm,
@@ -4231,6 +4232,7 @@ export function createApp({
         cutlines,
         signal: controller.signal,
         thresholds,
+        heightsCache,
       });
     } catch (error) {
       if (error?.name === 'AbortError') return;

@@ -516,6 +516,7 @@ export function mergeTileFor(options) {
         signal,
         size,
         thresholds: options.thresholds,
+        heightsCache: options.heightsCache,
       });
       // Gzipped here, because the header the archive is finalised with says
       // it is. A vector tile stored uncompressed under a header claiming gzip

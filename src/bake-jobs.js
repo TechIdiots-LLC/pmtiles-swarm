@@ -24,6 +24,7 @@ import {
   drawnZooms,
   thresholdsFrom,
 } from './contour-options.js';
+import { HeightsCache } from './heights-cache.js';
 import { PixelWorker } from './pixels.js';
 import { retains, retire } from './retention.js';
 import { stackCoverage, stackEncoding } from './stacks.js';
@@ -753,6 +754,21 @@ export class BakeManager {
         format,
         kind: options.kind,
         thresholds: options.thresholds,
+        // One per job, and only where a tile is built out of others. A
+        // contour tile is traced from nine merged ones and each of those is
+        // wanted by nine contour tiles, so a run without this does most of
+        // its merging twice over -- measured at four times the source reads
+        // on a small block and approaching nine on a large one.
+        //
+        // Its own rather than the node's disk cache, which a bake rightly
+        // does not touch: a planet export would evict the serving cache with
+        // tiles nobody will ask for again. This one goes when the job does.
+        heightsCache:
+          options.kind === 'contours'
+            ? new HeightsCache({
+                maxBytes: this.#config.stacks?.heightsCacheBytes,
+              })
+            : null,
       }),
       // The zooms are left to the writer, which reads them off the tiles it
       // actually wrote -- more honest than the selection, since a request for

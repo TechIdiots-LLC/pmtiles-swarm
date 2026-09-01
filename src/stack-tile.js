@@ -462,6 +462,7 @@ async function gather({
   size,
   rgba,
   cutlines,
+  heightsCache,
 }) {
   const contributors = [];
   const contributions = [];
@@ -480,6 +481,7 @@ async function gather({
         signal,
         size,
         cutlines,
+        heightsCache,
       });
       if (inner?.error) {
         if (read.source.required) {
@@ -622,6 +624,7 @@ async function gather({
     codec,
     signal,
     cutlines,
+    heightsCache,
   });
   return { contributors, contributions };
 }
@@ -665,6 +668,7 @@ async function readMaskEdges({
   codec,
   signal,
   cutlines,
+  heightsCache,
 }) {
   if (!codec) return;
   await Promise.all(
@@ -703,6 +707,7 @@ async function readMaskEdges({
               signal,
               size: grid,
               cutlines,
+              heightsCache,
             }).catch(() => null);
             if (!inner?.heights) return;
 
@@ -842,6 +847,75 @@ export async function stackHeights({
   signal,
   size,
   cutlines,
+  heightsCache,
+}) {
+  // Keyed on the ETag, which already covers the recipe's revision and what its
+  // sources resolved to, plus the grid -- the same identity the merged-tile
+  // cache uses, for the same reason. Consulted here rather than at each caller
+  // because all three of them arrive through this function: the merge below a
+  // nested source, the parents a feather measures against, and the nine tiles
+  // a contour is traced from.
+  const key = heightsCache?.enabled
+    ? `${stackEtag(resolved, z, x, y)}:${size ?? 'auto'}`
+    : null;
+  if (key) {
+    const hit = heightsCache.get(key);
+    if (hit) return hit;
+    // Nine neighbours are asked for at once and the tiles either side want
+    // most of the same ones, so without this the first requests all miss and
+    // all merge the same tile.
+    return heightsCache.once(key, async () => {
+      const again = heightsCache.get(key);
+      if (again) return again;
+      const made = await mergeHeights({
+        resolved,
+        z,
+        x,
+        y,
+        tiles,
+        codec,
+        signal,
+        size,
+        cutlines,
+        heightsCache,
+      });
+      if (made) heightsCache.set(key, made);
+      return made;
+    });
+  }
+  return mergeHeights({
+    resolved,
+    z,
+    x,
+    y,
+    tiles,
+    codec,
+    signal,
+    size,
+    cutlines,
+    heightsCache,
+  });
+}
+
+/**
+ * Merges one tile of a stack into heights, with nothing cached.
+ *
+ * Split out from `stackHeights` so the cache above it has one thing to call
+ * and one thing to store, rather than a flag threaded through the work.
+ * @param {object} options - The stack, the coordinates and what to read with.
+ * @returns {Promise<object|null>} - `{heights, width, contributors}`.
+ */
+async function mergeHeights({
+  resolved,
+  z,
+  x,
+  y,
+  tiles,
+  codec,
+  signal,
+  size,
+  cutlines,
+  heightsCache,
 }) {
   const clips = clipsFor(resolved, cutlines, z, x, y, size);
   const reads = await readAll({ resolved, z, x, y, tiles, signal, clips });
@@ -856,6 +930,7 @@ export async function stackHeights({
     size,
     rgba: false,
     cutlines,
+    heightsCache,
   });
   if (gathered.error) return { error: gathered.error };
 
@@ -1108,6 +1183,7 @@ export async function answerStackTile(options) {
       size,
       rgba,
       cutlines,
+      heightsCache: options.heightsCache,
     });
     if (gathered.error) {
       return {

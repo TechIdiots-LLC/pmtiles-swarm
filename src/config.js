@@ -503,6 +503,29 @@ const DEFAULTS = {
      */
     cacheDir: undefined,
     /**
+     * Bytes of merged *heights* to keep in memory, as opposed to merged tiles
+     * on disk.
+     *
+     * A different cache for a different shape of reuse. `cacheBytes` above
+     * holds encoded tiles, so a second request for one tile is free; this
+     * holds the numbers a tile was merged from, because several *different*
+     * tiles are each built out of the same neighbours.
+     *
+     * Contours are what need it. One is traced from its own tile plus its
+     * eight neighbours, so every merged tile is wanted by nine of them: an N
+     * by N run needs (N+2)² merges and asks for 9N², which is four times over
+     * on a small block and nearly nine on a large one. A feathered source has
+     * the same shape more mildly, since four sibling tiles share the parents
+     * its ramp is measured against.
+     *
+     * In memory because these are Float32Arrays wanted again within seconds or
+     * not at all -- writing them out would cost more than merging them again.
+     * A 512 px tile is a megabyte, so this is a working set of sixty-odd. Zero
+     * turns it off, which costs a node that never draws contours nothing
+     * either way: it fills only when something asks twice.
+     */
+    heightsCacheBytes: 64 * 1024 * 1024,
+    /**
      * Milliseconds a bake waits between tiles. Zero is as fast as it can go.
      *
      * The pixel maths a merge does is synchronous, so a bake holds the main

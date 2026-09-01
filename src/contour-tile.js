@@ -85,6 +85,7 @@ function neighbourhoodOf(x, y) {
  */
 async function heightsFor(options) {
   const { resolved, z, x, y, tiles, codec, cutlines, signal, size } = options;
+  const { heightsCache } = options;
   const span = 2 ** z;
   // Off the top or bottom of the world there is no tile and never was. Off the
   // side there is: the map wraps, and a stack covering the antimeridian covers
@@ -102,6 +103,7 @@ async function heightsFor(options) {
     signal,
     size,
     cutlines,
+    heightsCache,
   });
   if (!inner?.heights) return null;
   return { width: inner.width, height: inner.width, data: inner.heights };
@@ -142,6 +144,7 @@ export async function contourTile(options) {
         cutlines,
         signal,
         size,
+        heightsCache: options.heightsCache,
       }),
     ),
   );

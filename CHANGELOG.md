@@ -39,6 +39,18 @@
   The interval is part of the export's revision, so a checkpoint cannot be resumed across a change
   to it: a 20 m run continued into a 100 m one would splice two sets of lines into an archive
   nothing downstream could tell apart.
+
+  **Merged heights are cached in memory**, under `stacks.heightsCacheBytes` (64 MiB, zero to turn
+  it off). A different cache from `stacks.cacheBytes` and for a different shape of reuse: that one
+  holds encoded tiles so a second request for one tile is free, this holds the numbers a tile was
+  merged from, because several *different* tiles are built out of the same neighbours. An N×N
+  contour run needs (N+2)² merges and asks for 9N² — measured at 4× fewer source reads and twice
+  the speed on a 4×4 block, approaching 9× on a large one. A feathered source benefits more mildly,
+  since four sibling tiles share the parents its ramp is measured against.
+
+  Each contour export gets its own, which goes when the job does. A bake deliberately does not
+  touch the disk cache — a planet export would evict the serving node's entire cache with tiles
+  nobody will ask for again — and that is exactly why it can have one of its own.
 - **An export can write part of a stack.** A zoom range, an area, or both, from the export dialog or
   as `minzoom` / `maxzoom` / `bounds` on `POST /api/stacks/<id>/bake`. Absent still means all of it.
   An export reads every tile its sources hold, which for a planet is hours and a file nobody wanted

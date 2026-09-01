@@ -6,6 +6,7 @@ import { createApp } from './api.js';
 import { assertSafeToListen, createAuth } from './auth.js';
 import { Catalog } from './catalog.js';
 import { StackStore, resolveStack } from './stacks.js';
+import { HeightsCache } from './heights-cache.js';
 import { StackCache } from './stack-cache.js';
 import { installCrashGuard } from './crash-guard.js';
 import { CutlineStore } from './cutlines.js';
@@ -261,6 +262,14 @@ PMTILES_SWARM_PUBLIC_URL
     maxBytes: config.stacks?.cacheBytes,
   });
   await stackCache.load();
+
+  // Merged heights, in memory, for tiles that are built out of other tiles. A
+  // contour tile is traced from nine of them and a map asking for a screenful
+  // wants each of those nine times over -- so this is what makes the endpoint
+  // answer at all rather than an optimisation on top of one.
+  const heightsCache = new HeightsCache({
+    maxBytes: config.stacks?.heightsCacheBytes,
+  });
 
   // Recipes rather than archives, so this is its own file and its own
   // store. A missing stacks.json is simply no stacks.
@@ -661,6 +670,7 @@ PMTILES_SWARM_PUBLIC_URL
     tiles,
     stacks,
     stackCache,
+    heightsCache,
     cutlines,
     bakes,
     warm,
