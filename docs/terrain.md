@@ -169,12 +169,28 @@ continent, and nine merges is an expensive way to answer nothing.
     GET /archives/<infohash>/contours/tiles.json
     GET /latest/<category>/contours/tiles.json
 
-The zoom range is the thresholds', not the source's. Under the built-in table
-those nearly agree, but a recipe naming only `{"12": [10, 50]}` draws nothing
-above z12 — and a client told the source's range instead fetches empty tiles all
-the way down. It is never deeper than there is ground for either: a contour
-traced from an upscaled parent is the parent's line drawn twice as thick, not
-new detail.
+The zoom range is the thresholds', not the source's — at both ends.
+
+Above, a recipe naming only `{"12": [10, 50]}` draws nothing until z12, and a
+client told the source's range instead fetches empty tiles all the way down.
+
+Below, it goes **past** where the ground stops, which a raster endpoint would
+never do. The interval gets finer as the zoom does, so z16 over a z12 DEM draws
+1 m lines that z12's own level never drew. Those are traced from the z12 tiles
+split down to the square being asked for, and scaled back up before tracing so
+the lines do not follow the parent's pixel edges — the same thing
+`maplibre-contour` does when it overzooms, with its own smoothing threshold.
+
+That stops where the intervals stop changing. Past the deepest level a table
+names, the interval is the one already in use, so overzooming further really
+would be the same lines smoothed rather than new ones — and the document says
+so. It is also capped at what splitting can carry: each level halves the square,
+and below a couple of pixels there is no surface left to trace. That cap is
+worked out for the smallest tile served rather than for whatever this source
+uses, so the claim holds either way.
+
+Cheap, too. Nine squares taken out of a handful of parent tiles beats nine
+merges, so the deep end costs less than the middle rather than more.
 
 Worth pointing a source at rather than declaring a range by hand — that is what
 the preview does, and it is why the preview stops asking for tiles below the

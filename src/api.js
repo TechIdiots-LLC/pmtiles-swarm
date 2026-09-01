@@ -4289,6 +4289,10 @@ export function createApp({
         x,
         y,
         thresholds,
+        // Where the ground stops. Past it the lines are traced from the
+        // deepest tiles there are, split down to this square -- a finer
+        // interval draws lines the source's own maxzoom never drew.
+        demMaxzoom: options.demMaxzoom,
       });
     } catch (error) {
       if (error?.name === 'AbortError') return;
@@ -4357,6 +4361,7 @@ export function createApp({
     }
     return answerContours(req, res, {
       thresholds: contourThresholdsFor(resolved.stack, req.query),
+      demMaxzoom: stackCoverage(resolved).maxzoom,
       immutable: isPinned(resolved),
       tag: (z, x, y) => stackEtag(resolved, z, x, y).slice(1, -1),
       heightsAt: (codec, signal) =>
@@ -4385,6 +4390,7 @@ export function createApp({
     }
     return answerContours(req, res, {
       thresholds: contourThresholdsFor({}, req.query),
+      demMaxzoom: entry.pmtiles?.maxZoom,
       // An infohash names one build and can never come to mean another.
       immutable: true,
       tag: (z, x, y) => `${entry.infoHash.slice(0, 20)}-${z}/${x}/${y}`,
@@ -4407,6 +4413,7 @@ export function createApp({
     }
     return answerContours(req, res, {
       thresholds: contourThresholdsFor({}, req.query),
+      demMaxzoom: entry.pmtiles?.maxZoom,
       // A category moves when a newer build lands, so it revalidates.
       immutable: false,
       // Tagged by the build it resolved to rather than by the category, so a

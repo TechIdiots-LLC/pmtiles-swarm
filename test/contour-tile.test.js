@@ -204,11 +204,30 @@ describe('what a contour endpoint says it covers', () => {
     assert.deepEqual(coverage.bounds, [-10, 35, 5, 45]);
   });
 
-  it('never claims a zoom the stack has no ground for', () => {
-    // Contours can be traced from an upscaled parent, but that is the parent's
-    // line drawn twice as thick rather than new detail.
+  it('goes past the ground, as far as the intervals keep changing', () => {
+    // Unlike a raster endpoint, and the difference is the point. The interval
+    // gets finer as the zoom does, so z15 over z12 ground draws 20 m lines
+    // that z12's own table never drew -- traced from a z12 tile split down to
+    // the square. Stopping at the ground would withhold exactly the lines the
+    // table was written to ask for.
     const coverage = contourCoverage({ minzoom: 0, maxzoom: 12 }, { 15: [20] });
+    assert.equal(coverage.maxzoom, 15);
+  });
+
+  it('stops where the intervals stop changing', () => {
+    // Past the deepest level a table names, the interval is the same one --
+    // so overzooming further is the same lines smoothed, which is the case the
+    // old cap was right about. Nothing new to advertise.
+    const coverage = contourCoverage({ minzoom: 0, maxzoom: 12 }, { 12: [10] });
     assert.equal(coverage.maxzoom, 12);
+  });
+
+  it('will not claim more overzoom than a split can carry', () => {
+    // Splitting halves the square per level, and below a couple of pixels
+    // there is no surface left to trace. Worked out for the smallest tile
+    // served, so the claim holds whatever this source's tiles are.
+    const coverage = contourCoverage({ minzoom: 0, maxzoom: 2 }, { 16: [10] });
+    assert.equal(coverage.maxzoom, 9, '2 + seven levels of splitting');
   });
 });
 

@@ -56,6 +56,29 @@ const DEFAULT_BUFFER = 1;
 const DEFAULT_EXTENT = 4096;
 
 /**
+ * Scale an overzoomed square back up to at least this wide before tracing.
+ *
+ * maplibre-contour's own default, and kept the same on purpose: the two should
+ * not disagree about how smooth an overzoomed contour is.
+ */
+const DEFAULT_SUBSAMPLE_BELOW = 100;
+
+/** Below this a split square is too few samples to trace anything from. */
+const MIN_SPLIT_PIXELS = 2;
+
+/**
+ * How many zooms past the ground a contour endpoint will claim.
+ *
+ * Splitting halves a tile per level, so the limit is where the square stops
+ * being a surface. Worked out for the smallest tile served rather than for the
+ * one this source happens to use: 256 halved seven times is two pixels, and
+ * under-claiming by a level on a 512 archive is the safe direction to be
+ * wrong -- the other one advertises zooms that answer 404, which is the thing
+ * the document exists to stop.
+ */
+const MAX_OVERZOOM = Math.log2(256 / MIN_SPLIT_PIXELS);
+
+/**
  * The nine tiles a contour tile is drawn from, in the order it wants them.
  *
  * `[nw, n, ne, w, c, e, sw, s, se]`. A contour crossing a tile edge has to be
@@ -202,7 +225,16 @@ export function heightsFromArchive(options) {
  * than in turn, and every one is a tile some neighbouring contour tile also
  * wants -- so a cache behind the provider is what makes a run of these
  * affordable rather than an optimisation on top of one.
+ * Past `demMaxzoom` the ground is read from the deepest ancestor there is and
+ * each of the nine is split down to the square it stands for. Contours differ
+ * from a raster here, which is why this is worth doing rather than stopping at
+ * the source's depth: the interval gets finer as the zoom does, so z14 over a
+ * z12 DEM draws lines at heights z12 never drew at all. They are smoother than
+ * lines traced from real z14 ground would be, but they are not the same lines
+ * enlarged. It is also cheaper -- nine squares of one parent rather than nine
+ * merges -- which is most of what makes the deep end affordable.
  * @param {object} options - `heightsAt`, the coordinates, and the thresholds.
+ *   `demMaxzoom` is the deepest zoom the ground itself goes to.
  * @returns {Promise<Buffer|null>} - The tile, or null where there is nothing.
  */
 export async function contourTile(options) {
@@ -216,21 +248,60 @@ export async function contourTile(options) {
   const intervals = intervalsAt(table, z);
   if (intervals.length === 0) return null;
 
+  // Where the ground stops. Asking deeper than this answers nothing, so the
+  // read happens at the deepest zoom that has tiles and each square is taken
+  // out of the parent afterwards.
+  const deepest = options.demMaxzoom;
+  const demZ = Number.isInteger(deepest) ? Math.min(z, deepest) : z;
+  const subZ = z - demZ;
+  const div = 2 ** subZ;
+
   const around = neighbourhoodOf(x, y);
   const tilesAround = await Promise.all(
-    around.map(([column, row]) => heightsAt(z, column, row)),
+    around.map(([column, row]) =>
+      heightsAt(demZ, Math.floor(column / div), Math.floor(row / div)),
+    ),
   );
 
   // The centre is the tile being drawn. Without it there is nothing to draw,
   // whatever the neighbours hold.
   if (!tilesAround[4]) return null;
 
-  const grid = contour.HeightTile.combineNeighbors(
-    tilesAround.map((dem) =>
-      dem ? contour.HeightTile.fromRawDem(dem) : undefined,
-    ),
+  // A square this small carries no shape to trace: split far enough and a tile
+  // becomes one pixel, which is a number rather than a surface. Refused rather
+  // than drawn, because a contour through a single sample is invented.
+  if (subZ > 0 && Math.floor(tilesAround[4].width / div) < MIN_SPLIT_PIXELS) {
+    return null;
+  }
+
+  let grid = contour.HeightTile.combineNeighbors(
+    tilesAround.map((dem, at) => {
+      if (!dem) return undefined;
+      const tile = contour.HeightTile.fromRawDem(dem);
+      if (subZ === 0) return tile;
+      // Which square of the parent this neighbour is. Taken modulo the split
+      // rather than from the neighbour's own offset, because a neighbour can
+      // sit in the parent next door -- and at the antimeridian its column is
+      // negative, which the wrap below turns back into a square index.
+      const [column, row] = around[at];
+      return tile.split(
+        subZ,
+        ((column % div) + div) % div,
+        ((row % div) + div) % div,
+      );
+    }),
   );
   if (!grid) return null;
+
+  // Scaled back up before tracing, or the lines follow the parent's pixel
+  // edges and come out as staircases. maplibre-contour's own overzoom does
+  // this for the same reason; the threshold is its default.
+  if (subZ > 0) {
+    const below = options.subsampleBelow ?? DEFAULT_SUBSAMPLE_BELOW;
+    while (grid.width < below) {
+      grid = grid.subsamplePixelCenters(2).materialize(2);
+    }
+  }
 
   const extent = options.extent ?? DEFAULT_EXTENT;
   // Traced at the finest interval and labelled with the rest. One pass over
@@ -254,10 +325,17 @@ export async function contourTile(options) {
 /**
  * What a contour endpoint says about itself, for a TileJSON.
  *
- * The zoom range is the thresholds', not the stack's: a stack serving z0-z16
- * draws no contours at z2, and a client told otherwise fetches empty tiles all
- * the way down. The bounds are the stack's, since that is where the ground is.
- * @param {object} coverage - The stack's own coverage.
+ * The zoom range is the thresholds', not the source's: terrain serving z0-z16
+ * draws nothing at z2 under a recipe that starts at z12, and a client told
+ * otherwise fetches empty tiles all the way down. The bounds are the source's,
+ * since that is where the ground is.
+ *
+ * The deep end goes past where the ground stops, which a raster endpoint would
+ * not do. A contour interval gets finer as the zoom does, so the deepest level
+ * a table names draws lines the source's own maxzoom never drew -- traced from
+ * an ancestor split down to the tile. Stopping at the ground's depth would
+ * withhold the lines the table was written to ask for.
+ * @param {object} coverage - The source's own coverage.
  * @param {number|object} [thresholds] - What the recipe named.
  * @returns {object} - `{minzoom, maxzoom, bounds}`.
  */
@@ -269,12 +347,14 @@ export function contourCoverage(coverage, thresholds) {
   const shallowest = drawn.length
     ? Math.min(...drawn)
     : (coverage.minzoom ?? 0);
+  const ground = coverage.maxzoom ?? 14;
+  // Past the ground but not past what splitting can carry.
+  const deepest = drawn.length
+    ? Math.min(Math.max(...drawn), ground + MAX_OVERZOOM)
+    : ground;
   return {
     minzoom: Math.max(coverage.minzoom ?? 0, shallowest),
-    // No deeper than the stack has ground for. Contours can be drawn from an
-    // upscaled parent, but a line traced from a parent's pixels is the
-    // parent's line drawn twice as thick, not new detail.
-    maxzoom: coverage.maxzoom ?? 14,
+    maxzoom: Math.max(ground, deepest),
     bounds: coverage.bounds ?? [-180, -85.051129, 180, 85.051129],
   };
 }

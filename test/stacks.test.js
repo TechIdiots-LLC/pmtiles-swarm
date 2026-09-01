@@ -1956,7 +1956,11 @@ describe('serving contours from a stack', { skip: !codec }, () => {
    */
   async function overASlope(stack = {}, pmtiles = {}) {
     const one = archive('d1'.repeat(20), 'one.pmtiles', ['one'], pmtiles);
-    const size = 64;
+    // A real tile size, because the contour endpoint's advertised depth is
+    // worked out from the smallest one this serves. A 64-pixel tile is below
+    // anything production has -- `output.tileSize` only takes 256 or 512 --
+    // and splitting one that small runs out of surface early.
+    const size = 256;
     const heights = new Float32Array(size * size);
     for (let i = 0; i < heights.length; i += 1) heights[i] = (i % size) * 20;
     const tile = await codec.encode(
@@ -2051,7 +2055,11 @@ describe('serving contours from a stack', { skip: !codec }, () => {
     assert.equal(flat.minzoom, 1);
   });
 
-  it('never claims a zoom the stack has no ground for', async () => {
+  it('claims the deep end the intervals reach, not the ground', async () => {
+    // A contour endpoint goes past its source, which a raster one would not.
+    // The interval gets finer with the zoom, so the deep levels draw lines the
+    // ground's own maxzoom never drew -- traced from its tiles split down to
+    // the square being asked for.
     const node = await overASlope();
     after(() => node.close());
     const doc = await (
@@ -2059,9 +2067,15 @@ describe('serving contours from a stack', { skip: !codec }, () => {
     ).json();
     const stack = await (await node.get('/stacks/slope/tiles.json')).json();
     assert.ok(
-      doc.maxzoom <= stack.maxzoom,
+      doc.maxzoom > stack.maxzoom,
       `contours to z${doc.maxzoom} over ground to z${stack.maxzoom}`,
     );
+
+    // And it is not a claim the endpoint cannot meet.
+    const deep = await node.get(
+      `/stacks/slope/contours/${doc.maxzoom}/${2 ** doc.maxzoom / 2}/${2 ** doc.maxzoom / 2}.pbf`,
+    );
+    assert.equal(deep.status, 200, 'the deepest zoom it advertises is empty');
   });
 
   it('reads the height under a coordinate', async () => {
