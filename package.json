@@ -46,8 +46,10 @@
     "create-torrent": "^6.1.0",
     "express": "^5.2.1",
     "fs-chunk-store": "^5.0.1",
+    "maplibre-contour": "^0.1.0",
     "maplibre-gl": "^6.2.0",
     "parse-torrent": "^11.0.24",
+    "pbf": "^5.1.2",
     "pmtiles": "^4.4.1",
     "pmtiles-torrent": "^0.11.1",
     "webtorrent": "^3.0.21"
