@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.103.0
+### ✨ Features and improvements
 - **Elevation at a coordinate.** `GET /stacks/<id>/elevation?lon=&lat=&zoom=` answers the height
   under a point, and `POST` of `{"points": [...]}` answers up to a thousand of them in the order
   asked. The same two under `/archives/<infohash>/` and `/latest/<category>/`, since an archive of
