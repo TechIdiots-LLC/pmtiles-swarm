@@ -5,6 +5,13 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.106.1
+### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
 - **A touchpad without separate buttons spun the map instead of panning it.** MapLibre binds
   rotate and pitch to the right mouse button, and a clickpad reports a press with a second finger
   resting on it as exactly that — so pressing down to drag rotated rather than panned. Every map
