@@ -120,7 +120,32 @@ the world. A recipe says either a number, meaning that interval wherever
 contours are drawn at all, or a table of zoom to intervals. A request says the
 same through `?interval=` or `?thresholds=`, which is the only way to set them
 for an archive or a category, since neither has a recipe to write them in.
-Saying nothing gets a built-in table.
+Saying nothing gets the built-in table, which is contour-generator's:
+
+| zoom | minor | major |
+| ---: | ----: | ----: |
+|    1 |   600 |  3000 |
+|    4 |   300 |  1500 |
+|    8 |   150 |   750 |
+|    9 |    80 |   400 |
+|   10 |    40 |   200 |
+|   11 |    20 |   100 |
+|   12 |    10 |    50 |
+|   14 |     5 |    25 |
+|   16 |     1 |     5 |
+
+Read as "from this zoom until the next one named", so z2 and z3 take z1's. They
+are that project's numbers, adopted whole rather than invented here, so a
+pyramid baked by contour-generator and a stack traced live draw the same lines
+at the same heights — the same reason the merge maths is kept in step with the
+offline merger.
+
+They begin at **z1**, and that is a real cost rather than an oversight: a
+contour tile is nine merged terrain tiles, and at low zoom each of those covers
+most of the world. The merged-heights cache is what makes a run of them
+affordable. A recipe naming only the deep end — `{"12": [10, 50]}` — draws
+nothing above it, which is how a stack declines the shallow zooms and the work
+of tracing them.
 
 Contours are a view of terrain rather than a property of it — the same ground is
 wanted at 10 m on a walking map and 100 m on an atlas — which is why the request
@@ -144,11 +169,12 @@ continent, and nine merges is an expensive way to answer nothing.
     GET /archives/<infohash>/contours/tiles.json
     GET /latest/<category>/contours/tiles.json
 
-The zoom range is the thresholds', not the source's. Terrain serving z0–z16
-draws no contours at z2, and a client told otherwise fetches empty tiles all the
-way down. It is never deeper than there is ground for either: a contour traced
-from an upscaled parent is the parent's line drawn twice as thick, not new
-detail.
+The zoom range is the thresholds', not the source's. Under the built-in table
+those nearly agree, but a recipe naming only `{"12": [10, 50]}` draws nothing
+above z12 — and a client told the source's range instead fetches empty tiles all
+the way down. It is never deeper than there is ground for either: a contour
+traced from an upscaled parent is the parent's line drawn twice as thick, not
+new detail.
 
 Worth pointing a source at rather than declaring a range by hand — that is what
 the preview does, and it is why the preview stops asking for tiles below the

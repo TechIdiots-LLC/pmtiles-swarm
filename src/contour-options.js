@@ -18,19 +18,29 @@
 /**
  * What to use where the recipe says nothing.
  *
- * Read as "from this zoom until the next one named". Below the shallowest
- * entry there are no contours at all: at z7 a tile is a continent, and every
- * interval coarse enough to draw is too coarse to mean anything.
+ * Read as "from this zoom until the next one named", so z2 and z3 take z1's.
+ *
+ * These are the intervals contour-generator uses, adopted wholesale so a
+ * pyramid baked there and a stack traced live draw the same lines at the same
+ * heights -- the same reason the merge maths is kept in step with the offline
+ * merger. See docs/terrain.md -- "Contours".
+ *
+ * They start at z1, which is a deliberate cost. A contour tile is nine merged
+ * terrain tiles, and at low zoom those cover most of the world; the merged
+ * heights cache is what makes a run of them affordable. Somebody who wants the
+ * shallow end left alone can say so in the recipe -- a table naming only z9 and
+ * up draws nothing below it.
  */
 const DEFAULT_THRESHOLDS = Object.freeze({
-  9: [500],
-  10: [200, 1000],
-  11: [200, 1000],
-  12: [100, 500],
-  13: [100, 500],
-  14: [50, 200],
-  15: [20, 100],
-  16: [10, 50],
+  1: [600, 3000],
+  4: [300, 1500],
+  8: [150, 750],
+  9: [80, 400],
+  10: [40, 200],
+  11: [20, 100],
+  12: [10, 50],
+  14: [5, 25],
+  16: [1, 5],
 });
 
 /** Nothing to draw. Kept as one object so callers can compare against it. */
@@ -52,9 +62,10 @@ export function thresholdsFrom(thresholds) {
     return DEFAULT_THRESHOLDS;
   }
 
-  // One number: the same everywhere, from the shallowest zoom the default
-  // table would have drawn at. Picking a floor rather than drawing at z0 is
-  // deliberate -- a contour every 50 m at z2 is a black tile, computed slowly.
+  // One number: the same everywhere the default table draws, which is from z1
+  // -- so a flat interval means at every zoom, the way contour-generator's
+  // `--increment` does. Read the warning under the table before picking one:
+  // 20 m lines at z2 is a black tile that took nine merges to compute.
   const flat = Number(thresholds);
   if (Number.isFinite(flat)) {
     if (!(flat > 0)) return {};
@@ -127,7 +138,9 @@ export function levelOf(height, intervals) {
  *
  * What an export needs in order to not walk a pyramid it will write nothing
  * for: below the shallowest entry there are no contours, and a run that reads
- * every source tile at z0-z8 to produce nothing is hours spent on silence.
+ * every source tile at a zoom nothing is drawn at is time spent on silence.
+ * The default table starts at z1, but a recipe naming a shallower floor -- or
+ * only the deep end -- is exactly what this exists to notice.
  * @param {object} table - From `thresholdsFrom`.
  * @returns {object|null} - `{minzoom, maxzoom}`, or null when it draws none.
  */

@@ -103,9 +103,10 @@ describe('drawing contours from a stack', { skip: !codec }, () => {
   });
 
   it('draws nothing at a zoom no threshold covers', async () => {
-    // Asked before the merges, not after: at z5 a tile is most of a continent
-    // and nine merges for a tile that was never going to have a line in it is
-    // the expensive way to answer nothing.
+    // Asked before the merges, not after: nine merges for a tile that was
+    // never going to have a line in it is the expensive way to answer nothing.
+    // The default table draws from z1, so this is z0 -- a recipe declining the
+    // shallow end is the case that matters, and it takes the same path.
     const { resolved, tiles } = await stackOf((x) => x * 20);
     const tile = await contourTile({
       heightsAt: heightsFromStack({
@@ -114,9 +115,9 @@ describe('drawing contours from a stack', { skip: !codec }, () => {
         codec,
         size: SIZE,
       }),
-      z: 5,
-      x: 10,
-      y: 10,
+      z: 0,
+      x: 0,
+      y: 0,
     });
     assert.equal(tile, null);
   });

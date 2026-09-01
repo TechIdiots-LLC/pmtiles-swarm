@@ -19,10 +19,13 @@ import {
 
 describe('reading what the recipe said about intervals', () => {
   it('takes nothing as the built-in table', () => {
-    // Which most exports should use and nobody should have to type.
+    // contour-generator's intervals, so a pyramid baked there and a stack
+    // traced live draw the same lines at the same heights.
     const table = thresholdsFrom(undefined);
-    assert.deepEqual(intervalsAt(table, 15), [20, 100]);
-    assert.deepEqual(intervalsAt(table, 12), [100, 500]);
+    assert.deepEqual(intervalsAt(table, 12), [10, 50]);
+    assert.deepEqual(intervalsAt(table, 16), [1, 5]);
+    // Read as "from this zoom until the next named", so z2 takes z1's.
+    assert.deepEqual(intervalsAt(table, 2), [600, 3000]);
   });
 
   it('takes one number as that interval at every drawn zoom', () => {
@@ -50,9 +53,10 @@ describe('reading what the recipe said about intervals', () => {
   });
 
   it('draws nothing above the shallowest entry', () => {
-    // At z7 a tile is a continent: every interval coarse enough to draw is too
-    // coarse to mean anything.
-    assert.deepEqual(intervalsAt(thresholdsFrom(undefined), 7), []);
+    // The default table starts at z1, so only z0 is above it -- but a recipe
+    // naming a deeper floor draws nothing above that, which is how somebody
+    // declines the low zooms and the cost of tracing them.
+    assert.deepEqual(intervalsAt(thresholdsFrom(undefined), 0), []);
     assert.deepEqual(intervalsAt(thresholdsFrom({ 12: [100] }), 11), []);
   });
 
@@ -81,9 +85,9 @@ describe('how major a contour is', () => {
 
 describe('which zooms are worth walking', () => {
   it('says where a table starts drawing', () => {
-    // An export that read every source tile at z0-z8 to write nothing would
-    // be hours spent on silence.
-    assert.deepEqual(drawnZooms(thresholdsFrom(undefined)).minzoom, 9);
+    // An export that read every source tile at a zoom it draws nothing at
+    // would be hours spent on silence.
+    assert.deepEqual(drawnZooms(thresholdsFrom(undefined)).minzoom, 1);
     assert.deepEqual(drawnZooms(thresholdsFrom({ 12: [100] })).minzoom, 12);
   });
 

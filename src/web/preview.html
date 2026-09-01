@@ -274,9 +274,9 @@
         );
         style.sources.contours = {
           type: 'vector',
-          // The thresholds' range, not the stack's. A stack with ground from
-          // z0 draws its first line at z9 by default, and a source claiming z0
-          // asks for eight zooms of tiles that can only ever answer 404.
+          // The thresholds' range, not the stack's. A recipe drawing only
+          // from z12 answers 404 everywhere above it, and a source claiming
+          // the stack's range asks for every one of those zooms.
           ...(contourJson
             ? {
                 minzoom: contourJson.minzoom,
@@ -450,9 +450,9 @@
       if (terrain) layerToggle('hillshade', 'hillshade');
       if (contours) {
         // The range is in the label because without it an empty map is
-        // indistinguishable from a broken one: contours start at z9 under the
-        // default thresholds, so a preview opened at z4 with the hillshade off
-        // draws nothing at all and says nothing about why.
+        // indistinguishable from a broken one: a stack whose recipe draws only
+        // at the deep end shows nothing at all with the hillshade off, and says
+        // nothing about why.
         const range = contourJson
           ? ` z${contourJson.minzoom}–${contourJson.maxzoom}`
           : '';

@@ -1993,18 +1993,17 @@ describe('serving contours from a stack', { skip: !codec }, () => {
   });
 
   it('says which zooms it draws at, not the ones the stack has', async () => {
-    // The whole point of serving this. The stack has ground from z0, and the
-    // default thresholds draw their first line at z9 -- so a client given the
-    // stack's range spends eight zooms of requests on tiles that can only ever
-    // answer 404, and a map showing nothing but contours looks broken rather
-    // than empty.
-    const node = await overASlope();
+    // The whole point of serving this. A recipe declining the shallow end
+    // draws nothing there, and a client given the stack's range instead spends
+    // those zooms on tiles that can only ever answer 404 -- a map showing
+    // nothing but contours then looks broken rather than empty.
+    const node = await overASlope({ contours: { thresholds: { 12: [100] } } });
     after(() => node.close());
 
     const res = await node.get('/stacks/slope/contours/tiles.json');
     assert.equal(res.status, 200);
     const doc = await res.json();
-    assert.equal(doc.minzoom, 9);
+    assert.equal(doc.minzoom, 12);
     assert.ok(
       doc.tiles[0].endsWith('/stacks/slope/contours/{z}/{x}/{y}.pbf'),
       doc.tiles[0],
@@ -2033,17 +2032,23 @@ describe('serving contours from a stack', { skip: !codec }, () => {
     assert.equal(doc.minzoom, 5);
   });
 
-  it('keeps the floor when the request names a flat interval', async () => {
-    // A bare `?interval=` reuses the default table's zooms rather than drawing
-    // everywhere, deliberately: a contour every 20 m at z2 is a black tile
-    // that took nine merges to compute. The document has to agree with that.
+  it('draws from the top of the default table when nothing is said', async () => {
+    // contour-generator's intervals start at z1, and they were adopted whole
+    // so a pyramid baked there and a stack traced live agree. A bare
+    // `?interval=` reuses those same zooms, so it draws from z1 as well --
+    // which is what `--increment` does over there.
     const node = await overASlope();
     after(() => node.close());
 
-    const doc = await (
+    const plain = await (
+      await node.get('/stacks/slope/contours/tiles.json')
+    ).json();
+    assert.equal(plain.minzoom, 1);
+
+    const flat = await (
       await node.get('/stacks/slope/contours/tiles.json?interval=20')
     ).json();
-    assert.equal(doc.minzoom, 9);
+    assert.equal(flat.minzoom, 1);
   });
 
   it('never claims a zoom the stack has no ground for', async () => {
@@ -2165,8 +2170,9 @@ describe('serving contours from a stack', { skip: !codec }, () => {
 
   it('draws nothing at a zoom no threshold covers', async () => {
     // 404 rather than an empty tile, which a client pays to fetch and draws
-    // nothing from.
-    const node = await overASlope();
+    // nothing from. The default table draws from z1, so the case worth testing
+    // is a recipe that declines the shallow end rather than z0 alone.
+    const node = await overASlope({ contours: { thresholds: { 12: [100] } } });
     after(() => node.close());
     assert.equal(
       (await node.get('/stacks/slope/contours/4/8/6.pbf')).status,
