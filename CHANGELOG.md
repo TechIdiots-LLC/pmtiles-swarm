@@ -2,7 +2,11 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **Hillshade and contours can be switched off in the preview.** Two boxes in the header, shown only
+  for the layers that page actually drew. Not only a cosmetic switch for the contours: MapLibre
+  stops fetching from a source once no visible layer draws from it, so unticking the box really does
+  stop the nine tile merges each contour tile costs. 3D stays where it was, on MapLibre's own
+  terrain button.
 
 ### 🐞 Bug fixes
 - **The contour preview asked for a tile at the literal coordinates `{z}`.** Its source URL was

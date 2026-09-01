@@ -36,7 +36,18 @@
       header h1 { font-size: 1rem; margin: 0; }
       header .sub { color: var(--muted); font-size: 0.8rem; }
       header code { font-size: 0.75rem; color: var(--muted); }
-      header .links { margin-left: auto; display: flex; gap: 0.9rem; }
+      header .links { margin-left: auto; display: flex; gap: 0.9rem; align-items: center; }
+      header .layers { display: flex; gap: 0.7rem; align-items: center; }
+      header .layers label {
+        display: flex;
+        align-items: center;
+        gap: 0.3rem;
+        font-size: 0.8rem;
+        color: var(--muted);
+        cursor: pointer;
+        user-select: none;
+      }
+      header .layers input { margin: 0; cursor: pointer; }
       header a { color: var(--accent); font-size: 0.8rem; }
       #map { flex: 1; min-height: 0; }
       .banner {
@@ -68,6 +79,7 @@
       <span class="sub" id="summary"></span>
       <code id="endpoint"></code>
       <span class="links">
+        <span class="layers" id="layers"></span>
         <a id="mode" href="#" hidden></a>
         <a id="back" href="/">← console</a>
       </span>
@@ -347,6 +359,49 @@
           'top-left',
         );
       }
+
+      /**
+       * A checkbox that shows and hides one layer.
+       *
+       * Visibility rather than removing the layer, and that is not only
+       * tidier: MapLibre marks a source unused when no visible layer draws
+       * from it -- `if (!layer.isHidden(zoom) && layer.source)
+       * tileManagers[layer.source].used = true` -- and an unused source stops
+       * fetching. So unticking contours really does stop the nine merges a
+       * tile costs, rather than hiding work that carries on underneath.
+       *
+       * The 3D switch is not here: MapLibre ships a TerrainControl and it is
+       * already on the map, one row up on the left.
+       * @param {string} id - The layer to show and hide.
+       * @param {string} label - What to call it.
+       * @returns {void}
+       */
+      function layerToggle(id, label) {
+        const box = document.createElement('label');
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.checked = true;
+        // `setLayoutProperty` calls `_checkLoaded()`, which throws before the
+        // style has finished loading, so the box is not offered until it has.
+        input.disabled = true;
+        map.once('load', () => {
+          input.disabled = false;
+        });
+        input.addEventListener('change', () => {
+          map.setLayoutProperty(
+            id,
+            'visibility',
+            input.checked ? 'visible' : 'none',
+          );
+        });
+        box.append(input, document.createTextNode(label));
+        $('layers').append(box);
+      }
+
+      // Only for the layers this page actually put in the style. A checkbox
+      // for a layer that is not there is a control that does nothing.
+      if (terrain) layerToggle('hillshade', 'hillshade');
+      if (contours) layerToggle('contours', 'contours');
 
       if (vector) {
         // MapLibre's own inspect control, rather than something equivalent
