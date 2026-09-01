@@ -2,6 +2,26 @@
 
 ## master
 ### ✨ Features and improvements
+- **Contours, traced from what a stack merges.** `GET /stacks/<id>/contours/{z}/{x}/{y}.pbf` returns
+  a gzipped vector tile of contour lines. The interval comes from the recipe's `contours.thresholds`
+  or from `?interval=` on the request — contours are a view of a stack rather than a property of one,
+  and the same terrain is wanted at 10 m on a walking map and 100 m on an atlas.
+
+  Drawn here rather than from an archive for one reason. A tool reading archives has to answer "what
+  is the elevation?" for ground no archive covers, and an encoded terrain tile cannot say
+  "nothing" — every triple of bytes is a height. So it invents one, and a constant beside real
+  terrain is a cliff, which a tracer renders as lines packed tight along the seam. A stack has `NaN`
+  and hands its holes over unfilled, so a line stops at the edge of the data instead.
+
+  A level may name several intervals. `[100, 500]` draws every hundred metres and marks every fifth,
+  and each feature carries `level` — how many intervals its height divides by — so a style draws the
+  major lines thicker and labels only those, from one layer. That is `maplibre-contour`'s convention,
+  so a style written for its tiles works against these.
+
+  Worth knowing what it costs: a contour tile is traced from its own tile **plus its eight
+  neighbours**, because a line crossing an edge has to be traced from the ground on both sides or it
+  will not meet the line next door. Roughly nine merged terrain tiles each. See
+  [tile-stacks.md](docs/tile-stacks.md) — "Contours from a stack".
 - **An export can write part of a stack.** A zoom range, an area, or both, from the export dialog or
   as `minzoom` / `maxzoom` / `bounds` on `POST /api/stacks/<id>/bake`. Absent still means all of it.
   An export reads every tile its sources hold, which for a planet is hours and a file nobody wanted

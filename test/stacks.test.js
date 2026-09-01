@@ -1940,3 +1940,122 @@ describe('an MBTiles archive as a layer', () => {
     assert.equal(stackEncoding(over(mbtiles(summary))).encoding, 'terrarium');
   });
 });
+
+describe('serving contours from a stack', { skip: !codec }, () => {
+  /**
+   * A node serving one stack over a slope, so there is something to trace.
+   * @param {object} [stack] - Extra recipe fields.
+   * @returns {Promise<object>} - The node.
+   */
+  async function overASlope(stack = {}) {
+    const one = archive('d1'.repeat(20), 'one.pmtiles', ['one']);
+    const size = 64;
+    const heights = new Float32Array(size * size);
+    for (let i = 0; i < heights.length; i += 1) heights[i] = (i % size) * 20;
+    const tile = await codec.encode(
+      encodeHeights(heights, { width: size, height: size }),
+      { format: 'webp', lossless: true },
+    );
+    // Every tile of the archive is the same slope, so any coordinate traces.
+    const tiles = {};
+    for (const at of ['12/2000/1000']) tiles[at] = tile;
+    return serve(
+      [one],
+      [
+        {
+          id: 'slope',
+          space: 'elevation',
+          sources: [{ category: 'one' }],
+          ...stack,
+        },
+      ],
+      { [one.infoHash]: new Proxy(tiles, { get: () => tile }) },
+    );
+  }
+
+  it('answers a vector tile of lines, gzipped', async () => {
+    const node = await overASlope();
+    after(() => node.close());
+
+    const res = await node.get('/stacks/slope/contours/12/2000/1000.pbf');
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('content-type'), 'application/x-protobuf');
+    assert.equal(res.headers.get('content-encoding'), 'gzip');
+    const body = Buffer.from(await res.arrayBuffer());
+    assert.ok(body.length > 0);
+  });
+
+  it('draws nothing at a zoom no threshold covers', async () => {
+    // 404 rather than an empty tile, which a client pays to fetch and draws
+    // nothing from.
+    const node = await overASlope();
+    after(() => node.close());
+    assert.equal(
+      (await node.get('/stacks/slope/contours/4/8/6.pbf')).status,
+      404,
+    );
+  });
+
+  it('takes an interval from the request', async () => {
+    // Contours are a view of a stack rather than a property of one: the same
+    // terrain is wanted at 10 m on a walking map and 100 m on an atlas.
+    const node = await overASlope();
+    after(() => node.close());
+
+    const fine = await node.get(
+      '/stacks/slope/contours/12/2000/1000.pbf?interval=20',
+    );
+    const coarse = await node.get(
+      '/stacks/slope/contours/12/2000/1000.pbf?interval=500',
+    );
+    assert.equal(fine.status, 200);
+    assert.equal(coarse.status, 200);
+    const fineBytes = (await fine.arrayBuffer()).byteLength;
+    const coarseBytes = (await coarse.arrayBuffer()).byteLength;
+    assert.ok(
+      fineBytes > coarseBytes,
+      `20 m should draw more than 500 m: ${fineBytes} against ${coarseBytes}`,
+    );
+  });
+
+  it('tags the interval, so two of them are not one cached tile', async () => {
+    // Without it a style asking for 50 m lines is answered from a cache
+    // holding 100 m ones.
+    const node = await overASlope();
+    after(() => node.close());
+    const fine = await node.get(
+      '/stacks/slope/contours/12/2000/1000.pbf?interval=20',
+    );
+    const coarse = await node.get(
+      '/stacks/slope/contours/12/2000/1000.pbf?interval=500',
+    );
+    assert.notEqual(fine.headers.get('etag'), coarse.headers.get('etag'));
+  });
+
+  it('refuses an interval it cannot draw at', async () => {
+    const node = await overASlope();
+    after(() => node.close());
+    const res = await node.get(
+      '/stacks/slope/contours/12/2000/1000.pbf?interval=0',
+    );
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /more than zero/);
+  });
+
+  it('refuses to trace a colour', async () => {
+    const node = await overASlope({ space: 'rgba' });
+    after(() => node.close());
+    const res = await node.get('/stacks/slope/contours/12/2000/1000.pbf');
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /imagery|colour/);
+  });
+
+  it('serves pbf and refuses anything else', async () => {
+    const node = await overASlope();
+    after(() => node.close());
+    assert.equal(
+      (await node.get('/stacks/slope/contours/12/2000/1000.webp')).status,
+      400,
+    );
+  });
+});

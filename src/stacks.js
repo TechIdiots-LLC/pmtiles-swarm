@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { contourProblems } from './contour-options.js';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { isS3Url } from './s3-source.js';
@@ -375,6 +376,23 @@ export function validateStack(stack) {
       );
     }
   }
+  // Only meaningful for heights: a colour has no contours to trace, and a
+  // recipe saying otherwise has misunderstood something worth saying so.
+  if (stack.contours !== undefined) {
+    if (typeof stack.contours !== 'object' || stack.contours === null) {
+      problems.push('contours must be an object');
+    } else {
+      if (stack.space === 'rgba') {
+        problems.push(
+          'contours do not apply to imagery: a colour is not a height',
+        );
+      }
+      for (const said of contourProblems(stack.contours)) {
+        problems.push(`contours.${said}`);
+      }
+    }
+  }
+
   if (stack.boundsSource !== undefined) {
     const index = Number(stack.boundsSource);
     if (

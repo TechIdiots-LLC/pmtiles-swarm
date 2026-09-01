@@ -57,6 +57,9 @@ import {
   stacksAffectedBy,
 } from './stacks.js';
 import { bakeRevision } from './bake.js';
+import zlib from 'node:zlib';
+import { contourTile } from './contour-tile.js';
+import { contourProblems } from './contour-options.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -3957,6 +3960,56 @@ export function createApp({
    * @param {number} y - Row.
    * @returns {void}
    */
+  /**
+   * Gzips a vector tile, the way the archive tile route does.
+   * @param {Buffer} data - The tile.
+   * @returns {Promise<Buffer>} - The compressed tile.
+   */
+  const gzip = (data) =>
+    new Promise((resolve, reject) =>
+      zlib.gzip(data, (error, out) => (error ? reject(error) : resolve(out))),
+    );
+
+  /**
+   * What contour intervals to draw a stack at.
+   *
+   * The recipe's, unless the request asked for something else. A query
+   * parameter rather than only a recipe field because contours are a view of a
+   * stack rather than a property of one -- the same terrain is wanted at 10 m
+   * on a walking map and 100 m on an atlas, and neither is the stack's
+   * business.
+   * @param {object} stack - The stack definition.
+   * @param {object} [query] - The request's query parameters.
+   * @returns {number|object|undefined} - What the recipe or the caller named.
+   */
+  const contourThresholdsFor = (stack, query = {}) => {
+    const asked = query.interval ?? query.thresholds;
+    if (asked !== undefined && asked !== '') {
+      const flat = Number(asked);
+      if (Number.isFinite(flat)) return flat;
+      try {
+        return JSON.parse(asked);
+      } catch {
+        // Left to `contourProblems` to refuse and name, rather than answering
+        // a different question than the one that was asked.
+        return asked;
+      }
+    }
+    return stack.contours?.thresholds;
+  };
+
+  /**
+   * A short, stable tag for one set of thresholds.
+   * @param {number|object} [thresholds] - What is being drawn.
+   * @returns {string} - Twelve hex characters.
+   */
+  const contourTag = (thresholds) =>
+    crypto
+      .createHash('sha1')
+      .update(JSON.stringify(thresholds ?? null))
+      .digest('hex')
+      .slice(0, 12);
+
   const stackHeaders = (res, resolved, contributors, z, x, y) => {
     res.setHeader('access-control-allow-origin', '*');
     res.setHeader('x-stack-sources', contributors.join(', '));
@@ -4102,6 +4155,107 @@ export function createApp({
 
     res.type(format === 'png' ? 'image/png' : 'image/webp');
     return res.send(answer.body);
+  });
+
+  /**
+   * Contour lines traced from what a stack merges.
+   *
+   * Its own endpoint rather than a format the tile route answers in, because
+   * it is a different map: vector where that is raster, drawn at the zooms the
+   * thresholds name rather than the ones the stack has ground for, and costing
+   * nine merges a tile rather than one. Sharing a route would mean one set of
+   * headers describing two things.
+   *
+   * See docs/tile-stacks.md -- "Contours from a stack".
+   */
+  const serveStackContours = route(async (req, res) => {
+    await stacks?.refresh();
+    const resolved = stackOr404(req, res);
+    if (!resolved) return;
+
+    if (resolved.stack.space === 'rgba') {
+      return res.status(400).json({
+        error: 'this stack is imagery, and a colour has no contours to trace',
+      });
+    }
+
+    // Always: contours are traced from heights, so every source has to be
+    // decoded whatever the recipe would otherwise have passed through.
+    const codec = await loadCodec();
+    if (!codec) {
+      return res.status(501).json({
+        error:
+          'tracing contours means decoding pixels, and this node has ' +
+          'no codec',
+        hint: 'npm install sharp',
+      });
+    }
+
+    const z = Number(req.params.z);
+    const x = Number(req.params.x);
+    const y = Number(req.params.y);
+    if (![z, x, y].every(Number.isInteger)) {
+      return res.status(400).json({ error: 'z, x and y must be integers' });
+    }
+    const limit = 2 ** z;
+    if (z < 0 || z > 26 || x < 0 || y < 0 || x >= limit || y >= limit) {
+      return res.status(400).json({ error: 'tile coordinates out of range' });
+    }
+
+    const thresholds = contourThresholdsFor(resolved.stack, req.query);
+    const wrong = contourProblems({ thresholds });
+    if (wrong.length) {
+      return res.status(400).json({ error: wrong.join('; ') });
+    }
+
+    const controller = new AbortController();
+    // Nine merges deep, so an abandoned request here is nine abandoned reads
+    // per source. A panning map does that constantly.
+    res.on('close', () => {
+      if (!res.writableEnded) controller.abort();
+    });
+
+    let tile;
+    try {
+      tile = await contourTile({
+        resolved,
+        z,
+        x,
+        y,
+        tiles,
+        codec,
+        cutlines,
+        signal: controller.signal,
+        thresholds,
+      });
+    } catch (error) {
+      if (error?.name === 'AbortError') return;
+      throw error;
+    }
+
+    stackHeaders(res, resolved, ['contours'], z, x, y);
+    // The thresholds decide the bytes as much as the recipe does, so they go
+    // in the tag. Without that a style asking for 50 m lines is answered from
+    // a cache holding 100 m ones.
+    res.setHeader(
+      'etag',
+      `W/"${stackEtag(resolved, z, x, y).slice(1, -1)}-${contourTag(thresholds)}"`,
+    );
+    // Nothing crossed a threshold here. 404 rather than an empty tile, which
+    // a client pays to fetch and draws nothing from.
+    if (!tile) return res.status(404).end();
+
+    res.type('application/x-protobuf');
+    const gzipped = await gzip(tile);
+    res.setHeader('content-encoding', 'gzip');
+    return res.send(gzipped);
+  });
+
+  app.get('/stacks/:id/contours/:z/:x/:y.:ext', (req, res, next) => {
+    if (!['pbf', 'mvt'].includes(req.params.ext)) {
+      return res.status(400).json({ error: 'contours are served as pbf' });
+    }
+    return serveStackContours(req, res, next);
   });
 
   app.get('/stacks/:id/:size/:z/:x/:y.:ext', (req, res, next) => {
