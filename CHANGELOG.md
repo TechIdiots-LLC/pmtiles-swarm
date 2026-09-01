@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.100.0
+### ✨ Features and improvements
 - **A nested stack takes `maskColors`, and fades into what is under it.** Two things a stack could
   not do that every other kind of source could, both for the same reason: it is evaluated rather
   than stored, so it has no bytes. That is a fact about storage, not about meaning, and it was
@@ -25,7 +32,6 @@
   above had to mask back out, which is the problem nesting avoids by construction.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.99.2
 ### ✨ Features and improvements
