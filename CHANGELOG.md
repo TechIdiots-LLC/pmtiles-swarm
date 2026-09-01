@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.102.0
+### ✨ Features and improvements
 - **Hillshade and contours can be switched off in the preview.** Two boxes in the header, shown only
   for the layers that page actually drew. Not only a cosmetic switch for the contours: MapLibre
   stops fetching from a source once no visible layer draws from it, so unticking the box really does
