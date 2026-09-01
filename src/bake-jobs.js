@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { Compression } from 'pmtiles';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -18,6 +19,11 @@ import {
   selectionFrom,
   selectionProblems,
 } from './bake-selection.js';
+import {
+  contourProblems,
+  drawnZooms,
+  thresholdsFrom,
+} from './contour-options.js';
 import { PixelWorker } from './pixels.js';
 import { retains, retire } from './retention.js';
 import { stackCoverage, stackEncoding } from './stacks.js';
@@ -321,7 +327,17 @@ export class BakeManager {
         if (!state?.describe) continue;
 
         const resolved = resolve(stackId);
-        if (!resolved || bakeRevision(resolved) !== state.revision) continue;
+        // Computed the way the run that wrote it did, from what the checkpoint
+        // records. A revision built any other way stops matching the moment an
+        // export is anything other than the whole stack as terrain, and the
+        // work is silently passed over rather than picked up.
+        const revision = resolved
+          ? bakeRevision(resolved, selectionFrom(state.describe), {
+              kind: state.describe.kind ?? 'terrain',
+              thresholds: state.describe.thresholds ?? null,
+            })
+          : null;
+        if (!resolved || revision !== state.revision) continue;
 
         // Somebody stopped this one. It stays where it is until they say
         // otherwise -- an export begun again by a restart is the opposite of
@@ -441,7 +457,48 @@ export class BakeManager {
       error.status = 400;
       throw error;
     }
-    const selection = selectionFrom(options);
+    let selection = selectionFrom(options);
+
+    // What this run is making. Terrain is what an export has always meant, so
+    // it stays the default and nothing already written has to say so.
+    const kind = options.kind ?? 'terrain';
+    if (!['terrain', 'contours'].includes(kind)) {
+      const error = new Error(`there is no "${kind}" to export`);
+      error.status = 400;
+      throw error;
+    }
+    const thresholds =
+      kind === 'contours'
+        ? (options.thresholds ?? resolved.stack.contours?.thresholds)
+        : undefined;
+    if (kind === 'contours') {
+      if (resolved.stack.space === 'rgba') {
+        const error = new Error(
+          'this stack is imagery, and a colour has no contours to trace',
+        );
+        error.status = 400;
+        throw error;
+      }
+      const wrongThresholds = contourProblems({ thresholds });
+      if (wrongThresholds.length) {
+        const error = new Error(wrongThresholds.join('; '));
+        error.status = 400;
+        throw error;
+      }
+      // Narrowed to the zooms that draw anything. Without this the run walks
+      // every tile the sources hold at z0-z8 to trace nothing at all, which on
+      // a planet is hours spent producing silence -- and the selection is
+      // already the machinery for not doing that.
+      const drawn = drawnZooms(thresholdsFrom(thresholds));
+      selection = selectionFrom({
+        ...options,
+        minzoom: Math.max(
+          Number(options.minzoom ?? drawn.minzoom),
+          drawn.minzoom,
+        ),
+        maxzoom: options.maxzoom,
+      });
+    }
 
     // A source this node can read: an archive it holds, a recipe it can
     // evaluate, or an address it can fetch. The last was missing, which
@@ -502,6 +559,7 @@ export class BakeManager {
       // and so a finished one says what it was rather than leaving the name
       // to be read for it.
       selection,
+      kind,
     };
     this.#jobs.set(stackId, job);
 
@@ -511,6 +569,8 @@ export class BakeManager {
     job.promise = this.#run(job, resolved, codec, {
       ...options,
       selection,
+      kind,
+      thresholds,
     }).catch((error) => {
       job.phase = job.cancelling ? 'cancelled' : 'failed';
       job.error = error.message;
@@ -531,7 +591,8 @@ export class BakeManager {
   async #run(job, resolved, codec, options) {
     const workDir = workDirFor(job, this.#config);
     const destination = path.join(workDir, job.name);
-    const format = outputFormat(resolved);
+    // Contours are lines, whatever the stack's own tiles are written as.
+    const format = options.kind === 'contours' ? 'pbf' : outputFormat(resolved);
 
     // Running again is the answer to having been stopped, so the mark goes.
     // Left behind, an export somebody restarted by hand would be passed over
@@ -677,7 +738,10 @@ export class BakeManager {
       sources,
       workDir,
       destination,
-      revision: bakeRevision(resolved, options.selection ?? null),
+      revision: bakeRevision(resolved, options.selection ?? null, {
+        kind: options.kind ?? 'terrain',
+        thresholds: options.thresholds ?? null,
+      }),
       signal: job.controller.signal,
       mergeTile: mergeTileFor({
         resolved,
@@ -687,6 +751,8 @@ export class BakeManager {
         cutlines: this.#cutlines,
         signal: job.controller.signal,
         format,
+        kind: options.kind,
+        thresholds: options.thresholds,
       }),
       // The zooms are left to the writer, which reads them off the tiles it
       // actually wrote -- more honest than the selection, since a request for
@@ -694,7 +760,15 @@ export class BakeManager {
       // derived there and default to the whole world, so a regional export
       // would claim the planet and hold one country: a client would go on
       // asking for tiles that were never written.
-      header: { format, ...boundsHeader(resolved, options.selection ?? null) },
+      header: {
+        format,
+        ...boundsHeader(resolved, options.selection ?? null),
+        // A vector tile, gzipped, which is how every reader expects to find
+        // one. The raster path says nothing here and takes the defaults.
+        ...(options.kind === 'contours'
+          ? { tileCompression: Compression.Gzip }
+          : {}),
+      },
       selection: options.selection ?? null,
       pauseMs: this.#config.stacks?.bakePauseMs ?? 0,
       concurrency: this.#concurrency(),
@@ -705,6 +779,16 @@ export class BakeManager {
       describe: {
         name: job.archiveName,
         filename: job.name,
+        // What this run is making and of how much, in the shape `start` reads
+        // rather than the shape it derives. Both are part of the revision, so
+        // a resume has to reproduce them exactly or it will not recognise its
+        // own checkpoint -- and reproducing them from the derived selection
+        // would mean two ideas of what a selection is.
+        kind: options.kind ?? 'terrain',
+        thresholds: options.thresholds ?? null,
+        minzoom: options.selection?.minzoom ?? null,
+        maxzoom: options.selection?.maxzoom ?? null,
+        bounds: options.selection?.bounds ?? null,
         publishDir: job.publishDir ?? null,
         description: options.description ?? null,
         attribution: options.attribution ?? null,
@@ -794,6 +878,9 @@ export class BakeManager {
       // job that has been running for an hour should say what it is covering
       // without anybody parsing a filename for it.
       selection: job.selection ?? null,
+      // And what it is making of it. A contour export and a terrain one look
+      // identical while they run, and take very different amounts of time.
+      kind: job.kind ?? 'terrain',
     };
   }
 

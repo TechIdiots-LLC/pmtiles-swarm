@@ -3536,6 +3536,10 @@ export function createApp({
           minzoom: req.body?.minzoom,
           maxzoom: req.body?.maxzoom,
           bounds: req.body?.bounds,
+          // And what to make of it. Terrain unless asked otherwise, so
+          // nothing already written has to start saying so.
+          kind: req.body?.kind,
+          thresholds: req.body?.thresholds,
         });
         return res.status(202).json({ bake: job });
       } catch (error) {

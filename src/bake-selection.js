@@ -40,6 +40,11 @@ function firstIdAt(z) {
  */
 export function selectionFrom(options = {}) {
   const zoom = (value) => {
+    // Null is not said, the same as absent. `Number(null)` is 0, so without
+    // this a request or a checkpoint carrying an explicit null selects zoom
+    // zero -- an export of one tile, or a resume that does not recognise its
+    // own work because the revision it recomputes is a different one.
+    if (value === undefined || value === null || value === '') return undefined;
     const number = Number(value);
     return Number.isInteger(number) && number >= 0 && number <= 24
       ? number

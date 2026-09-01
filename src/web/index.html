@@ -722,10 +722,21 @@
           <label for="bake-kind">What to make</label>
           <select id="bake-kind">
             <option value="terrain">The tiles the stack serves</option>
+            <option value="contours">Contour lines, traced from them</option>
           </select>
-          <div class="sub" id="bake-kind-note">
-            The merged tiles, written as an archive of the same kind the stack
-            already answers with.
+          <div class="sub" id="bake-kind-note"></div>
+        </div>
+
+        <div class="field" id="bake-contours" hidden>
+          <label for="bake-interval">Contour interval</label>
+          <input id="bake-interval" placeholder="the recipe's, or the defaults" />
+          <div class="sub">
+            Metres. One number draws every line that far apart wherever
+            contours are drawn at all; a table like
+            <code>{"12": [100, 500], "15": [20, 100]}</code> says it per zoom,
+            and the second number in a level is the one drawn thicker. Left
+            empty, the stack's own <code>contours.thresholds</code>, or a
+            built-in table.
           </div>
         </div>
 
@@ -9269,6 +9280,8 @@ Every piece is hashed against the ` +
         // silently remembered last time's box would be the wrong default in
         // the one direction that matters: a partial archive nobody meant.
         $('bake-kind').value = 'terrain';
+        $('bake-interval').value = '';
+        showBakeKind();
         document.querySelector(
           'input[name="bake-extent"][value="all"]',
         ).checked = true;
@@ -9281,6 +9294,18 @@ Every piece is hashed against the ` +
         $('bake-location').innerHTML = locationPicker('bake-loc');
         await fillLocations('bake-loc');
         $('bake-dialog').showModal();
+      }
+
+      /** Says what the chosen kind writes, and offers what only it needs. */
+      function showBakeKind() {
+        const contours = $('bake-kind').value === 'contours';
+        $('bake-contours').hidden = !contours;
+        $('bake-kind-note').textContent = contours
+          ? 'Lines traced from the merged heights, written as vector tiles. ' +
+            'Each is traced from its own tile and its eight neighbours, so ' +
+            'this reads about nine times what the terrain export does.'
+          : 'The merged tiles, written as an archive of the same kind the ' +
+            'stack already answers with.';
       }
 
       /** Shows the zoom and area fields only when they are being asked for. */
@@ -9393,6 +9418,8 @@ Every piece is hashed against the ` +
         radio.addEventListener('change', showBakeExtent);
       }
 
+      $('bake-kind').addEventListener('change', showBakeKind);
+
       $('bake-region-apply').addEventListener('click', () => {
         const said = $('bake-region').value.trim();
         const parts = said.split('/').map((part) => Number(part.trim()));
@@ -9443,6 +9470,25 @@ Every piece is hashed against the ` +
               .map((one) => Number(one.trim()))
               .filter((one) => Number.isFinite(one))
           : [];
+        const kind = $('bake-kind').value;
+        const said = $('bake-interval').value.trim();
+        let thresholds;
+        if (kind === 'contours' && said !== '') {
+          const flat = Number(said);
+          // A number or a table, and anything else goes to the node to be
+          // refused by name rather than guessed at here.
+          thresholds = Number.isFinite(flat) ? flat : said;
+          if (!Number.isFinite(flat)) {
+            try {
+              thresholds = JSON.parse(said);
+            } catch {
+              $('bake-error').textContent =
+                `"${said}" is not a number of metres or a zoom table.`;
+              return;
+            }
+          }
+        }
+
         const extent = !part
           ? {}
           : {
@@ -9466,6 +9512,8 @@ Every piece is hashed against the ` +
               ...(description ? { description } : {}),
               ...(attribution ? { attribution } : {}),
               ...extent,
+              ...(kind === 'terrain' ? {} : { kind }),
+              ...(thresholds === undefined ? {} : { thresholds }),
             },
           });
         } catch (error) {

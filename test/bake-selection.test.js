@@ -27,6 +27,22 @@ describe('reading a selection', () => {
     assert.equal(selectionFrom({ bounds: 'nonsense' }), null);
   });
 
+  it('reads an explicit null as nothing said', () => {
+    // `Number(null)` is 0, so without this a request carrying an explicit null
+    // selects zoom zero -- an export of one tile. A checkpoint records the
+    // selection as nulls where there was none, so it also meant a resume
+    // recomputed a different revision and passed over its own work.
+    assert.equal(
+      selectionFrom({ minzoom: null, maxzoom: null, bounds: null }),
+      null,
+    );
+    assert.deepEqual(selectionFrom({ minzoom: 0, maxzoom: 4 }), {
+      minzoom: 0,
+      maxzoom: 4,
+      bounds: null,
+    });
+  });
+
   it('takes a zoom range, a box, or both', () => {
     assert.deepEqual(selectionFrom({ minzoom: 6, maxzoom: 12 }), {
       minzoom: 6,

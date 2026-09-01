@@ -989,3 +989,99 @@ describe(
     });
   },
 );
+
+describe('exporting contours rather than terrain', () => {
+  /**
+   * A manager that will take a job but is not asked to finish one.
+   *
+   * These are about what `start` accepts and what it reports back, which is
+   * settled before a tile is merged.
+   * @param {object} archive - What `sourceArchive` returned.
+   * @returns {object} - The manager.
+   */
+  const managerFor = (archive) =>
+    new BakeManager({
+      tiles: storeOver(archive),
+      config: {
+        dataDir: path.join(workspace, 'data-contours'),
+        savePath: workspace,
+      },
+      loadCodec: async () => null,
+      library: {
+        addLocalArchive: async () => ({ infoHash: 'c'.repeat(40) }),
+        resolveSavePath: async () => workspace,
+      },
+    });
+
+  it('refuses a kind it does not make', async () => {
+    const archive = await sourceArchive('kinds', [[1, 0, 0]]);
+    const manager = managerFor(archive);
+    await assert.rejects(
+      () => manager.start({ resolved: stackOver(archive), kind: 'hillshade' }),
+      /no "hillshade" to export/,
+    );
+  });
+
+  it('refuses to trace a colour', async () => {
+    const archive = await sourceArchive('colour', [[1, 0, 0]]);
+    const manager = managerFor(archive);
+    await assert.rejects(
+      () =>
+        manager.start({
+          resolved: stackOver(archive, { space: 'rgba' }),
+          kind: 'contours',
+        }),
+      /colour/,
+    );
+  });
+
+  it('refuses an interval it cannot draw at', async () => {
+    const archive = await sourceArchive('interval', [[1, 0, 0]]);
+    const manager = managerFor(archive);
+    await assert.rejects(
+      () =>
+        manager.start({
+          resolved: stackOver(archive),
+          kind: 'contours',
+          thresholds: 0,
+        }),
+      /more than zero/,
+    );
+  });
+
+  it('narrows itself to the zooms its thresholds draw at', async () => {
+    // Without this the run walks every tile the sources hold at z0-z8 to trace
+    // nothing at all, which on a planet is hours spent producing silence.
+    const archive = await sourceArchive('narrow', [[1, 0, 0]]);
+    const manager = managerFor(archive);
+    const job = await manager.start({
+      resolved: stackOver(archive),
+      kind: 'contours',
+      thresholds: { 12: [100] },
+    });
+    assert.equal(job.kind, 'contours');
+    assert.equal(job.selection.minzoom, 12);
+  });
+
+  it('keeps the interval in the revision, so two are not one job', async () => {
+    // A checkpoint records how far along one stream a run had got. Resuming a
+    // 20 m run into a 100 m one would splice two sets of lines into an archive
+    // nothing downstream could tell apart.
+    const archive = await sourceArchive('rev-contours', [[1, 0, 0]]);
+    const resolved = stackOver(archive);
+    const fine = bakeRevision(resolved, null, {
+      kind: 'contours',
+      thresholds: 20,
+    });
+    const coarse = bakeRevision(resolved, null, {
+      kind: 'contours',
+      thresholds: 100,
+    });
+    const terrain = bakeRevision(resolved, null, {
+      kind: 'terrain',
+      thresholds: null,
+    });
+    assert.notEqual(fine, coarse);
+    assert.notEqual(fine, terrain);
+  });
+});

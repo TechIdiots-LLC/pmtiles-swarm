@@ -29,6 +29,16 @@
   no second layer and no filter. There are no labels: text needs a glyph server, and a preview that
   fetched fonts from elsewhere would be a preview of that as much as of the archive. `ele` is on
   every feature for a style that has fonts to spend.
+
+  **An export can write them too.** The export dialog's *What to make* list has its second entry,
+  and `POST /api/stacks/<id>/bake` takes `kind: "contours"` with an optional `thresholds`. The
+  archive is written as gzipped MVT with the right header, and the run narrows itself to the zooms
+  its thresholds actually draw at — without that it walks every tile the sources hold at z0–z8 to
+  trace nothing, which on a planet is hours spent producing silence.
+
+  The interval is part of the export's revision, so a checkpoint cannot be resumed across a change
+  to it: a 20 m run continued into a 100 m one would splice two sets of lines into an archive
+  nothing downstream could tell apart.
 - **An export can write part of a stack.** A zoom range, an area, or both, from the export dialog or
   as `minzoom` / `maxzoom` / `bounds` on `POST /api/stacks/<id>/bake`. Absent still means all of it.
   An export reads every tile its sources hold, which for a planet is hours and a file nobody wanted

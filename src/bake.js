@@ -2,6 +2,19 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { tileIdToZxy } from 'pmtiles';
 import { idSpanOf, selectionSlug, selects } from './bake-selection.js';
+import zlib from 'node:zlib';
+import { contourTile } from './contour-tile.js';
+
+/**
+ * Gzips a tile, the way the tile routes do.
+ * @param {Buffer} data - The tile.
+ * @returns {Promise<Buffer>} - The compressed tile.
+ */
+function gzipTile(data) {
+  return new Promise((resolve, reject) =>
+    zlib.gzip(data, (error, out) => (error ? reject(error) : resolve(out))),
+  );
+}
 import { unionOfTileIds } from './pmtiles-scan.js';
 import crypto from 'node:crypto';
 import { safeSegment } from './savepath.js';
@@ -278,9 +291,10 @@ export async function clearCheckpoint(workDir) {
  * one map and half another, which nothing downstream could tell.
  * @param {object} resolved - The resolved stack.
  * @param {object|null} [selection] - Which part of it is being written.
+ * @param {object|null} [transform] - What is being made of it, and how.
  * @returns {string} - A short, stable identifier.
  */
-export function bakeRevision(resolved, selection = null) {
+export function bakeRevision(resolved, selection = null, transform = null) {
   const sources = resolved.sources
     .map((source) => source.entry?.infoHash ?? 'unresolved')
     .join(',');
@@ -291,7 +305,12 @@ export function bakeRevision(resolved, selection = null) {
   return crypto
     .createHash('sha256')
     .update(
-      `${stackRevision(resolved.stack)}|${sources}|${selectionSlug(selection)}`,
+      `${stackRevision(resolved.stack)}|${sources}|${selectionSlug(selection)}` +
+        // What is being made out of the tiles, and how. A run that traced
+        // contours every 100 m and one that traced them every 20 m are two
+        // archives, and resuming one into the other would splice two sets of
+        // lines into a file nothing downstream could tell apart.
+        `|${transform ? JSON.stringify(transform) : ''}`,
     )
     .digest('hex')
     .slice(0, 16);
@@ -479,6 +498,32 @@ export function mergeTileFor(options) {
   const { resolved, tiles, codec, signal, pixels, cutlines } = options;
   const format = options.format ?? outputFormat(resolved);
   const size = options.size ?? outputSize(resolved.stack);
+
+  // The other thing a stack's tiles can be turned into. Its own branch rather
+  // than a format, because what comes out is a different kind of tile: lines
+  // instead of pixels, at the zooms the thresholds name rather than the ones
+  // the sources hold, and traced from nine merges rather than one.
+  if (options.kind === 'contours') {
+    return async (z, x, y) => {
+      const tile = await contourTile({
+        resolved,
+        z,
+        x,
+        y,
+        tiles,
+        codec,
+        cutlines,
+        signal,
+        size,
+        thresholds: options.thresholds,
+      });
+      // Gzipped here, because the header the archive is finalised with says
+      // it is. A vector tile stored uncompressed under a header claiming gzip
+      // is one every reader refuses, and the claim is made in bake-jobs where
+      // the bytes are not.
+      return tile ? gzipTile(tile) : null;
+    };
+  }
 
   return async (z, x, y) => {
     const answer = await answerStackTile({
