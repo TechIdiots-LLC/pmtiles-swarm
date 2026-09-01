@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { PbfReader } from 'pbf';
 import { loadCodec } from '../src/codec.js';
-import { contourCoverage, contourTile } from '../src/contour-tile.js';
+import {
+  contourCoverage,
+  contourTile,
+  heightsFromArchive,
+  heightsFromStack,
+} from '../src/contour-tile.js';
 import { encodeHeights } from '../src/elevation.js';
 import { resolveStack } from '../src/stacks.js';
 
@@ -83,13 +88,15 @@ describe('drawing contours from a stack', { skip: !codec }, () => {
     // line every five pixels.
     const { resolved, tiles } = await stackOf((x) => x * 20);
     const tile = await contourTile({
-      resolved,
+      heightsAt: heightsFromStack({
+        resolved,
+        tiles,
+        codec,
+        size: SIZE,
+      }),
       z: 12,
       x: 100,
       y: 100,
-      tiles,
-      codec,
-      size: SIZE,
     });
     assert.ok(tile, 'a slope should produce contours');
     assert.ok(tile.length > 100, `${tile.length} bytes is too few`);
@@ -101,13 +108,15 @@ describe('drawing contours from a stack', { skip: !codec }, () => {
     // the expensive way to answer nothing.
     const { resolved, tiles } = await stackOf((x) => x * 20);
     const tile = await contourTile({
-      resolved,
+      heightsAt: heightsFromStack({
+        resolved,
+        tiles,
+        codec,
+        size: SIZE,
+      }),
       z: 5,
       x: 10,
       y: 10,
-      tiles,
-      codec,
-      size: SIZE,
     });
     assert.equal(tile, null);
   });
@@ -115,13 +124,15 @@ describe('drawing contours from a stack', { skip: !codec }, () => {
   it('draws nothing where the stack covers nothing', async () => {
     const { resolved } = await stackOf(() => 0);
     const tile = await contourTile({
-      resolved,
+      heightsAt: heightsFromStack({
+        resolved,
+        tiles: { getTile: async () => null },
+        codec,
+        size: SIZE,
+      }),
       z: 12,
       x: 100,
       y: 100,
-      tiles: { getTile: async () => null },
-      codec,
-      size: SIZE,
     });
     assert.equal(tile, null);
   });
@@ -143,22 +154,26 @@ describe('drawing contours from a stack', { skip: !codec }, () => {
     );
 
     const withHole = await contourTile({
-      resolved: masked,
+      heightsAt: heightsFromStack({
+        resolved: masked,
+        tiles: sloped.tiles,
+        codec,
+        size: SIZE,
+      }),
       z: 14,
       x: 100,
       y: 100,
-      tiles: sloped.tiles,
-      codec,
-      size: SIZE,
     });
     const withoutMask = await contourTile({
-      resolved: sloped.resolved,
+      heightsAt: heightsFromStack({
+        resolved: sloped.resolved,
+        tiles: sloped.tiles,
+        codec,
+        size: SIZE,
+      }),
       z: 14,
       x: 100,
       y: 100,
-      tiles: sloped.tiles,
-      codec,
-      size: SIZE,
     });
 
     const holed = heightsIn(withHole);
@@ -193,5 +208,116 @@ describe('what a contour endpoint says it covers', () => {
     // line drawn twice as thick rather than new detail.
     const coverage = contourCoverage({ minzoom: 0, maxzoom: 12 }, { 15: [20] });
     assert.equal(coverage.maxzoom, 12);
+  });
+});
+
+describe('drawing contours straight from an archive', { skip: !codec }, () => {
+  /**
+   * An archive whose every tile is one slope, packed as the caller says.
+   * @param {string} encoding - `mapbox` or `terrarium`.
+   * @returns {Promise<object>} - `{entry, tiles, reads}`.
+   */
+  async function archiveOf(encoding) {
+    const heights = new Float32Array(SIZE * SIZE);
+    for (let i = 0; i < heights.length; i += 1) heights[i] = (i % SIZE) * 20;
+    const bytes = await codec.encode(
+      encodeHeights(heights, { width: SIZE, height: SIZE, encoding }),
+      { format: 'webp', lossless: true },
+    );
+    const counted = { reads: 0 };
+    return {
+      counted,
+      entry: {
+        infoHash: 'a'.repeat(40),
+        name: 'terrain.pmtiles',
+        pmtiles: { encoding, format: 'webp' },
+      },
+      tiles: {
+        getTile: async () => {
+          counted.reads += 1;
+          return { data: bytes };
+        },
+      },
+    };
+  }
+
+  it('reads the tiles and nothing else', async () => {
+    // An archive is already terrain: its pixels are a packed height and it
+    // says which packing. Going through the stack path would spend a
+    // resolution, a gather and a one-layer merge arriving back at the array
+    // the decode already produced.
+    const { entry, tiles, counted } = await archiveOf('mapbox');
+    const tile = await contourTile({
+      heightsAt: heightsFromArchive({ entry, tiles, codec }),
+      z: 12,
+      x: 100,
+      y: 100,
+      thresholds: 100,
+    });
+
+    assert.ok(tile, 'a slope should produce contours');
+    assert.equal(counted.reads, 9, 'its own tile and its eight neighbours');
+  });
+
+  it('reads the packing the archive states, not a guess at it', async () => {
+    // The one thing a recipe would have said and there is none to say it. Two
+    // archives holding the same bytes under different encodings are different
+    // ground, and tracing one as the other draws lines at the wrong heights.
+    const mapbox = await archiveOf('mapbox');
+    const terrarium = await archiveOf('terrarium');
+
+    const at = (made) =>
+      contourTile({
+        heightsAt: heightsFromArchive({
+          entry: made.entry,
+          tiles: made.tiles,
+          codec,
+        }),
+        z: 12,
+        x: 100,
+        y: 100,
+        thresholds: 100,
+      });
+
+    assert.ok(await at(mapbox));
+    assert.ok(await at(terrarium));
+  });
+
+  it('draws nothing where the archive has no tile', async () => {
+    const { entry } = await archiveOf('mapbox');
+    const tile = await contourTile({
+      heightsAt: heightsFromArchive({
+        entry,
+        tiles: { getTile: async () => null },
+        codec,
+      }),
+      z: 12,
+      x: 100,
+      y: 100,
+      thresholds: 100,
+    });
+    assert.equal(tile, null);
+  });
+
+  it('does not climb to a parent for a zoom it has no tile at', async () => {
+    // The stack path would, and for contours that is the wrong favour: a line
+    // traced from an upscaled parent is the parent's line drawn twice as
+    // thick rather than detail this zoom has.
+    const { entry, tiles } = await archiveOf('mapbox');
+    const asked = [];
+    const watched = {
+      getTile: async (hash, z, x, y) => {
+        asked.push(z);
+        return tiles.getTile(hash, z, x, y);
+      },
+    };
+    await contourTile({
+      heightsAt: heightsFromArchive({ entry, tiles: watched, codec }),
+      z: 12,
+      x: 100,
+      y: 100,
+      thresholds: 100,
+    });
+    assert.deepEqual([...new Set(asked)], [12], 'it looked at another zoom');
   });
 });

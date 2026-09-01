@@ -3,7 +3,7 @@ import path from 'node:path';
 import { tileIdToZxy } from 'pmtiles';
 import { idSpanOf, selectionSlug, selects } from './bake-selection.js';
 import zlib from 'node:zlib';
-import { contourTile } from './contour-tile.js';
+import { contourTile, heightsFromStack } from './contour-tile.js';
 
 /**
  * Gzips a tile, the way the tile routes do.
@@ -504,19 +504,24 @@ export function mergeTileFor(options) {
   // instead of pixels, at the zooms the thresholds name rather than the ones
   // the sources hold, and traced from nine merges rather than one.
   if (options.kind === 'contours') {
+    // Built once for the whole run rather than per tile: it holds the cache,
+    // and one made per tile would be a cache that never saw a second request.
+    const traceFrom = heightsFromStack({
+      resolved,
+      tiles,
+      codec,
+      cutlines,
+      signal,
+      size,
+      heightsCache: options.heightsCache,
+    });
     return async (z, x, y) => {
       const tile = await contourTile({
-        resolved,
+        heightsAt: traceFrom,
         z,
         x,
         y,
-        tiles,
-        codec,
-        cutlines,
-        signal,
-        size,
         thresholds: options.thresholds,
-        heightsCache: options.heightsCache,
       });
       // Gzipped here, because the header the archive is finalised with says
       // it is. A vector tile stored uncompressed under a header claiming gzip

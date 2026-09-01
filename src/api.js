@@ -58,7 +58,11 @@ import {
 } from './stacks.js';
 import { bakeRevision } from './bake.js';
 import zlib from 'node:zlib';
-import { contourTile } from './contour-tile.js';
+import {
+  contourTile,
+  heightsFromArchive,
+  heightsFromStack,
+} from './contour-tile.js';
 import { contourProblems } from './contour-options.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -4173,25 +4177,26 @@ export function createApp({
    *
    * See docs/tile-stacks.md -- "Contours from a stack".
    */
-  const serveStackContours = route(async (req, res) => {
-    await stacks?.refresh();
-    const resolved = stackOr404(req, res);
-    if (!resolved) return;
-
-    if (resolved.stack.space === 'rgba') {
-      return res.status(400).json({
-        error: 'this stack is imagery, and a colour has no contours to trace',
-      });
-    }
-
+  /**
+   * Answers one contour tile, for whatever produced the resolution.
+   *
+   * A stack, one archive, or whichever build a category currently points at.
+   * The three differ only in where the heights come from and what identifies
+   * them, so both arrive as functions and everything else -- the coordinate
+   * checks, the codec refusal, the abort, the headers -- is written once.
+   * @param {import('express').Request} req - The request.
+   * @param {import('express').Response} res - The response.
+   * @param {object} options - `heightsAt`, `tag`, `thresholds`, `immutable`.
+   * @returns {Promise<void>} - Resolves once answered.
+   */
+  const answerContours = async (req, res, options = {}) => {
     // Always: contours are traced from heights, so every source has to be
-    // decoded whatever the recipe would otherwise have passed through.
+    // decoded whatever would otherwise have been passed through.
     const codec = await loadCodec();
     if (!codec) {
       return res.status(501).json({
         error:
-          'tracing contours means decoding pixels, and this node has ' +
-          'no codec',
+          'tracing contours means decoding pixels, and this node has no codec',
         hint: 'npm install sharp',
       });
     }
@@ -4207,7 +4212,7 @@ export function createApp({
       return res.status(400).json({ error: 'tile coordinates out of range' });
     }
 
-    const thresholds = contourThresholdsFor(resolved.stack, req.query);
+    const thresholds = options.thresholds;
     const wrong = contourProblems({ thresholds });
     if (wrong.length) {
       return res.status(400).json({ error: wrong.join('; ') });
@@ -4223,46 +4228,165 @@ export function createApp({
     let tile;
     try {
       tile = await contourTile({
-        resolved,
+        heightsAt: options.heightsAt(codec, controller.signal),
         z,
         x,
         y,
-        tiles,
-        codec,
-        cutlines,
-        signal: controller.signal,
         thresholds,
-        heightsCache,
       });
     } catch (error) {
       if (error?.name === 'AbortError') return;
       throw error;
     }
 
-    stackHeaders(res, resolved, ['contours'], z, x, y);
-    // The thresholds decide the bytes as much as the recipe does, so they go
+    res.setHeader('access-control-allow-origin', '*');
+    res.setHeader('x-stack-sources', 'contours');
+    // The thresholds decide the bytes as much as the ground does, so they go
     // in the tag. Without that a style asking for 50 m lines is answered from
     // a cache holding 100 m ones.
     res.setHeader(
       'etag',
-      `W/"${stackEtag(resolved, z, x, y).slice(1, -1)}-${contourTag(thresholds)}"`,
+      `W/"${options.tag(z, x, y)}-${contourTag(thresholds)}"`,
+    );
+    // Pinned content can never change; a category moves when its newest build
+    // does, and a stack when its recipe does. The same split the tile routes
+    // make, for the same reason.
+    res.setHeader(
+      'cache-control',
+      options.immutable
+        ? 'public, max-age=31536000, immutable'
+        : 'public, max-age=300, must-revalidate',
     );
     // Nothing crossed a threshold here. 404 rather than an empty tile, which
     // a client pays to fetch and draws nothing from.
     if (!tile) return res.status(404).end();
 
     res.type('application/x-protobuf');
-    const gzipped = await gzip(tile);
     res.setHeader('content-encoding', 'gzip');
-    return res.send(gzipped);
+    return res.send(await gzip(tile));
+  };
+
+  /**
+   * Whether an archive's tiles are heights at all.
+   *
+   * The same test the console uses to decide whether to offer a terrain
+   * preview: an archive naming no encoding is a picture, and tracing a
+   * picture's channels as though they were a number produces lines that mean
+   * nothing rather than an error.
+   * @param {object} entry - A catalog entry.
+   * @returns {boolean} - Whether contours can be traced from it.
+   */
+  const tracesAsTerrain = (entry) =>
+    ['terrarium', 'mapbox', 'custom'].includes(entry?.pmtiles?.encoding);
+
+  /**
+   * Contour lines traced from what a stack merges.
+   *
+   * Its own endpoint rather than a format the tile route answers in, because
+   * it is a different map: vector where that is raster, drawn at the zooms the
+   * thresholds name rather than the ones the stack has ground for, and costing
+   * nine merges a tile rather than one. Sharing a route would mean one set of
+   * headers describing two things.
+   *
+   * See docs/tile-stacks.md -- "Contours from a stack".
+   */
+  const serveStackContours = route(async (req, res) => {
+    await stacks?.refresh();
+    const resolved = stackOr404(req, res);
+    if (!resolved) return;
+    if (resolved.stack.space === 'rgba') {
+      return res.status(400).json({
+        error: 'this stack is imagery, and a colour has no contours to trace',
+      });
+    }
+    return answerContours(req, res, {
+      thresholds: contourThresholdsFor(resolved.stack, req.query),
+      immutable: isPinned(resolved),
+      tag: (z, x, y) => stackEtag(resolved, z, x, y).slice(1, -1),
+      heightsAt: (codec, signal) =>
+        heightsFromStack({
+          resolved,
+          tiles,
+          codec,
+          cutlines,
+          signal,
+          heightsCache,
+        }),
+    });
   });
 
-  app.get('/stacks/:id/contours/:z/:x/:y.:ext', (req, res, next) => {
+  /** Contours traced from one archive, which is a stack of one source. */
+  const serveArchiveContours = route(async (req, res) => {
+    const entry = catalog.get(req.params.infoHash);
+    if (!entry) return res.status(404).json({ error: 'unknown archive' });
+    if (!tracesAsTerrain(entry)) {
+      return res.status(400).json({
+        error:
+          'this archive does not say its pixels are heights, so there is ' +
+          'nothing to trace contours from',
+        hint: 'an archive states that as `encoding` in its metadata',
+      });
+    }
+    return answerContours(req, res, {
+      thresholds: contourThresholdsFor({}, req.query),
+      // An infohash names one build and can never come to mean another.
+      immutable: true,
+      tag: (z, x, y) => `${entry.infoHash.slice(0, 20)}-${z}/${x}/${y}`,
+      heightsAt: (codec, signal) =>
+        heightsFromArchive({ entry, tiles, codec, signal, heightsCache }),
+    });
+  });
+
+  /** The same, for whichever build a category currently points at. */
+  const serveCategoryContours = route(async (req, res) => {
+    const entry = newestIn(req.params.category, req);
+    if (!entry) {
+      return res.status(404).json({ error: 'nothing is in that category' });
+    }
+    if (!tracesAsTerrain(entry)) {
+      return res.status(400).json({
+        error:
+          "this category's newest build does not say its pixels are heights",
+      });
+    }
+    return answerContours(req, res, {
+      thresholds: contourThresholdsFor({}, req.query),
+      // A category moves when a newer build lands, so it revalidates.
+      immutable: false,
+      // Tagged by the build it resolved to rather than by the category, so a
+      // rebuild lands as a new tag rather than as the same one with different
+      // lines behind it.
+      tag: (z, x, y) => `${entry.infoHash.slice(0, 20)}-${z}/${x}/${y}`,
+      heightsAt: (codec, signal) =>
+        heightsFromArchive({ entry, tiles, codec, signal, heightsCache }),
+    });
+  });
+
+  /**
+   * The three ways in. A contour tile is a vector tile whatever produced it,
+   * so the extension is checked once and in one place.
+   * @param {Function} handler - What answers it.
+   * @returns {Function} - An express handler.
+   */
+  const contourRoute = (handler) => (req, res, next) => {
     if (!['pbf', 'mvt'].includes(req.params.ext)) {
       return res.status(400).json({ error: 'contours are served as pbf' });
     }
-    return serveStackContours(req, res, next);
-  });
+    return handler(req, res, next);
+  };
+
+  app.get(
+    '/stacks/:id/contours/:z/:x/:y.:ext',
+    contourRoute(serveStackContours),
+  );
+  app.get(
+    '/archives/:infoHash/contours/:z/:x/:y.:ext',
+    contourRoute(serveArchiveContours),
+  );
+  app.get(
+    '/latest/:category/contours/:z/:x/:y.:ext',
+    contourRoute(serveCategoryContours),
+  );
 
   app.get('/stacks/:id/:size/:z/:x/:y.:ext', (req, res, next) => {
     // Anything that is not a size this serves is not a size at all -- and

@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { encodeContourTile } from './contour-mvt.js';
 import { intervalsAt, levelOf, thresholdsFrom } from './contour-options.js';
+import { decodeHeights } from './elevation.js';
 import { stackHeights } from './stack-tile.js';
 
 /**
@@ -75,53 +76,137 @@ function neighbourhoodOf(x, y) {
 }
 
 /**
- * Evaluates the stack over one tile, as heights.
+ * Wraps a coordinate check around whatever supplies the heights.
  *
- * Null rather than a tile of nothing where the stack covers none of it: the
- * caller passes that straight through as a missing neighbour, which is read as
- * no-data rather than as ground.
- * @param {object} options - The stack, the coordinates, and what to read with.
- * @returns {Promise<object|null>} - A DemTile, or null.
+ * Off the top or bottom of the world there is no tile and never was. Off the
+ * side there is: the map wraps, and ground covering the antimeridian covers
+ * both halves of it. Done once here rather than in each provider, since it is
+ * a fact about tiles and not about where they come from.
+ * @param {Function} at - `(z, x, y) => Promise<DemTile|null>`.
+ * @returns {Function} - The same, refusing what is off the map.
  */
-async function heightsFor(options) {
-  const { resolved, z, x, y, tiles, codec, cutlines, signal, size } = options;
-  const { heightsCache } = options;
-  const span = 2 ** z;
-  // Off the top or bottom of the world there is no tile and never was. Off the
-  // side there is: the map wraps, and a stack covering the antimeridian covers
-  // both halves of it.
-  if (y < 0 || y >= span) return null;
-  const column = ((x % span) + span) % span;
-
-  const inner = await stackHeights({
-    resolved,
-    z,
-    x: column,
-    y,
-    tiles,
-    codec,
-    signal,
-    size,
-    cutlines,
-    heightsCache,
-  });
-  if (!inner?.heights) return null;
-  return { width: inner.width, height: inner.width, data: inner.heights };
+function onTheMap(at) {
+  return async (z, x, y) => {
+    const span = 2 ** z;
+    if (y < 0 || y >= span) return null;
+    return at(z, ((x % span) + span) % span, y);
+  };
 }
 
 /**
- * Draws one contour tile.
+ * Heights merged from a stack.
  *
- * Nine evaluations of the stack, which is the cost of this and worth being
- * plain about: a contour tile is roughly nine merged terrain tiles. They are
- * asked for together rather than in turn, and every one of them is a tile some
- * neighbouring contour tile also wants -- so a cache in front of the merge is
- * what makes a run of these affordable rather than an optimisation.
- * @param {object} options - The stack, coordinates, readers and thresholds.
+ * Everything a recipe does happens here -- the sources are read, masked,
+ * clipped, faded and merged -- and what comes out is metres with `NaN` where
+ * nothing covered the ground.
+ * @param {object} options - The stack and what to read it with.
+ * @returns {Function} - `(z, x, y) => Promise<DemTile|null>`.
+ */
+export function heightsFromStack(options) {
+  const { resolved, tiles, codec, cutlines, signal, size, heightsCache } =
+    options;
+  return onTheMap(async (z, x, y) => {
+    const inner = await stackHeights({
+      resolved,
+      z,
+      x,
+      y,
+      tiles,
+      codec,
+      signal,
+      size,
+      cutlines,
+      heightsCache,
+    });
+    if (!inner?.heights) return null;
+    return { width: inner.width, height: inner.width, data: inner.heights };
+  });
+}
+
+/**
+ * Heights read straight out of one archive.
+ *
+ * An archive is already terrain: its pixels are a packed height and it says
+ * which packing in its own metadata. So this is the decode and nothing else --
+ * no recipe to resolve, no sources to merge, no masks or clips to apply,
+ * because there is no recipe saying to.
+ *
+ * Deliberately not the stack path with one source in it. That would work, and
+ * it would spend a resolution, a gather and a one-layer merge arriving back at
+ * the array the decode already produced. It would also climb to a parent where
+ * the archive has no tile at this zoom, which for contours is the wrong
+ * favour: a line traced from an upscaled parent is the parent's line drawn
+ * twice as thick rather than detail this zoom has.
+ * @param {object} options - The catalog entry and what to read it with.
+ * @returns {Function} - `(z, x, y) => Promise<DemTile|null>`.
+ */
+export function heightsFromArchive(options) {
+  const { entry, tiles, codec, signal, heightsCache } = options;
+  const encoding = entry.pmtiles ?? {};
+  const source = {
+    encoding: encoding.encoding,
+    ...(encoding.encoding === 'custom' ? (encoding.encodingFactors ?? {}) : {}),
+  };
+
+  return onTheMap(async (z, x, y) => {
+    // Keyed on the infohash, which names one build and can never name another,
+    // so a tile read for one contour tile is there for the eight beside it.
+    const key = heightsCache?.enabled
+      ? `archive:${entry.infoHash}:${z}/${x}/${y}`
+      : null;
+    if (key) {
+      const hit = heightsCache.get(key);
+      if (hit)
+        return { width: hit.width, height: hit.width, data: hit.heights };
+    }
+
+    const read = async () => {
+      const tile = await tiles.getTile(entry.infoHash, z, x, y, { signal });
+      if (!tile?.data) return null;
+      const raster = await codec
+        .decode(Buffer.from(tile.data), { channels: 3 })
+        .catch(() => null);
+      if (!raster) return null;
+      return {
+        width: raster.width,
+        height: raster.height,
+        data: decodeHeights(raster, source),
+      };
+    };
+
+    if (!key) return read();
+    return heightsCache.once(key, async () => {
+      const again = heightsCache.get(key);
+      if (again) {
+        return { width: again.width, height: again.width, data: again.heights };
+      }
+      const made = await read();
+      if (made) {
+        heightsCache.set(key, { heights: made.data, width: made.width });
+      }
+      return made;
+    });
+  });
+}
+
+/**
+ * Draws one contour tile from whatever supplies the heights.
+ *
+ * A provider rather than a stack, because the two things that have heights are
+ * genuinely different: a stack merges them out of a recipe, an archive already
+ * holds them and only has to be decoded. Injecting the one saves the other
+ * from pretending to be a stack of one source to get here.
+ *
+ * Nine calls to it, which is the cost and worth being plain about: a contour
+ * tile is drawn from nine tiles of ground. They are asked for together rather
+ * than in turn, and every one is a tile some neighbouring contour tile also
+ * wants -- so a cache behind the provider is what makes a run of these
+ * affordable rather than an optimisation on top of one.
+ * @param {object} options - `heightsAt`, the coordinates, and the thresholds.
  * @returns {Promise<Buffer|null>} - The tile, or null where there is nothing.
  */
 export async function contourTile(options) {
-  const { resolved, z, x, y, tiles, codec, cutlines, signal, size } = options;
+  const { heightsAt, z, x, y } = options;
 
   // What to draw at this zoom, which above the shallowest threshold is
   // nothing. Asked first, because the answer costs one lookup and the
@@ -133,20 +218,7 @@ export async function contourTile(options) {
 
   const around = neighbourhoodOf(x, y);
   const tilesAround = await Promise.all(
-    around.map(([column, row]) =>
-      heightsFor({
-        resolved,
-        z,
-        x: column,
-        y: row,
-        tiles,
-        codec,
-        cutlines,
-        signal,
-        size,
-        heightsCache: options.heightsCache,
-      }),
-    ),
+    around.map(([column, row]) => heightsAt(z, column, row)),
   );
 
   // The centre is the tile being drawn. Without it there is nothing to draw,

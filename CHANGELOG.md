@@ -51,6 +51,18 @@
   Each contour export gets its own, which goes when the job does. A bake deliberately does not
   touch the disk cache — a planet export would evict the serving node's entire cache with tiles
   nobody will ask for again — and that is exactly why it can have one of its own.
+
+  **Contours from an archive or a category too**, at `/archives/<infohash>/contours/{z}/{x}/{y}.pbf`
+  and `/latest/<category>/contours/{z}/{x}/{y}.pbf`. An archive is already terrain — its pixels are
+  a packed height and it states the packing in its own metadata — so these decode the tile and do
+  nothing else: no recipe to resolve, no sources to merge, no masks or clips, because there is no
+  recipe saying to. Nine reads a tile against the stack path's nine merges.
+
+  They also do not climb to a parent where the archive has no tile at that zoom, which the stack
+  path would: for contours that is the wrong favour, since a line traced from an upscaled parent is
+  the parent's line drawn twice as thick rather than detail the zoom has. An infohash is immutable
+  and cached as such; a category revalidates, and is tagged by the build it resolved to so a
+  rebuild lands as a new tag rather than the same one with different lines behind it.
 - **An export can write part of a stack.** A zoom range, an area, or both, from the export dialog or
   as `minzoom` / `maxzoom` / `bounds` on `POST /api/stacks/<id>/bake`. Absent still means all of it.
   An export reads every tile its sources hold, which for a planet is hours and a file nobody wanted
