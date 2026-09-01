@@ -63,6 +63,7 @@ of its parts.
 - [Syncing a stack to another node](#syncing-a-stack-to-another-node)
 - [What the offline merge got wrong](#what-the-offline-merge-got-wrong)
 - [The stack editor](#the-stack-editor)
+- [Contours from a stack](#contours-from-a-stack)
 - [Merging vector sources](#merging-vector-sources)
 - [Staging](#staging)
 - [Open questions](#open-questions)
@@ -2319,6 +2320,94 @@ per tile than a plain archive does — the map feels it immediately.
 Debounced, and it should not follow the map past the stack's `maxzoom`: above
 that the client overzooms and there is nothing new to see, but the tiles are
 still requested and still composited.
+
+## Contours from a stack
+
+A contour tile is drawn from the heights a stack merges, not from an archive of
+terrain. That distinction is the whole reason to do it here.
+
+A tool that reads archives has to answer "what is the elevation here?" for
+ground no archive covers, and an encoded terrain tile has no way to say
+"nothing" — every triple of bytes is some height. So it invents one. A constant
+beside real terrain is a **cliff**, and a cliff under a contour tracer comes out
+as lines packed arbitrarily tight along the seam. Filling with `-10000` rather
+than `0` only moves the cliff and makes it taller. That is not a fault in the
+tool; it is the shape of its input.
+
+A stack has `NaN`, and `stackHeights` deliberately leaves its holes unfilled —
+the same property that lets one stack show through another. `maplibre-contour`
+already understands it: `HeightTile.fromRawDem` maps anything invalid to `NaN`,
+the tracer skips it, and `combineNeighbors` answers `NaN` for a neighbour that
+is missing altogether rather than throwing. So a tile the stack covers none of
+is passed as `undefined` and reads as no-data. Nothing is invented anywhere, and
+a line stops at the edge of the data instead of diving off a cliff.
+
+Where you want contours to run on past the coast, put a base under them — the
+merge is what makes them continuous, and `featherMetres` is what stops the seam
+between two sources becoming its own little cliff. For contours that feather is
+load-bearing rather than cosmetic.
+
+### Nine tiles per tile
+
+A contour crossing a tile edge has to be traced from the ground on both sides,
+or it will not meet the line in the next tile. So a contour tile is drawn from
+its own tile plus its eight neighbours: **roughly nine merged terrain tiles
+each**, asked for together rather than in turn.
+
+Every one of those is a tile some neighbouring contour tile also wants, so a
+cache in front of the merge is what decides whether a run of these is affordable
+— not an optimisation to add later. Baking deliberately bypasses the merged-tile
+cache, which is right for terrain, where each tile is written once and never
+wanted again. It is not right here.
+
+### How far apart the lines go
+
+Per zoom, because one interval is wrong at both ends of a map: at z8 a 20 m
+contour is a band of ink, and at z15 a 500 m one is a blank tile through most of
+the world. A recipe says either a number, meaning that interval wherever
+contours are drawn at all, or a table of zoom to intervals. Saying nothing gets
+a built-in table.
+
+A level may name more than one interval. `[100, 500]` draws a line every hundred
+metres and marks every fifth, and each feature carries `level` — how many of the
+intervals its height divides by, so 500 outranks 100. A style reads that to draw
+the major lines thicker and label only those, from one layer rather than two
+passes. The convention is `maplibre-contour`'s, so a style written against its
+tiles works against these.
+
+A zoom the table skips reads as the entry above it: a table naming 12 and 14
+means 12 and 13 share a setting. Below the shallowest entry nothing is drawn at
+all, and that is checked _before_ the nine merges — at z5 a tile is most of a
+continent, and nine merges is an expensive way to answer nothing.
+
+### What the endpoint claims
+
+The zoom range is the thresholds', not the stack's. A stack serving z0–z16 draws
+no contours at z2, and a client told otherwise fetches empty tiles all the way
+down. It is never deeper than the stack has ground for either: a contour traced
+from an upscaled parent is the parent's line drawn twice as thick, not new
+detail.
+
+### Why the encoding is written here
+
+`maplibre-contour` has a vector tile encoder and does not export it, and
+`vt-pbf` — the obvious dependency — is built against `pbf` 3 while this tree
+resolves `pbf` 5, whose `Pbf` default export no longer exists. So `contour-mvt.js`
+writes the tile directly against `pbf` 5. It is narrow enough to be worth
+owning: one layer of line strings with two numeric properties, where a general
+encoder carries polygons, points, mixed property types and many layers.
+
+Heights are written in ascending order, so two runs over the same contours
+produce the same bytes whatever order the tracer closed its fragments in — which
+is what lets an export be resumed and a tile be keyed by content. A tile no
+contour crossed is no tile at all rather than an empty layer, which a client
+would pay to fetch and draw nothing from.
+
+`maplibre-contour` itself is loaded through `createRequire`: the published 0.1.0
+declares no `import` condition, so `import 'maplibre-contour'` fails outright.
+The fix is in upstream main and unreleased. A git dependency would push that
+requirement onto everyone installing this package, so the `require` path is
+taken instead, and becomes an ordinary import when a release carries the fix.
 
 ## Merging vector sources
 
