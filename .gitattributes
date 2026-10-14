@@ -1,0 +1,5 @@
+# Scripts that run inside the Linux image. A Windows checkout with
+# core.autocrlf would otherwise give them CRLF endings, and an image built from
+# that checkout fails to start with "/bin/sh^M: not found".
+*.sh text eol=lf
+Dockerfile text eol=lf

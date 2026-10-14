@@ -1,0 +1,184 @@
+name: Docker
+
+# Separate from the release workflow on purpose. Publishing to npm and building
+# images are different failures with different fixes, and an image build that
+# breaks must not be able to fail a publish that already succeeded — or, worse,
+# strand a release that cannot be re-run because npm already has the version.
+#
+# Triggered by the release workflow *finishing*, not by the release it creates.
+# A release made with GITHUB_TOKEN deliberately does not trigger other
+# workflows — GitHub blocks that to stop workflows setting each other off for
+# ever — so `on: release` would simply never fire here. `workflow_run` is the
+# mechanism that does, and it needs nothing from release.yml.
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version to build, without the leading v
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  decide:
+    name: Is there anything to build?
+    runs-on: ubuntu-latest
+    outputs:
+      build: ${{ steps.check.outputs.build }}
+      version: ${{ steps.check.outputs.version }}
+      sha: ${{ steps.check.outputs.sha }}
+    steps:
+      # The commit the release workflow ran on, so the image is built from what
+      # was published rather than from whatever main has become since.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+
+      - name: Decide
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+          if [ -n "${{ inputs.version }}" ]; then
+            # Asked for by hand: build it and do not argue.
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The release workflow runs on every push to main and is a no-op when
+          # the version is already on npm, so finishing successfully is not the
+          # same as having released something.
+          if [ "${{ github.event.workflow_run.conclusion }}" != "success" ]; then
+            echo "release workflow did not succeed; nothing to build"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+          # A release exists for this version only if the run actually
+          # published one. That is the difference between "main moved" and
+          # "a version was cut".
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "v$VERSION was released; building images"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no release for v$VERSION; nothing to build"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: ${{ matrix.arch }}
+    needs: decide
+    if: needs.decide.outputs.build == 'true'
+    runs-on: ${{ matrix.runs-on }}
+    environment: release
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Native runners rather than QEMU. An emulated arm64 build of a Node
+          # image is minutes of CPU for the same result.
+          - runs-on: ubuntu-24.04
+            arch: amd64
+          - runs-on: ubuntu-24.04-arm
+            arch: arm64
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decide.outputs.sha }}
+
+      - name: Check the tag against the package
+        run: |
+          # An image whose name lies about its contents is worse than no image.
+          PACKAGE="$(node -p "require('./package.json').version")"
+          if [ "${{ needs.decide.outputs.version }}" != "$PACKAGE" ]; then
+            echo "building ${{ needs.decide.outputs.version }} from a tree that says $PACKAGE" >&2
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Build and push ${{ matrix.arch }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/${{ matrix.arch }}
+          tags: wifidb/pmtiles-swarm:v${{ needs.decide.outputs.version }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+  manifest:
+    name: Multi-arch manifest
+    needs: [decide, build]
+    runs-on: ubuntu-latest
+    environment: release
+
+    steps:
+      - name: Is this a prerelease?
+        id: kind
+        run: |
+          # A prerelease must not become `latest`. Somebody pulling that tag is
+          # asking for the version to run, not the one to try.
+          case "${{ needs.decide.outputs.version }}" in
+            *-*) echo "latest=false" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "latest=true"  >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+
+      - name: Create and push the manifest
+        run: |
+          VERSION="${{ needs.decide.outputs.version }}"
+          IMAGE=wifidb/pmtiles-swarm
+
+          TAGS="--tag ${IMAGE}:v${VERSION}"
+          if [ "${{ steps.kind.outputs.latest }}" = "true" ]; then
+            TAGS="$TAGS --tag ${IMAGE}:latest"
+          fi
+
+          # shellcheck disable=SC2086
+          docker buildx imagetools create $TAGS \
+            "${IMAGE}:v${VERSION}-amd64" \
+            "${IMAGE}:v${VERSION}-arm64"
+
+      - name: Show what was published
+        run: docker buildx imagetools inspect wifidb/pmtiles-swarm:v${{ needs.decide.outputs.version }}
+
+      # The image's overview page on Docker Hub, from the same file the repo
+      # documents it with. Two copies of this would be two copies to keep
+      # right, and the one nobody edits is the one people read first.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decide.outputs.sha }}
+
+      - name: Update the Docker Hub description
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKER_USER }}
+          password: ${{ secrets.DOCKER_TOKEN }}
+          repository: wifidb/pmtiles-swarm
+          short-description: BitTorrent distribution and tile serving for PMTiles archives
+          readme-filepath: ./docs/docker.md
