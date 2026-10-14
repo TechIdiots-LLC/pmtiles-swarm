@@ -4,10 +4,10 @@
 docker run -d --name pmtiles-swarm \
   --network host \
   -v /srv/maps:/data \
-  wifidb/pmtiles-swarm:latest
+  techidiotsllc/pmtiles-swarm:latest
 ```
 
-Images are `wifidb/pmtiles-swarm`, built for **amd64 and arm64**, tagged
+Images are `techidiotsllc/pmtiles-swarm`, built for **amd64 and arm64**, tagged
 `v<version>` with `latest` following the newest stable release. A prerelease
 never becomes `latest`.
 
@@ -130,7 +130,7 @@ and the container will fail to start if they collide.
 with
 
 ```sh
-docker run --rm wifidb/pmtiles-swarm publisher-key > /path/to/data/publisher.pem
+docker run --rm techidiotsllc/pmtiles-swarm publisher-key > /path/to/data/publisher.pem
 chmod 400 /path/to/data/publisher.pem
 ```
 
@@ -180,7 +180,7 @@ docker run -d --name pmtiles-swarm-worker --restart unless-stopped \
   -e PMTILES_SWARM_WORKER_TOKEN=<worker token> \
   -e PMTILES_SWARM_WORKER_NAME=rack-2 \
   -v pmtiles-swarm-worker:/data \
-  wifidb/pmtiles-swarm:latest worker
+  techidiotsllc/pmtiles-swarm:latest worker
 ```
 
 **Settings → Workers** on the coordinator mints the token and shows this command

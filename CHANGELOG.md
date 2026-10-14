@@ -2,7 +2,9 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **The Docker image is `techidiotsllc/pmtiles-swarm`.** Images are pushed there, and the
+  docs, the compose file and the Docker worker command in Settings → Workers use that name.
+  Nothing was published under the earlier `wifidb/pmtiles-swarm` name.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._

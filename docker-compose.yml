@@ -9,7 +9,7 @@
 
 services:
   pmtiles-swarm:
-    image: wifidb/pmtiles-swarm:latest
+    image: techidiotsllc/pmtiles-swarm:latest
     container_name: pmtiles-swarm
     restart: unless-stopped
 
@@ -62,7 +62,7 @@ services:
   # only makes outgoing connections. See docs/workers.md.
   #
   # pmtiles-swarm-worker:
-  #   image: wifidb/pmtiles-swarm:latest
+  #   image: techidiotsllc/pmtiles-swarm:latest
   #   command: worker
   #   restart: unless-stopped
   #   environment:

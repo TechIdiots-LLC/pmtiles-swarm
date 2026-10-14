@@ -38,7 +38,7 @@ see [installing globally](running-as-a-service.md#installing-globally):
 | ------- | --------------------------------------------------------------------------------------------------- |
 | npx     | trying it: nothing installed, gone when the terminal is                                             |
 | npm     | a desktop somebody leaves running: `npm install -g only-allow`, then `npm install -g pmtiles-swarm` |
-| Docker  | a server: `wifidb/pmtiles-swarm … worker`, see [docker.md](docker.md)                               |
+| Docker  | a server: `techidiotsllc/pmtiles-swarm … worker`, see [docker.md](docker.md)                        |
 | systemd | a server that should bring it back after a reboot                                                   |
 
 Then export a stack as usual, and choose under _Where to run it_:
