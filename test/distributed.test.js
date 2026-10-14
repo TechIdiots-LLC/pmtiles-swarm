@@ -967,6 +967,47 @@ describe('leasing shards', () => {
     }
   });
 
+  it('lists what failed and why, and retries one shard while the job runs', async () => {
+    const { node, job } = await planned({ maxAttempts: 1 });
+    try {
+      const one = node.distributed.lease({ workerId: 'a', name: 'box-a' });
+      node.distributed.fail(one.leaseId, 'cannot read source 3');
+      const two = node.distributed.lease({ workerId: 'b', name: 'box-b' });
+      node.distributed.fail(two.leaseId, 'out of memory');
+
+      // Only the failed ones, with where they are and who failed them last.
+      const failed = node.distributed.get(job.id, { state: 'failed' }).shards;
+      assert.deepEqual(
+        failed.map((shard) => [shard.index, shard.worker, shard.error]),
+        [
+          [one.shard.index, 'box-a', 'cannot read source 3'],
+          [two.shard.index, 'box-b', 'out of memory'],
+        ],
+      );
+      assert.equal(failed[0].zooms.length, 2);
+      assert.ok(failed[0].zooms[0] <= failed[0].zooms[1]);
+
+      // One retried, mid-run: back in the queue, the other left alone.
+      const after = await node.distributed.retry(job.id, {
+        shards: [two.shard.index],
+      });
+      assert.equal(after.phase, 'running');
+      const states = node.distributed.get(job.id).shards;
+      assert.equal(states[two.shard.index].state, 'pending');
+      assert.equal(states[two.shard.index].attempts, 0);
+      assert.equal(states[one.shard.index].state, 'failed');
+
+      // And then all of them.
+      await node.distributed.retry(job.id);
+      assert.deepEqual(
+        node.distributed.get(job.id, { state: 'failed' }).shards,
+        [],
+      );
+    } finally {
+      await node.close();
+    }
+  });
+
   it('gives up on a shard after its attempts, and retries it on request', async () => {
     const { node, job } = await planned({ maxAttempts: 2 });
     try {

@@ -152,7 +152,11 @@ export function mountDistributed(app, parts) {
   app.get(
     '/api/distributed/:id',
     route(async (req, res) => {
-      const job = distributed?.get(req.params.id);
+      // `?state=failed` narrows the shard list to what the console shows.
+      const job = distributed?.get(req.params.id, {
+        state:
+          typeof req.query.state === 'string' ? req.query.state : undefined,
+      });
       if (!job) return res.status(404).json({ error: 'no such job' });
       res.json({ job });
     }),
@@ -194,7 +198,13 @@ export function mountDistributed(app, parts) {
     '/api/distributed/:id/retry',
     route(async (req, res) => {
       if (!distributed) return disabled(res);
-      res.json({ job: await distributed.retry(req.params.id) });
+      // `{shards: [index, …]}` retries only those; nothing retries every
+      // failed shard.
+      res.json({
+        job: await distributed.retry(req.params.id, {
+          shards: req.body?.shards,
+        }),
+      });
     }),
   );
 

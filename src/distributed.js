@@ -24,6 +24,7 @@ import {
   planShards,
 } from './bake-shards.js';
 import { scanEntries } from './pmtiles-scan.js';
+import { zoomOf } from './pmtiles-write.js';
 import { isS3Url } from './s3-source.js';
 import { outputFormat, outputSize } from './stack-tile.js';
 import { stackCoverage, stackEncoding } from './stacks.js';
@@ -333,22 +334,32 @@ export class DistributedBakes {
   /**
    * One job, with its shards.
    * @param {string} id - Which job.
+   * @param {object} [options] - `state` to list only shards in that state.
    * @returns {object|null} - The job, or null.
    */
-  get(id) {
+  get(id, options = {}) {
     const job = this.#jobs.get(id);
     if (!job) return null;
+    // Narrowed where asked: a planet job is tens of thousands of shards, and
+    // the console wants the handful that failed, not all of them.
+    const shards = options.state
+      ? job.shards.filter((shard) => shard.state === options.state)
+      : job.shards;
     return {
       ...this.#describe(job),
-      shards: job.shards.map((shard) => ({
+      shards: shards.map((shard) => ({
         index: shard.index,
         from: shard.from,
         to: shard.to,
+        // Which zooms the run covers, so a failure can be read as "z14
+        // around here" rather than as two tile ids.
+        zooms: [zoomOf(shard.from), zoomOf(Math.max(shard.from, shard.to - 1))],
         tiles: shard.tiles,
         state: shard.state,
         attempts: shard.attempts,
         written: shard.written ?? 0,
-        worker: shard.lease?.workerName ?? shard.doneBy ?? null,
+        worker:
+          shard.lease?.workerName ?? shard.doneBy ?? shard.lastWorker ?? null,
         error: shard.error ?? null,
       })),
     };
@@ -645,9 +656,10 @@ export class DistributedBakes {
    * failed: everything already done is kept, and only what is missing is
    * handed out again.
    * @param {string} id - Which job.
+   * @param {object} [options] - `shards`, indexes to retry; all failed ones without it.
    * @returns {Promise<object>} - The job.
    */
-  async retry(id) {
+  async retry(id, options = {}) {
     const job = this.#jobs.get(id);
     if (!job) throw failure('no such job', 404);
     if (job.phase === 'done') throw failure('that job is finished', 409);
@@ -655,7 +667,13 @@ export class DistributedBakes {
       throw failure(`that job is ${job.phase}`, 409);
     }
 
+    // Only these, where a list is given: retrying one shard to see whether
+    // its failure was a passing one, without touching the rest.
+    const only = Array.isArray(options.shards)
+      ? new Set(options.shards.map(Number))
+      : null;
     for (const shard of job.shards) {
+      if (only && !only.has(shard.index)) continue;
       if (shard.state === 'failed') {
         shard.state = 'pending';
         shard.attempts = 0;
@@ -1272,6 +1290,7 @@ export class DistributedBakes {
     const worker = this.#workers.get(shard.lease?.workerId ?? '');
     if (worker) worker.lease = null;
     shard.error = String(message ?? 'failed').slice(0, 500);
+    shard.lastWorker = shard.lease?.workerName ?? shard.lastWorker ?? null;
     const requeued = (shard.attempts ?? 0) < maxAttempts;
     this.#release(shard, requeued ? 'pending' : 'failed');
     this.#maybeFinish(job);
@@ -1312,6 +1331,7 @@ export class DistributedBakes {
           worker.lease = null;
         }
         shard.error = `the lease held by ${shard.lease.workerName} lapsed`;
+        shard.lastWorker = shard.lease.workerName;
         this.#release(
           shard,
           shard.attempts < maxAttempts ? 'pending' : 'failed',
