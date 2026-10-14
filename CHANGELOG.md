@@ -21,7 +21,17 @@
   fragment on disk is checked and taken as done when the node starts again.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A lock left by a reboot could keep a node from ever starting again.** The data directory's lock
+  records the pid that took it, and a start refused whenever that pid was alive. After a reboot
+  the number is the kernel's to hand to anything: once it went to another process — a crash
+  reporter, in the case that found this — every start saw it alive and refused, and under
+  `Restart=always` the node retried every five seconds for a month while nothing served.
+
+  The lock now records the boot it was taken in, and one from another boot is stale. Where the
+  pid is alive, the process holding it must have started before the lock was written; one that
+  started afterwards only reused the number. That second check is also what recognises a lock
+  written before boot ids were recorded, so upgrading is enough to clear one. Both read `/proc`;
+  elsewhere the pid is still all there is to go on, and a refusal remains the safe side.
 
 ## 0.107.1
 ### ✨ Features and improvements
