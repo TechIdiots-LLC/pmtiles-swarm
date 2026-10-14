@@ -4,7 +4,12 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { after, describe, it } from 'node:test';
-import { assertPortsFree, claimDataDir, portInUse } from '../src/lock.js';
+import {
+  assertPortsFree,
+  claimDataDir,
+  heldByAnother,
+  portInUse,
+} from '../src/lock.js';
 
 const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'pmtiles-lock-'));
 after(() => fs.rm(workspace, { recursive: true, force: true }));
@@ -90,6 +95,114 @@ describe('claiming the data directory', () => {
     await lock.release();
     assert.ok(await fs.stat(lock.file), 'the other node keeps its lock');
   });
+});
+
+describe('telling a live lock from a pid that was reused', () => {
+  const LOCKED_AT = '2026-09-11T23:25:43.380Z';
+  /**
+   * What the machine says now, with the lock's pid alive unless told not.
+   * @param {object} [overrides] - Fields to replace.
+   * @returns {object} - What `heldByAnother` asks.
+   */
+  const now = (overrides = {}) => ({
+    pid: 4242,
+    running: () => true,
+    bootId: 'boot-b',
+    startedAt: async () => Date.parse(LOCKED_AT) - 2000,
+    ...overrides,
+  });
+
+  it('is held when its process is the one that wrote it', async () => {
+    const held = { pid: 1294, startedAt: LOCKED_AT, bootId: 'boot-b' };
+    assert.equal(await heldByAnother(held, now()), true);
+  });
+
+  it('is stale when it was written before a reboot', async () => {
+    // The pid is alive, but nothing from the previous boot can be.
+    const held = { pid: 1294, startedAt: LOCKED_AT, bootId: 'boot-a' };
+    assert.equal(await heldByAnother(held, now()), false);
+  });
+
+  it('is stale when its pid now belongs to a later process', async () => {
+    // What kept a node down for a month: written by a node that went with a
+    // reboot, before boot ids were recorded, and its pid handed to a crash
+    // reporter that started eleven minutes later.
+    const held = { pid: 1294, startedAt: LOCKED_AT };
+    const reused = now({
+      startedAt: async () => Date.parse('2026-09-11T23:37:14Z'),
+    });
+    assert.equal(await heldByAnother(held, reused), false);
+  });
+
+  it('is held where the start of the process cannot be told', async () => {
+    // Off Linux, or without /proc: the pid is all there is to go on, and a
+    // refusal is the safe side of being wrong.
+    const held = { pid: 1294, startedAt: LOCKED_AT };
+    const unknown = now({ bootId: null, startedAt: async () => null });
+    assert.equal(await heldByAnother(held, unknown), true);
+  });
+
+  it('is not held when its pid is not running, or is ours', async () => {
+    const held = { pid: 1294, startedAt: LOCKED_AT };
+    assert.equal(
+      await heldByAnother(held, now({ running: () => false })),
+      false,
+    );
+    assert.equal(await heldByAnother(held, now({ pid: 1294 })), false);
+  });
+
+  it(
+    'takes over a lock from another boot on this machine',
+    { skip: process.platform === 'linux' ? false : 'reads /proc' },
+    async () => {
+      // The real thing: the parent process is alive, but the lock says it was
+      // taken under a boot that is not this one.
+      const dir = await dataDir();
+      await fs.writeFile(
+        path.join(dir, 'swarm.lock'),
+        JSON.stringify({
+          pid: process.ppid,
+          startedAt: new Date().toISOString(),
+          bootId: 'not-this-boot',
+        }),
+      );
+      const lock = await claimDataDir({ dataDir: dir, port: 8090 });
+      const held = JSON.parse(await fs.readFile(lock.file, 'utf8'));
+      assert.equal(held.pid, process.pid);
+      assert.ok(held.bootId, 'records this boot');
+      await lock.release();
+    },
+  );
+
+  it(
+    'reads when a live process started, on this machine',
+    { skip: process.platform === 'linux' ? false : 'reads /proc' },
+    async () => {
+      const bootId = (
+        await fs.readFile('/proc/sys/kernel/random/boot_id', 'utf8')
+      ).trim();
+      const lockFor = async (startedAt) => {
+        const dir = await dataDir();
+        await fs.writeFile(
+          path.join(dir, 'swarm.lock'),
+          JSON.stringify({ pid: process.ppid, startedAt, bootId }),
+        );
+        return dir;
+      };
+
+      // Written long before the parent started: its pid was reused.
+      const reused = await lockFor('2000-01-01T00:00:00Z');
+      const lock = await claimDataDir({ dataDir: reused, port: 8090 });
+      await lock.release();
+
+      // Written now, by a parent that started before it: genuinely held.
+      const live = await lockFor(new Date().toISOString());
+      await assert.rejects(
+        () => claimDataDir({ dataDir: live, port: 8090 }),
+        /Another pmtiles-swarm is already using/,
+      );
+    },
+  );
 });
 
 describe('checking a port before binding', () => {
