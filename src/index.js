@@ -122,6 +122,11 @@ async function main() {
       systemd: { type: 'boolean' },
       user: { type: 'string' },
       password: { type: 'string' },
+      coordinator: { type: 'string' },
+      token: { type: 'string' },
+      name: { type: 'string' },
+      concurrency: { type: 'string' },
+      'work-dir': { type: 'string' },
     },
     allowPositionals: true,
   });
@@ -134,6 +139,9 @@ Usage:
   pmtiles-swarm init [--config FILE]     write a first configuration
   pmtiles-swarm status [--config FILE]   ask a running node what it is doing
   pmtiles-swarm publisher-key            print a new BEP 46 signing key
+  pmtiles-swarm worker --coordinator URL --token TOKEN
+                                         lend this machine to another node's
+                                         distributed bakes (docs/workers.md)
 
   --config, -c   path to a JSON config file
   --data-dir     where state goes, for init. Absolute, and never under /etc
@@ -144,12 +152,34 @@ Usage:
   --force        let init replace a config that already exists
   --port,   -p   override the listen port
   --json         machine-readable output, for the status command
+  --coordinator  the node to take work from, for worker
+  --token        a worker token minted on that node, for worker
+  --name         what this worker is called there. Default: the hostname
+  --concurrency  tiles merged at once, for worker. Default: the core count
+  --work-dir     where a worker keeps shards in progress
   --help,   -h   this message
 
 Environment: PMTILES_SWARM_PORT, PMTILES_SWARM_DATA_DIR, PMTILES_SWARM_ENGINE,
 PMTILES_SWARM_QBT_URL, PMTILES_SWARM_QBT_USERNAME, PMTILES_SWARM_QBT_PASSWORD,
-PMTILES_SWARM_PUBLIC_URL
+PMTILES_SWARM_PUBLIC_URL, PMTILES_SWARM_COORDINATOR,
+PMTILES_SWARM_WORKER_TOKEN, PMTILES_SWARM_WORKER_NAME
 `);
+    return;
+  }
+
+  // Ahead of loadConfig too: a worker is a coordinator's address and a token,
+  // and asking for a configuration file on top would be asking somebody who
+  // only wants to lend a machine to set up a node.
+  if (positionals[0] === 'worker') {
+    const { runWorker } = await import('./worker-command.js');
+    process.exitCode = await runWorker({
+      coordinator: values.coordinator,
+      token: values.token,
+      name: values.name,
+      concurrency: values.concurrency,
+      workDir: values['work-dir'],
+      config: values.config,
+    });
     return;
   }
 
