@@ -176,7 +176,7 @@ of the above applies to it — only an address and a token.
 
 ```sh
 docker run -d --name pmtiles-swarm-worker --restart unless-stopped \
-  -e PMTILES_SWARM_COORDINATOR=http://maps.lan:8091 \
+  -e PMTILES_SWARM_COORDINATOR=http://maps.lan:8090 \
   -e PMTILES_SWARM_WORKER_TOKEN=<worker token> \
   -e PMTILES_SWARM_WORKER_NAME=rack-2 \
   -v pmtiles-swarm-worker:/data \

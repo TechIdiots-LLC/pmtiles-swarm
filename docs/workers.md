@@ -7,7 +7,7 @@ them and hand the result back, and this node puts the shards together into the
 same archive it would have written alone.
 
 ```sh
-npx pmtiles-swarm worker --coordinator http://maps.lan:8091 --token <worker token>
+npx pmtiles-swarm worker --coordinator http://maps.lan:8090 --token <worker token>
 ```
 
 That is all a worker is. It reads the sources from the coordinator over HTTP, a
@@ -21,7 +21,7 @@ systemd version of it.
 - [When a worker goes away](#when-a-worker-goes-away)
 - [The same archive, wherever it was baked](#the-same-archive-wherever-it-was-baked)
 - [What a worker token can do](#what-a-worker-token-can-do)
-- [Workers outside your network](#workers-outside-your-network)
+- [Which address workers use](#which-address-workers-use)
 - [Settings](#settings)
 - [How a worker reaches each source](#how-a-worker-reaches-each-source)
 - [What is not shared out](#what-is-not-shared-out)
@@ -190,19 +190,27 @@ like everything else there:
 | `DELETE /api/distributed/:id`      | stop, keeping what was done                               |
 | `DELETE /api/distributed/:id/work` | forget it and delete its fragments                        |
 
-## Workers outside your network
+## Which address workers use
 
-Workers call `/api/workers/`, which is on the admin listener. With `adminPort`
-set and bound to a private interface — see
+**The public one** — the address this node's tiles and feeds are on. With
+`adminPort` set, `/api/workers/` is answered on both listeners, and the
+commands the console shows use the public address: `publicUrl` if it is set,
+otherwise this host on the public port. The admin listener stays where it is,
+on loopback or a private interface as
 [security.md](security.md#two-ports-so-the-console-is-not-merely-guarded-but-absent)
-— machines on the same network reach it and nothing else does, which is usually
-what you want.
+recommends, because workers are other machines and that is the listener they
+are least likely to be able to reach.
 
-For workers out on the internet, set `workers.publicEndpoint`. `/api/workers/`
-is then answered on the public listener as well — still wanting a worker token
-on every call, so this makes it reachable rather than open — and the console
-and the rest of the API stay where they were. Set `workers.coordinatorUrl` to
-the public address so the commands the console shows use it.
+That is the one exception to the public listener carrying only reads of what is
+already published, and it is a guarded one: every route under `/api/workers/`
+wants a worker token, a worker token reaches nothing else, archive and bucket
+reads are refused for anything no unfinished job uses, and uploads are taken
+only against a lease that token holds.
+
+To keep workers to the admin listener instead — every worker on the same
+network, and nothing worker-shaped on the public port — set
+`workers.publicEndpoint` to `false`. Set `workers.coordinatorUrl` wherever
+workers see this node by another name than the one the console offers.
 
 Everything a worker sends and receives is tiles and recipes, but the token is a
 bearer credential: put HTTPS in front of anything public, as you would for the
@@ -210,12 +218,12 @@ console.
 
 ## Settings
 
-| setting                  | default |                                                       |
-| ------------------------ | ------- | ----------------------------------------------------- |
-| `workers.leaseSeconds`   | `120`   | how long a shard stays a worker's without a heartbeat |
-| `workers.maxAttempts`    | `4`     | times a shard is handed out before it is given up on  |
-| `workers.publicEndpoint` | `false` | answer `/api/workers/` on the public listener too     |
-| `workers.coordinatorUrl` | unset   | the address the console's commands give workers       |
+| setting                  | default |                                                                 |
+| ------------------------ | ------- | --------------------------------------------------------------- |
+| `workers.leaseSeconds`   | `120`   | how long a shard stays a worker's without a heartbeat           |
+| `workers.maxAttempts`    | `4`     | times a shard is handed out before it is given up on            |
+| `workers.publicEndpoint` | `true`  | answer `/api/workers/` on the public listener too               |
+| `workers.coordinatorUrl` | unset   | the address the console's commands give workers; the public one |
 
 All four are read as they are used, so a change applies to the next lease
 without a restart.

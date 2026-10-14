@@ -27,8 +27,9 @@
   the source says `"workerRead": "coordinator"` (or _through this node_ in the stack editor) for an
   address only the coordinator can reach.
 - **A `worker` token role**, which can reach `/api/workers/` and nothing else. Archive reads through
-  it are refused for anything no unfinished job uses. `workers.publicEndpoint` puts those routes on
-  the public listener for workers outside the network, still guarded.
+  it are refused for anything no unfinished job uses. Workers use the node's public address: those
+  routes are answered on the public listener as well as the admin one, still guarded, so the admin
+  port can stay on loopback. `workers.publicEndpoint: false` keeps them to the admin listener.
 - **A Docker image**, `wifidb/pmtiles-swarm`, for amd64 and arm64, from
   [#1](https://github.com/TechIdiots-LLC/pmtiles-swarm/pull/1). One `/data` mount, a configuration
   written in relative paths on first start, and the same image runs as a worker with

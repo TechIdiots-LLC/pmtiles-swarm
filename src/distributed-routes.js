@@ -61,10 +61,13 @@ function workerOf(req) {
  * @param {Function} parts.stackOr404 - Resolves `req.params.id` or answers.
  * @param {object} parts.config - The node's configuration.
  * @param {string} parts.version - This package's version.
+ * @param {Function} [parts.publicBase] - `(req) => ` this node's public address.
  * @returns {void}
  */
 export function mountDistributed(app, parts) {
   const { distributed, tiles, stacks, stackOr404, config, version } = parts;
+  const publicBase =
+    parts.publicBase ?? ((req) => `${req.protocol}://${req.get('host')}`);
 
   const disabled = (res) =>
     res.status(501).json({ error: 'distributed baking is not enabled here' });
@@ -125,13 +128,18 @@ export function mountDistributed(app, parts) {
   app.get(
     '/api/distributed/setup',
     route(async (req, res) => {
-      const publicEndpoint = Boolean(config.workers?.publicEndpoint);
+      const publicEndpoint = config.workers?.publicEndpoint !== false;
       res.json({
         enabled: Boolean(distributed),
         version,
+        // The public address where workers are answered there -- the one the
+        // node gives out for everything else, never the admin port -- and the
+        // address this page is on where they are not.
         coordinatorUrl:
           config.workers?.coordinatorUrl ??
-          `${req.protocol}://${req.get('host')}`,
+          (publicEndpoint
+            ? publicBase(req)
+            : `${req.protocol}://${req.get('host')}`),
         publicEndpoint,
         leaseSeconds: config.workers?.leaseSeconds ?? 120,
       });

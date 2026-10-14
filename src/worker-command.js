@@ -59,7 +59,7 @@ export async function runWorker(options = {}) {
   if (!coordinator || !token) {
     console.error(
       'a worker needs a coordinator and a token:\n\n' +
-        '    pmtiles-swarm worker --coordinator https://maps.example:8091 --token <worker token>\n\n' +
+        '    pmtiles-swarm worker --coordinator https://maps.example --token <worker token>\n\n' +
         'Mint the token on the coordinator, under Settings -> Workers, which also\n' +
         'shows this command filled in. PMTILES_SWARM_COORDINATOR and\n' +
         'PMTILES_SWARM_WORKER_TOKEN work in place of the flags.',

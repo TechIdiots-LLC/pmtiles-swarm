@@ -325,7 +325,10 @@ export function createApp({
     app.use((req, res, next) => {
       const allowed = isPublicSurface(req.path, {
         index: publicIndex(),
-        workers: config.workers?.publicEndpoint === true,
+        // On unless turned off: workers are other machines, and the admin
+        // listener is the one they are least likely to reach. Every route
+        // there still wants a worker token. See docs/workers.md.
+        workers: config.workers?.publicEndpoint !== false,
       });
       if (onAdminPort(req) || allowed) return next();
       // 404 rather than 403: a refusal confirms there is something here.
@@ -3916,6 +3919,7 @@ export function createApp({
     stackOr404,
     config,
     version: VERSION,
+    publicBase: baseUrl,
   });
 
   // The page works out which document to fetch from its own path, so a stack

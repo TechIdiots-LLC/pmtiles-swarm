@@ -5611,11 +5611,13 @@ Every piece is hashed against the ` +
             <div class="sub" style="margin-top:0.3rem">
               ${
                 setup.publicEndpoint
-                  ? 'Workers can reach this node on its public port as well as the admin one.'
+                  ? `Workers use this node's public address, the same one its
+                     tiles and feeds are on — the admin listener stays where it
+                     is. Every call there wants a worker token.`
                   : `Workers call <code>/api/workers/</code>, which is on the admin
-                     listener only. That suits machines on the same network; for
-                     ones out on the internet, turn on <b>Reachable on the public
-                     port</b> below and give them the public address.`
+                     listener only with <b>Reachable on the public port</b> turned
+                     off below — so only machines that can reach the admin port
+                     can be workers.`
               }
             </div>
             <div id="worker-result"></div>
@@ -6618,20 +6620,25 @@ Every piece is hashed against the ` +
               label: 'Reachable on the public port',
               type: 'boolean',
               help:
-                'Also answer <code>/api/workers/</code> on the public ' +
-                'listener, for workers that cannot reach the admin one. ' +
-                'Still guarded: every call there wants a worker token. Only ' +
-                'meaningful where <code>adminPort</code> is set.',
+                'On by default: answer <code>/api/workers/</code> on the ' +
+                'public listener as well as the admin one, because workers ' +
+                'are other machines and the admin port is the one they are ' +
+                'least likely to reach. Still guarded — every call there ' +
+                'wants a worker token, and a worker token reaches nothing ' +
+                'else. Turn it off to keep workers to the admin listener. ' +
+                'Only meaningful where <code>adminPort</code> is set.',
             },
             {
               key: 'workers.coordinatorUrl',
               label: 'Address to give workers',
               type: 'text',
-              placeholder: 'the address this page is on',
+              placeholder: 'this node’s public address',
               help:
-                'What the commands under Add a worker fill in. Set it where ' +
-                'workers see this node by another name — a public hostname, ' +
-                'or the public port.',
+                'What the commands under Add a worker fill in. Unset, it is ' +
+                'the public address the node gives out for its tiles — ' +
+                '<code>publicUrl</code> if that is set. Set it where workers ' +
+                'see this node by another name, such as an address on the ' +
+                'local network.',
             },
           ],
         },

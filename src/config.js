@@ -489,9 +489,9 @@ const DEFAULTS = {
     leaseSeconds: 120,
     /** Times a shard is handed out before it is given up on. */
     maxAttempts: 4,
-    /** Whether /api/workers/ is also reachable on the public listener. */
-    publicEndpoint: false,
-    /** The address workers are told to use, where the console's is not it. */
+    /** Whether /api/workers/ is also answered on the public listener. */
+    publicEndpoint: true,
+    /** The address workers are told to use, where the public one is not it. */
     coordinatorUrl: undefined,
   },
 

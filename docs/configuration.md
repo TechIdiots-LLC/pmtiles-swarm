@@ -1003,7 +1003,7 @@ Sharing an export out to other machines. See [workers.md](workers.md).
 | ------------------------ | ------- | ----------------------------------------------------- |
 | `workers.leaseSeconds`   | `120`   | how long a shard stays a worker's without a heartbeat |
 | `workers.maxAttempts`    | `4`     | times a shard is handed out before it is given up on  |
-| `workers.publicEndpoint` | `false` | answer `/api/workers/` on the public listener as well |
+| `workers.publicEndpoint` | `true`  | answer `/api/workers/` on the public listener as well |
 | `workers.coordinatorUrl` | unset   | the address the console's worker commands fill in     |
 
 All four are read as they are used, so a change applies to the next lease. A

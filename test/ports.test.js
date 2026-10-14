@@ -133,8 +133,8 @@ describe('two listeners', () => {
     const base = (server) => `http://127.0.0.1:${server.address().port}`;
     return {
       config,
-      onPublic: (route) => fetch(`${base(publicServer)}${route}`),
-      onAdmin: (route) => fetch(`${base(adminServer)}${route}`),
+      onPublic: (route, init) => fetch(`${base(publicServer)}${route}`, init),
+      onAdmin: (route, init) => fetch(`${base(adminServer)}${route}`, init),
       close: async () => {
         await new Promise((resolve) => publicServer.close(resolve));
         await new Promise((resolve) => adminServer.close(resolve));
@@ -153,6 +153,35 @@ describe('two listeners', () => {
       assert.equal((await node.onPublic('/api/catalog')).status, 200);
     } finally {
       await node.close();
+    }
+  });
+
+  it('answers workers on the public port unless told not to', async () => {
+    // No coordinator is wired in here, so a worker route that is reached
+    // answers 501; one hidden by the listener answers 404.
+    const lease = { method: 'POST' };
+    const node = await split();
+    try {
+      const reached = await node.onPublic('/api/workers/lease', lease);
+      assert.equal(reached.status, 501, 'reached on the public port');
+      // The console's half stays on the admin port.
+      assert.equal((await node.onPublic('/api/distributed')).status, 404);
+    } finally {
+      await node.close();
+    }
+
+    const shut = await split({ workers: { publicEndpoint: false } });
+    try {
+      assert.equal(
+        (await shut.onPublic('/api/workers/lease', lease)).status,
+        404,
+      );
+      assert.equal(
+        (await shut.onAdmin('/api/workers/lease', lease)).status,
+        501,
+      );
+    } finally {
+      await shut.close();
     }
   });
 

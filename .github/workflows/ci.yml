@@ -182,15 +182,16 @@ jobs:
       - name: Run a worker against it
         run: |
           # The same image as a worker: no configuration, no mount it needs,
-          # just a coordinator and a token. The placeholder key the entrypoint
-          # wrote is a working admin credential until somebody changes it,
-          # which is what lets this mint the token.
+          # just a coordinator and a token -- and the coordinator's public port,
+          # which is where workers are answered by default. The placeholder key
+          # the entrypoint wrote is a working admin credential until somebody
+          # changes it, which is what lets this mint the token.
           KEY=REPLACE-WITH-A-LONG-RANDOM-STRING
           TOKEN="$(curl -fsS -X POST http://127.0.0.1:8091/api/tokens \
             -H "authorization: Bearer $KEY" -H 'content-type: application/json' \
             -d '{"name":"ci worker","role":"worker"}' | node -p 'JSON.parse(require("fs").readFileSync(0)).token')"
           docker run -d --name worker --network host \
-            -e PMTILES_SWARM_COORDINATOR=http://127.0.0.1:8091 \
+            -e PMTILES_SWARM_COORDINATOR=http://127.0.0.1:8090 \
             -e PMTILES_SWARM_WORKER_TOKEN="$TOKEN" \
             pmtiles-swarm:ci-${{ matrix.arch }} worker --name ci-worker
           for i in $(seq 1 30); do
