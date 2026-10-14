@@ -823,9 +823,10 @@
           </div>
           <div id="bake-join" hidden style="margin-top:0.5rem"></div>
           <div class="bar" id="bake-shard-row" hidden style="margin-top:0.4rem">
-            <label for="bake-shard-size" class="sub" style="margin:0">Tiles per shard</label>
+            <label for="bake-shard-size" class="sub" style="margin:0"
+                   title="Counted as tiles times the sources each is merged from, so shards at the low zooms -- where every source overlaps -- hold fewer tiles.">Work per shard</label>
             <input id="bake-shard-size" type="number" min="100" step="100"
-                   placeholder="20000, or 4000 for contours" style="width:16rem" />
+                   placeholder="5000, or 1000 for contours" style="width:16rem" />
           </div>
           <div class="sub" id="bake-shard-note" hidden>
             A few minutes of work each is the aim: small enough that a worker
@@ -6714,20 +6715,23 @@ Every piece is hashed against the ` +
             },
             {
               key: 'workers.tilesPerShard',
-              label: 'Tiles per shard',
+              label: 'Work per shard',
               type: 'number',
-              placeholder: '20000',
+              placeholder: '5000',
               help:
                 'What a shared-out export is cut into when the export dialog ' +
-                'does not say. A few minutes of one worker’s time is the aim: ' +
-                'small enough that a worker going away costs little, large ' +
-                'enough that asking for the next shard is not most of the job.',
+                'does not say, counting each tile once per source it is ' +
+                'merged from — so the low zooms, where every source overlaps, ' +
+                'come out as smaller shards instead of one heavy one. A few ' +
+                'minutes of one worker’s time is the aim: small enough that ' +
+                'no one shard holds up the end of a job, large enough that ' +
+                'asking for the next one is not most of the work.',
             },
             {
               key: 'workers.contourTilesPerShard',
-              label: 'Tiles per shard, contours',
+              label: 'Work per shard, contours',
               type: 'number',
-              placeholder: '4000',
+              placeholder: '1000',
               help:
                 'The same for contours, which cost about nine merges a tile ' +
                 'and so want smaller shards for the same time each.',

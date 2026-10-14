@@ -236,7 +236,9 @@ export async function* scanTileIds(archive, options = {}) {
  * Merged as streams rather than gathered and sorted, because gathering means
  * holding every tile id of every source in memory at once.
  * @param {Array<string|object>} archives - Paths, or byte sources.
- * @param {object} [options] - `signal` to stop early.
+ * @param {object} [options] - `signal` to stop early; `from`, `to` to narrow
+ *   it; `tally`, an object whose `sources` is set to how many archives hold
+ *   each id as it is yielded.
  * @yields {number} - Ascending tile ids, each once.
  */
 export async function* unionOfTileIds(archives, options = {}) {
@@ -280,15 +282,22 @@ export async function* unionOfTileIds(archives, options = {}) {
       if (lowest === Infinity) return;
 
       // Every reader sitting on it advances, so a tile several sources hold is
-      // yielded once.
+      // yielded once -- and how many held it is counted on the way, for a
+      // caller that wants to know what merging it will cost.
+      let holders = 0;
       for (const reader of readers) {
+        let held = false;
         while (!reader.done && reader.batch[reader.at] === lowest) {
+          held = true;
           reader.at += 1;
           await fill(reader);
         }
+        if (held) holders += 1;
       }
 
       if (lowest !== last) {
+        // Set before the yield, so it describes the id the caller is given.
+        if (options.tally) options.tally.sources = holders;
         yield lowest;
         last = lowest;
       }

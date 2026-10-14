@@ -10,8 +10,15 @@
   **Cores** number and puts `--concurrency` (or `PMTILES_SWARM_WORKER_CONCURRENCY`) in every
   command it shows, and the **Cores** column in Settings → Workers caps a running worker from its
   next shard — kept across restarts, and only ever lowering what it was started with.
-- **Default shard sizes are settings**: `workers.tilesPerShard` (20000) and
-  `workers.contourTilesPerShard` (4000), shown as the placeholder in the export dialog.
+- **Shards are cut by work, not by tile count**, and smaller by default. A tile counts once per
+  source it is merged from, so the low zooms — first in id order, and where every source overlaps
+  — come out as several small shards instead of one heavy one that a single worker was still on
+  long after the rest had finished. Defaults are 5000 (`workers.tilesPerShard`) and 1000 for
+  contours (`workers.contourTilesPerShard`), both settings now, shown as the placeholder in the
+  export dialog.
+- **A big job's record is written less often** — about a millisecond a shard between saves, up to
+  ten seconds — and a shard finished inside that window is not lost if the node stops: its
+  fragment on disk is checked and taken as done when the node starts again.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._

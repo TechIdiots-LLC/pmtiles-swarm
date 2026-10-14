@@ -212,6 +212,47 @@ describe('planning shards', () => {
     }
   });
 
+  it('cuts smaller shards where more sources overlap', async () => {
+    // The low zooms are where every source overlaps, and they come first in
+    // id order: cut by count they all landed in one heavy shard. Three
+    // sources over z0-z2 and one over z3-z4, so a low tile is three merges.
+    const low = PLANET.filter((id) => id < 21);
+    const high = PLANET.filter((id) => id >= 21);
+    const sources = [
+      await sourceOf(low),
+      await sourceOf(low),
+      await sourceOf([...low, ...high]),
+    ];
+    const { shards, tiles } = await planShards(sources, { tilesPerShard: 30 });
+
+    assert.equal(tiles, PLANET.length, 'every tile once');
+    const lowShards = shards.filter((shard) => shard.to <= 21);
+    const highShards = shards.filter((shard) => shard.from >= 21);
+    assert.ok(
+      lowShards.every((shard) => shard.tiles <= 10 && shard.work <= 30),
+      'a low shard holds a third of the tiles, each costing three',
+    );
+    assert.ok(
+      highShards.slice(0, -1).every((shard) => shard.tiles === 30),
+      'a deep shard holds the full count',
+    );
+    for (let i = 1; i < shards.length; i += 1) {
+      assert.equal(shards[i].from, shards[i - 1].to);
+    }
+  });
+
+  it('gives a tile that costs more than a shard a shard of its own', async () => {
+    const sources = [await sourceOf([0, 1]), await sourceOf([0, 1])];
+    const { shards } = await planShards(sources, { tilesPerShard: 1 });
+    assert.deepEqual(
+      shards.map((shard) => [shard.from, shard.to, shard.tiles]),
+      [
+        [0, 1, 1],
+        [1, 2, 1],
+      ],
+    );
+  });
+
   it('counts only what the selection will merge', async () => {
     const source = await sourceOf(PLANET);
     const { tiles } = await planShards([source], {

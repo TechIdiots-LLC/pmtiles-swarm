@@ -118,11 +118,26 @@ and cutting it into runs cuts it into independent jobs:
 The coordinator plans them by counting what the export will actually merge —
 the sources' coverage, narrowed by the zoom range and box chosen — rather than
 the id space, which over a sparse planet would make most shards empty and a few
-enormous. 20,000 tiles each by default and 4,000 for contours, which cost about
-nine merges a tile — `workers.tilesPerShard` and `workers.contourTilesPerShard`
-change the defaults, and the export dialog takes another number for one job. A few minutes of work each
-is the aim: small enough that a worker going away costs little, large enough
-that asking for the next one is not most of the job.
+enormous.
+
+**Shards are cut by work, not by tile count.** A tile counts once for each
+source it is merged from. That matters because ids run by zoom, so the first
+shards are the low zooms — and a low-zoom tile overlaps nearly every source in a
+stack, where a deep one usually overlaps one or two. Cut by count, the first
+shard held every tile from z0 to z7, each several merges, and whichever worker
+drew it was still on it long after the rest had finished. Cut by work, the low
+zooms come out as several small shards and spread across the workers like
+everything else, while the deep zooms keep full-sized ones.
+
+The default is 5,000 — a shard of single-source tiles holds 5,000 of them, one
+where nine sources overlap about 550 — and 1,000 for contours, which cost about
+nine merges a tile. `workers.tilesPerShard` and `workers.contourTilesPerShard`
+change the defaults, and the export dialog takes another number for one job. A
+few minutes of one worker's time each is the aim: small enough that a worker
+going away costs little and no one shard holds up the end of a job, large
+enough that asking for the next one is not most of the work. Going much
+smaller has a cost of its own — every shard is a lease, a read of each source's
+directories, and a fragment file to assemble.
 
 A worker scanning a source skips the leaf directories wholly outside its shard
 without fetching them, so the last shard of a planet does not read every
@@ -238,14 +253,14 @@ console.
 
 ## Settings
 
-| setting                        | default |                                                                 |
-| ------------------------------ | ------- | --------------------------------------------------------------- |
-| `workers.leaseSeconds`         | `120`   | how long a shard stays a worker's without a heartbeat           |
-| `workers.maxAttempts`          | `4`     | times a shard is handed out before it is given up on            |
-| `workers.publicEndpoint`       | `true`  | answer `/api/workers/` on the public listener too               |
-| `workers.coordinatorUrl`       | unset   | the address the console's commands give workers; the public one |
-| `workers.tilesPerShard`        | `20000` | tiles per shard when the export does not say                    |
-| `workers.contourTilesPerShard` | `4000`  | the same, for contours                                          |
+| setting                        | default |                                                                   |
+| ------------------------------ | ------- | ----------------------------------------------------------------- |
+| `workers.leaseSeconds`         | `120`   | how long a shard stays a worker's without a heartbeat             |
+| `workers.maxAttempts`          | `4`     | times a shard is handed out before it is given up on              |
+| `workers.publicEndpoint`       | `true`  | answer `/api/workers/` on the public listener too                 |
+| `workers.coordinatorUrl`       | unset   | the address the console's commands give workers; the public one   |
+| `workers.tilesPerShard`        | `5000`  | work per shard when the export does not say: tiles × sources each |
+| `workers.contourTilesPerShard` | `1000`  | the same, for contours                                            |
 
 All are read as they are used, so a change applies to the next lease or the next
 job without a restart. Per-worker core caps are set from the workers table and

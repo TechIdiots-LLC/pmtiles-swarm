@@ -9,6 +9,7 @@ import express from 'express';
 import { PMTiles, tileIdToZxy, zxyToTileId } from 'pmtiles';
 import { createAuth, hashToken, isPublicSurface } from '../src/auth.js';
 import { bakeStack, mergeTileFor } from '../src/bake.js';
+import { selectionFrom } from '../src/bake-selection.js';
 import { loadCodec } from '../src/codec.js';
 import { DistributedBakes } from '../src/distributed.js';
 import { mountDistributed } from '../src/distributed-routes.js';
@@ -739,7 +740,15 @@ describe('settings and participants', () => {
       });
       const planned = await until(node.distributed, job.id, ['running']);
       assert.equal(planned.tilesPerShard, 50);
-      assert.equal(planned.shardCount, Math.ceil(PLANET.length / 50));
+      // Cut by work, not count: where the detail layer overlaps the base a
+      // tile is two merges, so those shards hold fewer tiles.
+      const shards = node.distributed.get(job.id).shards;
+      assert.ok(shards.length > Math.ceil(PLANET.length / 50));
+      assert.equal(
+        shards.reduce((sum, shard) => sum + shard.tiles, 0),
+        PLANET.length,
+      );
+      assert.ok(shards.some((shard) => shard.tiles < 50 && shard.to < 200));
       assert.equal(node.distributed.shardDefaults().tilesPerShard, 50);
     } finally {
       await node.close();
@@ -819,6 +828,70 @@ describe('settings and participants', () => {
         node.distributed.workers().some((one) => one.id.startsWith('local:')),
         'this node did the work',
       );
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('takes a shard as done after a restart if its fragment is on disk', async () => {
+    // The record is written a few seconds behind on a big job, so a node
+    // that stops hard can come back to a shard it accepted and never wrote
+    // down. The fragment is the proof.
+    const node = await coordinator();
+    try {
+      const resolved = node.resolve('terrain');
+      const job = await node.distributed.start({
+        resolved,
+        tilesPerShard: 100,
+      });
+      await until(node.distributed, job.id, ['running']);
+
+      const lease = node.distributed.lease({ workerId: 'w' });
+      const staging = node.distributed.stagingFor(lease.leaseId);
+      await fs.mkdir(staging.directory, { recursive: true });
+      await bakeStack({
+        sources: resolved.sources.map((one) =>
+          path.join(one.entry.savePath, one.entry.name),
+        ),
+        workDir: path.join(workspace, 'recover-work'),
+        destination: staging.file,
+        revision: 'recover',
+        selection: selectionFrom({ span: lease.shard }),
+        mergeTile: mergeTileFor({ resolved, tiles: node.tiles, codec: null }),
+        header: { format: 'png' },
+      });
+      await node.distributed.complete(lease.leaseId, {
+        file: staging.file,
+        written: lease.shard.tiles,
+        skipped: 0,
+      });
+      await node.distributed.stopAll();
+
+      // The record as it might have been left: the shard still out on lease.
+      const record = path.join(
+        node.config.dataDir,
+        'distributed',
+        `${job.id}.json`,
+      );
+      const saved = JSON.parse(await fs.readFile(record, 'utf8'));
+      saved.shards[lease.shard.index].state = 'leased';
+      saved.shards[lease.shard.index].lease = {
+        id: 'lost',
+        workerId: 'w',
+        until: Date.now() + 60000,
+      };
+      await fs.writeFile(record, JSON.stringify(saved));
+
+      const again = new DistributedBakes({
+        library: node.library,
+        tiles: node.tiles,
+        config: node.config,
+        resolve: node.resolve,
+      });
+      await again.load();
+      const shard = again.get(job.id).shards[lease.shard.index];
+      assert.equal(shard.state, 'done');
+      await again.stopAll();
     } finally {
       await node.close();
     }

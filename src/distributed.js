@@ -51,8 +51,8 @@ const DEFAULT_LEASE_SECONDS = 120;
 /** Times a shard is handed out before it is given up on. */
 const DEFAULT_MAX_ATTEMPTS = 4;
 
-/** Tiles per shard for contours, which cost about nine merges a tile. */
-const CONTOUR_TILES_PER_SHARD = 4000;
+/** Work per shard for contours, which cost about nine merges a tile. */
+const CONTOUR_TILES_PER_SHARD = 1000;
 
 /** Where the console's per-worker limits are kept, beside the jobs. */
 const LIMITS_FILE = 'worker-limits.json';
@@ -298,10 +298,19 @@ export class DistributedBakes {
         }
       }
 
+      // Shards finished after the record was last written. Their fragments
+      // are on disk -- that is the moment a shard is done -- so they are
+      // taken as done rather than handed out to be baked again.
+      const loadedAs = job.phase;
+      if (['running', 'stalled', 'cancelled'].includes(job.phase)) {
+        await this.#recoverFragments(job);
+        if (job.phase === 'running') this.#maybeFinish(job);
+      }
+
       // Whatever was in flight in this process is begun again. A plan is
       // cheap to redo; an assembly reads only fragments that are still there.
       if (job.phase === 'planning') this.#launch(job, () => this.#plan(job));
-      if (job.phase === 'assembling' || job.phase === 'importing') {
+      if (loadedAs === 'assembling' || loadedAs === 'importing') {
         this.#launch(job, () => this.#assemble(job));
       }
       // This node's own share, where the job asked for one.
@@ -441,6 +450,46 @@ export class DistributedBakes {
 
   #limitsFile() {
     return path.join(this.#dir, LIMITS_FILE);
+  }
+
+  /**
+   * Marks done the shards whose fragments are on disk but not in the record.
+   *
+   * A job's record is written a few seconds behind on a big job (see #save),
+   * so a node that stops hard can come back to shards it accepted and never
+   * wrote down. Each fragment is checked the way an upload is before it is
+   * believed. An empty shard leaves no fragment, so one of those is baked
+   * again -- which costs little, since there was nothing in it.
+   * @param {object} job - The job, as loaded.
+   * @returns {Promise<number>} - How many were recovered.
+   */
+  async #recoverFragments(job) {
+    const names = await fs.readdir(this.#fragmentDir(job)).catch(() => []);
+    let recovered = 0;
+    for (const name of names) {
+      const index = /^(\d+)\.pmtiles$/.exec(name)?.[1];
+      const shard = index === undefined ? null : job.shards[Number(index)];
+      if (!shard || shard.state === 'done') continue;
+      try {
+        await this.#check(path.join(this.#fragmentDir(job), name), shard);
+      } catch {
+        continue;
+      }
+      shard.state = 'done';
+      shard.fragment = name;
+      shard.lease = null;
+      shard.error = null;
+      shard.doneBy = shard.doneBy ?? 'recovered after a restart';
+      recovered += 1;
+    }
+    if (recovered) {
+      console.log(
+        `[distributed] ${job.id}: ${recovered} finished shard(s) found on ` +
+          'disk that the record had not caught up with',
+      );
+      await this.#save(job, { now: true });
+    }
+    return recovered;
   }
 
   /**
@@ -1493,7 +1542,7 @@ export class DistributedBakes {
   }
 
   /**
-   * Writes a job down, at most every half second unless told to now.
+   * Writes a job down, coalescing changes unless told to write now.
    *
    * Every lease and every finished shard changes it, and with a few dozen
    * workers that is many writes a second of a file that can run to megabytes
@@ -1530,7 +1579,12 @@ export class DistributedBakes {
     if (options.now) {
       write();
     } else if (!pending.timer) {
-      pending.timer = setTimeout(write, 500);
+      // Longer for a bigger job: its record is one line per shard, and on a
+      // planet that is megabytes rewritten whole. About a millisecond a
+      // shard, between half a second and ten. A shard finished inside that
+      // window is not lost if the node stops -- see #recoverFragments.
+      const delay = Math.min(10000, Math.max(500, job.shards?.length ?? 0));
+      pending.timer = setTimeout(write, delay);
       pending.timer.unref?.();
     }
     return pending.promise;
