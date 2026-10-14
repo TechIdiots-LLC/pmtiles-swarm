@@ -600,6 +600,10 @@ export async function bakeStack(options) {
     // where it was going, what it was filed under -- and none of that can be
     // worked out from the tiles on disk.
     describe,
+    // Whether writing nothing is an answer rather than a failure. It is for
+    // one shard of a distributed bake: a run of ids over open ocean, masked
+    // out by the recipe, is a shard with nothing in it and nothing wrong.
+    allowEmpty = false,
   } = options;
   const batchSize = Math.max(1, Math.floor(concurrency));
 
@@ -731,7 +735,11 @@ export async function bakeStack(options) {
     };
 
     const span = idSpanOf(selection);
-    for await (const tileId of unionOfTileIds(sources, { signal })) {
+    for await (const tileId of unionOfTileIds(sources, {
+      signal,
+      from: Math.max(span.from, lastTileId + 1),
+      to: span.to,
+    })) {
       // Everything up to and including the checkpoint has been dealt with.
       // Skipped rather than sought, because the union is a stream and seeking
       // it would mean holding an index of every source.
@@ -766,6 +774,9 @@ export async function bakeStack(options) {
   if (written === 0) {
     await writer.suspend();
     await clearCheckpoint(workDir);
+    if (allowEmpty) {
+      return { header: null, written, skipped, resumed: Boolean(found) };
+    }
     throw new Error(
       'no source covered any tile the recipe could answer for, so there is ' +
         'nothing to write',
