@@ -5,6 +5,12 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.107.1
+### ✨ Features and improvements
+
+### 🐞 Bug fixes
 - **A stack with MBTiles sources could not be exported**, here or shared out: the export stopped
   with "this archive is not readable as a stream of bytes". A bake learns which tiles exist by
   walking each source's directories, and an MBTiles has none — it is SQLite. It is now asked
