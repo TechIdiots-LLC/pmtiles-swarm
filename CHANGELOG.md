@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.107.2
+### ✨ Features and improvements
 - **Who takes a shared-out job's shards can be changed after it starts.** **Edit** on the job
   turns the workers and this node on or off. This node starts at once when turned on, and hands
   back the shard it is on when turned off without that counting against the shard; workers turned
