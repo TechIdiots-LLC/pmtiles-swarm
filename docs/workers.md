@@ -31,14 +31,15 @@ systemd version of it.
 On the node that owns the stack — the **coordinator** — open **Settings →
 Workers** and **Create worker token**. One token per machine, so any of them can
 be turned away without disturbing the rest. The command is shown once, with the
-token in it, four ways:
+token in it, four ways. A global install needs `only-allow` installed first —
+see [installing globally](running-as-a-service.md#installing-globally):
 
-| way     | for                                                                   |
-| ------- | --------------------------------------------------------------------- |
-| npx     | trying it: nothing installed, gone when the terminal is               |
-| npm     | a desktop somebody leaves running: `npm install -g pmtiles-swarm`     |
-| Docker  | a server: `wifidb/pmtiles-swarm … worker`, see [docker.md](docker.md) |
-| systemd | a server that should bring it back after a reboot                     |
+| way     | for                                                                                                 |
+| ------- | --------------------------------------------------------------------------------------------------- |
+| npx     | trying it: nothing installed, gone when the terminal is                                             |
+| npm     | a desktop somebody leaves running: `npm install -g only-allow`, then `npm install -g pmtiles-swarm` |
+| Docker  | a server: `wifidb/pmtiles-swarm … worker`, see [docker.md](docker.md)                               |
+| systemd | a server that should bring it back after a reboot                                                   |
 
 Then export a stack as usual, and choose under _Where to run it_:
 

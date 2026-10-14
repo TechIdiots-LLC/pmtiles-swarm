@@ -20,6 +20,14 @@
   ten seconds — and a shard finished inside that window is not lost if the node stops: its
   fragment on disk is checked and taken as done when the node starts again.
 
+### 📚 Documentation
+- **A global install needs `npm install -g only-allow` first.** `ip-set`, a WebTorrent dependency,
+  runs `npx only-allow pnpm` before installing, and during `npm install -g` that npx cannot
+  fetch it into its own cache, so the install stops with `ENOENT … _npx/…/package.json` unless a
+  copy happens to be cached already. The README, the service guide and the worker commands in
+  Settings → Workers now say to install it first. The service guide blamed `sudo` and cache
+  permissions for this; it happens without either, and only for global installs.
+
 ### 🐞 Bug fixes
 - **A lock left by a reboot could keep a node from ever starting again.** The data directory's lock
   records the pid that took it, and a start refused whenever that pid was alive. After a reboot

@@ -5453,7 +5453,11 @@ Every piece is hashed against the ` +
           },
           {
             label: 'npm',
+            // only-allow first: a dependency's install script runs it through
+            // npx, which cannot fetch it during a global install. See
+            // docs/running-as-a-service.md.
             text:
+              'npm install -g only-allow\n' +
               `npm install -g pmtiles-swarm${pinned}\n` +
               `pmtiles-swarm worker --coordinator ${url} --token ${token}${named}`,
           },
@@ -5473,7 +5477,7 @@ Every piece is hashed against the ` +
             label: 'systemd',
             text: [
               '# /etc/systemd/system/pmtiles-swarm-worker.service',
-              '# after: npm install -g pmtiles-swarm',
+              '# after: npm install -g only-allow, then npm install -g pmtiles-swarm',
               '[Unit]',
               'Description=pmtiles-swarm worker',
               'After=network-online.target',

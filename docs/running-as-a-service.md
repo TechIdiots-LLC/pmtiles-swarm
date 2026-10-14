@@ -88,17 +88,6 @@ sudo -u pmtiles-swarm -H /var/lib/pmtiles-swarm/node_modules/.bin/pmtiles-swarm 
 
 That path is what goes in `ExecStart`. Upgrading is the same command again.
 
-Installing as the account rather than into a root-owned tree also sidesteps a
-failure `sudo npm install -g` can hit: `ip-set`, a dependency of WebTorrent,
-runs `npx only-allow pnpm` before installing, and under `sudo` that npx may not
-be able to write root's cache.
-
-```
-npm error command sh -c npx only-allow pnpm
-npm error enoent Could not read package.json: ENOENT:
-  open '/root/.npm/_npx/0b83cd9ca5e1325c/package.json'
-```
-
 If you would rather install as root and hand the tree over — the usual pattern
 — give npm a cache it can write and chown afterwards:
 
@@ -107,6 +96,32 @@ sudo env npm_config_cache=/var/cache/npm \
   npm install --prefix /var/lib/pmtiles-swarm pmtiles-swarm
 sudo chown -R pmtiles-swarm:pmtiles-swarm /var/lib/pmtiles-swarm
 ```
+
+### Installing globally
+
+`npm install -g pmtiles-swarm` works, with one step first:
+
+```sh
+npm install -g only-allow
+npm install -g pmtiles-swarm
+```
+
+`ip-set`, a dependency of WebTorrent, runs `npx only-allow pnpm` before it
+installs. During a _global_ install that npx cannot fetch `only-allow` into its
+own cache — it inherits the global install's settings and then looks for the
+package where it did not put it — so unless a copy is already cached, the
+install stops with:
+
+```
+npm error command sh -c npx only-allow pnpm
+npm error enoent Could not read package.json: ENOENT:
+  open '/root/.npm/_npx/0b83cd9ca5e1325c/package.json'
+```
+
+It happens with or without `sudo`, on Linux and Windows alike, and only for
+`-g`: the `--prefix` install above runs the same script without trouble.
+Installing `only-allow` globally first lets npx find it on the `PATH` instead.
+It is a one-time step per machine — upgrades do not need it again.
 
 **nvm does not affect either.** `sudo` resets `PATH` to `secure_path`, so
 `sudo npm` is `/usr/bin/npm` whatever `nvm use` last selected. Only the
