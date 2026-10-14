@@ -51,8 +51,11 @@ const DEFAULT_LEASE_SECONDS = 120;
 /** Times a shard is handed out before it is given up on. */
 const DEFAULT_MAX_ATTEMPTS = 4;
 
-/** Tiles per shard for contours, which cost about nine merges a tile. */
-const CONTOUR_TILES_PER_SHARD = 4000;
+/** Work per shard for contours, which cost about nine merges a tile. */
+const CONTOUR_TILES_PER_SHARD = 1000;
+
+/** Where the console's per-worker limits are kept, beside the jobs. */
+const LIMITS_FILE = 'worker-limits.json';
 
 /** How long a worker that has stopped asking is still listed. */
 const FORGET_WORKER_MS = 24 * 60 * 60 * 1000;
@@ -196,6 +199,10 @@ export class DistributedBakes {
   #running = new Map();
   #local = new Map();
   #loadCodec;
+  // What the console has said each worker may use, by worker id. Kept apart
+  // from the worker records, which are only what workers report and are
+  // forgotten when they go quiet; a limit is a decision, and outlives that.
+  #limits = new Map();
 
   /**
    * @param {object} deps - What a coordinator works with.
@@ -238,7 +245,20 @@ export class DistributedBakes {
         Number(own.leaseSeconds) || DEFAULT_LEASE_SECONDS,
       ),
       maxAttempts: Math.max(1, Number(own.maxAttempts) || DEFAULT_MAX_ATTEMPTS),
+      tilesPerShard:
+        Math.floor(Number(own.tilesPerShard)) || DEFAULT_TILES_PER_SHARD,
+      contourTilesPerShard:
+        Math.floor(Number(own.contourTilesPerShard)) || CONTOUR_TILES_PER_SHARD,
     };
+  }
+
+  /**
+   * The shard sizes a job takes when it is not given one.
+   * @returns {object} - `tilesPerShard`, `contourTilesPerShard`.
+   */
+  shardDefaults() {
+    const { tilesPerShard, contourTilesPerShard } = this.#settings();
+    return { tilesPerShard, contourTilesPerShard };
   }
 
   /**
@@ -251,9 +271,17 @@ export class DistributedBakes {
    * @returns {Promise<void>} - Resolves once loaded.
    */
   async load() {
+    const limits = await fs
+      .readFile(this.#limitsFile(), 'utf8')
+      .then((raw) => JSON.parse(raw))
+      .catch(() => ({}));
+    for (const [id, limit] of Object.entries(limits ?? {})) {
+      this.#limits.set(id, limit);
+    }
+
     const files = await fs.readdir(this.#dir).catch(() => []);
     for (const file of files) {
-      if (!file.endsWith('.json')) continue;
+      if (!file.endsWith('.json') || file === LIMITS_FILE) continue;
       const job = await fs
         .readFile(path.join(this.#dir, file), 'utf8')
         .then((raw) => JSON.parse(raw))
@@ -270,10 +298,19 @@ export class DistributedBakes {
         }
       }
 
+      // Shards finished after the record was last written. Their fragments
+      // are on disk -- that is the moment a shard is done -- so they are
+      // taken as done rather than handed out to be baked again.
+      const loadedAs = job.phase;
+      if (['running', 'stalled', 'cancelled'].includes(job.phase)) {
+        await this.#recoverFragments(job);
+        if (job.phase === 'running') this.#maybeFinish(job);
+      }
+
       // Whatever was in flight in this process is begun again. A plan is
       // cheap to redo; an assembly reads only fragments that are still there.
       if (job.phase === 'planning') this.#launch(job, () => this.#plan(job));
-      if (job.phase === 'assembling' || job.phase === 'importing') {
+      if (loadedAs === 'assembling' || loadedAs === 'importing') {
         this.#launch(job, () => this.#assemble(job));
       }
       // This node's own share, where the job asked for one.
@@ -334,7 +371,125 @@ export class DistributedBakes {
       online: this.#now() - worker.lastSeen < stale,
       lastSeen: new Date(worker.lastSeen).toISOString(),
       firstSeen: new Date(worker.firstSeen).toISOString(),
+      // What the console has capped it at, if anything. `concurrency` above
+      // is what the worker itself was started with.
+      limit: this.#limits.get(worker.id)?.concurrency ?? null,
     }));
+  }
+
+  /**
+   * Caps how many tiles a worker merges at once, or lifts the cap.
+   *
+   * Sent with the worker's next lease, so it applies from the next shard
+   * without anybody touching that machine. A worker never goes above what it
+   * was started with -- that is what sized its threads -- so this can only
+   * lower it.
+   * @param {string} workerId - Which worker.
+   * @param {object} limit - `concurrency`, a whole number, or null to lift it.
+   * @returns {Promise<object>} - The limit now in force, or null.
+   */
+  async setWorkerLimit(workerId, { concurrency }) {
+    const id = String(workerId ?? '').slice(0, 64);
+    if (!id) throw failure('which worker?', 400);
+    if (
+      concurrency === null ||
+      concurrency === undefined ||
+      concurrency === ''
+    ) {
+      this.#limits.delete(id);
+    } else {
+      const value = Math.floor(Number(concurrency));
+      if (!(value >= 1 && value <= 1024)) {
+        throw failure('concurrency must be a whole number from 1', 400);
+      }
+      this.#limits.set(id, { concurrency: value });
+    }
+    await fs.mkdir(this.#dir, { recursive: true });
+    await fs.writeFile(
+      this.#limitsFile(),
+      JSON.stringify(Object.fromEntries(this.#limits)),
+    );
+    return this.#limits.get(id) ?? null;
+  }
+
+  /**
+   * Changes who takes a job's shards.
+   *
+   * Either can be turned off, not both. Turning this node on starts it
+   * working at once; turning it off hands back the shard it is on, without
+   * counting that against the shard. Turning workers off stops new leases --
+   * shards already out are finished by whoever has them.
+   * @param {string} id - Which job.
+   * @param {object} changes - `local`, `remote`, either or both.
+   * @returns {Promise<object>} - The job.
+   */
+  async updateJob(id, changes = {}) {
+    const job = this.#jobs.get(id);
+    if (!job) throw failure('no such job', 404);
+    const local =
+      changes.local === undefined ? Boolean(job.local) : changes.local === true;
+    const remote =
+      changes.remote === undefined
+        ? job.remote !== false
+        : changes.remote === true;
+    if (!local && !remote) {
+      throw failure(
+        'somebody has to take the shards: keep this node or the workers on',
+        400,
+      );
+    }
+    job.local = local;
+    job.remote = remote;
+    if (local && (job.phase === 'planning' || job.phase === 'running')) {
+      this.#startLocal(job);
+    }
+    if (!local) this.#local.get(job.id)?.abort();
+    await this.#save(job, { now: true });
+    return this.#describe(job);
+  }
+
+  #limitsFile() {
+    return path.join(this.#dir, LIMITS_FILE);
+  }
+
+  /**
+   * Marks done the shards whose fragments are on disk but not in the record.
+   *
+   * A job's record is written a few seconds behind on a big job (see #save),
+   * so a node that stops hard can come back to shards it accepted and never
+   * wrote down. Each fragment is checked the way an upload is before it is
+   * believed. An empty shard leaves no fragment, so one of those is baked
+   * again -- which costs little, since there was nothing in it.
+   * @param {object} job - The job, as loaded.
+   * @returns {Promise<number>} - How many were recovered.
+   */
+  async #recoverFragments(job) {
+    const names = await fs.readdir(this.#fragmentDir(job)).catch(() => []);
+    let recovered = 0;
+    for (const name of names) {
+      const index = /^(\d+)\.pmtiles$/.exec(name)?.[1];
+      const shard = index === undefined ? null : job.shards[Number(index)];
+      if (!shard || shard.state === 'done') continue;
+      try {
+        await this.#check(path.join(this.#fragmentDir(job), name), shard);
+      } catch {
+        continue;
+      }
+      shard.state = 'done';
+      shard.fragment = name;
+      shard.lease = null;
+      shard.error = null;
+      shard.doneBy = shard.doneBy ?? 'recovered after a restart';
+      recovered += 1;
+    }
+    if (recovered) {
+      console.log(
+        `[distributed] ${job.id}: ${recovered} finished shard(s) found on ` +
+          'disk that the record had not caught up with',
+      );
+      await this.#save(job, { now: true });
+    }
+    return recovered;
   }
 
   /**
@@ -367,12 +522,13 @@ export class DistributedBakes {
     const when = new Date(this.#now());
     const id = `${stackId}-${when.getTime().toString(36)}`;
     const format = kind === 'contours' ? 'pbf' : outputFormat(resolved);
+    const defaults = this.#settings();
     const perShard =
       Number(options.tilesPerShard) > 0
         ? Math.floor(Number(options.tilesPerShard))
         : kind === 'contours'
-          ? CONTOUR_TILES_PER_SHARD
-          : DEFAULT_TILES_PER_SHARD;
+          ? defaults.contourTilesPerShard
+          : defaults.tilesPerShard;
 
     const job = {
       id,
@@ -387,6 +543,9 @@ export class DistributedBakes {
       // the export dialog: a job that finishes even if no worker ever comes,
       // and goes faster for every one that does.
       local: options.local === true,
+      // Whether workers take shards. Off leaves the job to this node alone;
+      // a job with neither is refused, since nothing would ever finish it.
+      remote: options.remote !== false,
       revision: bakeRevision(resolved, selection, {
         kind,
         thresholds: thresholds ?? null,
@@ -568,7 +727,10 @@ export class DistributedBakes {
         (job) =>
           LEASING.has(job.phase) &&
           !worker.cannot?.[job.id] &&
-          (!options.jobId || job.id === options.jobId),
+          (!options.jobId || job.id === options.jobId) &&
+          // This node's own share asks with `local`; every other asker is a
+          // worker, and a job may have been told to do without them.
+          (options.local || job.remote !== false),
       )
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
@@ -600,6 +762,8 @@ export class DistributedBakes {
         leaseSeconds,
         jobId: job.id,
         revision: job.revision,
+        // The cap the console set for this worker, if any.
+        concurrency: this.#limits.get(worker.id)?.concurrency ?? null,
         shard: {
           index: shard.index,
           from: shard.from,
@@ -813,6 +977,26 @@ export class DistributedBakes {
   }
 
   /**
+   * Puts a leased shard back in the queue, not counting it as an attempt.
+   * @param {string} leaseId - The lease.
+   * @returns {void}
+   */
+  #handBack(leaseId) {
+    const ref = this.#leases.get(leaseId);
+    const job = ref && this.#jobs.get(ref.jobId);
+    const shard = job?.shards[ref.index];
+    if (!shard || shard.state !== 'leased' || shard.lease?.id !== leaseId) {
+      return;
+    }
+    const worker = this.#workers.get(shard.lease.workerId);
+    if (worker) worker.lease = null;
+    this.#leases.delete(leaseId);
+    shard.attempts = Math.max(0, (shard.attempts ?? 1) - 1);
+    this.#release(shard, 'pending');
+    this.#save(job);
+  }
+
+  /**
    * A worker saying it could not do a shard.
    * @param {string} leaseId - The lease.
    * @param {string} message - Why.
@@ -944,7 +1128,7 @@ export class DistributedBakes {
 
     try {
       while (!signal.aborted && LEASING.has(job.phase)) {
-        const lease = this.lease(who, { jobId: job.id });
+        const lease = this.lease(who, { jobId: job.id, local: true });
         if (!lease) {
           // Nothing pending, but a worker's shard may yet lapse back.
           const open = job.shards.some((shard) => shard.state === 'leased');
@@ -1049,6 +1233,11 @@ export class DistributedBakes {
         } catch {
           // The lease went while this was failing; nothing left to report.
         }
+      } else if (!lost) {
+        // Stopped -- this node taken off the job, or the node shutting down.
+        // The shard goes back at once rather than waiting for its lease to
+        // lapse, and it was not this shard's fault, so it is not an attempt.
+        this.#handBack(lease.leaseId);
       }
       await fs.rm(staging.file, { force: true }).catch(() => {});
     } finally {
@@ -1353,7 +1542,7 @@ export class DistributedBakes {
   }
 
   /**
-   * Writes a job down, at most every half second unless told to now.
+   * Writes a job down, coalescing changes unless told to write now.
    *
    * Every lease and every finished shard changes it, and with a few dozen
    * workers that is many writes a second of a file that can run to megabytes
@@ -1390,7 +1579,12 @@ export class DistributedBakes {
     if (options.now) {
       write();
     } else if (!pending.timer) {
-      pending.timer = setTimeout(write, 500);
+      // Longer for a bigger job: its record is one line per shard, and on a
+      // planet that is megabytes rewritten whole. About a millisecond a
+      // shard, between half a second and ten. A shard finished inside that
+      // window is not lost if the node stops -- see #recoverFragments.
+      const delay = Math.min(10000, Math.max(500, job.shards?.length ?? 0));
+      pending.timer = setTimeout(write, delay);
       pending.timer.unref?.();
     }
     return pending.promise;
@@ -1433,8 +1627,10 @@ export class DistributedBakes {
       title: job.title,
       kind: job.kind,
       phase: job.phase,
-      // Whether this node is taking shards too, and why it stopped if it did.
+      // Who takes shards: this node, the workers, or both.
       local: Boolean(job.local),
+      remote: job.remote !== false,
+      tilesPerShard: job.tilesPerShard,
       localError: job.localError ?? null,
       archiveName: job.archiveName,
       filename: job.filename,

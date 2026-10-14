@@ -17,8 +17,14 @@ import { Compression, PMTilesWriter, TileType } from './pmtiles-write.js';
  * pieces one tile needs are mostly the pieces the next one needs.
  */
 
-/** Tiles per shard where nobody says otherwise: minutes of work, not hours. */
-export const DEFAULT_TILES_PER_SHARD = 20000;
+/**
+ * Work per shard where nobody says otherwise: minutes, not hours.
+ *
+ * Counted as tiles times the sources each is merged from -- see planShards --
+ * so a shard of tiles that each have one source holds this many tiles, and one
+ * at a zoom where every source overlaps holds a fraction of it.
+ */
+export const DEFAULT_TILES_PER_SHARD = 5000;
 
 /**
  * Cuts a bake into shards of roughly equal work.
@@ -27,11 +33,20 @@ export const DEFAULT_TILES_PER_SHARD = 20000;
  * narrowed by the selection -- rather than over the id space, which over a
  * sparse planet would make most shards empty and a few enormous.
  *
+ * And weighted by what each tile costs, which is mostly how many sources it is
+ * merged from. Ids run by zoom, so the first shards are the low zooms -- and a
+ * low-zoom tile overlaps nearly every source in a stack, where a deep one
+ * usually overlaps one or two. Cut by count, the first shard held every tile
+ * from z0 to z7, each several merges, and whichever worker drew it finished
+ * long after the rest. Cut by work, the low zooms come out as several small
+ * shards and spread across the workers like everything else.
+ *
  * Shards are half-open and abut: each ends where the next begins, so between
  * them they cover every id the bake would visit, and none is visited twice.
  * @param {Array<string|object>} sources - Paths, or byte sources.
- * @param {object} [options] - `selection`, `tilesPerShard`, `signal`.
- * @returns {Promise<{shards: object[], tiles: number}>} - `{index, from, to, tiles}` each.
+ * @param {object} [options] - `selection`, `tilesPerShard` (the work a shard
+ *   holds, counting a tile once per source it is merged from), `signal`.
+ * @returns {Promise<{shards: object[], tiles: number}>} - `{index, from, to, tiles, work}` each.
  */
 export async function planShards(sources, options = {}) {
   const selection = options.selection ?? null;
@@ -46,22 +61,35 @@ export async function planShards(sources, options = {}) {
   let total = 0;
   let lastId = -1;
 
+  const tally = { sources: 1 };
   for await (const tileId of unionOfTileIds(sources, {
     signal: options.signal,
     from: span.from,
     to: span.to,
+    tally,
   })) {
     if (tileId >= span.to) break;
     if (tileId < span.from) continue;
     if (!selects(selection, tileId)) continue;
 
-    if (!current || current.tiles >= perShard) {
+    const work = Math.max(1, tally.sources);
+    // A new shard once this tile would take the current one past its share --
+    // but never an empty one, so a tile costing more than a whole shard still
+    // gets a shard of its own rather than none.
+    if (!current || (current.tiles > 0 && current.work + work > perShard)) {
       // The previous shard ends exactly where this one begins.
       if (current) current.to = tileId;
-      current = { index: shards.length, from: tileId, to: null, tiles: 0 };
+      current = {
+        index: shards.length,
+        from: tileId,
+        to: null,
+        tiles: 0,
+        work: 0,
+      };
       shards.push(current);
     }
     current.tiles += 1;
+    current.work += work;
     total += 1;
     lastId = tileId;
   }

@@ -75,7 +75,11 @@ export async function runWorker(options = {}) {
 
   const concurrency = Math.max(
     1,
-    Math.floor(Number(options.concurrency) || os.availableParallelism()),
+    Math.floor(
+      Number(
+        options.concurrency ?? process.env.PMTILES_SWARM_WORKER_CONCURRENCY,
+      ) || os.availableParallelism(),
+    ),
   );
   const wanted = Math.min(concurrency, os.availableParallelism());
   if (!process.env.UV_THREADPOOL_SIZE && wanted > 4) {

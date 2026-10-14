@@ -493,6 +493,10 @@ const DEFAULTS = {
     publicEndpoint: true,
     /** The address workers are told to use, where the public one is not it. */
     coordinatorUrl: undefined,
+    /** Work per shard when the export does not say: tiles x sources each. */
+    tilesPerShard: 5000,
+    /** The same for contours, which cost about nine merges a tile. */
+    contourTilesPerShard: 1000,
   },
 
   /**

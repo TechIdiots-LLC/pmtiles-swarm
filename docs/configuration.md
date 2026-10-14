@@ -999,14 +999,16 @@ See [security.md](security.md).
 
 Sharing an export out to other machines. See [workers.md](workers.md).
 
-| setting                  | default |                                                       |
-| ------------------------ | ------- | ----------------------------------------------------- |
-| `workers.leaseSeconds`   | `120`   | how long a shard stays a worker's without a heartbeat |
-| `workers.maxAttempts`    | `4`     | times a shard is handed out before it is given up on  |
-| `workers.publicEndpoint` | `true`  | answer `/api/workers/` on the public listener as well |
-| `workers.coordinatorUrl` | unset   | the address the console's worker commands fill in     |
+| setting                        | default |                                                                   |
+| ------------------------------ | ------- | ----------------------------------------------------------------- |
+| `workers.leaseSeconds`         | `120`   | how long a shard stays a worker's without a heartbeat             |
+| `workers.maxAttempts`          | `4`     | times a shard is handed out before it is given up on              |
+| `workers.publicEndpoint`       | `true`  | answer `/api/workers/` on the public listener as well             |
+| `workers.coordinatorUrl`       | unset   | the address the console's worker commands fill in                 |
+| `workers.tilesPerShard`        | `5000`  | work per shard when the export does not say: tiles × sources each |
+| `workers.contourTilesPerShard` | `1000`  | the same, for contours                                            |
 
-All four are read as they are used, so a change applies to the next lease. A
+All are read as they are used, so a change applies to the next lease or job. A
 worker itself has no configuration file: it is started with a coordinator's
 address and a worker token, and the environment variables below.
 
@@ -1252,12 +1254,13 @@ says.
 
 And for `pmtiles-swarm worker`, which reads no configuration file:
 
-| variable                     | flag            |
-| ---------------------------- | --------------- |
-| `PMTILES_SWARM_COORDINATOR`  | `--coordinator` |
-| `PMTILES_SWARM_WORKER_TOKEN` | `--token`       |
-| `PMTILES_SWARM_WORKER_NAME`  | `--name`        |
-| `PMTILES_SWARM_WORK_DIR`     | `--work-dir`    |
+| variable                           | flag            |
+| ---------------------------------- | --------------- |
+| `PMTILES_SWARM_COORDINATOR`        | `--coordinator` |
+| `PMTILES_SWARM_WORKER_TOKEN`       | `--token`       |
+| `PMTILES_SWARM_WORKER_NAME`        | `--name`        |
+| `PMTILES_SWARM_WORK_DIR`           | `--work-dir`    |
+| `PMTILES_SWARM_WORKER_CONCURRENCY` | `--concurrency` |
 
 Relative paths in the config file resolve against the file's own directory rather
 than the working directory, so a config can be moved as a unit with the data it
