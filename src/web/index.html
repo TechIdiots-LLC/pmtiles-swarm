@@ -914,6 +914,37 @@
       </form>
     </dialog>
 
+    <dialog id="job-dialog">
+      <form method="dialog" id="job-form">
+        <h2>Who takes the shards</h2>
+        <div class="sub" style="margin-bottom:0.8rem">
+          <code id="job-name"></code> — changing this applies from the next
+          shard. The size shards were cut to cannot change once a job is
+          planned.
+        </div>
+        <label class="choice">
+          <input type="checkbox" id="job-remote" />
+          <span>Workers take shards</span>
+        </label>
+        <div class="sub" style="margin:0.2rem 0 0.6rem 1.6rem">
+          Off stops new leases; a worker with a shard already finishes it.
+        </div>
+        <label class="choice">
+          <input type="checkbox" id="job-local" />
+          <span>This node takes shards</span>
+        </label>
+        <div class="sub" style="margin:0.2rem 0 0.6rem 1.6rem">
+          On starts it at once. Off hands back the shard it is on, which does
+          not count against that shard.
+        </div>
+        <div class="sub" id="job-error" style="color: var(--danger)"></div>
+        <menu>
+          <button value="cancel" formnovalidate>Cancel</button>
+          <button id="job-save" value="default">Save</button>
+        </menu>
+      </form>
+    </dialog>
+
     <dialog id="adopt-dialog">
       <form method="dialog" id="adopt-form">
         <h2>Adopt existing torrents</h2>
@@ -5408,9 +5439,12 @@ Every piece is hashed against the ` +
        * @param {object} options - `url`, `token`, `name`, `version`.
        * @returns {object[]} - `{label, text}` per way.
        */
-      const workerCommands = ({ url, token, name, version }) => {
+      const workerCommands = ({ url, token, name, version, concurrency }) => {
         const pinned = version ? `@${version}` : '';
-        const named = name ? ` --name ${JSON.stringify(name)}` : '';
+        const cores = concurrency > 0 ? Math.floor(concurrency) : null;
+        const named =
+          (name ? ` --name ${JSON.stringify(name)}` : '') +
+          (cores ? ` --concurrency ${cores}` : '');
         return [
           {
             label: 'npx',
@@ -5429,6 +5463,7 @@ Every piece is hashed against the ` +
               `  -e PMTILES_SWARM_COORDINATOR=${url} \\`,
               `  -e PMTILES_SWARM_WORKER_TOKEN=${token} \\`,
               ...(name ? [`  -e PMTILES_SWARM_WORKER_NAME=${JSON.stringify(name)} \\`] : []),
+              ...(cores ? [`  -e PMTILES_SWARM_WORKER_CONCURRENCY=${cores} \\`] : []),
               '  -v pmtiles-swarm-worker:/data \\',
               `  wifidb/pmtiles-swarm${version ? `:v${version}` : ':latest'} worker`,
             ].join('\n'),
@@ -5447,6 +5482,7 @@ Every piece is hashed against the ` +
               `Environment=PMTILES_SWARM_COORDINATOR=${url}`,
               `Environment=PMTILES_SWARM_WORKER_TOKEN=${token}`,
               ...(name ? [`Environment=PMTILES_SWARM_WORKER_NAME=${name}`] : []),
+              ...(cores ? [`Environment=PMTILES_SWARM_WORKER_CONCURRENCY=${cores}`] : []),
               'ExecStart=/usr/bin/env pmtiles-swarm worker',
               'Restart=always',
               'RestartSec=10',
@@ -5471,12 +5507,16 @@ Every piece is hashed against the ` +
        * @param {object} options - `created` (the API's answer), `url`, `name`, `version`.
        * @returns {void}
        */
-      function showWorkerCommands(into, { created, url, name, version }) {
+      function showWorkerCommands(
+        into,
+        { created, url, name, version, concurrency },
+      ) {
         const commands = workerCommands({
           url: String(url).replace(/\/+$/, ''),
           token: created.token,
           name,
           version,
+          concurrency,
         });
         into.innerHTML = `
           <div class="panel" style="margin-top:0.8rem">
@@ -5554,12 +5594,12 @@ Every piece is hashed against the ` +
             <div style="overflow-x:auto">
               <table>
                 <thead>
-                  <tr><th>Worker</th><th>State</th><th>Doing</th><th>Done</th><th>Version</th><th>Last heard</th></tr>
+                  <tr><th>Worker</th><th>State</th><th>Doing</th><th>Done</th><th title="Tiles it merges at once. It was started with the number shown; lower it here and it applies from its next shard.">Cores</th><th>Version</th><th>Last heard</th></tr>
                 </thead>
                 <tbody>
                   ${
                     listed.workers.length === 0
-                      ? '<tr><td colspan="6" class="sub">None has asked for work yet.</td></tr>'
+                      ? '<tr><td colspan="7" class="sub">None has asked for work yet.</td></tr>'
                       : listed.workers
                           .map(
                             (worker) => `
@@ -5581,6 +5621,15 @@ Every piece is hashed against the ` +
                                     : ''
                                 }</td>
                                 <td class="sub">${worker.shardsDone.toLocaleString()} shards &middot; ${worker.tilesDone.toLocaleString()} tiles</td>
+                                <td>${
+                                  String(worker.id).startsWith('local:')
+                                    ? `<span class="sub">${worker.concurrency ?? '?'} — <b>stacks.bakeConcurrency</b></span>`
+                                    : `<input type="number" min="1" style="width:5rem"
+                                         data-worker-limit="${escapeHtml(worker.id)}"
+                                         placeholder="${worker.concurrency ?? 'all'}"
+                                         value="${worker.limit ?? ''}" />
+                                       <span class="sub">of ${worker.concurrency ?? '?'}</span>`
+                                }</td>
                                 <td class="sub">${escapeHtml(worker.version ?? '?')}</td>
                                 <td class="sub">${ago(worker.lastSeen)}</td>
                               </tr>`,
@@ -5605,6 +5654,11 @@ Every piece is hashed against the ` +
               <div class="field" style="margin:0">
                 <label for="worker-name">Worker name</label>
                 <input id="worker-name" placeholder="garage-desktop" style="width:14rem" />
+              </div>
+              <div class="field" style="margin:0"
+                   title="Tiles it merges at once. Empty uses every core the machine has. It can be lowered later from the table above without touching the machine, but not raised past this.">
+                <label for="worker-cores">Cores</label>
+                <input id="worker-cores" type="number" min="1" placeholder="all" style="width:6rem" />
               </div>
               <button type="button" id="worker-create">Create worker token</button>
             </div>
@@ -5661,8 +5715,25 @@ Every piece is hashed against the ` +
             };
           }
 
+          // A cap typed into the table, saved as it is changed.
+          for (const input of panel.querySelectorAll('[data-worker-limit]')) {
+            input.onchange = async () => {
+              const value = input.value.trim();
+              try {
+                await api(`/api/distributed/workers/${encodeURIComponent(input.dataset.workerLimit)}`, {
+                  method: 'PUT',
+                  body: { concurrency: value === '' ? null : Number(value) },
+                });
+                toast(value === '' ? 'Cap lifted' : `Capped at ${value} from its next shard`);
+              } catch (error) {
+                toast(error.message);
+              }
+            };
+          }
+
           panel.querySelector('#worker-create').onclick = async () => {
             const name = panel.querySelector('#worker-name').value.trim();
+            const concurrency = Number(panel.querySelector('#worker-cores').value);
             const url = panel.querySelector('#worker-url').value.trim().replace(/\/+$/, '');
             if (!/^https?:\/\//i.test(url)) return toast('the address needs http:// or https://');
             try {
@@ -5677,6 +5748,7 @@ Every piece is hashed against the ` +
                 url,
                 name,
                 version: setup.version,
+                concurrency,
               });
             } catch (error) {
               toast(error.message);
@@ -6639,6 +6711,26 @@ Every piece is hashed against the ` +
                 '<code>publicUrl</code> if that is set. Set it where workers ' +
                 'see this node by another name, such as an address on the ' +
                 'local network.',
+            },
+            {
+              key: 'workers.tilesPerShard',
+              label: 'Tiles per shard',
+              type: 'number',
+              placeholder: '20000',
+              help:
+                'What a shared-out export is cut into when the export dialog ' +
+                'does not say. A few minutes of one worker’s time is the aim: ' +
+                'small enough that a worker going away costs little, large ' +
+                'enough that asking for the next shard is not most of the job.',
+            },
+            {
+              key: 'workers.contourTilesPerShard',
+              label: 'Tiles per shard, contours',
+              type: 'number',
+              placeholder: '4000',
+              help:
+                'The same for contours, which cost about nine merges a tile ' +
+                'and so want smaller shards for the same time each.',
             },
           ],
         },
@@ -10022,6 +10114,12 @@ Every piece is hashed against the ` +
         }[job.phase] ?? escapeHtml(job.phase);
 
         const buttons = [
+          ['planning', 'running', 'stalled'].includes(job.phase)
+            ? `<button type="button" data-distributed-edit="${id}"
+                       data-local="${job.local ? '1' : ''}" data-remote="${job.remote ? '1' : ''}"
+                       data-name="${escapeHtml(job.archiveName)}"
+                       title="Choose who takes this job's shards: the workers, this node, or both.">Edit</button>`
+            : '',
           live && job.phase !== 'importing'
             ? `<button type="button" data-distributed-stop="${id}">Stop</button>`
             : '',
@@ -10039,7 +10137,13 @@ Every piece is hashed against the ` +
               <strong>${escapeHtml(job.archiveName)}</strong>
               <span class="pill">${escapeHtml(job.kind)}</span>
               <span class="pill ${job.phase === 'done' ? 'mirror' : 'cache'}">${escapeHtml(job.phase)}</span>
-              <span class="muted">${job.local ? 'this node and workers' : 'workers'} &middot; ${escapeHtml(job.stackId)}${part}</span>
+              <span class="muted">${
+                job.local && job.remote
+                  ? 'this node and workers'
+                  : job.local
+                    ? 'this node'
+                    : 'workers'
+              } &middot; ${escapeHtml(job.stackId)}${part} &middot; ${(job.tilesPerShard ?? 0).toLocaleString()} tiles a shard</span>
               <span class="bar-gap"></span>
               ${buttons}
             </div>
@@ -10087,7 +10191,17 @@ Every piece is hashed against the ` +
       };
 
       $('distributed-list').addEventListener('click', async (event) => {
-        const { distributedStop, distributedRetry, distributedDiscard } = event.target.dataset;
+        const { distributedStop, distributedRetry, distributedDiscard, distributedEdit } =
+          event.target.dataset;
+        if (distributedEdit !== undefined) {
+          $('job-name').textContent = event.target.dataset.name;
+          $('job-name').dataset.id = distributedEdit;
+          $('job-local').checked = event.target.dataset.local === '1';
+          $('job-remote').checked = event.target.dataset.remote === '1';
+          $('job-error').textContent = '';
+          $('job-dialog').showModal();
+          return;
+        }
         try {
           if (distributedStop !== undefined) {
             await api(`/api/distributed/${encodeURIComponent(distributedStop)}`, { method: 'DELETE' });
@@ -10105,6 +10219,31 @@ Every piece is hashed against the ` +
         } catch (error) {
           toast(error.message);
         }
+        distributedLastDrawn = null;
+        loadDistributed().catch(() => {});
+      });
+
+      $('job-form').addEventListener('submit', async (event) => {
+        if (event.submitter?.value === 'cancel') return;
+        event.preventDefault();
+        const local = $('job-local').checked;
+        const remote = $('job-remote').checked;
+        if (!local && !remote) {
+          $('job-error').textContent =
+            'Somebody has to take the shards: keep this node or the workers on.';
+          return;
+        }
+        try {
+          await api(`/api/distributed/${encodeURIComponent($('job-name').dataset.id)}`, {
+            method: 'PATCH',
+            body: { local, remote },
+          });
+        } catch (error) {
+          $('job-error').textContent = error.message;
+          return;
+        }
+        $('job-dialog').close();
+        toast('Saved; it applies from the next shard');
         distributedLastDrawn = null;
         loadDistributed().catch(() => {});
       });
@@ -10146,6 +10285,12 @@ Every piece is hashed against the ` +
           host.innerHTML = `<div class="sub bad">${escapeHtml(error.message)}</div>`;
           return;
         }
+        // What the job is cut into if the field stays empty, from Settings.
+        $('bake-shard-size').placeholder = `${(
+          $('bake-kind').value === 'contours'
+            ? setup.contourTilesPerShard
+            : setup.tilesPerShard
+        )?.toLocaleString() ?? ''} — the default, under Settings → Workers`;
         // Not this node's own share, which is not somebody who joined.
         const online = listed.workers.filter(
           (worker) => worker.online && !String(worker.id).startsWith('local:'),
@@ -10161,12 +10306,15 @@ Every piece is hashed against the ` +
             <div class="sub">${who}</div>
             <div class="bar" style="margin-top:0.4rem; flex-wrap:wrap">
               <input id="bake-join-name" placeholder="worker name, e.g. garage-desktop" style="flex:1; min-width:12rem" />
+              <input id="bake-join-cores" type="number" min="1" placeholder="cores: all" style="width:7rem"
+                     title="Tiles it merges at once. Empty uses every core the machine has." />
               <button type="button" id="bake-join-add">Add a worker…</button>
             </div>
             <div id="bake-join-result"></div>
           </div>`;
         host.querySelector('#bake-join-add').onclick = async () => {
           const name = host.querySelector('#bake-join-name').value.trim();
+          const concurrency = Number(host.querySelector('#bake-join-cores').value);
           try {
             const created = await api('/api/tokens', {
               method: 'POST',
@@ -10177,6 +10325,7 @@ Every piece is hashed against the ` +
               url: setup.coordinatorUrl,
               name,
               version: setup.version,
+              concurrency,
             });
           } catch (error) {
             toast(error.message);
@@ -10186,6 +10335,10 @@ Every piece is hashed against the ` +
       for (const radio of document.querySelectorAll('input[name="bake-where"]')) {
         radio.addEventListener('change', showBakeWhere);
       }
+      // Contours and terrain have different default shard sizes.
+      $('bake-kind').addEventListener('change', () => {
+        if (bakeWhere() !== 'here') drawBakeJoin(bakeWhere()).catch(() => {});
+      });
 
       // Editing and deleting hang off the list, which is redrawn on every
       // change, so they are delegated the same way the source rows are.

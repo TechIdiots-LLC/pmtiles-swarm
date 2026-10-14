@@ -59,16 +59,35 @@ button that makes a token and the commands to use it without leaving the dialog.
 The job appears above the stacks, with how many shards are done, how many
 workers are on it, tiles a second and roughly how long is left.
 
+**Edit** on a job changes who takes its shards after it has started: the
+workers, this node, or both. Turning this node on starts it at once; turning it
+off hands back the shard it is on, which does not count against that shard.
+Turning the workers off stops new leases, and a worker with a shard already
+finishes it. One of the two has to stay on. What cannot change is the size the
+job was cut into — the shards already exist.
+
+### How many cores a worker uses
+
+A worker merges as many tiles at once as it was started with: `--concurrency`,
+or every core the machine has. **Add a worker** takes a **Cores** number and puts
+it in the commands it shows. Afterwards, the **Cores** column in Settings →
+Workers caps a worker from the coordinator — it is sent with the worker's next
+lease, so it applies from its next shard without anybody touching that machine.
+A cap can only lower a worker, never raise it past what it was started with,
+since that is what sized its threads; to raise one, start it again with a
+higher `--concurrency`. This node's own share uses `stacks.bakeConcurrency`,
+as an export on it does.
+
 The worker side, in full:
 
-| flag            | environment                  |                                               |
-| --------------- | ---------------------------- | --------------------------------------------- |
-| `--coordinator` | `PMTILES_SWARM_COORDINATOR`  | the coordinator's address, `http(s)://…`      |
-| `--token`       | `PMTILES_SWARM_WORKER_TOKEN` | a worker token minted there                   |
-| `--name`        | `PMTILES_SWARM_WORKER_NAME`  | what the coordinator lists it as; hostname    |
-| `--concurrency` |                              | tiles merged at once; the core count          |
-| `--work-dir`    | `PMTILES_SWARM_WORK_DIR`     | shards in progress; `~/.pmtiles-swarm/worker` |
-| `--config`      |                              | optional, for its `tiles` settings only       |
+| flag            | environment                        |                                               |
+| --------------- | ---------------------------------- | --------------------------------------------- |
+| `--coordinator` | `PMTILES_SWARM_COORDINATOR`        | the coordinator's address, `http(s)://…`      |
+| `--token`       | `PMTILES_SWARM_WORKER_TOKEN`       | a worker token minted there                   |
+| `--name`        | `PMTILES_SWARM_WORKER_NAME`        | what the coordinator lists it as; hostname    |
+| `--concurrency` | `PMTILES_SWARM_WORKER_CONCURRENCY` | tiles merged at once; the core count          |
+| `--work-dir`    | `PMTILES_SWARM_WORK_DIR`           | shards in progress; `~/.pmtiles-swarm/worker` |
+| `--config`      |                                    | optional, for its `tiles` settings only       |
 
 A worker sizes its own thread pool. Decoding and encoding tiles happens on
 libuv's, which holds four threads unless `UV_THREADPOOL_SIZE` says otherwise,
@@ -99,8 +118,9 @@ and cutting it into runs cuts it into independent jobs:
 The coordinator plans them by counting what the export will actually merge —
 the sources' coverage, narrowed by the zoom range and box chosen — rather than
 the id space, which over a sparse planet would make most shards empty and a few
-enormous. 20,000 tiles each by default, 4,000 for contours, which cost about
-nine merges a tile; the dialog takes another number. A few minutes of work each
+enormous. 20,000 tiles each by default and 4,000 for contours, which cost about
+nine merges a tile — `workers.tilesPerShard` and `workers.contourTilesPerShard`
+change the defaults, and the export dialog takes another number for one job. A few minutes of work each
 is the aim: small enough that a worker going away costs little, large enough
 that asking for the next one is not most of the job.
 
@@ -218,15 +238,18 @@ console.
 
 ## Settings
 
-| setting                  | default |                                                                 |
-| ------------------------ | ------- | --------------------------------------------------------------- |
-| `workers.leaseSeconds`   | `120`   | how long a shard stays a worker's without a heartbeat           |
-| `workers.maxAttempts`    | `4`     | times a shard is handed out before it is given up on            |
-| `workers.publicEndpoint` | `true`  | answer `/api/workers/` on the public listener too               |
-| `workers.coordinatorUrl` | unset   | the address the console's commands give workers; the public one |
+| setting                        | default |                                                                 |
+| ------------------------------ | ------- | --------------------------------------------------------------- |
+| `workers.leaseSeconds`         | `120`   | how long a shard stays a worker's without a heartbeat           |
+| `workers.maxAttempts`          | `4`     | times a shard is handed out before it is given up on            |
+| `workers.publicEndpoint`       | `true`  | answer `/api/workers/` on the public listener too               |
+| `workers.coordinatorUrl`       | unset   | the address the console's commands give workers; the public one |
+| `workers.tilesPerShard`        | `20000` | tiles per shard when the export does not say                    |
+| `workers.contourTilesPerShard` | `4000`  | the same, for contours                                          |
 
-All four are read as they are used, so a change applies to the next lease
-without a restart.
+All are read as they are used, so a change applies to the next lease or the next
+job without a restart. Per-worker core caps are set from the workers table and
+kept in `<dataDir>/distributed/worker-limits.json`.
 
 ## How a worker reaches each source
 

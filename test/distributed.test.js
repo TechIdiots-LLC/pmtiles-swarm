@@ -189,6 +189,8 @@ async function coordinator(options = {}) {
     distributed,
     resolve,
     tiles,
+    config,
+    library,
     imported,
     workerToken,
     peerToken,
@@ -725,6 +727,116 @@ describe('a public address as a source', () => {
       }),
       [],
     );
+  });
+});
+
+describe('settings and participants', () => {
+  it('cuts shards to the configured size when the export does not say', async () => {
+    const node = await coordinator({ workers: { tilesPerShard: 50 } });
+    try {
+      const job = await node.distributed.start({
+        resolved: node.resolve('terrain'),
+      });
+      const planned = await until(node.distributed, job.id, ['running']);
+      assert.equal(planned.tilesPerShard, 50);
+      assert.equal(planned.shardCount, Math.ceil(PLANET.length / 50));
+      assert.equal(node.distributed.shardDefaults().tilesPerShard, 50);
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('hands a worker the cap the console set, and keeps it across a restart', async () => {
+    const node = await coordinator();
+    try {
+      const job = await node.distributed.start({
+        resolved: node.resolve('terrain'),
+        tilesPerShard: 100,
+      });
+      await until(node.distributed, job.id, ['running']);
+      await node.distributed.setWorkerLimit('capped', { concurrency: 3 });
+      assert.equal(
+        node.distributed.lease({ workerId: 'capped' }).concurrency,
+        3,
+      );
+      assert.equal(
+        node.distributed.lease({ workerId: 'uncapped' }).concurrency,
+        null,
+      );
+      assert.equal(
+        node.distributed.workers().find((one) => one.id === 'capped').limit,
+        3,
+      );
+
+      // A coordinator started again over the same directory still has it.
+      const again = new DistributedBakes({
+        library: node.library,
+        tiles: node.tiles,
+        config: node.config,
+        resolve: node.resolve,
+      });
+      await again.load();
+      assert.equal(again.lease({ workerId: 'capped' }).concurrency, 3);
+
+      await node.distributed.setWorkerLimit('capped', { concurrency: null });
+      await assert.rejects(
+        node.distributed.setWorkerLimit('capped', { concurrency: 0 }),
+        /whole number/,
+      );
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('can take the workers off a job and put this node on it', async () => {
+    const node = await coordinator();
+    try {
+      const job = await node.distributed.start({
+        resolved: node.resolve('terrain'),
+        tilesPerShard: 60,
+      });
+      await until(node.distributed, job.id, ['running']);
+      const remote = node.distributed.lease({ workerId: 'remote' });
+      assert.ok(remote, 'workers may take shards to begin with');
+
+      const changed = await node.distributed.updateJob(job.id, {
+        local: true,
+        remote: false,
+      });
+      assert.equal(changed.local, true);
+      assert.equal(changed.remote, false);
+      assert.equal(
+        node.distributed.lease({ workerId: 'remote-two' }),
+        null,
+        'no new leases for workers',
+      );
+
+      // The worker that had a shard hands it back; this node does the rest.
+      node.distributed.giveBack(remote.leaseId, 'taken off the job');
+      const done = await until(node.distributed, job.id, ['done']);
+      assert.equal(done.tilesDone, done.tiles);
+      assert.ok(
+        node.distributed.workers().some((one) => one.id.startsWith('local:')),
+        'this node did the work',
+      );
+    } finally {
+      await node.close();
+    }
+  });
+
+  it('will not leave a job with nobody to take its shards', async () => {
+    const node = await coordinator();
+    try {
+      const job = await node.distributed.start({
+        resolved: node.resolve('terrain'),
+      });
+      await assert.rejects(
+        node.distributed.updateJob(job.id, { local: false, remote: false }),
+        /somebody has to take the shards/,
+      );
+    } finally {
+      await node.close();
+    }
   });
 });
 

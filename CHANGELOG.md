@@ -2,7 +2,16 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **Who takes a shared-out job's shards can be changed after it starts.** **Edit** on the job
+  turns the workers and this node on or off. This node starts at once when turned on, and hands
+  back the shard it is on when turned off without that counting against the shard; workers turned
+  off take no new leases and finish the ones they have.
+- **How many cores a worker uses can be set from the coordinator.** **Add a worker** takes a
+  **Cores** number and puts `--concurrency` (or `PMTILES_SWARM_WORKER_CONCURRENCY`) in every
+  command it shows, and the **Cores** column in Settings → Workers caps a running worker from its
+  next shard — kept across restarts, and only ever lowering what it was started with.
+- **Default shard sizes are settings**: `workers.tilesPerShard` (20000) and
+  `workers.contourTilesPerShard` (4000), shown as the placeholder in the export dialog.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._

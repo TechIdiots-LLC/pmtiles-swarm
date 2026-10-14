@@ -245,8 +245,19 @@ export class Worker {
         return;
       }
 
+      // The coordinator may cap this worker below what it was started with;
+      // never above, since what it was started with sized its threads.
+      const concurrency =
+        lease.concurrency > 0
+          ? Math.min(this.#concurrency, lease.concurrency)
+          : this.#concurrency;
       const started = Date.now();
-      this.#log(`[worker] ${label}: ${shard.tiles} tiles`);
+      this.#log(
+        `[worker] ${label}: ${shard.tiles} tiles` +
+          (concurrency < this.#concurrency
+            ? ` (${concurrency} at once, as the coordinator asks)`
+            : ''),
+      );
       const result = await bakeStack({
         sources: scanSourcesFor(job.resolved, job.tiles, controller.signal),
         mergeTile: job.mergeFor(controller.signal),
@@ -262,7 +273,7 @@ export class Worker {
           span: { from: shard.from, to: shard.to },
         }),
         header: job.task.header,
-        concurrency: this.#concurrency,
+        concurrency,
         allowEmpty: true,
         onProgress: ({ written, skipped }) => {
           progress = { written, skipped };

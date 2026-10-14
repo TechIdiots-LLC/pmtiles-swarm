@@ -103,8 +103,9 @@ export function mountDistributed(app, parts) {
         kind: body.kind,
         thresholds: body.thresholds,
         tilesPerShard: body.tilesPerShard,
-        // This node takes shards too, alongside the workers.
+        // Who takes shards: this node, the workers, or both.
         local: body.local === true,
+        remote: body.remote !== false,
       });
       res.status(202).json({ job });
     }),
@@ -142,6 +143,8 @@ export function mountDistributed(app, parts) {
             : `${req.protocol}://${req.get('host')}`),
         publicEndpoint,
         leaseSeconds: config.workers?.leaseSeconds ?? 120,
+        // What a job is cut into when the export dialog does not say.
+        ...(distributed?.shardDefaults() ?? {}),
       });
     }),
   );
@@ -152,6 +155,38 @@ export function mountDistributed(app, parts) {
       const job = distributed?.get(req.params.id);
       if (!job) return res.status(404).json({ error: 'no such job' });
       res.json({ job });
+    }),
+  );
+
+  /**
+   * Changes who takes a job's shards: `{local, remote}`, either or both.
+   */
+  app.patch(
+    '/api/distributed/:id',
+    route(async (req, res) => {
+      if (!distributed) return disabled(res);
+      res.json({
+        job: await distributed.updateJob(req.params.id, {
+          local: req.body?.local,
+          remote: req.body?.remote,
+        }),
+      });
+    }),
+  );
+
+  /**
+   * Caps how many tiles one worker merges at once: `{concurrency}`, or null
+   * to lift the cap. Applies from its next shard.
+   */
+  app.put(
+    '/api/distributed/workers/:workerId',
+    route(async (req, res) => {
+      if (!distributed) return disabled(res);
+      res.json({
+        limit: await distributed.setWorkerLimit(req.params.workerId, {
+          concurrency: req.body?.concurrency ?? null,
+        }),
+      });
     }),
   );
 
