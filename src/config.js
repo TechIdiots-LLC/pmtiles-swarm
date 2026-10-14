@@ -481,6 +481,21 @@ const DEFAULTS = {
   stackExports: [],
 
   /**
+   * Distributed bakes: this node handing shards of an export to workers. See
+   * docs/workers.md.
+   */
+  workers: {
+    /** Seconds a shard stays a worker's without a heartbeat. */
+    leaseSeconds: 120,
+    /** Times a shard is handed out before it is given up on. */
+    maxAttempts: 4,
+    /** Whether /api/workers/ is also reachable on the public listener. */
+    publicEndpoint: false,
+    /** The address workers are told to use, where the console's is not it. */
+    coordinatorUrl: undefined,
+  },
+
+  /**
    * Tile stacks: several archives served as one endpoint. See
    * docs/tile-stacks.md.
    */

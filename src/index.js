@@ -11,6 +11,7 @@ import { StackCache } from './stack-cache.js';
 import { installCrashGuard } from './crash-guard.js';
 import { CutlineStore } from './cutlines.js';
 import { BakeManager } from './bake-jobs.js';
+import { DistributedBakes } from './distributed.js';
 import { loadCodec } from './codec.js';
 import { loadConfig } from './config.js';
 import { CompositeEngine } from './engines/composite.js';
@@ -540,6 +541,31 @@ PMTILES_SWARM_PUBLIC_URL
     cutlines,
   });
 
+  // The same bakes, shared out across worker nodes. Always built, because it
+  // costs nothing until somebody starts one, and whether a node coordinates is
+  // decided by pressing the button rather than by a setting.
+  const distributed = new DistributedBakes({
+    library,
+    tiles,
+    config,
+    cutlines,
+    loadCodec,
+    resolve: (stackId) => {
+      const stack = stacks?.list().find((one) => one.id === stackId);
+      if (!stack) return null;
+      return resolveStack(stack, {
+        archive: (hash) => catalog.get(hash),
+        category: (name) => catalog.byCategory(name)[0] ?? null,
+        stack: (id) => stacks?.get(id) ?? null,
+      });
+    },
+  });
+  await distributed
+    .load()
+    .catch((error) =>
+      console.warn(`[distributed] could not load jobs: ${error.message}`),
+    );
+
   // Anything a previous run did not finish. Deliberately after the stacks and
   // the catalog are loaded, since a checkpoint is only worth picking up where
   // the recipe still resolves to what it did when the work was done.
@@ -590,6 +616,7 @@ PMTILES_SWARM_PUBLIC_URL
       // The schedule first, or a tick landing during the shutdown would start
       // an export into a node that is closing.
       stackExports?.stop();
+      await distributed.stopAll();
       const stopped = await bakes.stopAll();
       if (stopped > 0) {
         console.log(
@@ -675,6 +702,7 @@ PMTILES_SWARM_PUBLIC_URL
     heightsCache,
     cutlines,
     bakes,
+    distributed,
     warm,
     config,
     speed,
