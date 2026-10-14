@@ -267,7 +267,14 @@ export class TileStore {
         502,
       );
     }
-    const source = row ? new S3Source(url, row) : new FetchSource(url);
+    // Headers an address needs that it cannot carry itself: a worker's
+    // token, for the bucket reads its coordinator makes on its behalf.
+    const extra = (this.#config.remoteHeaders ?? []).find((one) =>
+      url.startsWith(one.prefix),
+    )?.headers;
+    const source = row
+      ? new S3Source(url, row)
+      : new FetchSource(url, new Headers(extra ?? {}));
     const handle = {
       mode: 'remote',
       source,
@@ -523,6 +530,25 @@ export class TileStore {
    * @returns {Promise<object>} - The open handle.
    */
   async #openArchive(entry) {
+    // An archive another node holds, read from it over HTTP. What a worker in
+    // a distributed bake has: the coordinator's catalog entry -- so the merge
+    // sees the same summary, encoding and zoom range it would there -- and an
+    // address on the coordinator to read the bytes from. Asked first, because
+    // a node like that has no engine to ask about completeness.
+    if (entry.http) {
+      const source = new FetchSource(
+        entry.http.url,
+        new Headers(entry.http.headers ?? {}),
+      );
+      return {
+        mode: 'http',
+        source,
+        archive: new PMTiles(source, this.#directoryCache),
+        openedAt: new Date().toISOString(),
+        close: () => {},
+      };
+    }
+
     const local = await this.#completeLocalPath(entry);
 
     // An MBTiles archive is servable only from a complete local copy — see
