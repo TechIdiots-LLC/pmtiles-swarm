@@ -10105,7 +10105,7 @@ Every piece is hashed against the ` +
           planning: 'Reading the sources to cut it into shards…',
           running: `${job.shards.done.toLocaleString()} of ${job.shardCount.toLocaleString()} shards done
                     &middot; ${job.shards.leased} being worked on by ${job.workers} worker${job.workers === 1 ? '' : 's'}
-                    ${job.shards.failed ? `&middot; <span class="bad">${job.shards.failed} given up on</span>` : ''}
+                    ${job.shards.failed ? `&middot; <button type="button" class="bad" data-distributed-failures="${id}" title="List the shards that failed on every attempt, with why, and retry them.">${job.shards.failed} given up on</button>` : ''}
                     ${job.tilesPerSecond ? `&middot; ${job.tilesPerSecond.toLocaleString()} tiles/s` : ''}
                     ${job.etaSeconds !== null ? `&middot; about ${duration(job.etaSeconds * 1000)} left` : ''}
                     ${job.shards.leased === 0 && job.shards.pending > 0 && !job.local ? '&middot; <b>waiting for a worker</b> — add one under Settings → Workers' : ''}`,
@@ -10167,7 +10167,77 @@ Every piece is hashed against the ` +
                 ? `<p class="bad" style="margin:0.3rem 0 0">This node stopped taking shards: ${escapeHtml(job.localError)}</p>`
                 : ''
             }
+            ${failuresOpen.has(job.id) ? renderFailures(job) : ''}
           </div>`;
+      };
+
+      /** Jobs whose failures list is open, and what each last fetched. */
+      const failuresOpen = new Set();
+      const failuresOf = new Map();
+
+      /**
+       * The shards a job gave up on: where, why, and a way to try again.
+       *
+       * Retrying works while the job runs, not only once it stalls -- on a job
+       * days from finishing, waiting to the end to learn a failure was a
+       * passing one is waiting for nothing.
+       * @param {object} job - A row from /api/distributed.
+       * @returns {string} - HTML.
+       */
+      const renderFailures = (job) => {
+        const shards = failuresOf.get(job.id);
+        if (!shards) return '<p class="sub">Loading the failures…</p>';
+        if (!shards.length) {
+          return '<p class="sub">Nothing has failed on every attempt.</p>';
+        }
+        const id = escapeHtml(job.id);
+        const zooms = ([a, b]) => (a === b ? `z${a}` : `z${a}–z${b}`);
+        return `
+          <div style="overflow-x:auto; margin-top:0.6rem">
+            <table>
+              <thead><tr><th>Shard</th><th>Zooms</th><th>Tiles</th><th>Attempts</th><th>Last worker</th><th>Why</th><th></th></tr></thead>
+              <tbody>
+                ${shards
+                  .map(
+                    (shard) => `
+                      <tr>
+                        <td>${shard.index}</td>
+                        <td class="sub">${zooms(shard.zooms)}</td>
+                        <td class="sub">${shard.tiles.toLocaleString()}</td>
+                        <td class="sub">${shard.attempts}</td>
+                        <td class="sub">${escapeHtml(shard.worker ?? '')}</td>
+                        <td class="bad" style="max-width:32rem; word-break:break-word">${escapeHtml(shard.error ?? '')}</td>
+                        <td><button type="button" data-shard-retry="${shard.index}" data-job="${id}">Retry</button></td>
+                      </tr>`,
+                  )
+                  .join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="bar" style="margin-top:0.4rem">
+            <button type="button" data-distributed-retry="${id}">Retry all ${shards.length} failed</button>
+            <span class="sub">Back in the queue with their attempts reset; the job carries on meanwhile.</span>
+          </div>`;
+      };
+
+      /**
+       * Fetches the failed shards of every job whose list is open.
+       * @returns {Promise<void>} - Resolves once fetched.
+       */
+      const refreshFailures = async () => {
+        await Promise.all(
+          [...failuresOpen].map(async (jobId) => {
+            try {
+              const { job } = await api(
+                `/api/distributed/${encodeURIComponent(jobId)}?state=failed`,
+              );
+              failuresOf.set(jobId, job.shards);
+            } catch {
+              failuresOpen.delete(jobId);
+              failuresOf.delete(jobId);
+            }
+          }),
+        );
       };
 
       /**
@@ -10188,7 +10258,8 @@ Every piece is hashed against the ` +
         const jobs = body.jobs.filter(
           (job) => !job.finishedAt || Date.parse(job.finishedAt) > recent,
         );
-        const signature = JSON.stringify(jobs);
+        await refreshFailures();
+        const signature = JSON.stringify([jobs, [...failuresOf]]);
         if (signature === distributedLastDrawn) return;
         distributedLastDrawn = signature;
         host.innerHTML = jobs.length
@@ -10201,6 +10272,32 @@ Every piece is hashed against the ` +
       $('distributed-list').addEventListener('click', async (event) => {
         const { distributedStop, distributedRetry, distributedDiscard, distributedEdit } =
           event.target.dataset;
+        const { distributedFailures, shardRetry } = event.target.dataset;
+        if (distributedFailures !== undefined) {
+          if (failuresOpen.has(distributedFailures)) {
+            failuresOpen.delete(distributedFailures);
+            failuresOf.delete(distributedFailures);
+          } else {
+            failuresOpen.add(distributedFailures);
+          }
+          distributedLastDrawn = null;
+          loadDistributed().catch(() => {});
+          return;
+        }
+        if (shardRetry !== undefined) {
+          try {
+            await api(`/api/distributed/${encodeURIComponent(event.target.dataset.job)}/retry`, {
+              method: 'POST',
+              body: { shards: [Number(shardRetry)] },
+            });
+            toast(`Shard ${shardRetry} is back in the queue`);
+          } catch (error) {
+            toast(error.message);
+          }
+          distributedLastDrawn = null;
+          loadDistributed().catch(() => {});
+          return;
+        }
         if (distributedEdit !== undefined) {
           $('job-name').textContent = event.target.dataset.name;
           $('job-name').dataset.id = distributedEdit;

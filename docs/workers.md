@@ -158,10 +158,15 @@ A few things follow from that:
   went to somebody else, whichever finishes first is accepted and the other is
   told the shard is no longer wanted.
 - **A shard that fails is tried again**, elsewhere, up to
-  `workers.maxAttempts` times. One that fails on every attempt is usually a
-  source that cannot be read rather than bad luck, so the job then stops as
-  **stalled** with what was done kept; **Resume** hands out only the missing
-  shards.
+  `workers.maxAttempts` times. One that fails on every attempt is set aside and
+  the job carries on; once nothing else is left, it stops as **stalled** with
+  what was done kept, and **Resume** hands out only the missing shards.
+- **What failed, and why, is on the job card**: the "given up on" count opens
+  a list of those shards with their zooms, attempts, the worker that last had
+  each and its error. **Retry** puts one back in the queue, **Retry all**
+  every one of them, with their attempts reset — while the job is still
+  running, so a failure that was a passing one need not wait for the end.
+  A shard that fails everywhere is usually a source that cannot be read.
 - **A worker that cannot do a job at all** — no codec, say — hands the shard
   back without it counting as an attempt, and is not offered that job again.
 - **Stopping a job** keeps every finished shard on disk. **Resume** carries on;

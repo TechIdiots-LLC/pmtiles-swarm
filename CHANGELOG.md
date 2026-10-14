@@ -5,6 +5,11 @@
 - **The Docker image is `techidiotsllc/pmtiles-swarm`.** Images are pushed there, and the
   docs, the compose file and the Docker worker command in Settings → Workers use that name.
   Nothing was published under the earlier `wifidb/pmtiles-swarm` name.
+- **The shards a job gave up on are listed, and can be retried at once.** The "given up on" count
+  on a shared-out job opens a list of them — zooms, attempts, the worker that last had each, and
+  its error — with **Retry** for one and **Retry all** for every one, both while the job is still
+  running. They used to wait, unexplained, until everything else was done and the job stalled.
+  `GET /api/distributed/:id?state=failed` lists them; `POST …/retry` takes `{shards: [index]}`.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
