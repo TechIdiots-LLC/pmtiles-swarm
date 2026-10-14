@@ -232,6 +232,114 @@ export class MbtilesArchive {
   }
 
   /**
+   * Every tile id the archive holds, ascending, in chunks.
+   *
+   * What a bake needs of a source -- which tiles are there, in PMTiles order --
+   * asked of a table that keeps them in no order at all. Sorting every id in
+   * the file is not an option: a country at z16 is hundreds of millions of
+   * rows. So it leans on the one property of the Hilbert curve that makes this
+   * cheap: every tile's descendants at a deeper zoom are one contiguous run of
+   * ids, starting at the tile's own position times the number of them. A zoom
+   * is read a block of 256 x 256 tiles at a time, the blocks taken in curve
+   * order, each block's ids sorted on their own -- and the result is the whole
+   * zoom in order, never holding more than one block.
+   *
+   * `from` and `to` skip whole zooms and whole blocks outside the run, which is
+   * what keeps one shard of a planet from reading the planet.
+   * @param {object} [options] - `from`, `to` (half-open), `signal`.
+   * @yields {number[]} - Chunks of ascending tile ids.
+   */
+  async *tileIds(options = {}) {
+    const from = options.from ?? 0;
+    const to = options.to ?? Number.POSITIVE_INFINITY;
+    const { zxyToTileId } = await import('pmtiles');
+    const firstIdAt = (z) => (4 ** z - 1) / 3;
+
+    const zooms = this.#db
+      .prepare('SELECT DISTINCT zoom_level AS z FROM tiles ORDER BY z')
+      .all()
+      .map((row) => Number(row.z));
+    const all = this.#db.prepare(
+      'SELECT tile_column AS x, tile_row AS row FROM tiles WHERE zoom_level = ?',
+    );
+    const extent = this.#db.prepare(
+      'SELECT MIN(tile_column) AS x0, MAX(tile_column) AS x1, ' +
+        'MIN(tile_row) AS r0, MAX(tile_row) AS r1 FROM tiles WHERE zoom_level = ?',
+    );
+    const block = this.#db.prepare(
+      'SELECT tile_column AS x, tile_row AS row FROM tiles WHERE zoom_level = ? ' +
+        'AND tile_column BETWEEN ? AND ? AND tile_row BETWEEN ? AND ?',
+    );
+
+    /**
+     * Rows as ascending tile ids, narrowed to the run.
+     * @param {number} z - Their zoom.
+     * @param {object[]} rows - `{x, row}`, TMS.
+     * @returns {number[]} - The ids.
+     */
+    const idsOf = (z, rows) =>
+      rows
+        .map((one) =>
+          zxyToTileId(z, Number(one.x), 2 ** z - 1 - Number(one.row)),
+        )
+        .filter((id) => id >= from && id < to)
+        .sort((a, b) => a - b);
+
+    // Blocks of 2^8 tiles a side; below z9 a whole zoom is no bigger than one.
+    const BLOCK_BITS = 8;
+
+    for (const z of zooms) {
+      options.signal?.throwIfAborted();
+      const start = firstIdAt(z);
+      const end = firstIdAt(z + 1);
+      if (end <= from || start >= to) continue;
+
+      if (z <= BLOCK_BITS) {
+        const ids = idsOf(z, all.all(z));
+        if (ids.length) yield ids;
+        continue;
+      }
+
+      // Only the blocks the zoom's tiles actually reach.
+      const k = z - BLOCK_BITS;
+      const span = 4 ** BLOCK_BITS;
+      const range = extent.get(z);
+      const maxRow = 2 ** z - 1;
+      const bx0 = Number(range.x0) >> BLOCK_BITS;
+      const bx1 = Number(range.x1) >> BLOCK_BITS;
+      // TMS rows count from the south; blocks are counted in XYZ rows.
+      const by0 = (maxRow - Number(range.r1)) >> BLOCK_BITS;
+      const by1 = (maxRow - Number(range.r0)) >> BLOCK_BITS;
+
+      const blocks = [];
+      for (let bx = bx0; bx <= bx1; bx += 1) {
+        for (let by = by0; by <= by1; by += 1) {
+          const first = start + (zxyToTileId(k, bx, by) - firstIdAt(k)) * span;
+          if (first + span <= from || first >= to) continue;
+          blocks.push({ bx, by, first });
+        }
+      }
+      blocks.sort((a, b) => a.first - b.first);
+
+      for (const { bx, by } of blocks) {
+        options.signal?.throwIfAborted();
+        const x0 = bx << BLOCK_BITS;
+        const y0 = by << BLOCK_BITS;
+        const side = (1 << BLOCK_BITS) - 1;
+        const rows = block.all(
+          z,
+          x0,
+          x0 + side,
+          maxRow - (y0 + side),
+          maxRow - y0,
+        );
+        const ids = idsOf(z, rows);
+        if (ids.length) yield ids;
+      }
+    }
+  }
+
+  /**
    * The prepared tile statement, made once.
    * @returns {object} - The prepared statement.
    */

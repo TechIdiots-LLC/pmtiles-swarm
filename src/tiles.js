@@ -49,6 +49,86 @@ export class TileReadError extends Error {
   }
 }
 
+/**
+ * Another node's MBTiles archive, read over HTTP a tile at a time.
+ *
+ * What a worker has for an MBTiles source in a shared-out export: SQLite has
+ * no byte range worth asking for, so the node holding it answers for whole
+ * tiles, and for the ids it holds, and this presents both in the shapes the
+ * store already uses -- `getZxy` as a PMTiles reader has it, `tileIds` as a
+ * local MBTiles does.
+ */
+export class HttpTileArchive {
+  #base;
+  #headers;
+
+  /**
+   * @param {object} where - `url`, the archive's address on that node, and `headers`.
+   */
+  constructor({ url, headers }) {
+    this.#base = String(url).replace(/\/+$/, '');
+    this.#headers = headers ?? {};
+  }
+
+  /**
+   * One tile, or null where the archive has none.
+   * @param {number} z - Zoom.
+   * @param {number} x - Column.
+   * @param {number} y - Row, XYZ.
+   * @param {AbortSignal} [signal] - To stop early.
+   * @returns {Promise<{data: Buffer, encoding?: string} | null>} - The tile.
+   */
+  async getZxy(z, x, y, signal) {
+    const response = await fetch(`${this.#base}/tiles/${z}/${x}/${y}`, {
+      headers: this.#headers,
+      signal,
+    });
+    // 204 is "no tile here"; anything else that is not success is a refusal,
+    // and a refusal read as an empty tile would bake a hole into the archive.
+    if (response.status === 204) return null;
+    if (!response.ok) {
+      throw new TileReadError(
+        `reading ${z}/${x}/${y} answered ${response.status}`,
+        502,
+      );
+    }
+    const data = Buffer.from(await response.arrayBuffer());
+    const encoding = response.headers.get('x-tile-encoding');
+    return encoding ? { data, encoding } : { data };
+  }
+
+  /**
+   * The tile ids the archive holds within a run, ascending.
+   * @param {object} [options] - `from`, `to`, `signal`.
+   * @yields {number[]} - Ascending tile ids.
+   */
+  async *tileIds(options = {}) {
+    const query = new URLSearchParams();
+    if (Number.isFinite(options.from)) query.set('from', String(options.from));
+    if (Number.isFinite(options.to)) query.set('to', String(options.to));
+    const response = await fetch(`${this.#base}/ids?${query}`, {
+      headers: this.#headers,
+      signal: options.signal,
+    });
+    if (!response.ok) {
+      throw new TileReadError(`listing tiles answered ${response.status}`, 502);
+    }
+    const { ids } = await response.json();
+    if (ids?.length) yield ids;
+  }
+
+  /**
+   * Not offered: the summary travels with the catalog entry instead.
+   * @returns {Promise<never>} - Always rejects.
+   */
+  async getHeader() {
+    throw new TileReadError(
+      'the header of this archive is not served here',
+      501,
+    );
+  }
+}
+
 /** What a reader's piece cache holds before it has seen the torrent. */
 const STARTING_CACHE_BYTES = 64 * 1024 * 1024;
 
@@ -289,6 +369,27 @@ export class TileStore {
       this.#remote.delete(oldest);
     }
     return handle;
+  }
+
+  /**
+   * Every tile id an archive holds, ascending, for one that can say.
+   *
+   * The counterpart of `readRange` for an archive with no byte ranges worth
+   * reading: an MBTiles is a database, and a bake learns which tiles it holds
+   * by asking it rather than by walking a directory -- here, or over HTTP from
+   * the node that holds it.
+   * @param {string} infoHash - Which archive.
+   * @param {object} [options] - `from`, `to`, `signal`.
+   * @yields {number[]} - Chunks of ascending tile ids.
+   */
+  async *tileIdsOf(infoHash, options = {}) {
+    const entry = this.#catalog.get(infoHash);
+    if (!entry) throw new TileReadError('unknown archive', 404);
+    const handle = await this.#acquire(entry);
+    if (typeof handle.archive?.tileIds !== 'function') {
+      throw new TileReadError('this archive cannot list its tiles', 415);
+    }
+    yield* handle.archive.tileIds(options);
   }
 
   /**
@@ -535,6 +636,17 @@ export class TileStore {
     // sees the same summary, encoding and zoom range it would there -- and an
     // address on the coordinator to read the bytes from. Asked first, because
     // a node like that has no engine to ask about completeness.
+    if (entry.http && (entry.kind === 'mbtiles' || isMbtiles(entry.name))) {
+      // SQLite cannot be read a byte range at a time, so another node's
+      // MBTiles is asked for whole tiles, and for the ids it holds.
+      return {
+        mode: 'http',
+        archive: new HttpTileArchive(entry.http),
+        openedAt: new Date().toISOString(),
+        close: () => {},
+      };
+    }
+
     if (entry.http) {
       const source = new FetchSource(
         entry.http.url,

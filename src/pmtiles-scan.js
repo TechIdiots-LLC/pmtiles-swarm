@@ -196,6 +196,13 @@ export async function* scanEntries(archive, options = {}) {
  * @yields {number[]} - Chunks of ascending tile ids.
  */
 export async function* scanTileIds(archive, options = {}) {
+  // A source that lists its own ids -- an MBTiles archive, which has no
+  // directory to read -- is asked for them rather than scanned. It answers in
+  // the same shape: ascending chunks, narrowed to the run.
+  if (typeof archive?.tileIds === 'function') {
+    yield* archive.tileIds(options);
+    return;
+  }
   const from = options.from ?? 0;
   const to = options.to ?? Number.POSITIVE_INFINITY;
   for await (const { entries } of scanEntries(archive, options)) {

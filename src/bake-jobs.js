@@ -163,32 +163,78 @@ export function boundsHeader(resolved, selection) {
  * @returns {object[]} - One `{getBytes}` per readable source.
  */
 export function scanSourcesFor(resolved, tiles, signal) {
-  return resolved.sources
-    .filter((source) => source.entry || source.remote)
-    .map((source) => ({
-      getBytes: async (offset, length) => {
-        // The one difference between a source this node holds and one it
-        // reads over the network, here as everywhere else: which method of
-        // the store answers. What is done with the bytes is identical.
-        const bytes = source.remote
-          ? await tiles.readRemoteRange(source.remote, offset, length, {
-              signal,
-            })
-          : await tiles.readRange(source.entry.infoHash, offset, length, {
-              signal,
-            });
-        // Sliced by offset and length rather than handed `.buffer` outright.
-        // A Buffer is a view, and where it is a view *into* something larger
-        // -- which is what Buffer.allocUnsafe hands back -- `.buffer` is the
-        // whole pool, and a header read out of it is somebody else's bytes.
-        return {
-          data: bytes.buffer.slice(
-            bytes.byteOffset,
-            bytes.byteOffset + bytes.byteLength,
-          ),
-        };
-      },
-    }));
+  return leafSourcesOf(resolved).map((source) =>
+    // An MBTiles is a database, not a file of directories, so it is asked
+    // which tiles it holds rather than read for them. Here or on a worker,
+    // the store knows how to ask.
+    source.entry && isMbtiles(source.entry.name, source.entry.kind)
+      ? {
+          tileIds: (options = {}) =>
+            tiles.tileIdsOf(source.entry.infoHash, { ...options, signal }),
+        }
+      : {
+          getBytes: async (offset, length) => {
+            // The one difference between a source this node holds and one it
+            // reads over the network, here as everywhere else: which method of
+            // the store answers. What is done with the bytes is identical.
+            const bytes = source.remote
+              ? await tiles.readRemoteRange(source.remote, offset, length, {
+                  signal,
+                })
+              : await tiles.readRange(source.entry.infoHash, offset, length, {
+                  signal,
+                });
+            // Sliced by offset and length rather than handed `.buffer` outright.
+            // A Buffer is a view, and where it is a view *into* something larger
+            // -- which is what Buffer.allocUnsafe hands back -- `.buffer` is the
+            // whole pool, and a header read out of it is somebody else's bytes.
+            return {
+              data: bytes.buffer.slice(
+                bytes.byteOffset,
+                bytes.byteOffset + bytes.byteLength,
+              ),
+            };
+          },
+        },
+  );
+}
+
+/**
+ * Every archive and address a stack reads, through any nested stacks, once.
+ *
+ * What a bake walks to find the tiles it could write. A nested stack holds no
+ * tiles of its own -- it is a recipe -- so its coverage is its sources'
+ * coverage, and leaving it out was leaving out whatever ground only it covered:
+ * a planet whose base is a stack baked only where the archives above it
+ * happened to reach. Listed once each, since a stack may name one archive
+ * through two routes and scanning it twice buys nothing.
+ * @param {object} resolved - The resolved stack.
+ * @param {Set<string>} [seen] - Archives and addresses already listed.
+ * @returns {object[]} - The resolved sources holding tiles.
+ */
+function leafSourcesOf(resolved, seen = new Set()) {
+  const found = [];
+  for (const source of resolved.sources) {
+    if (source.nested) {
+      found.push(...leafSourcesOf(source.nested, seen));
+      continue;
+    }
+    const key = source.entry?.infoHash ?? source.remote;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    found.push(source);
+  }
+  return found;
+}
+
+/**
+ * Whether a catalog entry is an MBTiles archive.
+ * @param {string} [name] - Its filename.
+ * @param {string} [kind] - Its recorded kind.
+ * @returns {boolean} - True for MBTiles.
+ */
+function isMbtiles(name, kind) {
+  return kind === 'mbtiles' || /\.mbtiles$/i.test(name ?? '');
 }
 
 /**

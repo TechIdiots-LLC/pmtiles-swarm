@@ -5,7 +5,17 @@
 - _...Add new stuff here..._
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
+- **A stack with MBTiles sources could not be exported**, here or shared out: the export stopped
+  with "this archive is not readable as a stream of bytes". A bake learns which tiles exist by
+  walking each source's directories, and an MBTiles has none — it is SQLite. It is now asked
+  instead, in PMTiles order without sorting the whole table: a zoom is read a block of 256 × 256
+  tiles at a time, the blocks in Hilbert order, since every tile's descendants are one contiguous
+  run of ids. A shard reads only the blocks its run reaches. Workers ask the coordinator for an
+  MBTiles source's tiles and tile lists, since there is no byte range of one to read.
+- **An export skipped ground that only a nested stack covered.** The scan for which tiles to write
+  looked at a stack's archives and addresses and passed over the stacks inside it, so a planet
+  whose base is a stack was baked only where the archives above it happened to reach. Nested
+  stacks' archives are now scanned too.
 
 ## 0.107.0
 ### ✨ Features and improvements
