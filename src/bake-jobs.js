@@ -144,10 +144,250 @@ export function sayIfThreadStarved(
  * @param {object|null} selection - Which part is being written.
  * @returns {object} - `minLon`, `minLat`, `maxLon`, `maxLat`.
  */
-function boundsHeader(resolved, selection) {
+export function boundsHeader(resolved, selection) {
   const { bounds } = coverageOf(stackCoverage(resolved), selection);
   const [minLon, minLat, maxLon, maxLat] = bounds;
   return { minLon, minLat, maxLon, maxLat };
+}
+
+/**
+ * A stack's sources as byte sources, for a bake to scan.
+ *
+ * Read through the tile store rather than off the disk, so a cache-mode
+ * source is scanned the same way it is served: its directories come out of
+ * the swarm, and the store holds them to its own byte budget. On a worker the
+ * same call reads the coordinator's archives over HTTP, for the same reason.
+ * @param {object} resolved - The resolved stack.
+ * @param {object} tiles - The tile store.
+ * @param {AbortSignal} [signal] - To stop early.
+ * @returns {object[]} - One `{getBytes}` per readable source.
+ */
+export function scanSourcesFor(resolved, tiles, signal) {
+  return resolved.sources
+    .filter((source) => source.entry || source.remote)
+    .map((source) => ({
+      getBytes: async (offset, length) => {
+        // The one difference between a source this node holds and one it
+        // reads over the network, here as everywhere else: which method of
+        // the store answers. What is done with the bytes is identical.
+        const bytes = source.remote
+          ? await tiles.readRemoteRange(source.remote, offset, length, {
+              signal,
+            })
+          : await tiles.readRange(source.entry.infoHash, offset, length, {
+              signal,
+            });
+        // Sliced by offset and length rather than handed `.buffer` outright.
+        // A Buffer is a view, and where it is a view *into* something larger
+        // -- which is what Buffer.allocUnsafe hands back -- `.buffer` is the
+        // whole pool, and a header read out of it is somebody else's bytes.
+        return {
+          data: bytes.buffer.slice(
+            bytes.byteOffset,
+            bytes.byteOffset + bytes.byteLength,
+          ),
+        };
+      },
+    }));
+}
+
+/**
+ * The per-tile merge a bake runs, with the cache contours need.
+ * @param {object} options - What `mergeTileFor` takes, plus `heightsCacheBytes`.
+ * @returns {Function} - `(z, x, y) => Promise<Buffer|null>`.
+ */
+export function bakeMergeFor(options) {
+  return mergeTileFor({
+    ...options,
+    // One per job, and only where a tile is built out of others. A contour
+    // tile is traced from nine merged ones and each of those is wanted by
+    // nine contour tiles, so a run without this does most of its merging
+    // twice over -- measured at four times the source reads on a small block
+    // and approaching nine on a large one.
+    //
+    // Its own rather than the node's disk cache, which a bake rightly does
+    // not touch: a planet export would evict the serving cache with tiles
+    // nobody will ask for again. This one goes when the job does.
+    heightsCache:
+      options.kind === 'contours'
+        ? new HeightsCache({ maxBytes: options.heightsCacheBytes })
+        : null,
+  });
+}
+
+/**
+ * The header fields a bake states rather than derives.
+ *
+ * The zooms are left to the writer, which reads them off the tiles it
+ * actually wrote -- more honest than the selection, since a request for z0-16
+ * over sources that stop at z14 wrote fourteen. Bounds are not derived there
+ * and default to the whole world, so a regional export would claim the planet
+ * and hold one country: a client would go on asking for tiles that were never
+ * written.
+ * @param {object} resolved - The resolved stack.
+ * @param {object|null} selection - Which part is being written.
+ * @param {object} options - `format` and `kind`.
+ * @returns {object} - Header fields.
+ */
+export function bakeHeaderFor(resolved, selection, { format, kind }) {
+  return {
+    format,
+    ...boundsHeader(resolved, selection),
+    // A vector tile, gzipped, which is how every reader expects to find one.
+    // The raster path says nothing here and takes the defaults.
+    ...(kind === 'contours' ? { tileCompression: Compression.Gzip } : {}),
+  };
+}
+
+/**
+ * What an export will write, or why it cannot.
+ *
+ * Checked where the export is asked for rather than at the first tile: an
+ * export is hours, and a box the wrong way round should cost a message rather
+ * than an archive of nothing. The same answer whether the merging is done here
+ * or handed out to workers, so both refuse the same things.
+ * @param {object} resolved - The resolved stack.
+ * @param {object} options - What was asked for.
+ * @returns {{selection: object|null, kind: string, thresholds: (object|string|undefined)}} - The plan.
+ * @throws {Error} With a `status` the caller can answer with.
+ */
+export function bakePlanFor(resolved, options) {
+  // Which part of the stack this run writes.
+  const wrong = selectionProblems(options);
+  if (wrong.length) {
+    const error = new Error(wrong.join('; '));
+    error.status = 400;
+    throw error;
+  }
+  let selection = selectionFrom(options);
+
+  // What this run is making. Terrain is what an export has always meant, so
+  // it stays the default and nothing already written has to say so.
+  const kind = options.kind ?? 'terrain';
+  if (!['terrain', 'contours'].includes(kind)) {
+    const error = new Error(`there is no "${kind}" to export`);
+    error.status = 400;
+    throw error;
+  }
+  const thresholds =
+    kind === 'contours'
+      ? (options.thresholds ?? resolved.stack.contours?.thresholds)
+      : undefined;
+  if (kind === 'contours') {
+    if (resolved.stack.space === 'rgba') {
+      const error = new Error(
+        'this stack is imagery, and a colour has no contours to trace',
+      );
+      error.status = 400;
+      throw error;
+    }
+    const wrongThresholds = contourProblems({ thresholds });
+    if (wrongThresholds.length) {
+      const error = new Error(wrongThresholds.join('; '));
+      error.status = 400;
+      throw error;
+    }
+    // Narrowed to the zooms that draw anything. Without this the run walks
+    // every tile the sources hold at z0-z8 to trace nothing at all, which on
+    // a planet is hours spent producing silence -- and the selection is
+    // already the machinery for not doing that.
+    const drawn = drawnZooms(thresholdsFrom(thresholds));
+    selection = selectionFrom({
+      ...options,
+      minzoom: Math.max(
+        Number(options.minzoom ?? drawn.minzoom),
+        drawn.minzoom,
+      ),
+      maxzoom: options.maxzoom,
+    });
+  }
+
+  // A source this node can read: an archive it holds, a recipe it can
+  // evaluate, or an address it can fetch. The last was missing, which
+  // refused exactly the bake worth having -- a stack of remote sources
+  // exported to an archive is how terrain that lives somewhere else, in a
+  // provider's file list or a private bucket, becomes something this node
+  // holds and can seed.
+  const unresolved = resolved.sources.filter(
+    (source) => !source.entry && !source.nested && !source.remote,
+  );
+  if (unresolved.length === resolved.sources.length) {
+    const error = new Error(
+      "none of this stack's sources resolved to anything this node can read",
+    );
+    error.status = 409;
+    throw error;
+  }
+
+  return { selection, kind, thresholds };
+}
+
+/**
+ * Hands a finished bake to the library, and retires the builds it replaces.
+ *
+ * The last step of every export, wherever its tiles were merged -- on this
+ * node, or across several and assembled here.
+ * @param {object} parts - What to import and how.
+ * @param {object} parts.library - The library to add it to.
+ * @param {string} parts.destination - The finished `.pmtiles`.
+ * @param {string} parts.stackId - Which stack made it.
+ * @param {string} [parts.publishDir] - Where it should end up.
+ * @param {object} parts.options - What the export was asked to do with it.
+ * @returns {Promise<object>} - The catalog entry.
+ */
+export async function publishBaked({
+  library,
+  destination,
+  stackId,
+  publishDir,
+  options,
+}) {
+  const entry = await library.addLocalArchive(destination, {
+    // The export's, and only the export's. A category is what an archive is
+    // filed under, and a stack is not an archive -- it has no bytes and no
+    // infohash, and nothing files it anywhere. This fell back to
+    // `stack.categories`, which the typedef never had, validation never
+    // checked and the editor has no field for.
+    categories: options.categories,
+    // So the archive can be served over HTTP from where it landed, which is
+    // what makes a scheduled export useful to anybody who is not a peer.
+    webSeedBase: options.webSeedBase,
+    // And what this node itself does with the file: serve it, offer itself
+    // as a web seed for it, list it for download. A baked archive is already
+    // on this disk, so all three are nearly free and none of them is the
+    // default.
+    serveArchive: options.serveArchive,
+    selfWebSeed: options.selfWebSeed,
+    publicDownload: options.publicDownload,
+    // Which stack made it. Without this an export has no family, and a
+    // scheduled one would pile up a build a night for ever.
+    stack: stackId,
+    // Moved out of the working directory as it is taken on, so a finished
+    // archive does not live among the checkpoint files of the job that made
+    // it.
+    publishDir,
+    mode: 'mirror',
+  });
+
+  // The same retirement a watched folder does, over the builds this stack
+  // has produced. A schedule without it is a disk that fills at whatever
+  // rate the schedule runs -- which for a nightly planet is the fastest way
+  // to fill one that this project has.
+  if (retains(options)) {
+    await retire({
+      library,
+      family: library.catalog
+        .list()
+        .filter((candidate) => candidate.source?.stack === stackId),
+      entry,
+      keep: options.keep,
+      keepDays: options.keepDays,
+      label: `[export] ${stackId}`,
+    }).catch((error) =>
+      console.warn(`[export] could not retire: ${error.message}`),
+    );
+  }
+  return entry;
 }
 
 /** The exports a node is running, and the ones it has just finished. */
@@ -449,74 +689,7 @@ export class BakeManager {
     // presses the button rather than an hour in.
     assertBakeable(resolved, codec);
 
-    // Which part of the stack this run writes. Refused here rather than at the
-    // first tile: an export is hours, and a box the wrong way round should
-    // cost a message rather than an archive of nothing.
-    const wrong = selectionProblems(options);
-    if (wrong.length) {
-      const error = new Error(wrong.join('; '));
-      error.status = 400;
-      throw error;
-    }
-    let selection = selectionFrom(options);
-
-    // What this run is making. Terrain is what an export has always meant, so
-    // it stays the default and nothing already written has to say so.
-    const kind = options.kind ?? 'terrain';
-    if (!['terrain', 'contours'].includes(kind)) {
-      const error = new Error(`there is no "${kind}" to export`);
-      error.status = 400;
-      throw error;
-    }
-    const thresholds =
-      kind === 'contours'
-        ? (options.thresholds ?? resolved.stack.contours?.thresholds)
-        : undefined;
-    if (kind === 'contours') {
-      if (resolved.stack.space === 'rgba') {
-        const error = new Error(
-          'this stack is imagery, and a colour has no contours to trace',
-        );
-        error.status = 400;
-        throw error;
-      }
-      const wrongThresholds = contourProblems({ thresholds });
-      if (wrongThresholds.length) {
-        const error = new Error(wrongThresholds.join('; '));
-        error.status = 400;
-        throw error;
-      }
-      // Narrowed to the zooms that draw anything. Without this the run walks
-      // every tile the sources hold at z0-z8 to trace nothing at all, which on
-      // a planet is hours spent producing silence -- and the selection is
-      // already the machinery for not doing that.
-      const drawn = drawnZooms(thresholdsFrom(thresholds));
-      selection = selectionFrom({
-        ...options,
-        minzoom: Math.max(
-          Number(options.minzoom ?? drawn.minzoom),
-          drawn.minzoom,
-        ),
-        maxzoom: options.maxzoom,
-      });
-    }
-
-    // A source this node can read: an archive it holds, a recipe it can
-    // evaluate, or an address it can fetch. The last was missing, which
-    // refused exactly the bake worth having -- a stack of remote sources
-    // exported to an archive is how terrain that lives somewhere else, in a
-    // provider's file list or a private bucket, becomes something this node
-    // holds and can seed.
-    const unresolved = resolved.sources.filter(
-      (source) => !source.entry && !source.nested && !source.remote,
-    );
-    if (unresolved.length === resolved.sources.length) {
-      const error = new Error(
-        "none of this stack's sources resolved to anything this node can read",
-      );
-      error.status = 409;
-      throw error;
-    }
+    const { selection, kind, thresholds } = bakePlanFor(resolved, options);
 
     // Resolved before anything starts, and allowed to throw. A location that
     // does not exist or cannot be written is the caller's mistake and they can
@@ -628,54 +801,15 @@ export class BakeManager {
     // in-progress list, which is what the archives view already draws -- so the
     // hashing shows up there without this having to report it twice.
     job.phase = 'importing';
-    const entry = await this.#library.addLocalArchive(destination, {
-      // The export's, and only the export's. A category is what an archive is
-      // filed under, and a stack is not an archive -- it has no bytes and no
-      // infohash, and nothing files it anywhere. This fell back to
-      // `stack.categories`, which the typedef never had, validation never
-      // checked and the editor has no field for.
-      categories: options.categories,
-      // So the archive can be served over HTTP from where it landed, which is
-      // what makes a scheduled export useful to anybody who is not a peer.
-      webSeedBase: options.webSeedBase,
-      // And what this node itself does with the file: serve it, offer itself
-      // as a web seed for it, list it for download. A baked archive is already
-      // on this disk, so all three are nearly free and none of them is the
-      // default.
-      serveArchive: options.serveArchive,
-      selfWebSeed: options.selfWebSeed,
-      publicDownload: options.publicDownload,
-      // Which stack made it. Without this an export has no family, and a
-      // scheduled one would pile up a build a night for ever.
-      stack: resolved.stack.id,
-      // Moved out of the working directory as it is taken on, so a finished
-      // archive does not live among the checkpoint files of the job that made
-      // it.
+    const entry = await publishBaked({
+      library: this.#library,
+      destination,
+      stackId: resolved.stack.id,
       publishDir: job.publishDir,
-      mode: 'mirror',
+      options,
     });
 
     job.infoHash = entry.infoHash;
-
-    // The same retirement a watched folder does, over the builds this stack
-    // has produced. A schedule without it is a disk that fills at whatever
-    // rate the schedule runs -- which for a nightly planet is the fastest way
-    // to fill one that this project has.
-    if (retains(options)) {
-      await retire({
-        library: this.#library,
-        family: this.#library.catalog
-          .list()
-          .filter((candidate) => candidate.source?.stack === resolved.stack.id),
-        entry,
-        keep: options.keep,
-        keepDays: options.keepDays,
-        label: `[export] ${resolved.stack.id}`,
-      }).catch((error) =>
-        console.warn(`[export] could not retire: ${error.message}`),
-      );
-    }
-
     job.phase = 'done';
     job.finishedAt = new Date().toISOString();
   }
@@ -702,41 +836,8 @@ export class BakeManager {
     format,
     options,
   ) {
-    // Read through the tile store rather than off the disk, so a cache-mode
-    // source is scanned the same way it is served: its directories come out of
-    // the swarm, and the store holds them to its own byte budget.
-    const sources = resolved.sources
-      .filter((source) => source.entry || source.remote)
-      .map((source) => ({
-        getBytes: async (offset, length) => {
-          // The one difference between a source this node holds and one it
-          // reads over the network, here as everywhere else: which method of
-          // the store answers. What is done with the bytes is identical.
-          const bytes = source.remote
-            ? await this.#tiles.readRemoteRange(source.remote, offset, length, {
-                signal: job.controller.signal,
-              })
-            : await this.#tiles.readRange(
-                source.entry.infoHash,
-                offset,
-                length,
-                { signal: job.controller.signal },
-              );
-          // Sliced by offset and length rather than handed `.buffer` outright.
-          // A Buffer is a view, and where it is a view *into* something larger
-          // -- which is what Buffer.allocUnsafe hands back -- `.buffer` is the
-          // whole pool, and a header read out of it is somebody else's bytes.
-          return {
-            data: bytes.buffer.slice(
-              bytes.byteOffset,
-              bytes.byteOffset + bytes.byteLength,
-            ),
-          };
-        },
-      }));
-
     const result = await bakeStack({
-      sources,
+      sources: scanSourcesFor(resolved, this.#tiles, job.controller.signal),
       workDir,
       destination,
       revision: bakeRevision(resolved, options.selection ?? null, {
@@ -744,7 +845,7 @@ export class BakeManager {
         thresholds: options.thresholds ?? null,
       }),
       signal: job.controller.signal,
-      mergeTile: mergeTileFor({
+      mergeTile: bakeMergeFor({
         resolved,
         tiles: this.#tiles,
         codec,
@@ -754,37 +855,12 @@ export class BakeManager {
         format,
         kind: options.kind,
         thresholds: options.thresholds,
-        // One per job, and only where a tile is built out of others. A
-        // contour tile is traced from nine merged ones and each of those is
-        // wanted by nine contour tiles, so a run without this does most of
-        // its merging twice over -- measured at four times the source reads
-        // on a small block and approaching nine on a large one.
-        //
-        // Its own rather than the node's disk cache, which a bake rightly
-        // does not touch: a planet export would evict the serving cache with
-        // tiles nobody will ask for again. This one goes when the job does.
-        heightsCache:
-          options.kind === 'contours'
-            ? new HeightsCache({
-                maxBytes: this.#config.stacks?.heightsCacheBytes,
-              })
-            : null,
+        heightsCacheBytes: this.#config.stacks?.heightsCacheBytes,
       }),
-      // The zooms are left to the writer, which reads them off the tiles it
-      // actually wrote -- more honest than the selection, since a request for
-      // z0-16 over sources that stop at z14 wrote fourteen. Bounds are not
-      // derived there and default to the whole world, so a regional export
-      // would claim the planet and hold one country: a client would go on
-      // asking for tiles that were never written.
-      header: {
+      header: bakeHeaderFor(resolved, options.selection ?? null, {
         format,
-        ...boundsHeader(resolved, options.selection ?? null),
-        // A vector tile, gzipped, which is how every reader expects to find
-        // one. The raster path says nothing here and takes the defaults.
-        ...(options.kind === 'contours'
-          ? { tileCompression: Compression.Gzip }
-          : {}),
-      },
+        kind: options.kind,
+      }),
       selection: options.selection ?? null,
       pauseMs: this.#config.stacks?.bakePauseMs ?? 0,
       concurrency: this.#concurrency(),
