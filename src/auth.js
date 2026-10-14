@@ -21,13 +21,19 @@ import crypto from 'node:crypto';
  *   admin  everything the console can do, which is everything.
  *   peer   reads only: the catalogue, the feeds, tiles and .torrent files.
  *          What another node needs to follow this one, and nothing else.
+ *   worker /api/workers/ and nothing else: ask for a shard of a distributed
+ *          bake, read the sources it needs, hand the result back. What a
+ *          machine lending its CPU needs, and not a read of the library.
  *
  * The split exists because the alternative was handing a peer the admin key.
  * "Let that node mirror my internal archives" and "let that node delete my
  * library" were the same sentence, and the first is a thing people reasonably
  * want to say to someone they would not say the second to.
  */
-export const ROLES = new Set(['admin', 'peer']);
+export const ROLES = new Set(['admin', 'peer', 'worker']);
+
+/** Where a worker token may go, and the only place it may. */
+const WORKER_PREFIX = '/api/workers/';
 
 /**
  * Mints a token.
@@ -135,10 +141,17 @@ export function verifyPassword(password, stored) {
  * @param {string} path - Request path.
  * @param {object} [options] - What this node publishes.
  * @param {boolean} [options.index] - Whether the front page is served. False takes it and the three paths it needs off the list.
+ * @param {boolean} [options.workers] - Whether workers reach this node on the public listener.
  * @returns {boolean} - True when a public listener should serve it.
  */
 export function isPublicSurface(path, options = {}) {
   const index = options.index !== false;
+
+  // The one exception to "nothing here can change anything", and only where
+  // asked for: workers out on the internet have no way to the admin port. It
+  // is still guarded -- every route under it wants a worker or admin token --
+  // so this makes it reachable, not open.
+  if (path.startsWith(WORKER_PREFIX)) return options.workers === true;
 
   // What the front page needs in order to be a front page. Turning it off has
   // to take these with it, or "no index" would leave the surface it opened up
@@ -369,6 +382,21 @@ export function createAuth(config) {
       if (!enabled || isPublicPath(req.path)) return next();
       if (!who) {
         return res.status(401).json({ error: 'authentication required' });
+      }
+
+      // A worker token does work and nothing else, and the work routes are
+      // for workers and whoever administers the node -- not for a peer, whose
+      // token is for following this node, not for reading its sources whole.
+      const forWorkers = req.path.startsWith(WORKER_PREFIX);
+      if (who.role === 'worker' || forWorkers) {
+        if (forWorkers && (who.role === 'worker' || who.role === 'admin')) {
+          return next();
+        }
+        return res.status(403).json({
+          error: forWorkers
+            ? 'that is for workers: it wants a worker token'
+            : 'a worker token can only take and return work, under /api/workers/',
+        });
       }
 
       // A peer token reads. Everything that changes something — creating
