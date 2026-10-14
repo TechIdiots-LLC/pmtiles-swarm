@@ -380,4 +380,68 @@ export function mountDistributed(app, parts) {
 
   app.get('/api/workers/archives/:infoHash/archive.pmtiles', serveSource);
   app.head('/api/workers/archives/:infoHash/archive.pmtiles', serveSource);
+
+  /**
+   * One tile of an archive a job reads, for a source with no byte ranges.
+   *
+   * An MBTiles is SQLite, which a worker cannot read a range at a time, so it
+   * asks for tiles instead. 204 where the archive has no such tile -- an
+   * answer -- and the encoding the tile is stored in, so a gzipped vector
+   * tile is not decompressed here only to be compressed again there.
+   */
+  app.get(
+    '/api/workers/archives/:infoHash/tiles/:z/:x/:y',
+    route(async (req, res) => {
+      if (!distributed) return disabled(res);
+      const entry = distributed.archiveFor(req.params.infoHash);
+      if (!entry) {
+        return res
+          .status(404)
+          .json({ error: 'no running job reads that archive' });
+      }
+      const [z, x, y] = ['z', 'x', 'y'].map((key) => Number(req.params[key]));
+      if (![z, x, y].every(Number.isInteger)) {
+        return res.status(400).json({ error: 'z, x and y are whole numbers' });
+      }
+      const tile = await tiles.getTile(entry.infoHash, z, x, y);
+      if (!tile) return res.status(204).end();
+      res.set('content-type', 'application/octet-stream');
+      if (tile.encoding) res.set('x-tile-encoding', tile.encoding);
+      res.end(tile.data);
+    }),
+  );
+
+  /**
+   * The tile ids an archive a job reads holds within a run, ascending.
+   *
+   * What a worker scans an MBTiles source with. Always for one shard's run in
+   * practice, so a few tens of thousands of ids at most.
+   */
+  app.get(
+    '/api/workers/archives/:infoHash/ids',
+    route(async (req, res) => {
+      if (!distributed) return disabled(res);
+      const entry = distributed.archiveFor(req.params.infoHash);
+      if (!entry) {
+        return res
+          .status(404)
+          .json({ error: 'no running job reads that archive' });
+      }
+      const bound = (value) =>
+        value === undefined || value === '' ? undefined : Number(value);
+      const from = bound(req.query.from);
+      const to = bound(req.query.to);
+      if (
+        (from !== undefined && !Number.isSafeInteger(from)) ||
+        (to !== undefined && !Number.isSafeInteger(to))
+      ) {
+        return res.status(400).json({ error: 'from and to are tile ids' });
+      }
+      const ids = [];
+      for await (const chunk of tiles.tileIdsOf(entry.infoHash, { from, to })) {
+        ids.push(...chunk);
+      }
+      res.json({ ids });
+    }),
+  );
 }
