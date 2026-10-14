@@ -33,6 +33,12 @@ node src/index.js --config swarm.config.json
 - **[docs/security.md](docs/security.md)** — what is public, what is guarded, named tokens with
   roles, console sign-in, and why an unauthenticated node refuses to listen on a reachable
   address.
+- **[docs/workers.md](docs/workers.md)** — sharing an export out to other machines: a worker is
+  the npm package and a token, a shard is a run of tile ids, and a worker that goes away costs
+  nothing but its lease.
+- **[docs/docker.md](docs/docker.md)** — the `wifidb/pmtiles-swarm` image, the single `/data`
+  mount everything lives under, why a BitTorrent peer is not the usual Docker networking
+  question, and the same image as a worker.
 - **[docs/running-as-a-service.md](docs/running-as-a-service.md)** — a systemd unit, why
   `Restart=always` is required rather than optional, and which ports want a firewall rule.
 - **[docs/haproxy.md](docs/haproxy.md)** — health monitors, what a reverse proxy carries and

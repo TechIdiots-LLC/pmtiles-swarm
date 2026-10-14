@@ -527,6 +527,7 @@
           <span class="bar-gap"></span>
           <span class="muted" id="stacks-where"></span>
         </div>
+        <div id="distributed-list"></div>
         <div id="stacks-list"></div>
       </section>
 
@@ -795,6 +796,41 @@
               zoom, so the pieces tile evenly, never overlap, and have a name
               everybody agrees on. This fills the box in from one.
             </div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Where to run it</label>
+          <label class="choice">
+            <input type="radio" name="bake-where" value="here" checked />
+            <span>This node</span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="bake-where" value="workers" />
+            <span>Workers</span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="bake-where" value="both" />
+            <span>Both — this node and the workers</span>
+          </label>
+          <div class="sub" id="bake-where-note">
+            With workers, the export is cut into shards that any machine
+            running <code>pmtiles-swarm worker</code> with a worker token can
+            take, bake and hand back; this node puts them together and imports
+            the result exactly as it would its own. <b>Both</b> has this node
+            take shards from the same queue too, so the job finishes even if
+            no worker ever comes, and sooner for every one that does.
+          </div>
+          <div id="bake-join" hidden style="margin-top:0.5rem"></div>
+          <div class="bar" id="bake-shard-row" hidden style="margin-top:0.4rem">
+            <label for="bake-shard-size" class="sub" style="margin:0">Tiles per shard</label>
+            <input id="bake-shard-size" type="number" min="100" step="100"
+                   placeholder="20000, or 4000 for contours" style="width:16rem" />
+          </div>
+          <div class="sub" id="bake-shard-note" hidden>
+            A few minutes of work each is the aim: small enough that a worker
+            going away costs little, large enough that asking for the next one
+            is not most of the job.
           </div>
         </div>
 
@@ -5208,8 +5244,11 @@ Every piece is hashed against the ` +
               One token per person or node, so any of them can be revoked
               without disturbing the rest. A <b>peer</b> token reads this node —
               its catalogue, feeds, tiles and torrent files — which is what
-              another swarm node needs to follow it, and nothing more. An
-              <b>admin</b> token can do everything the console can.
+              another swarm node needs to follow it, and nothing more. A
+              <b>worker</b> token takes and returns shards of an export and
+              nothing else — Settings → Workers makes those, with the command
+              to use them. An <b>admin</b> token can do everything the console
+              can.
             </div>
 
             <div style="overflow-x:auto">
@@ -5273,6 +5312,7 @@ Every piece is hashed against the ` +
                 <label for="token-role">Role</label>
                 <select id="token-role" style="width:9rem">
                   <option value="peer">peer — read only</option>
+                  <option value="worker">worker — bake shards only</option>
                   <option value="admin">admin — everything</option>
                 </select>
               </div>
@@ -5310,7 +5350,8 @@ Every piece is hashed against the ` +
             // An admin token can rewrite the configuration, and the
             // configuration is where the categories are — so the restriction
             // would be one it could lift.
-            categories.disabled = role.value === 'admin';
+            // A worker token reads no catalogue for categories to narrow.
+            categories.disabled = role.value !== 'peer';
             if (categories.disabled) categories.value = '';
           };
 
@@ -5347,6 +5388,296 @@ Every piece is hashed against the ` +
               await draw();
               panel.append(shown);
               shown.querySelector('input').select();
+            } catch (error) {
+              toast(error.message);
+            }
+          };
+        };
+
+        await draw();
+      }
+
+      /**
+       * The commands that start a worker, filled in.
+       *
+       * Four ways because they suit four kinds of machine: npx for trying it,
+       * a global install for a desktop somebody leaves running, Docker for a
+       * server, and a unit for a server that should bring it back after a
+       * reboot. The token is the same in all of them; only how it is passed
+       * changes.
+       * @param {object} options - `url`, `token`, `name`, `version`.
+       * @returns {object[]} - `{label, text}` per way.
+       */
+      const workerCommands = ({ url, token, name, version }) => {
+        const pinned = version ? `@${version}` : '';
+        const named = name ? ` --name ${JSON.stringify(name)}` : '';
+        return [
+          {
+            label: 'npx',
+            text: `npx --yes pmtiles-swarm${pinned} worker --coordinator ${url} --token ${token}${named}`,
+          },
+          {
+            label: 'npm',
+            text:
+              `npm install -g pmtiles-swarm${pinned}\n` +
+              `pmtiles-swarm worker --coordinator ${url} --token ${token}${named}`,
+          },
+          {
+            label: 'Docker',
+            text: [
+              'docker run -d --name pmtiles-swarm-worker --restart unless-stopped \\',
+              `  -e PMTILES_SWARM_COORDINATOR=${url} \\`,
+              `  -e PMTILES_SWARM_WORKER_TOKEN=${token} \\`,
+              ...(name ? [`  -e PMTILES_SWARM_WORKER_NAME=${JSON.stringify(name)} \\`] : []),
+              '  -v pmtiles-swarm-worker:/data \\',
+              `  wifidb/pmtiles-swarm${version ? `:v${version}` : ':latest'} worker`,
+            ].join('\n'),
+          },
+          {
+            label: 'systemd',
+            text: [
+              '# /etc/systemd/system/pmtiles-swarm-worker.service',
+              '# after: npm install -g pmtiles-swarm',
+              '[Unit]',
+              'Description=pmtiles-swarm worker',
+              'After=network-online.target',
+              'Wants=network-online.target',
+              '',
+              '[Service]',
+              `Environment=PMTILES_SWARM_COORDINATOR=${url}`,
+              `Environment=PMTILES_SWARM_WORKER_TOKEN=${token}`,
+              ...(name ? [`Environment=PMTILES_SWARM_WORKER_NAME=${name}`] : []),
+              'ExecStart=/usr/bin/env pmtiles-swarm worker',
+              'Restart=always',
+              'RestartSec=10',
+              'DynamicUser=yes',
+              'StateDirectory=pmtiles-swarm-worker',
+              'Environment=PMTILES_SWARM_WORK_DIR=/var/lib/pmtiles-swarm-worker',
+              '',
+              '[Install]',
+              'WantedBy=multi-user.target',
+            ].join('\n'),
+          },
+        ];
+      };
+
+      /**
+       * Shows a freshly made worker token as the commands that use it.
+       *
+       * Shown once, because only the hash is kept -- which is why this is
+       * drawn wherever the token was made, rather than somewhere to come back
+       * to.
+       * @param {HTMLElement} into - Where to draw it.
+       * @param {object} options - `created` (the API's answer), `url`, `name`, `version`.
+       * @returns {void}
+       */
+      function showWorkerCommands(into, { created, url, name, version }) {
+        const commands = workerCommands({
+          url: String(url).replace(/\/+$/, ''),
+          token: created.token,
+          name,
+          version,
+        });
+        into.innerHTML = `
+          <div class="panel" style="margin-top:0.8rem">
+            <b>${escapeHtml(created.name)}</b> created. This is the only time
+            its token is shown — copy whichever of these suits the machine, and
+            run it there. It appears in the list as soon as it asks for work.
+            <div class="tabs" style="margin-top:0.6rem">
+              ${commands
+                .map(
+                  (one, index) =>
+                    `<button type="button" data-worker-way="${index}" class="${index === 0 ? 'on' : ''}">${escapeHtml(one.label)}</button>`,
+                )
+                .join('')}
+            </div>
+            <pre data-worker-command style="white-space:pre-wrap; word-break:break-all; margin:0.5rem 0"></pre>
+            <button type="button" data-worker-copy>Copy</button>
+          </div>`;
+        let way = 0;
+        const show = () => {
+          into.querySelector('[data-worker-command]').textContent = commands[way].text;
+          for (const tab of into.querySelectorAll('[data-worker-way]')) {
+            tab.classList.toggle('on', Number(tab.dataset.workerWay) === way);
+          }
+        };
+        for (const tab of into.querySelectorAll('[data-worker-way]')) {
+          tab.onclick = () => {
+            way = Number(tab.dataset.workerWay);
+            show();
+          };
+        }
+        into.querySelector('[data-worker-copy]').onclick = () =>
+          copy(commands[way].text, 'Command');
+        show();
+      }
+
+      async function renderWorkersEditor(into) {
+        const panel = document.createElement('div');
+        panel.className = 'panel';
+        panel.style.marginBottom = '1rem';
+        into.append(panel);
+
+        const draw = async () => {
+          let setup;
+          let listed;
+          let tokens;
+          try {
+            [setup, listed, tokens] = await Promise.all([
+              api('/api/distributed/setup'),
+              api('/api/distributed'),
+              api('/api/tokens'),
+            ]);
+          } catch (error) {
+            panel.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+            return;
+          }
+          const workerTokens = tokens.tokens.filter((one) => one.role === 'worker');
+          const ago = (when) => {
+            const seconds = (Date.now() - Date.parse(when)) / 1000;
+            return seconds < 90 ? 'just now' : `${duration(seconds * 1000)} ago`;
+          };
+
+          panel.innerHTML = `
+            <h2 style="margin-top:0">Workers</h2>
+            <div class="sub" style="margin-bottom:0.7rem">
+              Other machines this node can share an export out to. A worker
+              asks for a shard, bakes it with the same code an export here
+              runs, and hands it back; this node puts the shards together. It
+              reads the sources from here over HTTP, so it needs nothing but
+              the npm package and a <b>worker</b> token — no copy of the
+              library, no torrent engine, no configuration file. A worker that
+              goes away loses nothing: its shard is handed to another once its
+              lease lapses.
+            </div>
+
+            <div style="overflow-x:auto">
+              <table>
+                <thead>
+                  <tr><th>Worker</th><th>State</th><th>Doing</th><th>Done</th><th>Version</th><th>Last heard</th></tr>
+                </thead>
+                <tbody>
+                  ${
+                    listed.workers.length === 0
+                      ? '<tr><td colspan="6" class="sub">None has asked for work yet.</td></tr>'
+                      : listed.workers
+                          .map(
+                            (worker) => `
+                              <tr>
+                                <td>${escapeHtml(worker.name)}
+                                  <div class="sub">${escapeHtml(worker.token ?? '')}${
+                                    worker.concurrency ? ` &middot; ${worker.concurrency} at once` : ''
+                                  }</div></td>
+                                <td><span class="pill ${worker.online ? 'mirror' : 'cache'}">${worker.online ? 'online' : 'gone quiet'}</span></td>
+                                <td class="sub">${
+                                  worker.lease
+                                    ? `${escapeHtml(worker.lease.jobId)} &middot; shard ${worker.lease.index}`
+                                    : worker.online
+                                      ? 'waiting for work'
+                                      : ''
+                                }${
+                                  Object.keys(worker.cannot ?? {}).length
+                                    ? `<div class="bad">cannot: ${escapeHtml(Object.values(worker.cannot)[0])}</div>`
+                                    : ''
+                                }</td>
+                                <td class="sub">${worker.shardsDone.toLocaleString()} shards &middot; ${worker.tilesDone.toLocaleString()} tiles</td>
+                                <td class="sub">${escapeHtml(worker.version ?? '?')}</td>
+                                <td class="sub">${ago(worker.lastSeen)}</td>
+                              </tr>`,
+                          )
+                          .join('')
+                  }
+                </tbody>
+              </table>
+            </div>
+
+            <h2>Add a worker</h2>
+            <div class="sub" style="margin-bottom:0.5rem">
+              Each machine gets a token of its own, so any one can be turned
+              away without disturbing the rest. The token is shown once, in the
+              commands below.
+            </div>
+            <div style="display:flex; gap:0.4rem; flex-wrap:wrap; align-items:flex-end">
+              <div class="field" style="margin:0; flex:1; min-width:16rem">
+                <label for="worker-url">This node, as workers reach it</label>
+                <input id="worker-url" value="${escapeHtml(setup.coordinatorUrl)}" />
+              </div>
+              <div class="field" style="margin:0">
+                <label for="worker-name">Worker name</label>
+                <input id="worker-name" placeholder="garage-desktop" style="width:14rem" />
+              </div>
+              <button type="button" id="worker-create">Create worker token</button>
+            </div>
+            <div class="sub" style="margin-top:0.3rem">
+              ${
+                setup.publicEndpoint
+                  ? `Workers use this node's public address, the same one its
+                     tiles and feeds are on — the admin listener stays where it
+                     is. Every call there wants a worker token.`
+                  : `Workers call <code>/api/workers/</code>, which is on the admin
+                     listener only with <b>Reachable on the public port</b> turned
+                     off below — so only machines that can reach the admin port
+                     can be workers.`
+              }
+            </div>
+            <div id="worker-result"></div>
+
+            <h2>Worker tokens</h2>
+            <div style="overflow-x:auto">
+              <table>
+                <thead><tr><th>Name</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+                <tbody>
+                  ${
+                    workerTokens.length === 0
+                      ? '<tr><td colspan="4" class="sub">None yet.</td></tr>'
+                      : workerTokens
+                          .map(
+                            (token) => `
+                              <tr>
+                                <td>${escapeHtml(token.name)}
+                                  <div class="sub"><code>${escapeHtml(token.hint ?? '')}</code></div></td>
+                                <td class="sub">${escapeHtml(new Date(token.createdAt).toLocaleString())}</td>
+                                <td class="sub">${token.lastUsedAt ? escapeHtml(new Date(token.lastUsedAt).toLocaleString()) : 'never'}</td>
+                                <td><button type="button" class="danger" data-worker-revoke="${escapeHtml(token.id)}"
+                                      data-name="${escapeHtml(token.name)}">Revoke</button></td>
+                              </tr>`,
+                          )
+                          .join('')
+                  }
+                </tbody>
+              </table>
+            </div>`;
+
+          for (const button of panel.querySelectorAll('[data-worker-revoke]')) {
+            button.onclick = async () => {
+              if (!confirm(`Revoke "${button.dataset.name}"? That worker stops getting work.`)) return;
+              try {
+                await api(`/api/tokens/${button.dataset.workerRevoke}`, { method: 'DELETE' });
+                toast('revoked');
+                await draw();
+              } catch (error) {
+                toast(error.message);
+              }
+            };
+          }
+
+          panel.querySelector('#worker-create').onclick = async () => {
+            const name = panel.querySelector('#worker-name').value.trim();
+            const url = panel.querySelector('#worker-url').value.trim().replace(/\/+$/, '');
+            if (!/^https?:\/\//i.test(url)) return toast('the address needs http:// or https://');
+            try {
+              const created = await api('/api/tokens', {
+                method: 'POST',
+                body: { name: `worker: ${name || 'unnamed'}`, role: 'worker' },
+              });
+              // Drawn after the redraw, so it survives it.
+              await draw();
+              showWorkerCommands(panel.querySelector('#worker-result'), {
+                created,
+                url,
+                name,
+                version: setup.version,
+              });
             } catch (error) {
               toast(error.message);
             }
@@ -5414,6 +5745,7 @@ Every piece is hashed against the ` +
         'Network',
         'Engine',
         'Transfers',
+        'Workers',
         'Security',
       ];
 
@@ -6255,6 +6587,62 @@ Every piece is hashed against the ` +
           ],
         },
         {
+          group: 'Workers',
+          title: 'Sharing exports out',
+          blurb:
+            'How this node lends shards of an export to workers, and how long ' +
+            'it waits for one that has gone quiet. Read as they are used, so ' +
+            'a change applies to the next lease.',
+          fields: [
+            {
+              key: 'workers.leaseSeconds',
+              label: 'Lease, seconds',
+              type: 'number',
+              placeholder: '120',
+              help:
+                'How long a shard stays a worker’s without a heartbeat. ' +
+                'Workers send one every third of this, so two can go missing ' +
+                'before the shard is handed to somebody else. Shorter notices ' +
+                'a dead worker sooner; longer forgives a flaky network.',
+            },
+            {
+              key: 'workers.maxAttempts',
+              label: 'Attempts per shard',
+              type: 'number',
+              placeholder: '4',
+              help:
+                'Times a shard is handed out before it is given up on and the ' +
+                'job stops to ask. A shard that fails everywhere is usually a ' +
+                'source that cannot be read, not bad luck.',
+            },
+            {
+              key: 'workers.publicEndpoint',
+              label: 'Reachable on the public port',
+              type: 'boolean',
+              help:
+                'On by default: answer <code>/api/workers/</code> on the ' +
+                'public listener as well as the admin one, because workers ' +
+                'are other machines and the admin port is the one they are ' +
+                'least likely to reach. Still guarded — every call there ' +
+                'wants a worker token, and a worker token reaches nothing ' +
+                'else. Turn it off to keep workers to the admin listener. ' +
+                'Only meaningful where <code>adminPort</code> is set.',
+            },
+            {
+              key: 'workers.coordinatorUrl',
+              label: 'Address to give workers',
+              type: 'text',
+              placeholder: 'this node’s public address',
+              help:
+                'What the commands under Add a worker fill in. Unset, it is ' +
+                'the public address the node gives out for its tiles — ' +
+                '<code>publicUrl</code> if that is set. Set it where workers ' +
+                'see this node by another name, such as an address on the ' +
+                'local network.',
+            },
+          ],
+        },
+        {
           group: 'Security',
           title: 'Who may reach this node',
           fields: [
@@ -6809,6 +7197,7 @@ Every piece is hashed against the ` +
         // what the Transfers tab is about.
         await renderStorageEditor(paneFor('Storage'));
         await renderTokenEditor(paneFor('Security'));
+        await renderWorkersEditor(paneFor('Workers'));
         renderHookEditor(paneFor('Transfers'), config, restartKeys, true);
 
         // One control for three settings, because as an import default they
@@ -7819,6 +8208,9 @@ Every piece is hashed against the ` +
       let stackCodec = null;
 
       const loadStacks = async () => {
+        // Before the stacks' own early return: a job moves on every poll
+        // whether or not any recipe did.
+        loadDistributed().catch(() => {});
         const body = await api('/api/stacks');
         const { stacks, codec } = body;
         stackCutlines = body.cutlines ?? [];
@@ -8761,6 +9153,20 @@ Every piece is hashed against the ` +
                      }
                    </div>
                    <div class="bar">
+                     ${
+                       /^s3:\/\//i.test(source.url ?? '')
+                         ? `<span class="sub">Workers read it through this node, which holds the bucket's keys — they never see them.</span>`
+                         : `<label class="choice"
+                                  title="For an export shared out to workers. Directly, each worker fetches from the publisher itself, which spares this node the bandwidth — right for a public source like Mapterhorn. Through this node, workers ask here and this node fetches it: for an address only this node can reach.">
+                             Workers read it
+                             <select data-stack-field="workerRead" data-stack-index="${index}">
+                               <option value="direct" ${source.workerRead === 'coordinator' ? '' : 'selected'}>directly from the address</option>
+                               <option value="coordinator" ${source.workerRead === 'coordinator' ? 'selected' : ''}>through this node</option>
+                             </select>
+                           </label>`
+                     }
+                   </div>
+                   <div class="bar">
                      <label class="choice"
                             title="The zooms this archive actually holds. Checked before anything is opened, so a tile outside the range skips it without a request leaving this node — which is what makes a stack of many of these cheap. Leave empty and every tile asks it.">
                        Only zooms
@@ -8875,6 +9281,11 @@ Every piece is hashed against the ` +
           // Kept as typed until all four are there, so the box does not empty
           // itself halfway through being entered.
           if (numbers.length === 4) source.bounds = numbers;
+        } else if (field === 'workerRead') {
+          // Directly is the default, so it is not written: a recipe says only
+          // what differs.
+          if (event.target.value === 'coordinator') source.workerRead = 'coordinator';
+          else delete source.workerRead;
         } else if (field === 'maskValues') {
           source.maskValues = event.target.value
             .split(',')
@@ -9321,6 +9732,13 @@ Every piece is hashed against the ` +
         $('bake-region').value = '';
         showBakeExtent();
         showBakeFilename();
+        // Here, unless this run is asked to go elsewhere -- like the extent, a
+        // remembered choice would be wrong in the direction that surprises.
+        document.querySelector(
+          'input[name="bake-where"][value="here"]',
+        ).checked = true;
+        $('bake-shard-size').value = '';
+        showBakeWhere();
         $('bake-location').innerHTML = locationPicker('bake-loc');
         await fillLocations('bake-loc');
         $('bake-dialog').showModal();
@@ -9531,8 +9949,13 @@ Every piece is hashed against the ` +
               ...(bounds.length === 4 ? { bounds } : {}),
             };
 
+        const where = bakeWhere();
+        const shared = where !== 'here';
+        const perShard = Number($('bake-shard-size').value);
+        const route = shared ? 'distribute' : 'bake';
+
         try {
-          await api(`/api/stacks/${encodeURIComponent(id)}/bake`, {
+          await api(`/api/stacks/${encodeURIComponent(id)}/${route}`, {
             method: 'POST',
             body: {
               ...chosenLocation('bake-loc'),
@@ -9544,6 +9967,8 @@ Every piece is hashed against the ` +
               ...extent,
               ...(kind === 'terrain' ? {} : { kind }),
               ...(thresholds === undefined ? {} : { thresholds }),
+              ...(shared && perShard > 0 ? { tilesPerShard: perShard } : {}),
+              ...(where === 'both' ? { local: true } : {}),
             },
           });
         } catch (error) {
@@ -9555,9 +9980,212 @@ Every piece is hashed against the ` +
         }
 
         $('bake-dialog').close();
-        toast(`Exporting ${id}`);
+        toast(shared ? `Sharing out ${id}` : `Exporting ${id}`);
+        distributedLastDrawn = null;
         loadStacks().catch((e) => toast(e.message));
       });
+
+      // ── Distributed bakes ─────────────────────────────────────────────────
+      /** What was drawn last, so a poll that changed nothing repaints nothing. */
+      let distributedLastDrawn = null;
+
+      /**
+       * One distributed job, as a card above the stacks.
+       * @param {object} job - A row from /api/distributed.
+       * @returns {string} - HTML.
+       */
+      const renderDistributedJob = (job) => {
+        const done = job.tilesDone + job.tilesInFlight;
+        const share = job.tiles ? Math.min(100, (done / job.tiles) * 100) : 0;
+        const live = ['planning', 'running', 'assembling', 'importing'].includes(job.phase);
+        const part = job.selection ? ` &middot; ${escapeHtml(describeSelection(job.selection))}` : '';
+        const id = escapeHtml(job.id);
+
+        const status = {
+          planning: 'Reading the sources to cut it into shards…',
+          running: `${job.shards.done.toLocaleString()} of ${job.shardCount.toLocaleString()} shards done
+                    &middot; ${job.shards.leased} being worked on by ${job.workers} worker${job.workers === 1 ? '' : 's'}
+                    ${job.shards.failed ? `&middot; <span class="bad">${job.shards.failed} given up on</span>` : ''}
+                    ${job.tilesPerSecond ? `&middot; ${job.tilesPerSecond.toLocaleString()} tiles/s` : ''}
+                    ${job.etaSeconds !== null ? `&middot; about ${duration(job.etaSeconds * 1000)} left` : ''}
+                    ${job.shards.leased === 0 && job.shards.pending > 0 && !job.local ? '&middot; <b>waiting for a worker</b> — add one under Settings → Workers' : ''}`,
+          assembling: `Every shard is in. Putting ${job.shardCount.toLocaleString()} fragments together${
+            job.assembled ? ` — ${job.assembled.toLocaleString()} tiles so far` : ''
+          }…`,
+          importing: `Assembled. Hashing <code>${escapeHtml(job.filename)}</code> — it appears under Archives while that runs.`,
+          done: `Done: <code>${escapeHtml(job.filename)}</code>${
+            job.infoHash ? ` &middot; <code>${escapeHtml(job.infoHash.slice(0, 12))}…</code>` : ''
+          }`,
+          stalled: `<span class="bad">${escapeHtml(job.error ?? 'Some shards failed.')}</span> What was done is kept.`,
+          cancelled: 'Stopped. What was done is kept; Resume hands out only what is missing.',
+          failed: `<span class="bad">Failed: ${escapeHtml(job.error ?? 'unknown')}</span>`,
+        }[job.phase] ?? escapeHtml(job.phase);
+
+        const buttons = [
+          live && job.phase !== 'importing'
+            ? `<button type="button" data-distributed-stop="${id}">Stop</button>`
+            : '',
+          ['stalled', 'cancelled', 'failed'].includes(job.phase)
+            ? `<button type="button" data-distributed-retry="${id}" title="Hands out again only the shards that are not done.">Resume</button>`
+            : '',
+          !live
+            ? `<button type="button" data-distributed-discard="${id}" title="Forgets the job and deletes the fragments it kept.">Discard</button>`
+            : '',
+        ].join('');
+
+        return `
+          <div class="card">
+            <div class="row">
+              <strong>${escapeHtml(job.archiveName)}</strong>
+              <span class="pill">${escapeHtml(job.kind)}</span>
+              <span class="pill ${job.phase === 'done' ? 'mirror' : 'cache'}">${escapeHtml(job.phase)}</span>
+              <span class="muted">${job.local ? 'this node and workers' : 'workers'} &middot; ${escapeHtml(job.stackId)}${part}</span>
+              <span class="bar-gap"></span>
+              ${buttons}
+            </div>
+            ${
+              job.tiles
+                ? `<div class="track" style="margin:0.5rem 0 0.3rem"><i style="width:${share.toFixed(1)}%"></i></div>
+                   <div class="sub">${done.toLocaleString()} of ${job.tiles.toLocaleString()} tiles</div>`
+                : ''
+            }
+            <p class="muted" style="margin:0.3rem 0 0">${status}</p>
+            ${
+              job.local && job.localError
+                ? `<p class="bad" style="margin:0.3rem 0 0">This node stopped taking shards: ${escapeHtml(job.localError)}</p>`
+                : ''
+            }
+          </div>`;
+      };
+
+      /**
+       * Draws the distributed jobs above the stacks, newest first, keeping the
+       * finished ones for a day so somebody can see what was made.
+       * @returns {Promise<void>} - Resolves once drawn.
+       */
+      const loadDistributed = async () => {
+        const host = $('distributed-list');
+        if (!host) return;
+        let body;
+        try {
+          body = await api('/api/distributed');
+        } catch {
+          return;
+        }
+        const recent = Date.now() - 24 * 60 * 60 * 1000;
+        const jobs = body.jobs.filter(
+          (job) => !job.finishedAt || Date.parse(job.finishedAt) > recent,
+        );
+        const signature = JSON.stringify(jobs);
+        if (signature === distributedLastDrawn) return;
+        distributedLastDrawn = signature;
+        host.innerHTML = jobs.length
+          ? `<h2 style="margin:0.6rem 0 0.4rem">Shared out to workers</h2>${jobs
+              .map(renderDistributedJob)
+              .join('')}`
+          : '';
+      };
+
+      $('distributed-list').addEventListener('click', async (event) => {
+        const { distributedStop, distributedRetry, distributedDiscard } = event.target.dataset;
+        try {
+          if (distributedStop !== undefined) {
+            await api(`/api/distributed/${encodeURIComponent(distributedStop)}`, { method: 'DELETE' });
+            toast('Stopped; workers let go of their shards at their next heartbeat');
+          } else if (distributedRetry !== undefined) {
+            await api(`/api/distributed/${encodeURIComponent(distributedRetry)}/retry`, { method: 'POST' });
+            toast('Handing out what is left');
+          } else if (distributedDiscard !== undefined) {
+            if (!confirm('Forget this job and delete the fragments it kept?')) return;
+            await api(`/api/distributed/${encodeURIComponent(distributedDiscard)}/work`, { method: 'DELETE' });
+            toast('Discarded');
+          } else {
+            return;
+          }
+        } catch (error) {
+          toast(error.message);
+        }
+        distributedLastDrawn = null;
+        loadDistributed().catch(() => {});
+      });
+
+      /** Where the export dialog says to run it: here, workers or both. */
+      const bakeWhere = () =>
+        document.querySelector('input[name="bake-where"]:checked')?.value ?? 'here';
+
+      /**
+       * Shows what only a shared export needs: the shard size, and who is
+       * there to take shards -- with a way to add somebody without leaving
+       * the dialog, since "no workers yet" is the usual first answer.
+       */
+      function showBakeWhere() {
+        const where = bakeWhere();
+        const shared = where !== 'here';
+        $('bake-shard-row').hidden = !shared;
+        $('bake-shard-note').hidden = !shared;
+        $('bake-join').hidden = !shared;
+        $('bake-go').textContent = shared ? 'Share out' : 'Export';
+        if (shared) drawBakeJoin(where).catch(() => {});
+      }
+
+      /**
+       * The workers online now, and the button that adds one.
+       * @param {string} where - `workers` or `both`.
+       * @returns {Promise<void>} - Resolves once drawn.
+       */
+      async function drawBakeJoin(where) {
+        const host = $('bake-join');
+        let setup;
+        let listed;
+        try {
+          [setup, listed] = await Promise.all([
+            api('/api/distributed/setup'),
+            api('/api/distributed'),
+          ]);
+        } catch (error) {
+          host.innerHTML = `<div class="sub bad">${escapeHtml(error.message)}</div>`;
+          return;
+        }
+        // Not this node's own share, which is not somebody who joined.
+        const online = listed.workers.filter(
+          (worker) => worker.online && !String(worker.id).startsWith('local:'),
+        );
+        const who = online.length
+          ? `<b>${online.length}</b> worker${online.length === 1 ? '' : 's'} online:
+             ${online.map((worker) => escapeHtml(worker.name)).join(', ')}.`
+          : where === 'both'
+            ? 'No workers online yet — this node starts on it now, and any that join take shards alongside it.'
+            : '<b>No workers online yet.</b> The job waits for one; choose <b>Both</b> to have this node start on it meanwhile.';
+        host.innerHTML = `
+          <div class="panel">
+            <div class="sub">${who}</div>
+            <div class="bar" style="margin-top:0.4rem; flex-wrap:wrap">
+              <input id="bake-join-name" placeholder="worker name, e.g. garage-desktop" style="flex:1; min-width:12rem" />
+              <button type="button" id="bake-join-add">Add a worker…</button>
+            </div>
+            <div id="bake-join-result"></div>
+          </div>`;
+        host.querySelector('#bake-join-add').onclick = async () => {
+          const name = host.querySelector('#bake-join-name').value.trim();
+          try {
+            const created = await api('/api/tokens', {
+              method: 'POST',
+              body: { name: `worker: ${name || 'unnamed'}`, role: 'worker' },
+            });
+            showWorkerCommands(host.querySelector('#bake-join-result'), {
+              created,
+              url: setup.coordinatorUrl,
+              name,
+              version: setup.version,
+            });
+          } catch (error) {
+            toast(error.message);
+          }
+        };
+      }
+      for (const radio of document.querySelectorAll('input[name="bake-where"]')) {
+        radio.addEventListener('change', showBakeWhere);
+      }
 
       // Editing and deleting hang off the list, which is redrawn on every
       // change, so they are delegated the same way the source rows are.

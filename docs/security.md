@@ -116,10 +116,11 @@ same sentence.
 So there are named tokens, minted in **Settings → Access tokens** or at
 `POST /api/tokens`:
 
-| role    | may                                                                                                                                           |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `peer`  | read this node — the catalogue, the feeds, tiles and `.torrent` files. What another swarm node needs in order to follow it, and nothing else. |
-| `admin` | everything the console can do.                                                                                                                |
+| role     | may                                                                                                                                                    |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `peer`   | read this node — the catalogue, the feeds, tiles and `.torrent` files. What another swarm node needs in order to follow it, and nothing else.          |
+| `worker` | `/api/workers/` and nothing else: take a shard of a distributed export, read the sources it needs, hand the result back. See [workers.md](workers.md). |
+| `admin`  | everything the console can do.                                                                                                                         |
 
 One per person or node, so any of them can be revoked without disturbing the
 rest, and each records when it was last used — which is what makes retiring an

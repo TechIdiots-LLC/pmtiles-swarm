@@ -180,6 +180,23 @@ export function validateStack(stack) {
         );
       }
     }
+    // How a worker in a shared-out export reaches this source. Only an
+    // address has a choice: an archive is always read from this node.
+    if (source?.workerRead !== undefined) {
+      if (!['direct', 'coordinator'].includes(source.workerRead)) {
+        problems.push(
+          `sources[${index}].workerRead must be "direct" or "coordinator"`,
+        );
+      } else if (source.url === undefined) {
+        problems.push(
+          `sources[${index}].workerRead only applies to a url source`,
+        );
+      } else if (source.workerRead === 'direct' && isS3Url(source.url)) {
+        problems.push(
+          `sources[${index}].workerRead cannot be "direct" for an s3:// source: its keys are this node's, so workers read it through here`,
+        );
+      }
+    }
     for (const key of ['minzoom', 'maxzoom']) {
       if (source?.[key] === undefined) continue;
       const value = Number(source[key]);

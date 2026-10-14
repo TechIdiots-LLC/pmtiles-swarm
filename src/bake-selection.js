@@ -61,8 +61,39 @@ export function selectionFrom(options = {}) {
       ? bounds
       : null;
 
-  if (minzoom === undefined && maxzoom === undefined && !boxed) return null;
-  return { minzoom, maxzoom, bounds: boxed };
+  const span = spanFrom(options.span);
+
+  if (minzoom === undefined && maxzoom === undefined && !boxed && !span) {
+    return null;
+  }
+  return { minzoom, maxzoom, bounds: boxed, ...(span ? { span } : {}) };
+}
+
+/**
+ * Reads a run of tile ids out of whatever the caller sent.
+ *
+ * What one shard of a distributed bake writes. A run of ids rather than a box
+ * or a zoom, because ids are the order an archive is written in: shards cut
+ * from one ascending stream are disjoint, cover it, and come back in an order
+ * that can be appended rather than sorted. See src/bake-shards.js.
+ * @param {object} [span] - `{from, to}`, half-open; `to` may be absent.
+ * @returns {object|undefined} - `{from, to}`, or undefined where none was said.
+ */
+function spanFrom(span) {
+  if (!span || typeof span !== 'object') return undefined;
+  const from = Number(span.from ?? 0);
+  const to =
+    span.to === undefined || span.to === null
+      ? Number.POSITIVE_INFINITY
+      : Number(span.to);
+  if (!Number.isSafeInteger(from) || from < 0) return undefined;
+  if (
+    to !== Number.POSITIVE_INFINITY &&
+    (!Number.isSafeInteger(to) || to <= from)
+  ) {
+    return undefined;
+  }
+  return { from, to };
 }
 
 /**
@@ -107,6 +138,14 @@ export function selectionProblems(options = {}) {
         problems.push('bounds south must be below north');
     }
   }
+
+  if (
+    options.span !== undefined &&
+    options.span !== null &&
+    !spanFrom(options.span)
+  ) {
+    problems.push('span must be {from, to} tile ids with from below to');
+  }
   return problems;
 }
 
@@ -120,12 +159,17 @@ export function selectionProblems(options = {}) {
  * @returns {object} - `{from, to}`, `to` being Infinity where no maxzoom.
  */
 export function idSpanOf(selection) {
-  const from =
+  let from =
     selection?.minzoom === undefined ? 0 : firstIdAt(selection.minzoom);
-  const to =
+  let to =
     selection?.maxzoom === undefined
       ? Number.POSITIVE_INFINITY
       : firstIdAt(selection.maxzoom + 1);
+  // A shard's run narrows it further, and is already in ids.
+  if (selection?.span) {
+    from = Math.max(from, selection.span.from);
+    to = Math.min(to, selection.span.to);
+  }
   return { from, to };
 }
 
@@ -165,6 +209,12 @@ function rowAt(lat, z) {
  */
 export function selects(selection, tileId) {
   if (!selection) return true;
+  if (
+    selection.span &&
+    (tileId < selection.span.from || tileId >= selection.span.to)
+  ) {
+    return false;
+  }
   const [z, x, y] = tileIdToZxy(tileId);
   if (selection.minzoom !== undefined && z < selection.minzoom) return false;
   if (selection.maxzoom !== undefined && z > selection.maxzoom) return false;
@@ -228,6 +278,12 @@ export function selectionSlug(selection) {
     // Two decimals is about a kilometre, which is finer than any bound anybody
     // types and short enough to read in a filename.
     parts.push(selection.bounds.map((n) => n.toFixed(2)).join('_'));
+  }
+  if (selection.span) {
+    // In the revision for the reason the rest is: two shards of one bake are
+    // two streams, and a checkpoint from one must never resume the other.
+    const to = Number.isFinite(selection.span.to) ? selection.span.to : 'end';
+    parts.push(`ids${selection.span.from}-${to}`);
   }
   return parts.join('-');
 }

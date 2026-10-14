@@ -58,6 +58,7 @@ import {
   stacksAffectedBy,
 } from './stacks.js';
 import { bakeRevision } from './bake.js';
+import { mountDistributed } from './distributed-routes.js';
 import zlib from 'node:zlib';
 import {
   contourCoverage,
@@ -264,6 +265,7 @@ export function createApp({
   heightsCache,
   cutlines,
   bakes,
+  distributed,
   warm,
   config,
   speed,
@@ -321,7 +323,13 @@ export function createApp({
 
   if (config.adminPort) {
     app.use((req, res, next) => {
-      const allowed = isPublicSurface(req.path, { index: publicIndex() });
+      const allowed = isPublicSurface(req.path, {
+        index: publicIndex(),
+        // On unless turned off: workers are other machines, and the admin
+        // listener is the one they are least likely to reach. Every route
+        // there still wants a worker token. See docs/workers.md.
+        workers: config.workers?.publicEndpoint !== false,
+      });
       if (onAdminPort(req) || allowed) return next();
       // 404 rather than 403: a refusal confirms there is something here.
       res.status(404).json({ error: 'not found' });
@@ -3901,6 +3909,18 @@ export function createApp({
     }
     return resolved;
   };
+
+  // Bakes shared out across worker nodes: the console's half and the
+  // workers' half. See src/distributed-routes.js.
+  mountDistributed(app, {
+    distributed,
+    tiles,
+    stacks,
+    stackOr404,
+    config,
+    version: VERSION,
+    publicBase: baseUrl,
+  });
 
   // The page works out which document to fetch from its own path, so a stack
   // previews through the same file an archive and a category do.

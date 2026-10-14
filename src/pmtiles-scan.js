@@ -117,6 +117,74 @@ async function openArchive(archive) {
 }
 
 /**
+ * Every tile entry an archive holds, ascending, with what to read them from.
+ *
+ * Entries rather than ids: an entry says where a tile's bytes are, which is
+ * what putting shards of a bake back together needs, and a run stays one run
+ * instead of being expanded into ids nobody asked for. Yielded a directory at a
+ * time, alongside the header and the open byte source, so the caller can read
+ * tile data while the archive is still open.
+ *
+ * `from` and `to` narrow it to a run of ids, and the point of them is what
+ * is *not* read: a leaf directory wholly outside the run is never fetched. One
+ * shard of a planet bake, scanning a source over HTTP, would otherwise read
+ * every directory in front of its own run just to skip the ids in it. What is
+ * yielded may still reach outside the run -- an entry is not split -- so the
+ * caller filters as it always has.
+ * @param {string|object} archive - Path to the `.pmtiles`, or a byte source.
+ * @param {object} [options] - `signal` to stop early; `from`, `to` to narrow it.
+ * @yields {{header: object, source: object, entries: object[]}} - A directory's tile entries.
+ */
+export async function* scanEntries(archive, options = {}) {
+  const from = options.from ?? 0;
+  const to = options.to ?? Number.POSITIVE_INFINITY;
+  const { source, header, root, owned } = await openArchive(archive);
+  try {
+    for (const [index, entry] of root.entries()) {
+      options.signal?.throwIfAborted();
+      // Root entries ascend, so nothing after this one can be in the run.
+      if (entry.tileId >= to) break;
+
+      // A run length of zero means the entry addresses a leaf directory rather
+      // than a tile. That is the only thing telling the two apart.
+      if (entry.runLength !== 0) {
+        if (entry.tileId + entry.runLength <= from) continue;
+        yield { header, source, entries: [entry] };
+        continue;
+      }
+      // A leaf covers the ids up to where the next root entry begins, so one
+      // whose successor starts at or before `from` holds nothing wanted.
+      const next = root[index + 1];
+      if (next && next.tileId <= from) continue;
+      const entries = deserializeDirectory(
+        decompress(
+          Buffer.from(
+            (
+              await source.getBytes(
+                header.leafDirectoryOffset + entry.offset,
+                entry.length,
+              )
+            ).data,
+          ),
+          header.internalCompression,
+        ),
+      );
+      // A leaf pointing at another leaf is legal in the format and produced by
+      // nothing in practice. Refused rather than silently skipped: a bake that
+      // quietly drops part of a source is worse than one that stops.
+      if (entries.some((leafEntry) => leafEntry.runLength === 0)) {
+        throw new Error(
+          'this archive nests leaf directories, which is not read here',
+        );
+      }
+      yield { header, source, entries };
+    }
+  } finally {
+    if (owned) source.close?.();
+  }
+}
+
+/**
  * Every tile id an archive holds, ascending.
  *
  * A run-length entry stands for several consecutive ids, so a run is expanded
@@ -124,57 +192,29 @@ async function openArchive(archive) {
  * in chunks because a single entry can stand for millions of tiles and a
  * per-tile yield across a planet is the slowest part of the loop.
  * @param {string|object} archive - Path to the `.pmtiles`, or a byte source.
- * @param {object} [options] - `signal` to stop early.
+ * @param {object} [options] - `signal` to stop early; `from`, `to` to narrow it.
  * @yields {number[]} - Chunks of ascending tile ids.
  */
 export async function* scanTileIds(archive, options = {}) {
-  const { source, header, root, owned } = await openArchive(archive);
-  try {
-    for (const entry of root) {
-      options.signal?.throwIfAborted();
-
-      // A run length of zero means the entry addresses a leaf directory rather
-      // than a tile. That is the only thing telling the two apart.
-      const entries =
-        entry.runLength === 0
-          ? deserializeDirectory(
-              decompress(
-                Buffer.from(
-                  (
-                    await source.getBytes(
-                      header.leafDirectoryOffset + entry.offset,
-                      entry.length,
-                    )
-                  ).data,
-                ),
-                header.internalCompression,
-              ),
-            )
-          : [entry];
-
-      let batch = [];
-      for (const leafEntry of entries) {
-        // A leaf pointing at another leaf is legal in the format and produced
-        // by nothing in practice. Refused rather than silently skipped: a bake
-        // that quietly drops part of a source is worse than one that stops.
-        if (entry.runLength === 0 && leafEntry.runLength === 0) {
-          throw new Error(
-            'this archive nests leaf directories, which is not read here',
-          );
-        }
-        for (let step = 0; step < leafEntry.runLength; step += 1) {
-          batch.push(leafEntry.tileId + step);
-          if (batch.length >= RUN_CHUNK) {
-            yield batch;
-            batch = [];
-            options.signal?.throwIfAborted();
-          }
+  const from = options.from ?? 0;
+  const to = options.to ?? Number.POSITIVE_INFINITY;
+  for await (const { entries } of scanEntries(archive, options)) {
+    let batch = [];
+    for (const entry of entries) {
+      // A run of millions is entered where the wanted ids begin and left
+      // where they end, rather than walked from its first id.
+      const first = Math.max(0, from - entry.tileId);
+      const last = Math.min(entry.runLength, to - entry.tileId);
+      for (let step = first; step < last; step += 1) {
+        batch.push(entry.tileId + step);
+        if (batch.length >= RUN_CHUNK) {
+          yield batch;
+          batch = [];
+          options.signal?.throwIfAborted();
         }
       }
-      if (batch.length > 0) yield batch;
     }
-  } finally {
-    if (owned) source.close?.();
+    if (batch.length > 0) yield batch;
   }
 }
 

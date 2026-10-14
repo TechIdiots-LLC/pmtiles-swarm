@@ -2,7 +2,43 @@
 
 ## master
 ### ✨ Features and improvements
-- _...Add new stuff here..._
+- **Exports can be shared out to other machines.** Choose _Workers_ or _Both_ in the export
+  dialog — _Both_ has this node take shards from the same queue as well — and the export is cut into shards that any machine running `pmtiles-swarm worker` with a
+  worker token can take, bake and hand back; this node puts them together and imports the result
+  exactly as it would its own. Terrain and contours both. See [docs/workers.md](docs/workers.md).
+
+  A shard is a run of tile ids. An export writes tiles in id order, so runs cut from it are
+  independent, come back already in archive order, and are appended rather than sorted — the
+  assembled archive is clustered and deduplicated across shards, and a test holds it to the tiles
+  a single-node bake writes.
+
+  A worker is the npm package and a token: it reads the sources from the coordinator over HTTP, a
+  byte range at a time, resolved against the coordinator's own catalog entries so it merges each
+  tile as the coordinator would. No library, no torrent engine, no configuration file. A shard is
+  leased rather than given, so a worker that crashes, loses its network or is closed costs nothing
+  but its lease: the shard goes to the next worker that asks. Jobs survive the coordinator
+  restarting.
+
+  **Settings → Workers** lists the workers and what each is doing, mints their tokens, and shows the
+  command to start one — npx, npm, Docker or a systemd unit — with the token filled in.
+- **Sources read from an address are shared out too.** A private bucket is read through the
+  coordinator, which signs each read with its own keys — a worker is never handed them. A public
+  address, like Mapterhorn's planet, is fetched by each worker straight from the publisher, unless
+  the source says `"workerRead": "coordinator"` (or _through this node_ in the stack editor) for an
+  address only the coordinator can reach.
+- **A `worker` token role**, which can reach `/api/workers/` and nothing else. Archive reads through
+  it are refused for anything no unfinished job uses. Workers use the node's public address: those
+  routes are answered on the public listener as well as the admin one, still guarded, so the admin
+  port can stay on loopback. `workers.publicEndpoint: false` keeps them to the admin listener.
+- **A Docker image**, `wifidb/pmtiles-swarm`, for amd64 and arm64, from
+  [#1](https://github.com/TechIdiots-LLC/pmtiles-swarm/pull/1). One `/data` mount, a configuration
+  written in relative paths on first start, and the same image runs as a worker with
+  `… worker`. Images build on a published release, in their own workflow, and CI builds both
+  architectures and starts a node and a worker from them on every push. See
+  [docs/docker.md](docs/docker.md).
+- Scanning an archive for a run of tile ids skips the leaf directories wholly outside it instead of
+  reading them, which is what keeps the last shard of a planet from reading every directory in
+  front of it. An export narrowed to some zooms benefits the same way.
 
 ### 🐞 Bug fixes
 - _...Add new stuff here..._
