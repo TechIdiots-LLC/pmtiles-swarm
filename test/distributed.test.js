@@ -87,7 +87,12 @@ async function coordinator(options = {}) {
     PLANET.filter((id) => id >= 30 && id < 120),
     ['detail'],
   );
-  const entries = new Map([base, detail].map((one) => [one.infoHash, one]));
+  const entries = new Map(
+    [base, detail, ...(options.entries ?? [])].map((one) => [
+      one.infoHash,
+      one,
+    ]),
+  );
   const catalog = {
     get: (hash) => entries.get(hash),
     byCategory: (name) =>
@@ -308,6 +313,86 @@ describe('a distributed bake', () => {
       assert.equal(assembled.get(50), 'detail:50', 'the detail is on top');
     } finally {
       await node.close();
+    }
+  });
+});
+
+describe('an MBTiles archive as a source', () => {
+  it('is baked by workers that read it a tile at a time', async () => {
+    // SQLite has no byte range a worker could read, so the coordinator answers
+    // for its tiles and its tile list instead.
+    const { DatabaseSync } = await import('node:sqlite');
+    const file = path.join(workspace, 'source.mbtiles');
+    const db = new DatabaseSync(file);
+    db.exec(`
+      CREATE TABLE metadata (name TEXT, value TEXT);
+      CREATE TABLE tiles (zoom_level INTEGER, tile_column INTEGER,
+                          tile_row INTEGER, tile_data BLOB);
+      CREATE UNIQUE INDEX tile_index ON tiles (zoom_level, tile_column, tile_row);
+      INSERT INTO metadata VALUES ('name', 'mb'), ('format', 'png');
+    `);
+    const insert = db.prepare('INSERT INTO tiles VALUES (?, ?, ?, ?)');
+    for (const id of PLANET) {
+      const [z, x, y] = tileIdToZxy(id);
+      insert.run(z, x, 2 ** z - 1 - y, Buffer.from(`mb:${id}`));
+    }
+    db.close();
+    const entry = {
+      infoHash: crypto.createHash('sha1').update(file).digest('hex'),
+      name: 'source.mbtiles',
+      kind: 'mbtiles',
+      savePath: workspace,
+      size: (await fs.stat(file)).size,
+      complete: true,
+      categories: [],
+      pmtiles: {
+        format: 'png',
+        contentType: 'image/png',
+        minZoom: 0,
+        maxZoom: 4,
+      },
+    };
+
+    const node = await coordinator({
+      entries: [entry],
+      stack: {
+        id: 'terrain',
+        title: 'Terrain',
+        sources: [{ archive: entry.infoHash }],
+      },
+    });
+    try {
+      const resolved = node.resolve('terrain');
+      const started = await node.distributed.start({
+        resolved,
+        tilesPerShard: 70,
+      });
+      await until(node.distributed, started.id, ['running']);
+
+      const controller = new AbortController();
+      const worker = new Worker({
+        coordinator: node.url,
+        token: node.workerToken,
+        workerId: 'mb-worker',
+        concurrency: 2,
+        workDir: path.join(workspace, 'worker-mb'),
+        log: () => {},
+      });
+      const running = worker.run(controller.signal);
+      try {
+        await until(node.distributed, started.id, ['done']);
+      } finally {
+        controller.abort();
+        await running;
+        await worker.close();
+      }
+
+      const baked = await contents(node.imported[0].file);
+      assert.equal(baked.size, PLANET.length);
+      assert.equal(baked.get(200), 'mb:200');
+    } finally {
+      await node.close();
+      await node.tiles.close();
     }
   });
 });

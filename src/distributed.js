@@ -646,7 +646,12 @@ export class DistributedBakes {
       categories: categoriesOf(resolved),
       archives: [...archivesOf(resolved).values()].map((entry) => ({
         ...entryForWorker(entry),
-        path: `/api/workers/archives/${entry.infoHash}/archive.pmtiles`,
+        // A PMTiles is read by byte range; an MBTiles cannot be, so it is
+        // given the address its tiles and its tile list are answered under.
+        path:
+          entry.kind === 'mbtiles' || /\.mbtiles$/i.test(entry.name ?? '')
+            ? `/api/workers/archives/${entry.infoHash}`
+            : `/api/workers/archives/${entry.infoHash}/archive.pmtiles`,
       })),
       // Each address read through this node, and where on it to read it
       // instead. The worker swaps one for the other; any credentials stay
