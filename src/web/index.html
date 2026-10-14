@@ -5470,7 +5470,7 @@ Every piece is hashed against the ` +
               ...(name ? [`  -e PMTILES_SWARM_WORKER_NAME=${JSON.stringify(name)} \\`] : []),
               ...(cores ? [`  -e PMTILES_SWARM_WORKER_CONCURRENCY=${cores} \\`] : []),
               '  -v pmtiles-swarm-worker:/data \\',
-              `  wifidb/pmtiles-swarm${version ? `:v${version}` : ':latest'} worker`,
+              `  techidiotsllc/pmtiles-swarm${version ? `:v${version}` : ':latest'} worker`,
             ].join('\n'),
           },
           {

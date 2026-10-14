@@ -121,7 +121,7 @@ jobs:
           context: .
           push: true
           platforms: linux/${{ matrix.arch }}
-          tags: wifidb/pmtiles-swarm:v${{ needs.decide.outputs.version }}-${{ matrix.arch }}
+          tags: techidiotsllc/pmtiles-swarm:v${{ needs.decide.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
@@ -152,7 +152,7 @@ jobs:
       - name: Create and push the manifest
         run: |
           VERSION="${{ needs.decide.outputs.version }}"
-          IMAGE=wifidb/pmtiles-swarm
+          IMAGE=techidiotsllc/pmtiles-swarm
 
           TAGS="--tag ${IMAGE}:v${VERSION}"
           if [ "${{ steps.kind.outputs.latest }}" = "true" ]; then
@@ -165,7 +165,7 @@ jobs:
             "${IMAGE}:v${VERSION}-arm64"
 
       - name: Show what was published
-        run: docker buildx imagetools inspect wifidb/pmtiles-swarm:v${{ needs.decide.outputs.version }}
+        run: docker buildx imagetools inspect techidiotsllc/pmtiles-swarm:v${{ needs.decide.outputs.version }}
 
       # The image's overview page on Docker Hub, from the same file the repo
       # documents it with. Two copies of this would be two copies to keep
@@ -179,6 +179,6 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_USER }}
           password: ${{ secrets.DOCKER_TOKEN }}
-          repository: wifidb/pmtiles-swarm
+          repository: techidiotsllc/pmtiles-swarm
           short-description: BitTorrent distribution and tile serving for PMTiles archives
           readme-filepath: ./docs/docker.md
