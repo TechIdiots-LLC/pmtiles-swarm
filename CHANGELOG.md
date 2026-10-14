@@ -2,6 +2,13 @@
 
 ## master
 ### ✨ Features and improvements
+- _...Add new stuff here..._
+
+### 🐞 Bug fixes
+- _...Add new stuff here..._
+
+## 0.107.0
+### ✨ Features and improvements
 - **Exports can be shared out to other machines.** Choose _Workers_ or _Both_ in the export
   dialog — _Both_ has this node take shards from the same queue as well — and the export is cut into shards that any machine running `pmtiles-swarm worker` with a
   worker token can take, bake and hand back; this node puts them together and imports the result
@@ -41,11 +48,9 @@
   front of it. An export narrowed to some zooms benefits the same way.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.106.2
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 ### 🐞 Bug fixes
 - **A restart forgot when a watched location was last polled.** The schedule lived in memory, so
@@ -68,7 +73,6 @@
 
 ## 0.106.1
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 ### 🐞 Bug fixes
 - **A touchpad without separate buttons spun the map instead of panning it.** MapLibre binds
@@ -104,7 +108,6 @@
   cheaper than the middle: nine squares out of a few parent tiles rather than nine merges.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.105.0
 ### ✨ Features and improvements
@@ -124,7 +127,6 @@
   contour-generator's `--increment` does.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.104.0
 ### ✨ Features and improvements
@@ -834,7 +836,6 @@
 
 ## 0.86.0
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 - **Stack recipes travel between nodes.** `GET /stacks.xml` is this node's own stacks as a feed;
   **Settings → Feeds → Stack feeds** follows another node's and adopts what it carries. Archives
@@ -858,11 +859,9 @@
   remove it here too.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.85.1
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 - **An export no longer pretends a stack has categories.** Both doors fell back to
   `stack.categories` when none were given — a field the typedef never had, validation never checked,
@@ -874,11 +873,9 @@
   could not exist.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.85.0
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 - **A scheduled export can be served by the node that baked it.** The **Local file** choice, the same
   one every other row under Feeds offers: http, http + web seed, http + catalog. It is worth more
@@ -891,11 +888,9 @@
   offering this node as a web seed gives a client two places to get the same bytes.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.84.0
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 - **Scheduled exports are rows, like every other automation beside them.** `stackExports` in the
   config, edited under Settings → Feeds with the same row editor the monitored folders and the
@@ -915,11 +910,9 @@
   A stack's row in the Stacks view still shows the schedules aimed at it.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.83.0
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 - **A scheduled export is set up like the other automations beside it.** The row under Settings →
   Feeds is the whole of one now, not only the timer: categories, builds to keep, keep for how many
@@ -935,11 +928,9 @@
   is a disk that fills at one archive a night.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.82.0
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 - **Export schedules are set under Settings → Feeds.** Not only the two global settings that landed
   there in 0.81.1 — the schedules themselves. **Scheduled exports** is a row per stack: never, every
@@ -952,11 +943,9 @@
   should survive being paused.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.81.1
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 - **The scheduled-export settings are under Settings → Feeds.** `stacks.scheduledExports` and
   `stacks.exportIntervalHours` had no schema entry, so they were config-file-only and invisible in
@@ -967,11 +956,9 @@
   out over the feed exactly as a fetched one does.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.81.0
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 - **A stack can export itself on a schedule.** An archive is a snapshot: a stack over categories
   follows a rebuild and a file baked from it does not, so it goes stale the moment its sources move
@@ -993,7 +980,6 @@
   which is what a second node serving the same recipes wants.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.80.0
 ### ✨ Features and improvements
@@ -1032,11 +1018,9 @@
   which is why MapLibre, Mapbox and OpenLayers all separate them this way.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.79.1
 ### ✨ Features and improvements
-- _...Add new stuff here..._
 
 ### 🐞 Bug fixes
 - **A source masked only by `maskRange` was served unmasked.** The short-circuit that hands a tile
@@ -1110,7 +1094,6 @@
   by hand — the API for it shipped in 0.76.0 with nothing calling it.
 
 ### 🐞 Bug fixes
-- _...Add new stuff here..._
 
 ## 0.77.0
 ### ✨ Features and improvements
