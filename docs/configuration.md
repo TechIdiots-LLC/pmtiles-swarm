@@ -23,6 +23,7 @@ Some settings only take effect on restart. Those are marked **restart**.
 - [S3 buckets](#s3-buckets)
 - [Mutable publishing](#mutable-publishing)
 - [Authentication](#authentication)
+- [Workers](#workers)
 - [Statistics](#statistics)
 - [Checking for changed sources](#checking-for-changed-sources)
 - [Downloading](#downloading)
@@ -994,6 +995,21 @@ network.
 
 See [security.md](security.md).
 
+## Workers
+
+Sharing an export out to other machines. See [workers.md](workers.md).
+
+| setting                  | default |                                                       |
+| ------------------------ | ------- | ----------------------------------------------------- |
+| `workers.leaseSeconds`   | `120`   | how long a shard stays a worker's without a heartbeat |
+| `workers.maxAttempts`    | `4`     | times a shard is handed out before it is given up on  |
+| `workers.publicEndpoint` | `false` | answer `/api/workers/` on the public listener as well |
+| `workers.coordinatorUrl` | unset   | the address the console's worker commands fill in     |
+
+All four are read as they are used, so a change applies to the next lease. A
+worker itself has no configuration file: it is started with a coordinator's
+address and a worker token, and the environment variables below.
+
 ## Statistics
 
 `tileStats` records what this node has served, at `GET /api/stats`. Per-archive
@@ -1233,6 +1249,15 @@ says.
 | `PMTILES_SWARM_QBT_USERNAME` | `qbittorrent.username` |
 | `PMTILES_SWARM_QBT_PASSWORD` | `qbittorrent.password` |
 | `PMTILES_SWARM_PUBLIC_URL`   | `publicUrl`            |
+
+And for `pmtiles-swarm worker`, which reads no configuration file:
+
+| variable                     | flag            |
+| ---------------------------- | --------------- |
+| `PMTILES_SWARM_COORDINATOR`  | `--coordinator` |
+| `PMTILES_SWARM_WORKER_TOKEN` | `--token`       |
+| `PMTILES_SWARM_WORKER_NAME`  | `--name`        |
+| `PMTILES_SWARM_WORK_DIR`     | `--work-dir`    |
 
 Relative paths in the config file resolve against the file's own directory rather
 than the working directory, so a config can be moved as a unit with the data it

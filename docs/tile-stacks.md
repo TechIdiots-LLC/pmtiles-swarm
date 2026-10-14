@@ -290,23 +290,24 @@ it differs from the snake_case rio-rgbify-merge uses.
 
 ### Source fields
 
-| Field                  | Meaning                                                                                                        |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `category`             | Resolve to the newest build in this category.                                                                  |
-| `archive`              | Or pin one infohash.                                                                                           |
-| `stack`                | Or another stack, merged as heights. See "A stack as a source".                                                |
-| `url`                  | Or an archive read straight from an http(s) address, no torrent involved. Exactly one of the four.             |
-| `minzoom` / `maxzoom`  | Skip a `url` source outside this zoom range before opening it. Optional; the header answers anyway without it. |
-| `required`             | A tile fails rather than being served without this source. Defaults true for the bottom-most, false above.     |
-| `encoding`             | `mapbox` or `terrarium`. Elevation space only.                                                                 |
-| `baseVal` / `interval` | Mapbox decode offset and step. Default `-10000` and `0.1`.                                                     |
-| `maskValues`           | Decoded heights meaning "no data here". Elevation space only.                                                  |
-| `maskRange`            | `[low, high]` in metres, or a list of them. Everything inside is nodata. Elevation space only.                 |
-| `heightAdjustment`     | Metres, added **after** masking. Elevation space only.                                                         |
-| `feather`              | Pixels to fade in over wherever the source stops: a `cutline`, `bounds`, or the holes a mask leaves. Max 64.   |
-| `featherMetres`        | The same fade written as metres of ground, worked out per tile. Usually the one to reach for.                  |
-| `opacity`              | `0`–`1`, scales the source alpha. RGBA space only.                                                             |
-| `blend`                | `normal`, `multiply`, `screen`, `overlay`, `darken`, `lighten`. RGBA space only.                               |
+| Field                  | Meaning                                                                                                                                                    |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `category`             | Resolve to the newest build in this category.                                                                                                              |
+| `archive`              | Or pin one infohash.                                                                                                                                       |
+| `stack`                | Or another stack, merged as heights. See "A stack as a source".                                                                                            |
+| `url`                  | Or an archive read straight from an http(s) address, no torrent involved. Exactly one of the four.                                                         |
+| `minzoom` / `maxzoom`  | Skip a `url` source outside this zoom range before opening it. Optional; the header answers anyway without it.                                             |
+| `workerRead`           | For a `url` source in an export shared out to workers: `direct` (default) or `coordinator`. See [workers.md](workers.md#how-a-worker-reaches-each-source). |
+| `required`             | A tile fails rather than being served without this source. Defaults true for the bottom-most, false above.                                                 |
+| `encoding`             | `mapbox` or `terrarium`. Elevation space only.                                                                                                             |
+| `baseVal` / `interval` | Mapbox decode offset and step. Default `-10000` and `0.1`.                                                                                                 |
+| `maskValues`           | Decoded heights meaning "no data here". Elevation space only.                                                                                              |
+| `maskRange`            | `[low, high]` in metres, or a list of them. Everything inside is nodata. Elevation space only.                                                             |
+| `heightAdjustment`     | Metres, added **after** masking. Elevation space only.                                                                                                     |
+| `feather`              | Pixels to fade in over wherever the source stops: a `cutline`, `bounds`, or the holes a mask leaves. Max 64.                                               |
+| `featherMetres`        | The same fade written as metres of ground, worked out per tile. Usually the one to reach for.                                                              |
+| `opacity`              | `0`–`1`, scales the source alpha. RGBA space only.                                                                                                         |
+| `blend`                | `normal`, `multiply`, `screen`, `overlay`, `darken`, `lighten`. RGBA space only.                                                                           |
 
 `attribution` is not optional in practice. A stack is a derived work of every
 source in it, and the thing that reliably gets lost when tiles are combined is
