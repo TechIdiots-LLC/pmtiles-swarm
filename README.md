@@ -17,6 +17,16 @@ node src/index.js --config swarm.config.json
 # then open http://localhost:8090
 ```
 
+Or from npm, installed globally — `only-allow` first, which a WebTorrent dependency's install
+script needs and cannot fetch during a global install (see
+[running as a service](docs/running-as-a-service.md#installing-globally)):
+
+```sh
+npm install -g only-allow
+npm install -g pmtiles-swarm
+pmtiles-swarm --config swarm.config.json
+```
+
 ## Documentation
 
 - **[docs/engines.md](docs/engines.md)** — libtorrent, qBittorrent and WebTorrent: what each
