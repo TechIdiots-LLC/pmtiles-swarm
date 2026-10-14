@@ -358,6 +358,18 @@ export class PMTilesWriter {
   }
 
   /**
+   * Gives up on the archive and removes its buffer.
+   *
+   * For work that cannot be resumed and should not be finished -- assembling
+   * shards that turned out not to fit together, say -- where writing a partial
+   * archive would leave something at the destination that looks complete.
+   * @returns {Promise<void>} - Resolves once the buffer is gone.
+   */
+  async abandon() {
+    await this.#discard();
+  }
+
+  /**
    * Adds one tile.
    *
    * Call these in ascending tile-id order. Out of order still produces a valid
@@ -413,6 +425,32 @@ export class PMTilesWriter {
     });
     if (digest !== null) this.#seen.set(digest, this.#offset);
     this.#offset += data.length;
+  }
+
+  /**
+   * Adds a run of consecutive tiles that all hold the same bytes.
+   *
+   * What reassembling an archive needs: its entries already say "these ten
+   * thousand ids are one ocean tile", and offering them one by one would hash
+   * the same buffer ten thousand times to rediscover it. The first is written
+   * the ordinary way, so it is deduplicated against everything before it, and
+   * the rest extend whatever entry that left -- which is the same thing
+   * `writeTile` would have arrived at, without deduplication too.
+   * @param {number} tileId - The first id of the run.
+   * @param {number} count - How many consecutive ids.
+   * @param {Buffer} data - What every one of them holds.
+   * @returns {Promise<void>} - Resolves once the run is buffered.
+   */
+  async writeTiles(tileId, count, data) {
+    if (!Number.isInteger(count) || count < 1) {
+      throw new Error(`a run needs at least one tile, got ${count}`);
+    }
+    await this.writeTile(tileId, data);
+    if (count === 1) return;
+    const last = this.#entries[this.#entries.length - 1];
+    last.runLength += count - 1;
+    this.#addressed += count - 1;
+    this.#lastId = tileId + count - 1;
   }
 
   /**
