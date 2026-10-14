@@ -44,6 +44,29 @@ async function settingsFor(options) {
   return JSON.parse(await fs.readFile(target, 'utf8'));
 }
 
+describe('an engine given settings nobody configured', () => {
+  it('falls back to python3 rather than spawning undefined', async () => {
+    // How the node builds it: every setting passed through, unset ones as
+    // `undefined`. That used to replace the default interpreter, and the
+    // engine failed to start with a type error naming no setting at all.
+    const engine = new LibtorrentEngine({
+      savePath: workspace,
+      python: undefined,
+      startTimeoutMs: undefined,
+      script: path.join(workspace, 'no-such-sidecar.py'),
+    });
+    const failure = await engine.connect().then(
+      () => null,
+      (error) => error,
+    );
+    await engine.destroy?.().catch(() => {});
+    assert.ok(
+      !/must be of type string/.test(String(failure?.message)),
+      `the interpreter was missing: ${failure?.message}`,
+    );
+  });
+});
+
 describe('what the libtorrent sidecar is told', () => {
   it('passes the listening port through', async () => {
     const settings = await settingsFor({ listen: '0.0.0.0:6881' });

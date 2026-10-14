@@ -205,7 +205,15 @@ export class LibtorrentEngine {
           `${typeof options.listen}`,
       );
     }
-    this.#options = { python: 'python3', startTimeoutMs: 20000, ...options };
+    // Unset options are dropped before the defaults are laid under them. The
+    // node passes every setting through as `config.libtorrent?.x`, so one
+    // nobody configured arrives as an explicit `undefined` -- and spreading
+    // that over a default replaces it, which for `python` meant spawning
+    // `undefined` and a libtorrent node that would not start.
+    const given = Object.fromEntries(
+      Object.entries(options).filter(([, value]) => value !== undefined),
+    );
+    this.#options = { python: 'python3', startTimeoutMs: 20000, ...given };
   }
 
   /** @returns {string | null} - libtorrent version, once connected. */
